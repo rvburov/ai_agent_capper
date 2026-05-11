@@ -53,8 +53,9 @@ platform.anthropic.com → API Keys → Create Key
 git init
 git add .
 git commit -m "init"
+git branch -M master 
 git remote add origin https://github.com/ваш-логин/ai_agent_capper.git
-git push -u origin main
+git push -u origin master
 ```
 
 ### 4. Заполните .env
@@ -105,7 +106,7 @@ docker compose up --build -d
 
 ## Вариант 2 — Сервер с авто-деплоем через GitHub
 
-Бот работает 24/7. При каждом `git push` в ветку `main` — автоматически деплоится на сервер.
+Бот работает 24/7. При каждом `git push` в ветку `master` — автоматически деплоится на сервер.
 
 **Требования:** любой VPS с Ubuntu (DigitalOcean, Hetzner, TimeWeb — от $3–5/мес)
 
@@ -122,7 +123,7 @@ sudo usermod -aG docker $USER
 exit && ssh user@ваш-сервер
 
 # Клонируйте репозиторий
-git clone https://github.com/ваш-логин/tennis-bot.git ~/ai_agent_capper
+git clone https://github.com/ваш-логин/ai_agent_capper.git ~/ai_agent_capper
 cd ~/ai_agent_capper
 
 # Заполните .env на сервере
@@ -142,11 +143,11 @@ docker compose logs -f
 
 Добавьте три секрета в GitHub → Settings → Secrets and variables → Actions:
 
-| Секрет | Значение |
-|--------|----------|
-| `SERVER_HOST` | IP адрес вашего сервера |
-| `SERVER_USER` | имя пользователя (обычно `ubuntu` или `root`) |
-| `SERVER_SSH_KEY` | приватный SSH ключ (`~/.ssh/id_rsa`) |
+| Секрет           | Значение                                      |
+| ---------------- | --------------------------------------------- |
+| `SERVER_HOST`    | IP адрес вашего сервера                       |
+| `SERVER_USER`    | имя пользователя (обычно `ubuntu` или `root`) |
+| `SERVER_SSH_KEY` | приватный SSH ключ (`~/.ssh/id_rsa`)          |
 
 **Как получить SSH ключ:**
 ```bash
@@ -189,12 +190,12 @@ docker compose restart        # перезапуск вручную
 
 ## Команды бота
 
-| Что написать | Что получите |
-|---|---|
-| Матчи + кэфы в свободном формате | Анализ + экспресс |
-| `/статистика` | Банк, W/L, серия, последние ставки |
-| `/игроки` | Список игроков в базе |
-| `/результат` | Кнопки ✅ W / ❌ L / ↩️ Возврат |
+| Что написать                     | Что получите                       |
+| -------------------------------- | ---------------------------------- |
+| Матчи + кэфы в свободном формате | Анализ + экспресс                  |
+| `/статистика`                    | Банк, W/L, серия, последние ставки |
+| `/игроки`                        | Список игроков в базе              |
+| `/результат`                     | Кнопки ✅ W / ❌ L / ↩️ Возврат       |
 
 ## Формат запроса
 
