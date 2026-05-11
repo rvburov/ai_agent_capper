@@ -1,0 +1,9 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./Tennis-Analytics/Игроки:/app/Tennis-Analytics/Игроки
+      - ./Tennis-Analytics/Ставки:/app/Tennis-Analytics/Ставки
+      - ./bot.log:/app/bot.log
