@@ -156,7 +156,7 @@
     .bets-search { position: relative; flex: 1 1 220px; min-width: 0; }
     .bets-search > svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--fg-3); pointer-events: none; }
     .bets-search .input { height: 38px; padding-left: 34px; }
-    .bets-filters .bets-select { width: auto; height: 38px; padding: 0 8px 0 10px; font-size: var(--fs-sm); flex: none; }
+    .bets-filters .bets-select { width: auto; height: 38px; flex: none; }
     .bets-chips { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
     .bets-chipbtn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg-2); font-size: var(--fs-sm); font-weight: 500; cursor: pointer; white-space: nowrap; }
     .bets-chipbtn:hover { background: var(--surface-2); color: var(--fg); }

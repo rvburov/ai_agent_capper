@@ -1351,8 +1351,8 @@
   function quietCard() {
     const q = st.quiet;
     const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0') + ':00');
-    const fromF = UI.field({ label: 'С', id: 'profile-quiet-from', value: q.from, options: HOURS });
-    const toF = UI.field({ label: 'До', id: 'profile-quiet-to', value: q.to, options: HOURS });
+    const fromF = UI.field({ label: 'С', id: 'profile-quiet-from', value: q.from, options: HOURS, attrs: { 'aria-label': 'Тихие часы — с' } });
+    const toF = UI.field({ label: 'До', id: 'profile-quiet-to', value: q.to, options: HOURS, attrs: { 'aria-label': 'Тихие часы — до' } });
     const times = h('div', { class: 'profile-time', hidden: !q.on }, fromF, toF);
     const save = button('Сохранить', { kind: 'secondary', type: 'submit', icon: 'check', disabled: true });
     return formCard({

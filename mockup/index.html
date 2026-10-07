@@ -37,6 +37,8 @@
   --chart-muted: #7d847e;
   --shadow: 0 1px 2px rgba(16,21,17,.06), 0 8px 24px -12px rgba(16,21,17,.18);
   --overlay: rgba(16,21,17,.42);
+  --dd-bg: var(--surface); --dd-border: var(--line); --dd-active: var(--surface-2);
+  --dd-shadow: 0 2px 6px rgba(16,21,17,.06), 0 18px 40px -12px rgba(16,21,17,.28);
 
   --font-display: "Geologica", "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -68,6 +70,8 @@
     --chart-grid: #262d29; --chart-axis: #39433d; --chart-muted: #8a938c;
     --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -12px rgba(0,0,0,.6);
     --overlay: rgba(0,0,0,.6);
+    --dd-bg: var(--surface-2); --dd-border: var(--line-strong); --dd-active: var(--surface-3);
+    --dd-shadow: 0 2px 6px rgba(0,0,0,.4), 0 18px 40px -12px rgba(0,0,0,.75);
     color-scheme: dark;
   }
 }
@@ -88,6 +92,8 @@
   --chart-grid: #262d29; --chart-axis: #39433d; --chart-muted: #8a938c;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -12px rgba(0,0,0,.6);
   --overlay: rgba(0,0,0,.6);
+  --dd-bg: var(--surface-2); --dd-border: var(--line-strong); --dd-active: var(--surface-3);
+  --dd-shadow: 0 2px 6px rgba(0,0,0,.4), 0 18px 40px -12px rgba(0,0,0,.75);
   color-scheme: dark;
 }
 
@@ -292,29 +298,39 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .check { display: flex; align-items: flex-start; gap: 10px; font-size: var(--fs-md); cursor: pointer; }
 
 /* ---------- выпадающие списки (UI.enhanceSelects): одинаковые на всех экранах ---------- */
-.dd-native { position: absolute !important; width: 1px !important; height: 1px !important; opacity: 0 !important; pointer-events: none !important; overflow: hidden; clip: rect(0 0 0 0); margin: 0 !important; }
+.dd-native { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; border: 0 !important; opacity: 0 !important; pointer-events: none !important; overflow: hidden; clip: rect(0 0 0 0); margin: 0 !important; }
 .dd-trigger {
   display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer;
-  padding: 0 12px 0 14px; font: inherit; color: var(--fg); -webkit-tap-highlight-color: transparent;
+  font: inherit; color: var(--fg); -webkit-tap-highlight-color: transparent;
   transition: border-color .15s, box-shadow .15s, background .15s;
 }
+button.dd-trigger.select { padding: 0 12px 0 14px; } /* отступы одинаковые везде — правила экранов их не перебивают */
 .dd-trigger:hover:not([disabled]) { border-color: var(--fg-3); }
 .dd-trigger:focus-visible, .dd-trigger[aria-expanded="true"] { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
+.dd-trigger.select:focus:not(:focus-visible):not([aria-expanded="true"]) { border-color: var(--line-strong); box-shadow: none; }
 .dd-trigger[disabled] { opacity: .55; cursor: not-allowed; }
-.dd-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dd-value.is-placeholder { color: var(--fg-3); }
+.dd-value { flex: 1; min-width: 0; display: grid; }
+.dd-value > span { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; visibility: hidden; }
+.dd-value > span.is-current { visibility: visible; }
+.dd-value > span.is-placeholder { color: var(--fg-3); }
 .dd-chev { flex: none; width: 28px; height: 28px; margin-right: -4px; display: grid; place-items: center; border-radius: 8px; color: var(--fg-3); transition: transform .18s ease, color .15s, background .15s; }
 .dd-chev svg { width: 18px; height: 18px; }
 .dd-trigger:hover:not([disabled]) .dd-chev { color: var(--fg-2); background: var(--surface-2); }
 .dd-trigger[aria-expanded="true"] .dd-chev { transform: rotate(180deg); color: var(--accent-ink); }
+/* поле с подсказками (игрок, турнир): та же стрелка справа */
+.input.dd-combo {
+  padding-right: 44px; background-repeat: no-repeat; background-position: right 17px center; background-size: 18px 18px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23838b84' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
 
 .dd-pop {
-  position: fixed; z-index: 100; min-width: 180px; max-width: min(420px, calc(100vw - 24px));
-  background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: var(--r-lg);
-  box-shadow: 0 2px 6px rgba(16,21,17,.06), 0 18px 40px -12px rgba(16,21,17,.28);
+  position: fixed; z-index: 100; max-width: min(420px, calc(100vw - 24px));
+  background: var(--dd-bg); color: var(--fg); border: 1px solid var(--dd-border); border-radius: var(--r-lg);
+  box-shadow: var(--dd-shadow);
   padding: 6px; overflow-y: auto; overscroll-behavior: contain; animation: dd-in .14s ease-out;
 }
 .dd-pop.above { animation-name: dd-in-up; }
+.dd-pop:focus, .dd-sheet-list:focus { outline: none; }
 @keyframes dd-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
 @keyframes dd-in-up { from { opacity: 0; transform: translateY(4px) scale(.98); } }
 .dd-opt {
@@ -324,14 +340,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dd-opt + .dd-opt { margin-top: 2px; }
 .dd-opt-label { flex: 1; min-width: 0; }
 .dd-opt-label mark { background: none; color: var(--accent-ink); font-weight: 600; }
-.dd-opt-sub { font-size: var(--fs-xs); color: var(--fg-3); white-space: nowrap; }
 .dd-opt-check { flex: none; width: 18px; height: 18px; color: var(--accent-ink); visibility: hidden; }
-.dd-opt.is-active { background: var(--surface-2); }
-.dd-opt[aria-selected="true"] { font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); }
-.dd-opt[aria-selected="true"].is-active { background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface-3)); }
-.dd-opt[aria-selected="true"] .dd-opt-check { visibility: visible; }
+.dd-opt.is-active { background: var(--dd-active); }
+.dd-opt.is-selected { font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); }
+.dd-opt.is-selected.is-active { background: color-mix(in srgb, var(--accent-soft) 70%, var(--dd-active)); }
+.dd-opt.is-selected .dd-opt-check { visibility: visible; }
 .dd-opt[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
 .dd-empty { padding: 10px 12px; font-size: var(--fs-sm); color: var(--fg-3); }
+@media (max-width: 720px) { .dd-pop .dd-opt { min-height: 44px; } }
 
 /* телефон: список выезжает шторкой снизу */
 .dd-sheet-back { position: fixed; inset: 0; z-index: 100; background: var(--overlay); animation: fade .15s ease-out; }
@@ -342,8 +358,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   animation: rise .2s ease-out;
 }
 .dd-sheet-grip { width: 40px; height: 4px; border-radius: 4px; background: var(--line-strong); margin: 8px auto 2px; flex: none; }
-.dd-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px 8px 20px; flex: none; }
-.dd-sheet-title { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); }
+.dd-sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 6px 12px 8px 20px; flex: none; }
+.dd-sheet-head .btn { flex: none; }
+.dd-sheet-title { min-width: 0; padding-top: 8px; font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); }
 .dd-sheet-list { overflow-y: auto; overscroll-behavior: contain; padding: 4px 10px 14px; }
 .dd-sheet .dd-opt { min-height: 50px; padding: 12px 14px; font-size: var(--fs-lg); border-radius: var(--r-md); }
 .check input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); flex: none; }

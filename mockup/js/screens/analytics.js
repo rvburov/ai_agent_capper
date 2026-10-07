@@ -152,6 +152,7 @@
     .analytics-filter-label { font-size: var(--fs-sm); font-weight: 500; color: var(--fg-2); }
     .analytics-filters .field { width: 200px; }
     .analytics-filters .select { height: 38px; }
+    @media (max-width: 720px) { .analytics-filters .select { height: 42px; } }
     .analytics-filter-reset { align-self: flex-end; }
     .analytics-scope { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-top: 12px; border-top: 1px solid var(--line); font-size: var(--fs-sm); color: var(--fg-2); min-width: 0; }
     .analytics-scope b { color: var(--fg); font-weight: 600; }

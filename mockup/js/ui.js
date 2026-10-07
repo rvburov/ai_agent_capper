@@ -277,7 +277,7 @@
     document.body.appendChild(back);
     document.addEventListener('keydown', onKey);
     // фокус только на поле в теле окна, иначе на само окно: шторка на телефоне открывается с начала
-    const f = box.querySelector('.modal-body input, .modal-body select, .modal-body textarea');
+    const f = box.querySelector('.modal-body input:not(.dd-native), .modal-body textarea');
     setTimeout(() => { (f || box).focus({ preventScroll: true }); box.scrollTop = 0; }, 30);
     return { close };
   }
@@ -532,52 +532,60 @@
   // кнопка со стрелкой и список (на телефоне — шторка снизу). Исходный элемент остаётся в DOM,
   // поэтому код экранов читает и пишет .value и слушает change как раньше.
   const dd = { open: null };
-  const SHEET_MQ = window.matchMedia('(max-width: 600px)');
+  const SHEET_MQ = window.matchMedia('(max-width: 720px)'); // как у модальных окон: на телефоне — шторка
   const valueDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
   const indexDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex');
   const norm = s => String(s).toLowerCase().replace(/ё/g, 'е').trim();
 
   function fieldLabel(el) {
-    if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
+    if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').replace(/:.*$/, '');
     if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) return l.textContent.trim(); }
     return 'Выберите';
   }
+  function viewport() { const vv = window.visualViewport; return vv ? { top: vv.offsetTop, h: vv.height, w: vv.width } : { top: 0, h: window.innerHeight, w: window.innerWidth }; }
+  function topbarBottom() { const t = document.querySelector('.topbar'); return t ? Math.max(0, t.getBoundingClientRect().bottom) : 0; }
 
   function closeDropdown(returnFocus) {
     const o = dd.open; if (!o) return;
     dd.open = null;
     o.nodes.forEach(n => n.remove());
     o.anchor.setAttribute('aria-expanded', 'false');
+    o.anchor.removeAttribute('aria-controls');
     document.removeEventListener('pointerdown', o.onDown, true);
     window.removeEventListener('resize', o.onWin);
     window.removeEventListener('scroll', o.onScroll, true);
+    if (window.visualViewport) { visualViewport.removeEventListener('resize', o.onWin); visualViewport.removeEventListener('scroll', o.onWin); }
     if (returnFocus) o.anchor.focus({ preventScroll: true });
     o.onClose && o.onClose();
   }
 
-  // Общий список: items [{value,label,sub,disabled}], selected value, onPick(item)
+  // Список: items [{value,label,labelNode,disabled}], selected, onPick(item).
+  // focusEl — поле ввода, в котором остаётся фокус (подсказки); без него фокус переходит в сам список.
   function openList(anchor, o) {
     closeDropdown(false);
-    const sheet = o.sheet && SHEET_MQ.matches;
+    const sheet = !o.focusEl && SHEET_MQ.matches;
     const listId = 'dd-list-' + Math.random().toString(36).slice(2, 8);
     const list = h('div', { class: sheet ? 'dd-sheet-list' : 'dd-pop', role: 'listbox', id: listId, tabindex: '-1', 'aria-label': o.title });
+    if (!sheet) list.style.minWidth = anchor.getBoundingClientRect().width + 'px';
+    if (o.focusEl) list.addEventListener('mousedown', e => e.preventDefault()); // клик по подсказке не уводит фокус из поля
     let active = -1;
     const rows = [];
-    function setActive(i, scroll) {
+    function setActive(i, how, dir) {
       if (!rows.length) return;
+      dir = dir || 1;
       i = Math.max(0, Math.min(rows.length - 1, i));
-      let guard = 0;
-      while (o.items[i] && o.items[i].disabled && guard++ < rows.length) i = (i + 1) % rows.length;
-      rows.forEach((r, k) => r.classList.toggle('is-active', k === i));
+      while (o.items[i] && o.items[i].disabled) { i += dir; if (i < 0 || i >= rows.length) return; } // недоступные пропускаем по ходу движения
+      rows.forEach((r, k) => { r.classList.toggle('is-active', k === i); if (o.focusEl) r.setAttribute('aria-selected', String(k === i)); });
       active = i;
       (o.focusEl || list).setAttribute('aria-activedescendant', rows[i].id);
-      if (scroll !== false) rows[i].scrollIntoView({ block: 'nearest' });
+      if (how !== false) rows[i].scrollIntoView({ block: how || 'nearest' });
     }
-    function pick(i) { const it = o.items[i]; if (!it || it.disabled) return; o.onPick(it); closeDropdown(o.returnFocus !== false); }
+    function pick(i) { const it = o.items[i]; if (!it || it.disabled) return; o.onPick(it); closeDropdown(true); }
     if (!o.items.length) list.appendChild(h('div', { class: 'dd-empty' }, o.emptyText || 'Ничего не найдено'));
     o.items.forEach((it, i) => {
-      const row = h('div', { class: 'dd-opt', role: 'option', id: listId + '-' + i, 'aria-selected': String(it.value === o.selected), 'aria-disabled': it.disabled ? 'true' : null },
-        h('span', { class: 'dd-opt-label' }, it.labelNode || it.label), it.sub ? h('span', { class: 'dd-opt-sub' }, it.sub) : null,
+      const isSel = it.value === o.selected;
+      const row = h('div', { class: ['dd-opt', isSel && 'is-selected'], role: 'option', id: listId + '-' + i, 'aria-selected': String(!o.focusEl && isSel), 'aria-disabled': it.disabled ? 'true' : null },
+        h('span', { class: 'dd-opt-label' }, it.labelNode || it.label),
         h('span', { class: 'dd-opt-check' }, icon('check', { width: 18, height: 18 })));
       row.addEventListener('pointermove', () => { if (active !== i) setActive(i, false); });
       row.addEventListener('click', e => { e.preventDefault(); pick(i); });
@@ -597,27 +605,26 @@
     function place() {
       if (sheet) return;
       const r = anchor.getBoundingClientRect();
-      const vh = window.innerHeight, vw = window.innerWidth, gap = 6;
-      const below = vh - r.bottom - 12, above = r.top - 12;
-      const want = Math.min(list.scrollHeight, 320);
-      const up = below < Math.min(want, 200) && above > below;
+      const vp = viewport(), gap = 6, top0 = Math.max(vp.top, topbarBottom()) + 8, bottom0 = vp.top + vp.h - 8;
+      const below = bottom0 - r.bottom - gap, above = r.top - gap - top0;
+      const want = Math.min(list.scrollHeight, 360);
+      const up = below < Math.min(want, 180) && above > below;
       list.classList.toggle('above', up);
-      list.style.maxHeight = Math.max(120, Math.min(320, up ? above - gap : below - gap)) + 'px';
-      list.style.minWidth = r.width + 'px';
-      const w = Math.max(r.width, list.offsetWidth);
-      list.style.left = Math.max(12, Math.min(r.left, vw - w - 12)) + 'px';
-      if (up) { list.style.top = ''; list.style.bottom = (vh - r.top + gap) + 'px'; }
+      list.style.maxHeight = Math.max(110, Math.min(360, up ? above : below)) + 'px';
+      const w = list.offsetWidth, vw = vp.w;
+      list.style.left = (r.left + w > vw - 12 ? Math.max(12, r.right - w) : Math.max(12, r.left)) + 'px';
+      if (up) { list.style.top = ''; list.style.bottom = (window.innerHeight - r.top + gap) + 'px'; }
       else { list.style.bottom = ''; list.style.top = (r.bottom + gap) + 'px'; }
     }
     place();
     const onKey = e => {
-      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active < 0 ? 0 : active + 1); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active < 0 ? rows.length - 1 : active - 1); }
-      else if (e.key === 'Home') { e.preventDefault(); setActive(0); }
-      else if (e.key === 'End') { e.preventDefault(); setActive(rows.length - 1); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active < 0 ? 0 : active + 1, 'nearest', 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active < 0 ? rows.length - 1 : active - 1, 'nearest', -1); }
+      else if (!o.focusEl && e.key === 'Home') { e.preventDefault(); setActive(0, 'nearest', 1); }
+      else if (!o.focusEl && e.key === 'End') { e.preventDefault(); setActive(rows.length - 1, 'nearest', -1); }
       else if (e.key === 'Enter' || (e.key === ' ' && !o.focusEl)) { if (active >= 0) { e.preventDefault(); pick(active); } else if (!o.focusEl) { e.preventDefault(); closeDropdown(true); } }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDropdown(true); }
-      else if (e.key === 'Tab') closeDropdown(false);
+      else if (e.key === 'Tab') closeDropdown(!o.focusEl); // фокус возвращается на кнопку, и Tab ведёт к следующему полю
       else if (!o.focusEl && e.key.length === 1 && /\S/.test(e.key)) { // поиск по первым буквам
         const q = norm(e.key), start = active + 1;
         for (let k = 0; k < rows.length; k++) { const i = (start + k) % rows.length; if (norm(o.items[i].label).startsWith(q)) { setActive(i); break; } }
@@ -626,11 +633,23 @@
     const keyTarget = o.focusEl || list;
     keyTarget.addEventListener('keydown', onKey);
     const state = {
-      anchor, nodes, onClose: () => { keyTarget.removeEventListener('keydown', onKey); keyTarget.removeAttribute('aria-activedescendant'); },
-      onDown: e => { if (!nodes.some(n => n.contains(e.target)) && !anchor.contains(e.target)) closeDropdown(false); },
-      onWin: () => closeDropdown(false),
-      onScroll: e => { if (!nodes.some(n => n.contains(e.target))) place(); },
-      setActive, list, rows,
+      anchor, nodes, focusEl: o.focusEl,
+      onClose: () => { keyTarget.removeEventListener('keydown', onKey); keyTarget.removeAttribute('aria-activedescendant'); },
+      onDown: e => {
+        if (nodes.some(n => n.contains(e.target)) || anchor.contains(e.target)) return;
+        if (!o.focusEl) { // как у системного списка: клик, закрывший список, дальше не проходит (например, не закрывает модальное окно)
+          const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };
+          document.addEventListener('click', swallow, { capture: true, once: true });
+          setTimeout(() => document.removeEventListener('click', swallow, true), 700);
+        }
+        closeDropdown(false);
+      },
+      onWin: () => { if (!anchor.isConnected) closeDropdown(false); else place(); },
+      onScroll: e => {
+        if (nodes.some(n => n.contains(e.target))) return;
+        const r = anchor.getBoundingClientRect(), vp = viewport();
+        if (r.bottom < topbarBottom() || r.top > vp.top + vp.h) closeDropdown(false); else place();
+      },
     };
     dd.open = state;
     anchor.setAttribute('aria-expanded', 'true');
@@ -638,8 +657,9 @@
     document.addEventListener('pointerdown', state.onDown, true);
     window.addEventListener('resize', state.onWin);
     window.addEventListener('scroll', state.onScroll, true);
+    if (window.visualViewport) { visualViewport.addEventListener('resize', state.onWin); visualViewport.addEventListener('scroll', state.onWin); }
     const sel = o.items.findIndex(it => it.value === o.selected);
-    if (sel >= 0) setActive(sel); else if (o.activateFirst) setActive(0);
+    if (sel >= 0) setActive(sel, 'center'); else if (o.activateFirst) setActive(0);
     if (!o.focusEl) list.focus({ preventScroll: true });
     return state;
   }
@@ -648,6 +668,7 @@
     if (sel.dataset.dd) return;
     sel.dataset.dd = '1';
     const trigger = h('button', { type: 'button', class: Array.from(sel.classList).concat('dd-trigger').join(' '), 'aria-haspopup': 'listbox', 'aria-expanded': 'false' });
+    // все подписи лежат стопкой: кнопка шириной с самый длинный вариант и не прыгает при смене значения
     const valueEl = h('span', { class: 'dd-value' });
     trigger.appendChild(valueEl);
     trigger.appendChild(h('span', { class: 'dd-chev', 'aria-hidden': 'true' }, icon('chevronDown')));
@@ -656,10 +677,12 @@
     if (sel.style.cssText) trigger.style.cssText = sel.style.cssText;
     sel.after(trigger);
     const label = () => fieldLabel(sel);
+    let sig = '';
     function sync() {
-      const opt = sel.options[indexDesc.get.call(sel)];
-      valueEl.textContent = opt ? opt.textContent : '';
-      valueEl.classList.toggle('is-placeholder', !!opt && opt.value === '');
+      const opts = Array.from(sel.options), idx = indexDesc.get.call(sel), opt = opts[idx];
+      const nsig = opts.map(op => op.textContent).join('\u0001');
+      if (nsig !== sig) { sig = nsig; clear(valueEl); opts.forEach(op => valueEl.appendChild(h('span', null, op.textContent))); if (!opts.length) valueEl.appendChild(h('span')); }
+      Array.from(valueEl.children).forEach((sp, k) => { sp.classList.toggle('is-current', k === idx); sp.classList.toggle('is-placeholder', k === idx && opt && opt.value === ''); });
       trigger.disabled = sel.disabled;
       trigger.setAttribute('aria-label', label() + ': ' + (opt ? opt.textContent : 'не выбрано'));
     }
@@ -668,13 +691,14 @@
     Object.defineProperty(sel, 'value', { configurable: true, get() { return valueDesc.get.call(this); }, set(v) { valueDesc.set.call(this, v); sync(); } });
     Object.defineProperty(sel, 'selectedIndex', { configurable: true, get() { return indexDesc.get.call(this); }, set(v) { indexDesc.set.call(this, v); sync(); } });
     sel.addEventListener('change', sync);
-    new MutationObserver(sync).observe(sel, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+    new MutationObserver(sync).observe(sel, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['disabled', 'selected'] });
     sel.addEventListener('focus', () => trigger.focus());
     const open = () => {
       if (trigger.disabled) return;
       if (dd.open && dd.open.anchor === trigger) { closeDropdown(true); return; }
+      trigger.setAttribute('aria-haspopup', SHEET_MQ.matches ? 'dialog' : 'listbox');
       openList(trigger, {
-        title: label(), sheet: true, selected: valueDesc.get.call(sel),
+        title: label(), selected: valueDesc.get.call(sel),
         items: Array.from(sel.options).map(op => ({ value: op.value, label: op.textContent, disabled: op.disabled })),
         onPick: it => { if (valueDesc.get.call(sel) === it.value) return; valueDesc.set.call(sel, it.value); sync(); sel.dispatchEvent(new Event('input', { bubbles: true })); sel.dispatchEvent(new Event('change', { bubbles: true })); },
       });
@@ -692,34 +716,36 @@
     input.dataset.dd = '1';
     input.dataset.ddList = listId;
     input.removeAttribute('list'); // системный список подсказок больше не показывается
+    input.classList.add('dd-combo');
     input.setAttribute('role', 'combobox');
     input.setAttribute('aria-autocomplete', 'list');
     input.setAttribute('aria-expanded', 'false');
     input.setAttribute('autocomplete', 'off');
     const source = () => { const dl = document.getElementById(listId); return dl ? Array.from(dl.options).map(op => op.value).filter(Boolean) : []; };
+    const isOpen = () => dd.open && dd.open.anchor === input;
+    // all: весь список (поле пустое или в нём уже выбранное значение); иначе — фильтр по набранному
     function show(all) {
       const q = norm(input.value);
       let items = source().map(v => ({ value: v, label: v }));
-      if (!all && q) items = items.filter(it => norm(it.label).includes(q));
-      if (q && items.length === 1 && norm(items[0].label) === q) { if (dd.open && dd.open.anchor === input) closeDropdown(false); return; }
-      items = items.slice(0, 8).map(it => {
-        if (!q) return it;
-        const i = norm(it.label).indexOf(q);
-        return i < 0 ? it : Object.assign({}, it, { labelNode: [it.label.slice(0, i), h('mark', null, it.label.slice(i, i + q.length)), it.label.slice(i + q.length)] });
-      });
-      if (!items.length) { if (dd.open && dd.open.anchor === input) closeDropdown(false); return; }
+      if (!all) {
+        items = items.filter(it => norm(it.label).includes(q));
+        if (items.length === 1 && norm(items[0].label) === q) { if (isOpen()) closeDropdown(false); return; }
+        items = items.map(it => { const i = norm(it.label).indexOf(q); return i < 0 || !q ? it : Object.assign({}, it, { labelNode: [it.label.slice(0, i), h('mark', null, it.label.slice(i, i + q.length)), it.label.slice(i + q.length)] }); });
+      }
+      items = items.slice(0, 50);
+      if (!items.length) { if (isOpen()) closeDropdown(false); return; }
       openList(input, {
-        title: fieldLabel(input), sheet: false, focusEl: input, returnFocus: true, selected: null, items,
+        title: fieldLabel(input), focusEl: input, selected: input.value, items,
         onPick: it => { input.value = it.value; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); },
       });
     }
+    const wantAll = () => !input.value || source().some(v => norm(v) === norm(input.value));
     let picking = false;
-    input.addEventListener('focus', () => { if (!picking) show(!input.value); });
-    input.addEventListener('input', e => { if (e.isTrusted) show(false); });
-    input.addEventListener('keydown', e => {
-      if (e.key === 'ArrowDown' && !(dd.open && dd.open.anchor === input)) { e.preventDefault(); show(true); }
-    });
-    input.addEventListener('blur', () => setTimeout(() => { if (dd.open && dd.open.anchor === input && !dd.open.nodes.some(n => n.contains(document.activeElement))) closeDropdown(false); }, 120));
+    input.addEventListener('focus', () => { if (!picking) show(wantAll()); });
+    input.addEventListener('click', () => { if (!isOpen()) show(wantAll()); });
+    input.addEventListener('input', e => { if (e.isTrusted) show(!input.value); });
+    input.addEventListener('keydown', e => { if (e.key === 'ArrowDown' && !isOpen()) { e.preventDefault(); show(wantAll()); } });
+    input.addEventListener('blur', () => setTimeout(() => { if (isOpen() && document.activeElement !== input) closeDropdown(false); }, 150));
     input.addEventListener('change', () => { picking = true; setTimeout(() => { picking = false; }, 0); });
   }
 
