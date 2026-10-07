@@ -445,7 +445,8 @@
       .players-fgroup { flex: 1 1 100%; }
       .players-fgroup.players-half { flex: 1 1 0; }
       .players-fgroup .segmented { width: 100%; }
-      .players-fgroup .segmented button { flex: 1 1 auto; padding: 6px 8px; }
+      .players-fgroup .segmented button { flex: 1 1 auto; padding: 6px 6px; }
+      .players-count { margin-left: 3px; }
       .players-fgroup .select { min-width: 0; }
       .players-sources { grid-template-columns: minmax(0, 1fr); gap: 14px; }
       .players-hero-top { grid-template-columns: auto minmax(0, 1fr); padding: 16px 14px; gap: 14px; }
