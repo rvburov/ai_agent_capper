@@ -760,7 +760,7 @@
       h('div', null, h('span', { class: 'players-hs-l' }, 'Рейтинг ATP'), h('span', { class: 'players-hs-v' }, '№' + p.rank), h('span', { class: 'players-hs-s' }, fmt.int(p.points) + ' очков' + (ex.best && ex.best < p.rank ? ' · лучший №' + ex.best : ''))),
       h('div', null, h('span', { class: 'players-hs-l' }, 'Эло общий'), h('span', { class: 'players-hs-v' }, elo(p.elo.all)), h('span', { class: 'players-hs-s' }, eloRankAll(p) + '-й в базе по Эло')),
       h('div', null, h('span', { class: 'players-hs-l' }, 'Эло на харде'), h('span', { class: 'players-hs-v' }, elo(p.elo.hard)), h('span', { class: 'players-hs-s' }, signed(p.elo.hard - p.elo.all) + ' к общему')),
-      h('div', null, h('span', { class: 'players-hs-l' }, 'Форма, 10 матчей'), h('span', { class: 'players-hs-v' }, W + '–' + (10 - W), UI.formDots(p.form)), h('span', { class: 'players-hs-s' }, 'слева — последний матч')));
+      h('div', null, h('span', { class: 'players-hs-l' }, 'Форма, 10 матчей'), h('span', { class: 'players-hs-v' }, W + '–' + (10 - W), UI.formDots(p.form)), h('span', { class: 'players-hs-s' }, missing ? 'по архиву ATP' : 'слева — последний матч')));
 
     let foot = null;
     if (m) {
@@ -1136,7 +1136,7 @@
     const archive = h('div', { class: 'grid' },
       card({ class: 'col-7', title: 'Эло по покрытиям', subtitle: 'Общий ' + elo(p.elo.all) + ' · из архива ATP, без ИИ', body: [eloBars(p), h('p', { class: 'players-hint' }, 'Число — Эло на покрытии, полоса — разница с общим: вправо — здесь сильнее своего уровня, влево — слабее.')] }),
       card({ class: 'col-5', title: 'Что уже известно', subtitle: 'архив ATP · 2 сезона', body: [
-        h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'players-formbig', role: 'img', 'aria-label': 'Последние 10 матчей: ' + W + ' побед' }, p.form.map(x => h('span', { class: x === 'W' ? 'w' : 'l', 'aria-hidden': 'true' }, x === 'W' ? 'В' : 'П'))), h('span', { class: 'players-hint' }, 'Форма: ' + W + ' побед из 10, слева последний матч')),
+        h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'players-formbig', role: 'img', 'aria-label': 'Последние 10 матчей: ' + W + ' побед' }, p.form.map(x => h('span', { class: x === 'W' ? 'w' : 'l', 'aria-hidden': 'true' }, x === 'W' ? 'В' : 'П'))), h('span', { class: 'players-hint' }, 'Форма за 10 матчей: ' + W + ' ' + fmt.plural(W, 'победа', 'победы', 'побед'))),
         UI.kv(wl.map(k => [D.surfaces[k].label, p.wlSurface[k][0] + '–' + p.wlSurface[k][1] + ' · ' + fmt.pct(p.wlSurface[k][0] / (p.wlSurface[k][0] + p.wlSurface[k][1]) * 100, 0)]).concat([['Эйсов за матч', fmt.dec(p.serve.aces, 1)], ['Очки на первой подаче', p.serve.firstWon + '%']])),
       ] }));
     root.append(collectCard, h('div', { class: 'eyebrow', style: 'margin-bottom:-6px' }, 'Уже есть из архива ATP'), archive);

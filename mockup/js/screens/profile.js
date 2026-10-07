@@ -1230,7 +1230,7 @@
       const err = h('div', { class: 'field-error', 'aria-live': 'polite' });
       const sw = (ch, label) => switchInput('profile-n-' + n.id + '-' + ch, v[ch], label + ': ' + n.t, (val, input) => {
         v[ch] = val;
-        if (n.guard && !v.tg && !v.mail) { v[ch] = true; input.checked = true; err.textContent = 'Оставьте хотя бы один канал — это защита аккаунта'; return; }
+        if (n.guard && !(v.tg && st.tg.linked) && !v.mail) { v[ch] = true; input.checked = true; err.textContent = 'Оставьте хотя бы один канал — это защита аккаунта'; return; }
         err.textContent = '';
         UI.toast((val ? 'Включено' : 'Выключено') + ' в ' + (ch === 'tg' ? 'Telegram' : 'почте') + ': ' + lower1(n.t), val ? 'bell' : 'x');
       }, ch === 'tg' && tgOff);
