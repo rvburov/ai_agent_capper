@@ -224,17 +224,33 @@
   function evalResult(c) {
     const LL = activeStrategy.logloss, BR = activeStrategy.brier;
     if (c.type === 'analysis') {
-      const back = c.kind === 'model' ? c.to === DEFAULTS.models.analysis : c.to === DEFAULTS.effort.analysis;
-      if (back) return { ok: true, rows: [metricRow('Лог-лосс', LL, 0, 0, 0, TOL.logloss), metricRow('Brier', BR, 0, 0, 0, TOL.brier)].map(r => Object.assign(r, { delta: '—', verdict: 'same' })), why: 'Возврат к проверенной настройке: метрики известны.' };
-      if (c.kind === 'model') return { ok: false,
-        rows: [metricRow('Лог-лосс', LL, 0.011, 0.004, 0.018, TOL.logloss), metricRow('Brier', BR, 0.004, 0.001, 0.007, TOL.brier), eceRow(3.1, 1.8, 0.3, 3.3)],
-        why: 'Sonnet 5.5 завышает шансы фаворитов на 3–5 п.п. в матчах с тай-брейками. Верхняя граница интервала выше допуска — экономия не стоит потери качества.' };
-      if (c.to === 'low') return { ok: true,
-        rows: [metricRow('Лог-лосс', LL, 0.003, -0.002, 0.008, TOL.logloss), metricRow('Brier', BR, 0.001, -0.001, 0.003, TOL.brier), eceRow(3.1, 0.3, -0.9, 1.5)],
-        why: 'Разница в пределах допуска — это «не хуже», а не «то же самое». После включения подтверждаем теневым прогоном на реальных анализах; на трудном хвосте (≈40 событий) интервал слишком широкий для отдельного вывода.' };
-      return { ok: false,
-        rows: [Object.assign(metricRow('Лог-лосс', LL, -0.002, -0.007, 0.003, TOL.logloss), { verdict: 'noproof' }), Object.assign(metricRow('Brier', BR, -0.001, -0.003, 0.001, TOL.brier), { verdict: 'noproof' }), eceRow(3.1, -0.2, -1.3, 0.9)],
-        why: 'Дороже, а улучшение не доказано: интервал разницы задевает ноль. Изменение «ради качества» принимается, только если интервал целиком ниже нуля.' };
+      if (c.kind === 'model') {
+        if (c.to === DEFAULTS.models.analysis) return { ok: true, rows: [metricRow('Лог-лосс', LL, 0, 0, 0, TOL.logloss), metricRow('Brier', BR, 0, 0, 0, TOL.brier)].map(r => Object.assign(r, { delta: '—', verdict: 'same' })), why: 'Возврат к проверенной настройке: метрики известны.' };
+        return { ok: false,
+          rows: [metricRow('Лог-лосс', LL, 0.011, 0.004, 0.018, TOL.logloss), metricRow('Brier', BR, 0.004, 0.001, 0.007, TOL.brier), eceRow(3.1, 1.8, 0.3, 3.3)],
+          why: 'Sonnet 5.5 завышает шансы фаворитов на 3–5 п.п. в матчах с тай-брейками. Верхняя граница интервала выше допуска — экономия не стоит потери качества.' };
+      }
+      // Effort: демо-метрики каждого уровня относительно medium (v3) и полуширина 95% ДИ парной разницы
+      const E = { low: { ll: 0.003, br: 0.001, ece: 0.3 }, medium: { ll: 0, br: 0, ece: 0 }, high: { ll: -0.002, br: -0.001, ece: -0.2 } };
+      const HW = { ll: 0.005, br: 0.002, ece: 1.2 };
+      const a = E[c.from] || E.medium, b = E[c.to] || E.medium;
+      const back = c.to === DEFAULTS.effort.analysis;
+      const cheaper = EFFORT_K[c.to] < EFFORT_K[c.from];
+      const mr = (name, now, k, tol) => {
+        const dv = b[k] - a[k], r = metricRow(name, now + a[k], dv, dv - HW[k], dv + HW[k], tol);
+        if (back) r.verdict = 'same'; else if (!cheaper) r.verdict = dv + HW[k] < 0 ? 'better' : 'noproof';
+        return r;
+      };
+      const ece = eceRow(3.1 + a.ece, b.ece - a.ece, b.ece - a.ece - HW.ece, b.ece - a.ece + HW.ece);
+      if (back) ece.verdict = 'same';
+      const rows = [mr('Лог-лосс', LL, 'll', TOL.logloss), mr('Brier', BR, 'br', TOL.brier), ece];
+      if (back) return { ok: true, rows, why: 'Возврат к проверенной настройке medium: её метрики известны.' };
+      if (cheaper) {
+        const ok = rows.every(r => r.verdict !== 'over');
+        return { ok, rows, why: ok ? 'Разница в пределах допуска — это «не хуже», а не «то же самое». После включения подтверждаем теневым прогоном на реальных анализах; на трудном хвосте (≈40 событий) интервал слишком широкий для отдельного вывода.' : 'Верхняя граница интервала выше допуска — экономия не стоит потери качества.' };
+      }
+      const proven = rows.slice(0, 2).every(r => r.verdict === 'better');
+      return { ok: proven, rows, why: proven ? 'Дороже, но улучшение доказано: интервал целиком ниже нуля.' : 'Дороже, а улучшение не доказано: интервал разницы задевает ноль. Изменение «ради качества» принимается, только если интервал целиком ниже нуля.' };
     }
     const dearer = c.kind === 'effort' || (c.type === 'parse' && c.to !== 'Haiku 4.5');
     if (c.type === 'parse') return c.to === 'Haiku 4.5'
@@ -320,6 +336,11 @@
     .costs-lever.fixed .costs-rank { background: var(--good-soft); color: var(--good-ink); }
     .costs-lever.fixed .costs-rank svg { width: 14px; height: 14px; }
     .costs-lever-save.soft { font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); white-space: normal; max-width: 92px; }
+    @media (max-width: 720px) {
+      .costs-lever { gap: 4px 10px; }
+      .costs-lever-save { max-width: 84px; white-space: normal; }
+      .costs-lever-save small { white-space: normal; line-height: 1.3; }
+    }
     .costs-lever-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .costs-lever-title { font-weight: 600; line-height: 1.3; }
     .costs-lever-text { font-size: var(--fs-sm); color: var(--fg-2); }
@@ -337,7 +358,7 @@
     .costs-compare > .new { font-weight: 600; }
     .costs-compare small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); }
     @media (max-width: 720px) {
-      .costs-compare { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .costs-compare { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); }
       .costs-compare > .hd.blank { display: none; }
       .costs-compare > .lbl { grid-column: 1 / -1; padding-bottom: 0; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
       .costs-compare > .old:not(.hd), .costs-compare > .new:not(.hd) { border-top: 0; padding-top: 2px; }
@@ -427,6 +448,8 @@
     .costs-mlist .t { font-weight: 500; min-width: 0; }
     .costs-mlist .s { grid-column: 1 / 2; font-size: var(--fs-xs); color: var(--fg-3); min-width: 0; }
     .costs-mlist .v { grid-row: 1 / 3; grid-column: 2; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .kv.costs-detail { grid-template-columns: 150px minmax(0, 1fr); }
+    .kv.costs-detail dd { text-align: left; }
     @media (max-width: 720px) {
       .kv.costs-detail { grid-template-columns: minmax(0, 1fr); gap: 2px; }
       .kv.costs-detail dt { font-size: var(--fs-xs); color: var(--fg-3); }
@@ -651,7 +674,7 @@
         h('div', null, h('dt', null, 'Можно в день'), h('dd', null, usd(pace), h('small', null, 'чтобы уложиться')))),
       h('div', { class: 'row costs-hero-actions' },
         button('Изменить лимит', { kind: 'ghost', size: 'sm', icon: 'edit', onClick: () => scrollToSettings('costs-limit-month') }),
-        h('span', { class: 'stat-hint' }, 'При 100% новые анализы встают на паузу, ставки и история доступны.')));
+        h('span', { class: 'stat-hint' }, 'При 100% фоновые задачи останавливаются, новый анализ — только с вашим подтверждением.')));
   }
 
   function tiles() {
@@ -733,7 +756,7 @@
         candidateState[lv.id] = ok ? 'accepted' : 'rejected';
         if (ok) lv.apply();
         redraw();
-        UI.toast(ok ? '«' + lv.title + '» включено: качество в допуске' : 'Не приняли «' + lv.title + '»: ' + lv.rejectedNote.toLowerCase(), ok ? 'check' : 'shield');
+        UI.toast(ok ? '«' + lv.title + '» включено: качество в допуске' : 'Не приняли «' + lv.title + '»: ' + lv.rejectedNote.charAt(0).toLowerCase() + lv.rejectedNote.slice(1), ok ? 'check' : 'shield');
       });
     };
     return card({
@@ -781,7 +804,7 @@
   function compareCard() {
     const an = BASE.analysis;
     const rows = [
-      ['Модель', OLD.model, 'Opus 5.5', 'сильнее; за токен дороже ($4 / $20 против $3 / $15), но токенов в ≈ ' + Math.round(OLD.input / an.avgIn) + ' раз меньше'],
+      ['Модель', OLD.model, 'Opus 5.5', 'сильнее; за токен дороже ($4/$20 против $3/$15), но токенов в ≈ ' + Math.round(OLD.input / an.avgIn) + ' раз меньше'],
       ['Запросов к модели', 'до 20', '2–4', 'лимит 4; текст (Haiku) и новости (Sonnet) — отдельными шагами'],
       ['Входных токенов', '≈ ' + fmt.tokens(OLD.input), '≈ ' + fmt.tokens(an.avgIn), pct(an.cacheShare) + ' из кэша — на итерациях 2–3'],
       ['Откуда данные', 'Читает .md и JSON по одному', 'Готовое досье из базы', 'поиск — только новости, отдельным шагом'],
@@ -958,7 +981,7 @@
       slot.appendChild(h('div', { class: 'costs-effort' }, h('span', { class: 'costs-effort-label', id: labelId }, 'Глубина размышлений (effort)'), seg));
     }
 
-    const TASK_LABEL = { parse: 'Разбор текста событий', analysis: 'Анализ матчей', postmortem: 'Разбор ставок', refresh: 'Обновление профилей и новостей (ночью, через Batch)' };
+    const TASK_LABEL = { parse: 'Разбор текста событий', analysis: 'Анализ матчей', postmortem: 'Разбор ставок', refresh: 'Обновление профилей (ночью, через Batch)' };
     const modelFields = ['parse', 'analysis', 'postmortem', 'refresh'].map(id => {
       const t = typeOf(id);
       const f = UI.field({

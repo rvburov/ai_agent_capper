@@ -154,7 +154,7 @@
     { id: 'lessons', label: 'Уроки', short: 'Уроки' },
     { id: 'versions', label: 'Версии стратегии', short: 'Версии' },
     { id: 'ml', label: 'Своя ML-модель', short: 'ML-модель' },
-    { id: 'lab', label: 'Датасет и LLM · лаборатория', short: 'Лаборатория' },
+    { id: 'lab', label: 'Датасет и LLM · лаборатория', short: 'Лаб. LLM' },
   ];
   const st = {
     tab: 'lessons',
@@ -424,7 +424,7 @@
     { ic: 'search', t: 'Разбор ошибки', d: 'Claude сверяет прогноз с исходом: невезение или систематическая ошибка', who: 'Sonnet 5.5 · ≈ $0,02', whoIc: 'spark' },
     { ic: 'book', t: 'Гипотеза-урок', d: 'Короткое правило и где оно применимо', who: 'Claude', whoIc: 'spark' },
     { ic: 'flask', t: 'Проверка на истории', d: 'С ' + NEED + ' своих случаев: прогноз с уроком и без, 95% ДИ на истории и на поздних матчах', who: 'код + Batch API', whoIc: 'bolt' },
-    { ic: 'brain', t: 'В промпт или в признаки', d: 'Текстовый урок — в инструкции, числовой — в ML-модель', who: 'вы подтверждаете', whoIc: 'user' },
+    { ic: 'brain', t: 'В промпт или в признаки', d: 'Строкой в инструкции анализа; урок про вероятность — ещё и признаком своей ML-модели', who: 'вы подтверждаете', whoIc: 'user' },
   ];
   function cycleCard() {
     const list = h('ol', { class: 'learning-cycle', 'aria-label': 'Цикл обучения, 6 шагов' }, STEPS.map((s, i) => h('li', { class: 'learning-step' },
@@ -670,7 +670,7 @@
       actions,
       flush: !mobile,
       body: listNode,
-      foot: hint('ROI и CLV — для наблюдения, решения по ним не принимаем: на ' + HOLDOUT + ' событиях 95% ДИ ROI около ±20 п.п. CLV — вторичная проверка.'),
+      foot: hint('ROI и CLV здесь — для наблюдения: на ' + HOLDOUT + ' событиях 95% ДИ ROI около ±20 п.п., поэтому версии сравниваются по лог-лоссу и Brier.'),
     });
     const toMarket = v => {
       const ci = MARKET_CI[v.id];
@@ -734,9 +734,9 @@
     const tA = VERSION_INFO.v3.tokens, tB = VERSION_INFO.v4.tokens;
     const OK = t => [t, 'good', 'check'], OBS = ['для наблюдения', 'outline', 'eye'];
     const rows = [
-      { k: 'Лог-лосс', a: fmt.dec(A.logloss, 3), b: fmt.dec(B.logloss, 3), d: signedDec(B.logloss - A.logloss), ci: '95% ДИ: −0,009 … +0,005', v: OK('не хуже: до +0,005 ≤ +0,01') },
-      { k: 'Brier', a: fmt.dec(A.brier, 3), b: fmt.dec(B.brier, 3), d: signedDec(B.brier - A.brier), ci: '95% ДИ: −0,004 … +0,002', v: OK('не хуже: до +0,002 ≤ +0,005') },
-      { k: 'Калибровка (ECE)', a: fmt.pct(ECE.v3), b: fmt.pct(ECE.v4), d: pp(ECE.v4 - ECE.v3), ci: '95% ДИ: −0,7 … +1,1 п.п.', v: OK('не хуже: до +1,1 ≤ +2') },
+      { k: 'Лог-лосс', a: fmt.dec(A.logloss, 3), b: fmt.dec(B.logloss, 3), d: signedDec(B.logloss - A.logloss), ci: '95% ДИ: −0,009 … +0,005', tol: 'допуск: до +0,01', v: OK('не хуже') },
+      { k: 'Brier', a: fmt.dec(A.brier, 3), b: fmt.dec(B.brier, 3), d: signedDec(B.brier - A.brier), ci: '95% ДИ: −0,004 … +0,002', tol: 'допуск: до +0,005', v: OK('не хуже') },
+      { k: 'Калибровка (ECE)', a: fmt.pct(ECE.v3), b: fmt.pct(ECE.v4), d: pp(ECE.v4 - ECE.v3), ci: '95% ДИ: −0,7 … +1,1 п.п.', tol: 'допуск: до +2 п.п.', v: OK('не хуже') },
       { k: 'Ошибок формата', a: FORMAT_ERR.v3 + ' из ' + HOLDOUT, b: FORMAT_ERR.v4 + ' из ' + HOLDOUT, d: (FORMAT_ERR.v4 - FORMAT_ERR.v3 < 0 ? MINUS : '+') + Math.abs(FORMAT_ERR.v4 - FORMAT_ERR.v3), v: OK('не больше') },
       { k: 'Токенов на анализ', a: '≈ ' + tA + ' тыс.', b: '≈ ' + tB + ' тыс.', d: MINUS + tokSave() + '%', ci: 'по логам запусков', v: OK('дешевле') },
       { k: 'ROI', a: fmt.signedPct(A.roi), b: fmt.signedPct(B.roi), d: pp(B.roi - A.roi), ci: '95% ДИ ROI ≈ ±20 п.п.', v: OBS },
@@ -747,13 +747,13 @@
       ? h('div', { class: 'learning-cmp-list' }, rows.map(r => h('div', { class: 'learning-cmp-item' },
           h('div', { class: 'learning-cmp-top' }, h('b', null, r.k), verdict(r)),
           h('div', { class: 'small num' }, A.id + ' ' + r.a + ' → ' + B.id + ' ' + r.b + ' · разница ' + r.d),
-          r.ci && h('div', { class: 'xsmall muted' }, r.ci))))
+          r.ci && h('div', { class: 'xsmall muted' }, r.ci + (r.tol ? ' · ' + r.tol : '')))))
       : UI.table({
           columns: [
             { label: 'Показатель', render: r => h('b', { style: 'font-weight:600' }, r.k) },
             { label: A.id + ' · ' + (VERSION_STATUS[A.status] || ['—'])[0].toLowerCase(), align: 'r', render: r => r.a },
             { label: B.id + ' · ' + (VERSION_STATUS[B.status] || ['—'])[0].toLowerCase(), align: 'r', render: r => r.b },
-            { label: 'Разница', align: 'r', render: r => h('div', null, h('div', null, r.d), r.ci && h('div', { class: 'xsmall muted', style: 'white-space:nowrap' }, r.ci)) },
+            { label: 'Разница', align: 'r', render: r => h('div', null, h('div', null, r.d), [r.ci, r.tol].filter(Boolean).map(t => h('div', { class: 'xsmall muted', style: 'white-space:nowrap' }, t))) },
             { label: 'Вывод', render: verdict },
           ],
           rows,
@@ -818,7 +818,7 @@
         h('div', null, h('dt', null, 'Brier, сентябрь'), h('dd', null, fmt.dec(ml.brier, 3), h('small', null, 'рынок ' + fmt.dec(WF[WF.length - 1].market, 3) + ': разница в пределах шума'))),
         h('div', null, h('dt', null, 'Калибровка, ECE'), h('dd', null, fmt.pct(2.1), h('small', null, 'на валидации; 0% — идеальная калибровка'))),
         h('div', null, h('dt', null, 'Доверие к поправкам Claude, c'), h('dd', null, '≈ ' + fmt.dec(0.42, 2), h('small', null, 'предварительно: 95% ДИ 0,1…0,7 на ' + OWN + ' событиях; в расчёт — с 300')))),
-      hint('c показывает, помогают ли поправки Claude к вероятности модели: c ≈ 0 — информации не несут, c ≈ 1 — берём как есть. Подбирается на валидации по своим снимкам с новостями; пока событий меньше 300, поправка Claude ограничена ±10 п.п.'),
+      hint('Коэффициент c показывает, помогают ли поправки Claude к вероятности модели: c ≈ 0 — информации не несут, c ≈ 1 — берём как есть. Подбирается на валидации по своим снимкам с новостями; пока событий меньше 300, поправка Claude ограничена ±10 п.п.'),
     ];
     if (ml.training) {
       const stage = ml.progress < 35 ? 'Собираем признаки на дату каждого матча' : ml.progress < 80 ? 'Обучаем градиентный бустинг' : 'Проверяем на валидации — заменим, только если не хуже';
@@ -1044,7 +1044,7 @@
     const list = mobile
       ? h('div', { class: 'learning-cmp-list' }, POPT.map(r => h('div', { class: 'learning-cmp-item' },
           h('div', { class: 'learning-cmp-top' }, h('b', null, r.i + '. ' + r.change), r.best && chip('кандидат v4', 'info', 'flask')),
-          h('div', { class: 'small num soft' }, 'Smoke: ', smokeEl(r), ' · полный: ', fullEl(r), ' · ≈ ' + r.tok + ' тыс. токенов'))))
+          h('div', { class: 'small num soft' }, 'Smoke, Δ к v3: ', smokeEl(r), ' · полный: ', fullEl(r), ' · ≈ ' + r.tok + ' тыс. токенов'))))
       : UI.table({
           columns: [
             { label: '№', render: r => String(r.i), width: '40px' },
