@@ -17,8 +17,9 @@
   const onBets = n => n + ' ' + fmt.plural(n, 'ставке', 'ставках', 'ставках');
   const pctRange = (lo, hi) => Math.round(lo * 100) + '–' + Math.round(hi * 100) + '%';
   const firstDate = D.bankHistory[0].date;
-  const SETTLED = D.bets.filter(b => b.status !== 'open');
-  const OPEN_N = D.bets.length - SETTLED.length;
+  // Считаются при каждой отрисовке: ставка, рассчитанная на экране «Ставки», сразу попадает в выборку
+  const settled = () => D.bets.filter(b => b.status !== 'open');
+  const openN = () => D.bets.filter(b => b.status === 'open').length;
   const SMALL = 20; // меньше — помечаем «мало данных»
 
   const PERIODS = [
@@ -60,13 +61,15 @@
     const losses = bets.filter(b => b.status === 'loss').length;
     const voids = bets.filter(b => b.status === 'void').length;
     const turnover = sum(bets, b => b.stake), profit = sum(bets, b => b.profit);
+    const withClv = bets.filter(b => b.clv != null); // без закрывающего кэфа CLV не посчитать — такие ставки не входят в среднее
     return {
       n: bets.length, wins, losses, voids, turnover, profit,
       singles: bets.filter(b => b.legs.length === 1).length,
       roi: turnover ? profit / turnover * 100 : null,
       winrate: wins + losses ? wins / (wins + losses) * 100 : null,
-      clv: bets.length ? sum(bets, b => b.clv) / bets.length : null,
-      clvPos: bets.filter(b => b.clv > 0).length,
+      clv: withClv.length ? sum(withClv, b => b.clv) / withClv.length : null,
+      clvPos: withClv.filter(b => b.clv > 0).length,
+      clvN: withClv.length,
     };
   }
   // ROI по срезу: каждое событие — как ординар на равную сумму
@@ -121,6 +124,7 @@
       && (state.surface === 'all' || b.surface === state.surface)
       && (state.market === 'all' || b.legs.some(l => l.market === state.market));
     const legs = D.allLegs.filter(l => legOk(l, anchor, TODAY));
+    const SETTLED = settled();
     const bets = SETTLED.filter(b => betOk(b, anchor, TODAY));
     let prev = null;
     if (p.days) {
@@ -365,7 +369,7 @@
       UI.append(scope, [
         h('span', null, 'В выборке ', h('b', null, nBets(s.sum.n)), ' и ', h('b', null, nEv(s.legs.length)), range),
         chips,
-        OPEN_N > 0 && h('span', { class: 'muted xsmall' }, OPEN_N + ' ' + fmt.plural(OPEN_N, 'ставка в игре не учитывается', 'ставки в игре не учитываются', 'ставок в игре не учитываются')),
+        openN() > 0 && h('span', { class: 'muted xsmall' }, openN() + ' ' + fmt.plural(openN(), 'ставка в игре не учитывается', 'ставки в игре не учитываются', 'ставок в игре не учитываются')),
       ]);
     }
     return { el, sync };
@@ -379,7 +383,7 @@
     const roi = { label: 'ROI', icon: 'coins', value: c.roi == null ? '—' : fmt.signedPct(c.roi), hint: 'к сумме ставок' };
     if (pv && pv.roi != null && c.roi != null) Object.assign(roi, { delta: deltaPP(c.roi - pv.roi), trend: trendOf(Math.round((c.roi - pv.roi) * 10)), hint: s.p.prev });
     const wr = { label: 'Винрейт', icon: 'trophy', value: c.winrate == null ? '—' : fmt.pct(c.winrate), hint: c.wins + ' В · ' + c.losses + ' П' + (c.voids ? ' · ' + c.voids + ' возвр.' : '') };
-    const clv = { label: 'Средний CLV', icon: 'bolt', value: c.clv == null ? '—' : fmt.signedPct(Math.round(c.clv * 10) / 10), hint: 'лучше закрытия в ' + c.clvPos + ' из ' + c.n };
+    const clv = { label: 'Средний CLV', icon: 'bolt', value: c.clv == null ? '—' : fmt.signedPct(Math.round(c.clv * 10) / 10), hint: 'лучше закрытия в ' + c.clvPos + ' из ' + c.clvN };
     if (pv && pv.clv != null && c.clv != null) Object.assign(clv, { delta: deltaPP(c.clv - pv.clv), trend: trendOf(Math.round((c.clv - pv.clv) * 10)) });
     const b = s.brier;
     const br = { label: 'Brier модели', icon: 'target', value: b.model == null ? '—' : fmt.dec(b.model, 3) };
@@ -504,7 +508,7 @@
     if (s.brier.n >= 20) {
       const diff = s.brier.model - s.brier.market;
       out.push({ id: 'brier', tone: 'accent', ic: 'bolt', title: Math.abs(diff) < 0.01 ? 'Модель на уровне закрывающей линии' : diff < 0 ? 'Модель точнее закрывающей линии' : 'Рынок пока точнее модели',
-        text: 'Brier ' + fmt.dec(s.brier.model, 3) + ' против ' + fmt.dec(s.brier.market, 3) + ' у рынка' + (Math.abs(diff) < 0.01 ? ' — разница в пределах шума на ' + onEv(s.brier.n) + '.' : '.') + ' Надёжнее смотреть на CLV: ' + fmt.signedPct(Math.round(s.sum.clv * 10) / 10) + ' в среднем, лучше закрытия в ' + s.sum.clvPos + ' из ' + s.sum.n + '.',
+        text: 'Brier ' + fmt.dec(s.brier.model, 3) + ' против ' + fmt.dec(s.brier.market, 3) + ' у рынка' + (Math.abs(diff) < 0.01 ? ' — разница в пределах шума на ' + onEv(s.brier.n) + '.' : '.') + ' Надёжнее смотреть на CLV: ' + fmt.signedPct(Math.round(s.sum.clv * 10) / 10) + ' в среднем, лучше закрытия в ' + s.sum.clvPos + ' из ' + s.sum.clvN + '.',
         basis: nEv(s.brier.n), action: 'explain' });
     }
     // 0. Общая оговорка, если данных мало — ставим первой
@@ -593,7 +597,7 @@
       class: 'analytics-card analytics-ins-card',
       title: 'Выводы модели',
       subtitle: 'Автоматически по рассчитанным ставкам ' + s.p.ctx,
-      actions: [chip('Обновлено ' + fmt.date(SETTLED[SETTLED.length - 1].date), 'outline', 'clock')],
+      actions: [chip('Обновлено ' + fmt.date(settled().map(b => b.date).sort().pop()), 'outline', 'clock')],
       body: list.length
         ? h('ol', { class: 'analytics-ins', 'aria-label': 'Выводы модели', style: { '--ins-n': String(list.length) } }, list.map(ins => h('li', null,
           h('span', { class: ['analytics-ins-ic', ins.tone], 'aria-hidden': 'true' }, icon(ins.ic)),
@@ -776,7 +780,7 @@
 
   // ---------- CLV ----------
   function clvCard(s, mobile) {
-    const clvs = s.bets.map(b => b.clv);
+    const clvs = s.bets.filter(b => b.clv != null).map(b => b.clv); // ставки без закрывающего кэфа в распределение не попадают
     if (!clvs.length) return card({ class: 'analytics-card', title: 'Распределение CLV', body: UI.empty('Нет ставок за период') });
     const lo = Math.max(-3, Math.floor(Math.min(...clvs))), top = Math.min(7, Math.max(lo + 3, Math.floor(Math.max(...clvs))));
     const bins = [];
@@ -886,7 +890,7 @@
   function emptyState(s) {
     const indoor = state.surface === 'indoor';
     // Есть ли такие ставки за всё время — тогда предлагаем расширить период, а не сбрасывать фильтры
-    const ever = SETTLED.filter(b => (state.surface === 'all' || b.surface === state.surface) && (state.market === 'all' || b.legs.some(l => l.market === state.market)));
+    const ever = settled().filter(b => (state.surface === 'all' || b.surface === state.surface) && (state.market === 'all' || b.legs.some(l => l.market === state.market)));
     const canWiden = state.period !== 'all' && ever.length > 0;
     const reset = () => { Object.assign(state, DEFAULTS); update(true); };
     return h('section', { class: 'card analytics-empty' },

@@ -923,6 +923,7 @@
       foot: [
         h('span', { class: 'small soft' }, (runFilter === 'all' ? 'Всего' : typeOf(runFilter).label) + ': ' + filtered.length + ' ' + fmt.plural(filtered.length, 'запуск', 'запуска', 'запусков') + ' · ' + usd(fCost, 2) + (shown.length < filtered.length ? ' · показаны последние ' + shown.length : '')),
         filtered.length > LIMIT ? button(showAllRuns ? 'Свернуть' : 'Показать все ' + filtered.length, { kind: 'ghost', size: 'sm', icon: showAllRuns ? 'chevronDown' : 'list', attrs: { style: 'margin-left:auto' }, onClick: () => { showAllRuns = !showAllRuns; redraw('costs-runs'); } }) : null,
+        (runFilter === 'all' || runFilter === 'analysis') && h('span', { class: 'xsmall muted', style: 'flex-basis:100%' }, 'Журнал — пример за 1–7 окт. Анализ #' + (D.currentAnalysis || 'A-0142') + ' с экрана «Анализ» — демонстрационный запуск макета; в приложении такой запуск появится здесь сразу после завершения.'),
       ],
     });
   }

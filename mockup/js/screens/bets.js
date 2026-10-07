@@ -143,6 +143,10 @@
 
   // ---------- стили ----------
   const CSS = `
+    .bets-why { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+    .bets-why li { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); min-width: 0; }
+    .bets-why-top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; min-width: 0; }
+    .bets-why-top .odds { white-space: nowrap; }
     .bets-head .lead { max-width: 70ch; }
     .bets-head h2 { font-size: var(--fs-2xl); }
     @media (max-width: 720px) { .bets-head h2 { font-size: var(--fs-xl); } }
@@ -220,8 +224,9 @@
     .bets-open-sum > div { min-width: 0; }
     .bets-open-sum dt { font-size: var(--fs-xs); color: var(--fg-3); }
     .bets-open-sum dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .bets-open-actions { display: flex; gap: 8px; margin-top: auto; }
-    .bets-open-actions .btn.primary { flex: 1; }
+    .bets-open-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+    .bets-open-actions .btn { flex: 1 1 auto; }
+    .bets-open-actions .btn.primary { flex: 1 1 55%; }
 
     .bets-plink { color: inherit; text-decoration: none; }
     .bets-plink:hover { color: var(--accent-ink); text-decoration: underline; }
@@ -545,7 +550,42 @@
         h('div', null, h('dt', null, 'Выплата'), h('dd', null, fmt.money(pay)))),
       h('div', { class: 'bets-open-actions' },
         button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => settleModal(b), attrs: { 'data-settle': String(b.id) } }),
-        button('Анализ', { kind: 'secondary', icon: 'spark', href: '#analysis', title: 'Открыть анализ, по которому сделана ставка' })));
+        // экран «Анализ» показывает только последний анализ — ссылку даём, если ставка сделана по нему
+        b.analysis && b.analysis === D.currentAnalysis
+          ? button('Анализ', { kind: 'secondary', icon: 'spark', href: '#analysis', title: 'Открыть анализ #' + b.analysis + ', по которому сделана ставка' })
+          : button('Почему эта ставка', { kind: 'secondary', icon: 'info', onClick: () => whyModal(b) })));
+  }
+
+  // Короткая выжимка анализа, по которому сделана ставка: оценка модели против кэфа по каждой ноге и правило суммы
+  function whyModal(b) {
+    const an = (D.ai && D.ai.runs || []).filter(r => r.type === 'analysis');
+    const run = an.filter(r => r.at.slice(0, 10) === b.date).pop();
+    const runId = run ? 'A-' + String(131 + an.indexOf(run)).padStart(4, '0') : null;
+    const T = D.strategy.stakeTable;
+    const band = b.total <= 1.70 ? T[0] : b.total <= 2.20 ? T[1] : T[2];
+    const bankAt = S.bank - (b.status === 'open' ? 0 : b.profit);
+    UI.modal({
+      title: 'Почему эта ставка · №' + b.id,
+      body: [
+        h('ul', { class: 'bets-why' }, b.legs.map(l => {
+          const imp = 1 / l.odds, edge = (l.p - imp) * 100;
+          return h('li', null,
+            h('div', { class: 'bets-why-top' }, h('b', null, pname(l.p1) + ' — ' + pname(l.p2)), h('span', { class: 'odds' }, l.marketLabel + ' @' + fmt.odds(l.odds))),
+            h('div', { class: 'small soft' }, 'Модель ' + fmt.prob(l.p) + ' против ' + fmt.prob(imp) + ' по кэфу → перевес ' + signedPP(edge) + ' · валуй ' + fmt.signedPct((l.p * l.odds - 1) * 100, 1)));
+        })),
+        UI.kv([
+          ['Итоговый кэф', fmt.odds(b.total)],
+          ['Вероятность экспресса по модели', '≈ ' + fmt.prob(b.legs.reduce((a, l) => a * l.p, 1))],
+          ['Правило суммы', 'кэф ' + band.range + ' → ' + band.pct + ' банка'],
+          ['Сумма', fmt.money(b.stake) + ' · ' + fmt.dec(b.stake / bankAt * 100, 2) + '% банка'],
+        ]),
+        h('p', { class: 'xsmall muted', style: 'margin:0' }, (runId ? 'Анализ #' + runId + ' · ' + fmt.date(b.date) + ', ' + run.at.slice(11, 16) : 'Анализ ' + fmt.date(b.date)) + ' · пример данных. Полный разбор с факторами в макете есть только для примера Синнер — Руне и Джокович — Рублёв.'),
+      ],
+      actions: close => [
+        button('Закрыть', { kind: 'secondary', onClick: close }),
+        b.status === 'open' && button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => { close(); settleModal(b); } }),
+      ],
+    });
   }
 
   // ---------- история ----------

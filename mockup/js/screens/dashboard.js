@@ -372,7 +372,7 @@
         h('div', { class: 'dashboard-match-odds' },
           UI.oddsBox('П1', m.odds.p1, inBet && inBet.leg.market === 'p1'),
           UI.oddsBox('П2', m.odds.p2, inBet && inBet.leg.market === 'p2')),
-        h('div', { class: 'dashboard-match-action' }, button('Анализировать', { kind: 'secondary', size: 'sm', icon: 'spark', href: '#new', ariaLabel: 'Анализировать матч ' + DATA.match(m) })));
+        h('div', { class: 'dashboard-match-action' }, button('Анализировать', { kind: 'secondary', size: 'sm', icon: 'spark', href: '#new-' + m.id, ariaLabel: 'Анализировать матч ' + DATA.match(m) })));
     });
     return card({
       class: 'dashboard-matches-card dashboard-card',
@@ -382,7 +382,7 @@
       flush: true,
       body: h('div', null, rows),
       foot: [
-        button('Собрать экспресс из матчей дня', { kind: 'primary', size: 'sm', icon: 'spark', href: '#new' }),
+        button('Собрать экспресс из матчей дня', { kind: 'primary', size: 'sm', icon: 'spark', href: '#new-today' }),
         h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 220px' }, 'Перед анализом ИИ обновит устаревшие профили и соберёт недостающие — это отразится в расходах.'),
       ],
     });

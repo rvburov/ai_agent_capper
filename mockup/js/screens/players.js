@@ -55,6 +55,8 @@
     return plural(d, 'день', 'дня', 'дней') + ' назад';
   }
   const todayMatch = id => D.matchesToday.find(m => m.p1 === id || m.p2 === id) || null;
+  // Подробный разбор в макете есть только для матчей примера (#analysis); для остальных — новый анализ с этим матчем
+  const IN_EXAMPLE = ['m1', 'm2'];
   const openLeg = id => { for (const b of D.bets) if (b.status === 'open') for (const l of b.legs) if (l.p1 === id || l.p2 === id) return { bet: b, leg: l }; return null; };
   const eloProb = (a, b) => 1 / (1 + Math.pow(10, -(a - b) / 400));
   const eloRankAll = p => D.players.slice().sort((a, b) => b.elo.all - a.elo.all).indexOf(p) + 1;
@@ -114,10 +116,24 @@
     L5: ['4:6 6:7(4) 4:6', '6:3 4:6 6:7(5) 4:6', '7:6(2) 4:6 3:6 4:6', '3:6 6:4 6:4 3:6 4:6'],
   };
 
+  // Соперники по неделям: в одну неделю один и тот же соперник не встречается у двух разных игроков базы
+  // (иначе «оба обыграли Фиса в 1/32 4 октября»). Матчи всех игроков считаются разом и в фиксированном порядке,
+  // поэтому карточка не зависит от того, какую открыли первой. Первыми идут игроки матчей из примера анализа —
+  // их соперников (Тиафо и Мунар у Руне) называет экран «Анализ».
+  const EXTRA_OTHERS = [['Хуркач', 'POL', 15], ['Меншик', 'CZE', 21], ['Давидович Фокина', 'ESP', 25], ['Шаповалов', 'CAN', 28], ['Фонсека', 'BRA', 30], ['Михельсен', 'USA', 32], ['Норри', 'GBR', 34], ['Табило', 'CHI', 36]];
+  const OPP_POOL = OTHERS.concat(EXTRA_OTHERS);
+  const WEEK_TAKEN = EVENTS.map(() => new Set());
+  const GEN_ORDER = ['rune', 'sinner', 'djokovic', 'rublev'].concat(D.players.map(x => x.id)).filter((id, i, a) => a.indexOf(id) === i && D.P[id]);
+  let matchesAll = null;
+  function matchesOf(p) {
+    if (!matchesAll) { matchesAll = {}; GEN_ORDER.forEach(id => { matchesAll[id] = genMatches(D.P[id]); }); }
+    return matchesAll[p.id] || genMatches(p);
+  }
+
   const cache = {};
   function info(p) {
     if (cache[p.id]) return cache[p.id];
-    const o = { matches: genMatches(p) };
+    const o = { matches: matchesOf(p) };
     o.ratings = genRatings(p);
     o.psych = genPsych(p);
     o.state = genState(p, o.matches);
@@ -154,18 +170,37 @@
     const r = rng(p.id + ':m');
     const form = p.form, out = [], used = new Set();
     const known = shanghaiFromBets(p.id);
-    known.forEach(k => used.add(k.opp.id || k.opp.name));
+    known.forEach(k => { used.add(k.opp.id || k.opp.name); WEEK_TAKEN[0].add(k.opp.id || k.opp.name); });
     const plays = !!todayMatch(p.id);
     const tops = D.players.filter(x => x.id !== p.id);
-    const pickOpp = (strong, live) => {
+    // Случайный выбор — как раньше (тот же расход генератора, чтобы остальные цифры карточки не менялись);
+    // если соперник на этой неделе уже занят другим игроком базы — берём следующего свободного по списку.
+    const pickOpp = (strong, live, week) => {
+      const taken = WEEK_TAKEN[week] || new Set();
       for (let t = 0; t < 40; t++) {
-        if (strong) { const x = tops[Math.floor(r() * tops.length)]; if (!used.has(x.id) && !(plays && todayMatch(x.id))) { used.add(x.id); return { id: x.id, name: x.short, cc: x.country, rank: x.rank }; } }
-        else { const x = OTHERS[Math.floor(r() * OTHERS.length)]; if (!used.has(x[0]) && !(live && SH_BET_NAMES.has(x[0]))) { used.add(x[0]); return { name: x[0], cc: x[1], rank: x[2] }; } }
+        if (strong) {
+          const k = Math.floor(r() * tops.length), x = tops[k];
+          if (used.has(x.id) || (plays && todayMatch(x.id))) continue;
+          used.add(x.id);
+          let y = x;
+          for (let s2 = 1; taken.has(y.id) && s2 < tops.length; s2++) { const c = tops[(k + s2) % tops.length]; if (!used.has(c.id) && !(plays && todayMatch(c.id)) && !taken.has(c.id)) y = c; }
+          used.add(y.id); taken.add(y.id);
+          return { id: y.id, name: y.short, cc: y.country, rank: y.rank };
+        } else {
+          const k = Math.floor(r() * OTHERS.length), x = OTHERS[k];
+          if (used.has(x[0]) || (live && SH_BET_NAMES.has(x[0]))) continue;
+          used.add(x[0]);
+          let y = x;
+          for (let s2 = 1; taken.has(y[0]) && s2 < OPP_POOL.length; s2++) { const c = OPP_POOL[(k + s2) % OPP_POOL.length]; if (!used.has(c[0]) && !(live && SH_BET_NAMES.has(c[0])) && !taken.has(c[0])) y = c; }
+          used.add(y[0]); taken.add(y[0]);
+          return { name: y[0], cc: y[1], rank: y[2] };
+        }
       }
       return { name: OTHERS[0][0], cc: OTHERS[0][1], rank: OTHERS[0][2] };
     };
     let i = 0;
-    for (const ev0 of EVENTS) {
+    for (let week = 0; week < EVENTS.length; week++) {
+      const ev0 = EVENTS[week];
       if (i >= form.length) break;
       const ev = Object.assign({}, ev0);
       if (ev.alt && r() < 0.4) ev.name = ev.alt;
@@ -194,9 +229,9 @@
         if (out.length && out[out.length - 1].score === score) score = pool[(pool.indexOf(score) + 1) % pool.length];
         const aces = Math.max(0, Math.round(p.serve.aces * (ev.bo5 ? 1.4 : 1) + (r() - 0.5) * 6));
         const firstPct = Math.round(p.serve.first + (r() - 0.5) * 10);
-        out.push({ date: kn ? kn.date : date, event: ev.name, cat: ev.cat, surface: ev.surface, round, res, opp: kn ? kn.opp : pickOpp(strong, ev.live), score, aces, firstPct, bo5: !!ev.bo5 });
+        out.push({ date: kn ? kn.date : date, event: ev.name, cat: ev.cat, surface: ev.surface, round, res, opp: kn ? kn.opp : pickOpp(strong, ev.live, week), score, aces, firstPct, bo5: !!ev.bo5 });
       }
-      if (wo) out.push({ date: '2026-10-04', event: ev.name, cat: ev.cat, surface: ev.surface, round: '1/32', wo: true, opp: pickOpp(false, true) });
+      if (wo) out.push({ date: '2026-10-04', event: ev.name, cat: ev.cat, surface: ev.surface, round: '1/32', wo: true, opp: pickOpp(false, true, week) });
       i += k;
     }
     return out;
@@ -272,7 +307,8 @@
     const xw = clamp(Math.round(n * eloProb(x.elo.all, y.elo.all) + (r() - 0.5)), 0, n);
     const hn = Math.max(1, Math.round(n * 0.6)), hxw = clamp(Math.round(hn * eloProb(x.elo.hard, y.elo.hard)), 0, hn);
     const lastX = r() < eloProb(x.elo.hard, y.elo.hard);
-    const last = ['Вена 2025, 1/2', 'Майами 2026, 1/4', 'Пекин 2025, 1/4', 'Цинциннати 2026, 1/8'][Math.floor(r() * 4)];
+    // последняя встреча — до окна списка матчей (июль–октябрь 2026), чтобы не спорить с вкладкой «Матчи»
+    const last = ['Вена 2025, 1/2', 'Майами 2026, 1/4', 'Пекин 2025, 1/4', 'Индиан-Уэллс 2026, 1/8'][Math.floor(r() * 4)];
     const mine = a === x;
     return { w: mine ? xw : n - xw, l: mine ? n - xw : xw, hw: mine ? hxw : hn - hxw, hl: mine ? hn - hxw : hxw, last, lastWon: mine ? lastX : !lastX };
   }
@@ -291,7 +327,7 @@
     const last = matches.find(m => !m.wo);
     const s = p.short;
     if (p.id === 'sinner') return [
-      { date: '2026-10-06', src: 'atptour.com', text: 'Синнер после 1/16: «Корт заметно быстрее, чем в Пекине, подача работает лучше». 11 эйсов за матч — лучший показатель в сезоне.', impact: true, why: 'Учтено: на быстром корте вес подачи выше, тай-брейки вероятнее', quote: '“The court is quicker than in Beijing, I can use my serve more,” Sinner said after his third-round win.' },
+      { date: '2026-10-06', src: 'atptour.com', text: 'Синнер после 1/16: «Корт заметно быстрее, чем в Пекине, подача работает лучше». Оба матча в Шанхае — в двух сетах.', impact: true, why: 'Учтено: на быстром корте вес подачи выше, тай-брейки вероятнее', quote: '“The court is quicker than in Beijing, I can use my serve more,” Sinner said after his third-round win.' },
       { date: '2026-10-05', src: 'tennis.com', text: 'Статистика турнира: на центральных кортах Шанхая эйсов на 18% больше, чем в 2025 году.', impact: true, why: 'Учтено для всех матчей турнира', quote: 'Aces per service game are up 18% year-on-year on Stadium Court and Grand Stand.' },
       { date: '2026-10-04', src: 'x.com', text: 'Пост болельщика с видео тренировки: Синнер якобы держался за бедро после спринта. Официальных сообщений нет, на следующий день — полная тренировка.', impact: false, why: 'Нет подтверждения турнира или команды — по уроку L-019 не учитываем', quote: 'Fan video, 14 s. No statement from the player team or tournament doctor.' },
       { date: '2026-10-01', src: 'ubitennis.com', text: 'Синнер снялся с Пекина после первого круга, чтобы восстановиться к Шанхаю.', impact: true, why: 'Учтено в состоянии: 3 матча за 14 дней — свежий', quote: 'Sinner ha deciso di ritirarsi da Pechino dopo il primo turno per preparare Shanghai.' },
@@ -822,8 +858,10 @@
       foot = h('div', { class: 'players-today' }, icon('calendar'),
         h('div', { class: 'players-today-text' }, h('b', null, 'Сегодня, ' + m.time + ' · '), m.tournament + ', ' + m.round + ' · соперник — ', h('a', { href: '#player-' + opp.id }, opp.name), ' (№' + opp.rank + ') · ',
           h('span', { class: 'muted' }, (side === 'p1' ? 'П1' : 'П2') + ' '), h('span', { class: 'odds' }, fmt.odds(m.odds[side]))),
-        ol && h('a', { class: 'chip info', href: '#bets', title: 'Открыть ставку' }, icon('ticket'), 'В ставке: ' + D.match(ol.leg) + ' · ' + ol.leg.marketLabel + ' ' + fmt.odds(ol.leg.odds)),
-        button('Разбор матча', { kind: 'ghost', size: 'sm', iconRight: 'arrowRight', href: '#analysis' }));
+        ol && h('a', { class: 'chip info', href: '#bets-' + ol.bet.id, title: 'Ставка №' + ol.bet.id + ' — внести результат' }, icon('ticket'), 'В ставке №' + ol.bet.id + ': ' + D.match(ol.leg) + ' · ' + ol.leg.marketLabel + ' ' + fmt.odds(ol.leg.odds)),
+        IN_EXAMPLE.includes(m.id)
+          ? button('Разбор матча', { kind: 'ghost', size: 'sm', iconRight: 'arrowRight', href: '#analysis' })
+          : button('Анализировать матч', { kind: 'ghost', size: 'sm', icon: 'spark', href: '#new-' + m.id }));
     }
     return h('section', { class: 'card players-hero', 'aria-label': 'Игрок ' + p.name }, top, stats, foot);
   }
@@ -853,7 +891,7 @@
         h('b', null, 'Сегодня: ' + p.short + ' — ' + opp.short),
         h('div', null, 'Эло на харде: ' + elo(p.elo.hard) + ' против ' + elo(opp.elo.hard) + ' → ' + fmt.prob(pe) + ' на победу · рынок без маржи: ' + fmt.prob(mk)),
         h('div', null, 'Личные встречи: ' + H.w + '–' + H.l + ', на харде ' + H.hw + '–' + H.hl + ' · последняя — ' + H.last + ', ' + (H.lastWon ? 'победа' : 'поражение')),
-        h('div', { class: 'xsmall', style: 'opacity:.85' }, 'Это входные точки модели, а не прогноз. Встречи на других покрытиях на хард не переносим (', h('a', { href: '#learning' }, 'урок L-012'), '). Итог — в ', h('a', { href: '#analysis' }, 'разборе матча'), '.')));
+        h('div', { class: 'xsmall', style: 'opacity:.85' }, 'Это входные точки модели, а не прогноз. Встречи на других покрытиях на хард не переносим (', h('a', { href: '#learning' }, 'урок L-012'), '). Итог — ', IN_EXAMPLE.includes(m.id) ? ['в ', h('a', { href: '#analysis' }, 'разборе матча')] : ['после ', h('a', { href: '#new-' + m.id }, 'анализа матча')], '.')));
     }
     const eloCard = card({
       class: 'col-7', title: 'Эло по покрытиям', subtitle: 'Общий ' + elo(p.elo.all) + ' · считаем сами по архиву матчей ATP',
@@ -1178,7 +1216,7 @@
       h('span', { class: 'players-collect-ic' }, icon('database')),
       h('h3', null, 'Профиль ещё не собран'),
       h('p', null, 'Из архива ATP уже есть рейтинг, Эло и результаты. Досье — стиль игры, физику и технику, психологию, новости и травмы — Claude ещё не собирал.',
-        opp ? [' Без него анализ матча ', h('a', { href: '#analysis' }, opp.short + ' — ' + p.short), ' сегодня в ' + m.time + ' пройдёт с пометкой «неполные данные» и пониженной уверенностью.'] : null),
+        opp ? [' Без него анализ матча ', h('a', { href: IN_EXAMPLE.includes(m.id) ? '#analysis' : '#new-' + m.id }, opp.short + ' — ' + p.short), ' сегодня в ' + m.time + ' пройдёт с пометкой «неполные данные» и пониженной уверенностью.'] : null),
       h('div', { class: 'row', style: 'justify-content:center' }, collectBtn, batchBtn),
       status,
       stepsEl));

@@ -24,8 +24,10 @@
   const initials = name => name.trim().split(/\s+/).slice(0, 2).map(w => w.charAt(0).toUpperCase()).join('') || U.initials;
 
   // ---------- производные данные ----------
-  const openBets = D.bets.filter(b => b.status === 'open');
-  const inPlay = openBets.reduce((a, b) => a + b.stake, 0);
+  // Ставки в игре считаются при каждой отрисовке: ставка, сохранённая в «Анализе» или рассчитанная в «Ставках», видна сразу
+  const openBets = () => D.bets.filter(b => b.status === 'open');
+  const inPlay = () => openBets().reduce((a, b) => a + b.stake, 0);
+  const todayBets = () => D.bets.filter(b => b.date === TODAY);
   const staleN = D.players.filter(p => p.fresh === 'stale').length;
   const missingN = D.players.filter(p => p.fresh === 'missing').length;
   const profiledN = D.players.length - missingN;
@@ -50,12 +52,19 @@
   }
 
   const BOOK_COUNT = name => D.bets.filter(b => b.bookmaker === name).length;
-  const BOOK_INPLAY = name => openBets.filter(b => b.bookmaker === name).reduce((a, b) => a + b.stake, 0);
+  const BOOK_INPLAY = name => openBets().filter(b => b.bookmaker === name).reduce((a, b) => a + b.stake, 0);
+  // Сверенный баланс (base) уже включает все ставки, рассчитанные до открытия макета. Результат ставок,
+  // рассчитанных в этой сессии на экране «Ставки», добавляем к балансу их букмекера — сверка продолжает сходиться.
+  const SETTLED_AT_LOAD = new Set(D.bets.filter(b => b.status !== 'open').map(b => b.id));
+  const sessionProfit = name => D.bets.filter(b => b.bookmaker === name && b.status !== 'open' && !SETTLED_AT_LOAD.has(b.id)).reduce((a, b) => a + b.profit, 0);
   const books0 = [
-    { id: 'fonbet', name: 'Fonbet', mark: 'FB', balance: 21480, checked: '2026-10-06' },
-    { id: 'winline', name: 'Winline', mark: 'WL', balance: 16800, checked: '2026-10-06' },
-    { id: 'liga', name: 'Лига Ставок', mark: 'ЛС', balance: S.bank - 21480 - 16800, checked: '2026-10-03' },
-  ].map(b => Object.assign(b, { bets: BOOK_COUNT(b.name), inPlay: BOOK_INPLAY(b.name) }));
+    { id: 'fonbet', name: 'Fonbet', mark: 'FB', base: 21480, checked: '2026-10-06' },
+    { id: 'winline', name: 'Winline', mark: 'WL', base: 16800, checked: '2026-10-06' },
+    { id: 'liga', name: 'Лига Ставок', mark: 'ЛС', base: S.bank - 21480 - 16800, checked: '2026-10-03' },
+  ];
+  function syncBooks() {
+    st.books.forEach(b => Object.assign(b, { bets: BOOK_COUNT(b.name), inPlay: BOOK_INPLAY(b.name), balance: b.base + sessionProfit(b.name) }));
+  }
 
   const LOG = [
     { at: '2026-10-07T08:12', device: 'iPhone 15 · Safari', ip: '95.165.xx.xx', city: 'Москва', result: 'ok' },
@@ -846,7 +855,7 @@
     const tiles = h('div', { class: 'grid profile-tiles' },
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Стартовый банк', icon: 'wallet', value: fmt.money(S.start), hint: 'с ' + dateLong(D.bankHistory[0].date) })),
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Текущий банк', icon: 'coins', value: fmt.money(b), delta: fmt.signedPct(growth), trend: growth >= 0 ? 'up' : 'down', hint: 'к старту' })),
-      h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'В игре', icon: 'clock', value: fmt.money(inPlay), hint: openBets.length + ' ' + pl(openBets.length, 'ставка', 'ставки', 'ставок') + ' · ' + fmt.pct(inPlay / b * 100) + ' банка' })),
+      h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'В игре', icon: 'clock', value: fmt.money(inPlay()), hint: openBets().length + ' ' + pl(openBets().length, 'ставка', 'ставки', 'ставок') + ' · ' + fmt.pct(inPlay() / b * 100) + ' банка' })),
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'От пика банка', icon: 'arrowDown', value: dd ? fmt.signedPct(dd) : '0%', hint: 'пик ' + fmt.money(S.peak) })));
     if (mobile) return h('div', { class: 'profile-panel' }, tiles, responsibleCard(), strategyCard(), adaptCard(dd, growth), booksCard(), historyCard());
     return h('div', { class: 'profile-panel' }, tiles,
@@ -1017,7 +1026,8 @@
   }
 
   function responsibleCard() {
-    const todayN = openBets.length, todaySum = inPlay;
+    // лимиты дня считают все ставки, сделанные сегодня, — и в игре, и уже рассчитанные
+    const todayN = todayBets().length, todaySum = todayBets().reduce((a, x) => a + x.stake, 0);
     const L = st.limits;
     const cF = UI.field({ label: 'Ставок в день, не больше', id: 'profile-lim-count', value: String(L.count), inputmode: 'numeric', autocomplete: 'off' });
     const aF = UI.field({ label: 'Сумма ставок в день', id: 'profile-lim-amount', value: fmt.int(L.amount), suffix: '₽', inputmode: 'numeric', autocomplete: 'off' });
@@ -1079,6 +1089,7 @@
   }
 
   function booksCard() {
+    syncBooks();
     const sum = st.books.reduce((a, b) => a + b.balance, 0);
     const diff = sum - bankNow();
     return card({
@@ -1117,8 +1128,8 @@
       if (isNew && !name) ok = setFieldError(nameF, 'Укажите название');
       if (!(v >= 0)) ok = setFieldError(balF, 'Введите сумму в рублях');
       if (!ok) return;
-      if (isNew) st.books.push({ id: 'bk-' + st.books.length, name, mark: name.replace(/[^A-Za-zА-Яа-яЁё]/g, '').slice(0, 2).toUpperCase(), balance: Math.round(v), checked: TODAY, bets: 0, inPlay: 0 });
-      else { b.balance = Math.round(v); b.checked = TODAY; }
+      if (isNew) st.books.push({ id: 'bk-' + st.books.length, name, mark: name.replace(/[^A-Za-zА-Яа-яЁё]/g, '').slice(0, 2).toUpperCase(), base: Math.round(v) - sessionProfit(name), balance: Math.round(v), checked: TODAY, bets: 0, inPlay: 0 });
+      else { b.base = Math.round(v) - sessionProfit(b.name); b.balance = Math.round(v); b.checked = TODAY; }
       m.close(); drawPanel();
       UI.toast(isNew ? name + ' добавлен' : 'Баланс ' + name + ' сверен: ' + fmt.money(v), 'wallet');
     }
@@ -1371,14 +1382,14 @@
   }
 
   function exportCard() {
-    const openLegs = openBets.reduce((a, b) => a + b.legs.length, 0);
+    const openLegs = openBets().reduce((a, b) => a + b.legs.length, 0);
     const file = 'capper-export-' + TODAY + (st.exportFmt === 'json' ? '.json' : '.zip');
     const prepBtn = button('Подготовить архив', { kind: 'primary', icon: 'download', onClick: () => busy(prepBtn, 'Собираем данные…', 1100, () => { st.exportState = 'ready'; drawPanel(); UI.toast('Архив готов. Ссылка также отправлена на почту', 'check'); }) });
     return card({
       id: 'profile-export', class: 'profile-anchor', title: 'Экспорт всех данных', subtitle: 'Ваши данные — ваши: заберите их в любой момент',
       body: [
         UI.kv([
-          ['Ставки и экспрессы', D.bets.length + ' · из них ' + openBets.length + ' в игре'],
+          ['Ставки и экспрессы', D.bets.length + ' · из них ' + openBets().length + ' в игре'],
           ['События в экспрессах', String(D.allLegs.length + openLegs)],
           ['Профили игроков', profiledN + ' + ' + missingN + ' без профиля'],
           ['Уроки модели и версии стратегии', D.lessons.length + ' и ' + D.strategyVersions.length],

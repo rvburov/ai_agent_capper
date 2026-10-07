@@ -360,7 +360,7 @@
     }
 
     .new-form-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .new-today { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--r-md); background: var(--surface-2); min-width: 0; }
+    .new-today { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--r-md); background: var(--surface-2); min-width: 0; scroll-margin-top: calc(var(--topbar-h) + 16px); }
     .new-today-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
     .new-today-head > div { min-width: 0; }
     .new-today-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; }
@@ -972,7 +972,7 @@
     const v = D.strategyVersions.find(s => s.status === 'active');
     return UI.card({
       class: 'new-rules', title: 'Правила стратегии', subtitle: 'Активная версия ' + v.name.split(' · ')[0],
-      actions: [button('Изменить', { kind: 'ghost', size: 'sm', icon: 'edit', href: '#profile' })],
+      actions: [button('Изменить', { kind: 'ghost', size: 'sm', icon: 'edit', href: '#profile-bank', title: 'Правила стратегии — в личном кабинете, вкладка «Банк и стратегия»' })],
       body: [
         UI.kv([
           ['Вероятность события', '≥ ' + ST.minProb + '%'],
@@ -1061,8 +1061,37 @@
     balance();
   }
 
+  // ---------- вход с параметром ----------
+  // #new-m3 — черновик с одним матчем из расписания (кнопка «Анализировать» на главной и в карточке игрока),
+  // #new-today — форма с выбором из матчей дня. Без параметра черновик не трогаем.
+  let revealToday = false;
+  function applyParam(param) {
+    if (!param) return;
+    const m = D.matchesToday.find(x => x.id === param);
+    if (m) {
+      state.tab = 'form'; state.editing.clear(); snapshots.clear();
+      state.events = [eventFromToday(m)];
+      // во вкладке «Вставить текстом» — тот же матч в формате бота, чтобы вкладки не расходились
+      state.text = [
+        'Текущий банк: ' + fmt.int(state.bank) + ' ₽', 'Букмекер: ' + state.bookmaker, '', 'События:',
+        P[m.p1].short + ' vs ' + P[m.p2].short + ', ' + m.tournament + ', ' + (D.surfaces[m.surface] ? D.surfaces[m.surface].label.toLowerCase() : 'хард') + ', ' + m.round.replace(' финала', ''),
+        'Кэфы: П1 = ' + fmt.odds(m.odds.p1) + ', П2 = ' + fmt.odds(m.odds.p2),
+        'Фора по сетам: П1(-1.5) = ' + fmt.odds(m.odds.h1m) + ', П2(+1.5) = ' + fmt.odds(m.odds.h2p),
+      ].join('\n');
+      state.parsedText = state.text;
+      state.parse = { bank: null, bookmaker: null, unknown: [] };
+      UI.toast('Добавлен матч ' + P[m.p1].short + ' — ' + P[m.p2].short + ' из расписания', 'calendar');
+    } else if (param === 'today') {
+      state.tab = 'form';
+      revealToday = true;
+    }
+    // адрес без параметра: повторный заход на экран не сбросит черновик ещё раз
+    try { history.replaceState(history.state, '', location.href.split('#')[0] + '#new'); } catch (e) { /* в песочнице адрес может быть недоступен */ }
+  }
+
   // ---------- экран ----------
-  function render(root) {
+  function render(root, param) {
+    applyParam(param);
     if (io) { io.disconnect(); io = null; }
     slots.clear();
     const panel = h('div', { class: 'new-panel', role: 'tabpanel', id: 'new-panel', 'aria-label': state.tab === 'text' ? 'Вставить текстом' : 'Заполнить форму' });
@@ -1095,6 +1124,16 @@
     renderPanel();
     renderSide();
     requestAnimationFrame(() => { const tb = document.querySelector('.tabbar'); if (tb && tb.offsetHeight) bar.style.setProperty('--new-tabbar', tb.offsetHeight + 'px'); });
+    if (revealToday) {
+      revealToday = false;
+      // после общего window.scrollTo(0, 0) в роутере — показываем «Матчи сегодня»
+      setTimeout(() => {
+        const sec = root.querySelector('.new-today'); if (!sec) return;
+        sec.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        const b = sec.querySelector('.new-today-btn[aria-pressed="false"]') || sec.querySelector('.new-today-btn');
+        if (b) b.focus({ preventScroll: true });
+      }, 80);
+    }
   }
 
   UI.register('new', { title: 'Новый анализ', nav: 'new', render });
