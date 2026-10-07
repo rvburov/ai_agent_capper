@@ -82,7 +82,7 @@
       const p = D.P[id];
       p.fresh = 'fresh'; p.updated = NOW; delete jobs[id]; doneNow.add(id);
       if (k === ids.length - 1) {
-        UI.toast(ids.length === 1 ? 'Профиль ' + p.short + ' обновлён · ' + fmt.usd(cost) : 'Готово: ' + plural(ids.length, 'профиль обновлён', 'профиля обновлены', 'профилей обновлены') + ' · ' + fmt.usd(cost), 'check');
+        UI.toast(ids.length === 1 ? 'Профиль обновлён: ' + p.short + ' · ' + fmt.usd(cost) : 'Готово: ' + plural(ids.length, 'профиль обновлён', 'профиля обновлены', 'профилей обновлены') + ' · ' + fmt.usd(cost), 'check');
         done && done();
       }
       notify();
@@ -147,6 +147,9 @@
     return out.sort((a, b) => b.date.localeCompare(a.date));
   }
 
+  // Все, кто играл в Шанхае по ставкам этой недели: случайным соперником в Шанхае их не ставим, чтобы сетка не спорила с историей ставок
+  const SH_BET_NAMES = new Set(D.bets.filter(b => b.date >= '2026-10-02' && b.status !== 'open').flatMap(b => b.legs.flatMap(l => [l.p1, l.p2])));
+
   function genMatches(p) {
     const r = rng(p.id + ':m');
     const form = p.form, out = [], used = new Set();
@@ -154,10 +157,10 @@
     known.forEach(k => used.add(k.opp.id || k.opp.name));
     const plays = !!todayMatch(p.id);
     const tops = D.players.filter(x => x.id !== p.id);
-    const pickOpp = strong => {
+    const pickOpp = (strong, live) => {
       for (let t = 0; t < 40; t++) {
         if (strong) { const x = tops[Math.floor(r() * tops.length)]; if (!used.has(x.id) && !(plays && todayMatch(x.id))) { used.add(x.id); return { id: x.id, name: x.short, cc: x.country, rank: x.rank }; } }
-        else { const x = OTHERS[Math.floor(r() * OTHERS.length)]; if (!used.has(x[0])) { used.add(x[0]); return { name: x[0], cc: x[1], rank: x[2] }; } }
+        else { const x = OTHERS[Math.floor(r() * OTHERS.length)]; if (!used.has(x[0]) && !(live && SH_BET_NAMES.has(x[0]))) { used.add(x[0]); return { name: x[0], cc: x[1], rank: x[2] }; } }
       }
       return { name: OTHERS[0][0], cc: OTHERS[0][1], rank: OTHERS[0][2] };
     };
@@ -191,9 +194,9 @@
         if (out.length && out[out.length - 1].score === score) score = pool[(pool.indexOf(score) + 1) % pool.length];
         const aces = Math.max(0, Math.round(p.serve.aces * (ev.bo5 ? 1.4 : 1) + (r() - 0.5) * 6));
         const firstPct = Math.round(p.serve.first + (r() - 0.5) * 10);
-        out.push({ date: kn ? kn.date : date, event: ev.name, cat: ev.cat, surface: ev.surface, round, res, opp: kn ? kn.opp : pickOpp(strong), score, aces, firstPct, bo5: !!ev.bo5 });
+        out.push({ date: kn ? kn.date : date, event: ev.name, cat: ev.cat, surface: ev.surface, round, res, opp: kn ? kn.opp : pickOpp(strong, ev.live), score, aces, firstPct, bo5: !!ev.bo5 });
       }
-      if (wo) out.push({ date: '2026-10-04', event: ev.name, cat: ev.cat, surface: ev.surface, round: '1/32', wo: true, opp: pickOpp(false) });
+      if (wo) out.push({ date: '2026-10-04', event: ev.name, cat: ev.cat, surface: ev.surface, round: '1/32', wo: true, opp: pickOpp(false, true) });
       i += k;
     }
     return out;
@@ -300,7 +303,7 @@
         ? { date: last.date, src: 'atptour.com', text: s + ' вышел в 1/8 финала Шанхая (' + last.score + ', соперник — ' + last.opp.name + ').', impact: true, why: 'Учтено в форме и усталости', quote: s + ' advanced to the fourth round with a ' + last.score.replace(/:/g, '-') + ' win.' }
         : { date: last ? last.date : '2026-10-05', src: 'atptour.com', text: s + (last ? ' проиграл в ' + last.round + ' ' + (last.event === 'Шанхай' ? 'Шанхая' : 'турнира') + ' (' + last.score + ')' : ' не сыграл в Шанхае') + '. Следующий турнир — Вена, ATP 500, крытый хард, с 19 окт.', impact: false, why: 'Матчей в ближайшие дни нет', quote: 'Next: Erste Bank Open, Vienna (ATP 500, indoor hard).' },
       { date: '2026-10-05', src: 'tennis.com', text: 'Статистика турнира: на центральных кортах Шанхая эйсов на 18% больше, чем в 2025 году.', impact: true, why: 'Учтено для всех матчей турнира', quote: 'Aces per service game are up 18% year-on-year on Stadium Court and Grand Stand.' },
-      { date: '2026-10-04', src: 'x.com', text: 'Пост болельщика: у ' + s + ' якобы дискомфорт в плече на тренировке. Официальных сообщений нет.', impact: false, why: 'Нет подтверждения турнира или команды — по уроку L-019 не учитываем', quote: 'Unverified fan post, no statement from the team.' },
+      { date: '2026-10-04', src: 'x.com', text: 'Пост болельщика: ' + s + ' якобы жаловался на плечо на тренировке. Официальных сообщений нет.', impact: false, why: 'Нет подтверждения турнира или команды — по уроку L-019 не учитываем', quote: 'Unverified fan post, no statement from the team.' },
       { date: '2026-09-30', src: ru ? 'sports.ru' : 'tennisworld.com', text: 'Интервью: ' + s + ' назвал цель осени — ' + (p.rank <= 10 ? 'отобраться в Итоговый турнир в Турине.' : 'вернуться в топ-10 к концу сезона.'), impact: p.rank <= 10, why: p.rank <= 10 ? 'Учтено слабо: мотивация «высокая»' : 'На конкретный матч не влияет', quote: 'Interview, ' + (ru ? 'на русском' : 'in English') + ', 6 min read.' },
     ];
   }
@@ -527,9 +530,9 @@
     if (jobs[p.id] === 'running') return button('Обновляем…', { kind: 'ghost', size: 'sm', icon: 'refresh', disabled: true, title: 'Обновляем' });
     if (jobs[p.id] === 'queued') return button('В очереди', { kind: 'ghost', size: 'sm', icon: 'clock', disabled: true, title: 'В очереди ночного пакета' });
     const onClick = e => { e.stopPropagation(); queueBatch([p.id]); };
-    if (p.fresh === 'fresh') return button('', { kind: 'ghost', size: 'sm', icon: 'refresh', title: 'Данные свежие — обновлять не нужно', ariaLabel: 'Обновить профиль ' + p.name, onClick });
+    if (p.fresh === 'fresh') return button('', { kind: 'ghost', size: 'sm', icon: 'refresh', title: 'Данные свежие — обновлять не нужно', ariaLabel: 'Обновить профиль: ' + p.name, onClick });
     const missing = p.fresh === 'missing';
-    return button(missing ? 'Собрать' : 'Обновить', { kind: 'secondary', size: 'sm', icon: missing ? 'database' : 'refresh', title: missing ? 'Собрать профиль ' + p.short : 'Обновить данные ' + p.short,
+    return button(missing ? 'Собрать' : 'Обновить', { kind: 'secondary', size: 'sm', icon: missing ? 'database' : 'refresh', title: missing ? 'Собрать профиль: ' + p.short : 'Обновить данные: ' + p.short,
       ariaLabel: (missing ? 'Собрать профиль: ' : 'Обновить данные: ') + p.name, onClick });
   }
 
@@ -560,7 +563,7 @@
           name,
           h('fieldset', { class: 'players-fieldset' }, h('legend', { class: 'field-label' }, 'Когда собрать профиль'),
             h('label', { class: 'check' }, h('input', { type: 'radio', name: 'players-when', value: 'now', checked: true }), h('span', null, h('b', null, 'Сейчас'), ' — ~', fmt.usd(COST.collect), ', 1–2 минуты')),
-            h('label', { class: 'check' }, h('input', { type: 'radio', name: 'players-when', value: 'batch' }), h('span', null, h('b', null, 'Ночным пакетом'), ' — ~', fmt.usd(COST.collect / 2), ', готово к 05:00 (Batch API, −50%)'))),
+            h('label', { class: 'check' }, h('input', { type: 'radio', name: 'players-when', value: 'batch' }), h('span', null, h('b', null, 'Ночным пакетом'), ' — ~', usd(COST.collect / 2), ', готово к 05:00 (Batch API, −50%)'))),
           UI.callout('', 'database', 'Соберём то же, что и в Telegram-боте: личные данные, игровой профиль, физику и технику, психологию, текущее состояние и последние матчи. Статистика берётся из архива ATP, новости и оценки — веб-поиском Claude с источниками.'));
         return form;
       },
@@ -617,7 +620,7 @@
         source('database', 'Архив матчей ATP', 'Рейтинг, счёт, подача и приём. Структурированные данные без ИИ и без токенов — импорт каждую ночь. Эло считаем сами по этим матчам.'),
         source('globe', 'Веб-поиск Claude', 'Новости, травмы, усталость, мотивация. У каждой записи ссылка на источник. Неподтверждённые слухи помечаются и не влияют на расчёт.'),
         source('brain', 'Оценки Claude 1–10', 'Стиль, физика, техника, психология. Собираются из разборов матчей и интервью раз в 30 дней. Это мнение, а не измерение — вес в модели небольшой.'),
-        source('coins', 'Сколько стоит', 'Обновление профиля ночным пакетом ≈ ' + fmt.usd(COST.batch) + ' (Batch API, −50%), сразу ≈ ' + fmt.usd(COST.now) + '. Сбор нового игрока ≈ ' + fmt.usd(COST.collect) + '.')),
+        source('coins', 'Сколько стоит', 'Обновление профиля ночным пакетом ≈ ' + usd(COST.batch) + ' (Batch API, −50%), сразу ≈ ' + fmt.usd(COST.now) + '. Сбор нового игрока ≈ ' + fmt.usd(COST.collect) + '.')),
     });
     function source(ic, title, text) { return h('div', { class: 'players-source' }, h('span', { class: 'players-source-ic' }, icon(ic)), h('div', { style: 'min-width:0' }, h('h4', null, title), h('p', null, text))); }
 
@@ -952,7 +955,7 @@
     const avg = f => played.reduce((a, m) => a + f(m), 0) / played.length;
     const W = played.filter(m => m.res === 'W').length;
     const resChip = m => m.wo ? chip('Без игры', 'outline', 'refresh') : m.res === 'W' ? chip('Победа', 'good', 'check') : chip('Поражение', 'bad', 'x');
-    const oppNode = m => m.wo ? h('span', null, m.opp.name + ' снялся') : h('span', null, m.opp.id ? h('a', { class: 'players-link', href: '#player-' + m.opp.id }, m.opp.name) : m.opp.name, ' ', h('span', { class: 'muted xsmall' }, '№' + m.opp.rank));
+    const oppNode = m => m.wo ? h('span', null, m.opp.name + ' снялся') : h('span', null, m.opp.id ? h('a', { class: 'players-link', href: '#player-' + m.opp.id }, m.opp.name) : m.opp.name, m.opp.rank ? [' ', h('span', { class: 'muted xsmall' }, '№' + m.opp.rank)] : null);
     const strip = h('div', { class: 'players-strip' },
       h('div', null, h('span', null, 'Победы'), h('b', null, W + ' из ' + played.length)),
       h('div', null, h('span', null, 'Эйсов за матч'), h('b', null, fmt.dec(avg(m => m.aces), 1))),
@@ -1059,7 +1062,7 @@
     const searches = p.id === 'sinner' ? 4 : 3;
     panel.appendChild(card({
       title: 'Новости и состояние', subtitle: 'Веб-поиск Claude · последний поиск ' + fmt.datetime(p.updated) + ' · ' + searches + ' запроса · примеры для макета',
-      actions: [button('Искать сейчас', { kind: 'secondary', size: 'sm', icon: 'search', onClick: () => { UI.toast('Ищем новости о ' + p.short + '… (~' + fmt.usd(0.02) + ')', 'search'); setTimeout(() => UI.toast('Новых новостей нет — последние уже учтены', 'check'), 2200); } })],
+      actions: [button('Искать сейчас', { kind: 'secondary', size: 'sm', icon: 'search', onClick: () => { UI.toast('Ищем свежие новости: ' + p.short + '… (~' + fmt.usd(0.02) + ')', 'search'); setTimeout(() => UI.toast('Новых новостей нет — последние уже учтены', 'check'), 2200); } })],
       body: h('div', { class: 'players-flush' }, items),
     }));
     panel.appendChild(UI.callout('', 'info', h('b', null, 'Как Claude решает, влияет ли новость. '), 'Учитываются только подтверждённые факты о здоровье, нагрузке, условиях турнира и мотивации. Слухи из соцсетей без подтверждения турнира или команды помечаются «не влияет» — так решили по итогам разбора ставок (урок ', h('a', { href: '#learning' }, 'L-019'), ').'));
@@ -1165,7 +1168,7 @@
         if (k < STEPS.length) setTimeout(tick, 520);
         else setTimeout(() => {
           p.fresh = 'fresh'; p.updated = NOW; delete jobs[p.id]; doneNow.add(p.id);
-          UI.toast('Профиль ' + p.short + ' собран · ' + fmt.usd(COST.collect) + ' · 14 источников', 'check');
+          UI.toast('Профиль собран: ' + p.short + ' · ' + fmt.usd(COST.collect) + ' · 14 источников', 'check');
           if (location.hash.indexOf('#player-' + p.id) === 0) UI.rerender();
         }, 500);
       };
@@ -1175,7 +1178,7 @@
       h('span', { class: 'players-collect-ic' }, icon('database')),
       h('h3', null, 'Профиль ещё не собран'),
       h('p', null, 'Из архива ATP уже есть рейтинг, Эло и результаты. Досье — стиль игры, физику и технику, психологию, новости и травмы — Claude ещё не собирал.',
-        opp ? [' Без него анализ матча ', h('a', { href: '#player-' + opp.id }, opp.short + ' — ' + p.short), ' сегодня в ' + m.time + ' пройдёт с пометкой «неполные данные» и пониженной уверенностью.'] : null),
+        opp ? [' Без него анализ матча ', h('a', { href: '#analysis' }, opp.short + ' — ' + p.short), ' сегодня в ' + m.time + ' пройдёт с пометкой «неполные данные» и пониженной уверенностью.'] : null),
       h('div', { class: 'row', style: 'justify-content:center' }, collectBtn, batchBtn),
       status,
       stepsEl));

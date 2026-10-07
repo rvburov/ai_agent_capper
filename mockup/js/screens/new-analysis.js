@@ -1010,11 +1010,41 @@
       button('Запустить', { kind: 'primary', icon: 'spark', disabled: !!a.reason, onClick: launch }));
   }
 
+  // На широком экране карточка «Правила стратегии» встаёт в ту колонку, которая короче:
+  // так под полем ввода не остаётся пустого места. Порог в 120px не даёт ей прыгать при наборе текста.
+  let rulesInMain = false;
+  function balance() {
+    const { main, side, rules, layout } = refs;
+    if (!rules || !layout || !layout.isConnected) return;
+    const twoCols = !UI.isMobile() && getComputedStyle(layout).gridTemplateColumns.trim().split(/\s+/).length > 1;
+    const inMain = rules.parentNode === main;
+    let toMain = inMain;
+    if (!twoCols) toMain = false;
+    else {
+      const R = rules.offsetHeight + 16;
+      const hm = main.offsetHeight - (inMain ? R : 0), hs = side.offsetHeight - (inMain ? 0 : R);
+      const dSide = Math.abs(hm - (hs + R)), dMain = Math.abs(hm + R - hs);
+      if (!inMain && dMain < dSide - 120) toMain = true;
+      else if (inMain && dSide < dMain - 120) toMain = false;
+    }
+    rulesInMain = toMain;
+    if (toMain !== inMain) (toMain ? main : side).appendChild(rules);
+  }
+  let balanceQueued = false;
+  window.addEventListener('resize', () => {
+    if (balanceQueued) return;
+    balanceQueued = true;
+    requestAnimationFrame(() => { balanceQueued = false; if (refs.layout && refs.layout.isConnected) balance(); });
+  });
+
   function renderSide() {
     if (!refs.side || !refs.side.isConnected) return;
     const a = summary();
     renderSteps(a);
-    keepFocus(refs.side, () => { clear(refs.side); refs.side.append(launchCard(a), flowCard(a), rulesCard(a)); });
+    if (refs.rules) refs.rules.remove();
+    refs.rules = rulesCard(a);
+    keepFocus(refs.side, () => { clear(refs.side); refs.side.append(launchCard(a), flowCard(a)); (rulesInMain ? refs.main : refs.side).appendChild(refs.rules); });
+    balance();
     renderBar(a);
     // На телефоне нижняя панель прячется, когда основная кнопка запуска видна на экране
     if (io) { io.disconnect(); io = null; }
@@ -1028,6 +1058,7 @@
   function renderPanel() {
     const panel = refs.panel; if (!panel || !panel.isConnected) return;
     keepFocus(panel, () => { clear(panel); slots.clear(); panel.appendChild(state.tab === 'text' ? textPanel() : formPanel()); });
+    balance();
   }
 
   // ---------- экран ----------
@@ -1038,7 +1069,9 @@
     const side = h('aside', { class: 'new-side', 'aria-label': 'Перед запуском' });
     const steps = h('ol', { class: 'new-steps', 'aria-label': 'Шаги' });
     const bar = h('div', { class: 'new-bar', role: 'region', 'aria-label': 'Запуск анализа' });
-    refs = { panel, side, steps, bar };
+    const main = h('div', { class: 'new-main' });
+    const layout = h('div', { class: 'new-layout' }, main, side);
+    refs = { panel, side, steps, bar, main, layout, rules: null };
     const tabsEl = UI.tabs({
       items: [{ id: 'text', label: [icon('list'), 'Вставить текстом'] }, { id: 'form', label: [icon('edit'), 'Заполнить форму'] }],
       active: state.tab,
@@ -1046,6 +1079,7 @@
     });
     tabsEl.classList.add('new-tabs');
     tabsEl.setAttribute('aria-label', 'Способ ввода');
+    main.appendChild(h('section', { class: 'card new-input-card', 'aria-label': 'Ввод событий' }, tabsEl, panel));
 
     root.appendChild(h('div', { class: 'new-root' },
       h('datalist', { id: 'new-players' }, D.players.map(p => h('option', { value: p.name }))),
@@ -1055,9 +1089,7 @@
           h('h2', null, 'Что разбираем сегодня?'),
           h('p', { class: 'lead' }, 'Вставьте события так же, как писали боту в Telegram, или заполните форму. До запуска видно, что понял ИИ, чьи данные устарели и сколько стоит анализ.')),
         steps),
-      h('div', { class: 'new-layout' },
-        h('div', { class: 'new-main' }, h('section', { class: 'card new-input-card', 'aria-label': 'Ввод событий' }, tabsEl, panel)),
-        side),
+      layout,
       bar,
       h('div', { class: 'new-bar-spacer', 'aria-hidden': 'true' })));
     renderPanel();

@@ -126,6 +126,7 @@
     logFilter: 'all',
     suspicious: true,
     books: books0, bankAdj: 0,
+    ruleEdits: [],
     rules: { minProb: D.strategy.minProb, oddsMin: D.strategy.oddsMin, oddsMax: D.strategy.oddsMax, maxLegs: D.strategy.maxLegs, totalMax: D.strategy.totalMax },
     stakes: D.strategy.stakeTable.map(r => { const [a, b] = r.pct.split('–'); return { range: r.range, min: num(a), max: num(b) }; }),
     adapt: { lose3: true, win3: true, dd10: true, dd20: true, up15: true, weekLoss: true, weekWin: true },
@@ -241,7 +242,7 @@
     .profile-value dd { margin: 0; font-family: var(--font-mono); font-weight: 500; font-size: var(--fs-sm); color: var(--fg); white-space: nowrap; }
     .profile-rule-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 12px; }
     .profile-rule-group { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; }
-    .profile-rule-group-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .profile-rule-group-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 26px; }
     .profile-rule-group-head h4 { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .05em; color: var(--fg-3); }
     .profile-rule-group .callout { margin-top: 10px; }
     .profile-rule { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: start; }
@@ -307,6 +308,9 @@
       .profile-stake { padding: 10px; gap: 8px; }
       .profile-stake-inputs .input-wrap { width: 68px; }
       .profile-value { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .profile-rule-groups { gap: 0; }
+      .profile-rule-group { border: 0; border-radius: 0; padding: 0; }
+      .profile-rule-group + .profile-rule-group { border-top: 1px solid var(--line-strong); margin-top: 14px; padding-top: 14px; }
     }
   `);
 
@@ -844,10 +848,10 @@
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Текущий банк', icon: 'coins', value: fmt.money(b), delta: fmt.signedPct(growth), trend: growth >= 0 ? 'up' : 'down', hint: 'к старту' })),
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'В игре', icon: 'clock', value: fmt.money(inPlay), hint: openBets.length + ' ' + pl(openBets.length, 'ставка', 'ставки', 'ставок') + ' · ' + fmt.pct(inPlay / b * 100) + ' банка' })),
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'От пика банка', icon: 'arrowDown', value: dd ? fmt.signedPct(dd) : '0%', hint: 'пик ' + fmt.money(S.peak) })));
-    if (mobile) return h('div', { class: 'profile-panel' }, tiles, responsibleCard(), strategyCard(), adaptCard(dd, growth), booksCard());
+    if (mobile) return h('div', { class: 'profile-panel' }, tiles, responsibleCard(), strategyCard(), adaptCard(dd, growth), booksCard(), historyCard());
     return h('div', { class: 'profile-panel' }, tiles,
       h('div', { class: 'grid' },
-        h('div', { class: 'col-7 profile-col' }, strategyCard()),
+        h('div', { class: 'col-7 profile-col' }, strategyCard(), historyCard()),
         h('div', { class: 'col-5 profile-col' }, responsibleCard(), booksCard())),
       adaptCard(dd, growth));
   }
@@ -870,7 +874,7 @@
         return { el, wrap: h('div', { class: 'input-wrap' }, el, h('span', { class: 'input-suffix', 'aria-hidden': 'true' }, '%')) };
       };
       const lo = inp('min', 'От'), hi = inp('max', 'До');
-      const upd = () => { const a = num(lo.el.value), c = num(hi.el.value); money.textContent = isFinite(a) && isFinite(c) ? 'Сейчас это ' + fmt.int(round10(b * a / 100)) + '–' + fmt.money(round10(b * c / 100)) : 'Введите проценты'; };
+      const upd = () => { const a = num(lo.el.value), c = num(hi.el.value); UI.clear(money); UI.append(money, isFinite(a) && isFinite(c) ? ['Сейчас это ', h('span', { style: 'white-space:nowrap' }, fmt.int(round10(b * a / 100)) + '–' + fmt.money(round10(b * c / 100)))] : 'Введите проценты'); };
       upd();
       [lo.el, hi.el].forEach(el => el.addEventListener('input', upd));
       return { row: h('div', { class: 'profile-stake' }, h('div', { style: 'min-width:0' }, h('div', { class: 'profile-stake-range' }, s.range), money), h('div', { class: 'profile-stake-inputs' }, lo.wrap, h('span', { 'aria-hidden': 'true' }, '–'), hi.wrap)), lo, hi };
@@ -921,11 +925,35 @@
         const badStake = v.stakes.findIndex(s => !(s.min > 0 && s.max >= s.min && s.max <= 5));
         if (badStake >= 0) { ok = false; UI.toast('Проверьте ставку для кэфа ' + v.stakes[badStake].range + ': от 0 до 5%, «от» не больше «до»', 'alert'); }
         if (!ok) return;
+        const was = st.rules, diff = [];
+        if (v.minProb !== was.minProb) diff.push('мин. вероятность ' + was.minProb + '% → ' + v.minProb + '%');
+        if (v.maxLegs !== was.maxLegs) diff.push('событий до ' + v.maxLegs);
+        if (v.oddsMin !== was.oddsMin || v.oddsMax !== was.oddsMax) diff.push('кэф события ' + fmt.odds(v.oddsMin) + '–' + fmt.odds(v.oddsMax));
+        if (v.totalMax !== was.totalMax) diff.push('итоговый кэф до ' + fmt.odds(v.totalMax));
+        if (v.stakes.some((x, i) => x.min !== st.stakes[i].min || x.max !== st.stakes[i].max)) diff.push('таблица ставок');
+        st.ruleEdits.unshift({ at: new Date().toTimeString().slice(0, 5), what: diff.length ? diff.join(', ') : 'без изменений в цифрах' });
         st.rules = { minProb: v.minProb, maxLegs: v.maxLegs, oddsMin: v.oddsMin, oddsMax: v.oddsMax, totalMax: v.totalMax };
         st.stakes = v.stakes;
         drawPanel();
         UI.toast('Правила сохранены и записаны в историю стратегии. ИИ применит их со следующего анализа', 'check');
       },
+    });
+  }
+
+  function historyCard() {
+    const VST = { active: ['Действует', 'good', 'check'], candidate: ['Кандидат', 'info', 'flask'], archived: ['Архив', 'outline', null] };
+    const versions = D.strategyVersions.slice().reverse();
+    return card({
+      id: 'profile-history', class: 'profile-anchor', title: 'История стратегии',
+      subtitle: 'Каждая правка правил и инструкций сохраняется — можно сравнить и откатить',
+      body: h('div', { class: 'profile-list' },
+        st.ruleEdits.map(e => item({ ic: 'edit', icKind: 'good', title: 'Правила изменены вами', titleExtra: chip('Не проверено на истории', 'warn', 'alert'), meta: 'Сегодня, ' + e.at + ' · ' + e.what, below: true })),
+        versions.map(v => item({
+          mark: v.id, title: (s => s.charAt(0).toUpperCase() + s.slice(1))(v.name.split(' · ')[1] || v.name), titleExtra: chip(VST[v.status][0], VST[v.status][1], VST[v.status][2]),
+          meta: dateLong(v.date) + ' · лог-лосс ' + fmt.dec(v.logloss, 3) + ' · Brier ' + fmt.dec(v.brier, 3) + ' на ' + v.n + ' событиях',
+          icKind: v.status === 'active' ? 'good' : null,
+        }))),
+      foot: [button('Сравнить версии', { kind: 'secondary', icon: 'layers', href: '#learning' }), h('span', { class: 'xsmall muted' }, 'Кандидата принимаете вы, после проверки на истории')],
     });
   }
 
@@ -1058,7 +1086,7 @@
       body: [
         h('div', { class: 'profile-list' }, st.books.map(b => item({
           mark: b.mark, title: b.name,
-          meta: b.bets + ' ' + pl(b.bets, 'ставка', 'ставки', 'ставок') + (b.inPlay ? ' · в игре ' + fmt.money(b.inPlay) : '') + ' · сверено ' + (b.checked === TODAY ? 'сегодня' : dateDay(b.checked)),
+          meta: b.bets + ' ' + pl(b.bets, 'ставка', 'ставки', 'ставок') + (b.inPlay ? ' · в игре ' + fmt.money(b.inPlay) : '') + ' · сверено\u00a0' + (b.checked === TODAY ? 'сегодня' : dateDay(b.checked).replace(' ', '\u00a0')),
           side: [h('span', { class: 'profile-money' }, fmt.money(b.balance)), button('', { kind: 'ghost', size: 'sm', icon: 'edit', title: 'Изменить баланс ' + b.name, onClick: () => bookModal(b) })],
         }))),
         h('div', { class: 'row-between', style: 'padding-top:10px;border-top:1px solid var(--line)' },
@@ -1375,7 +1403,7 @@
       title: 'Перенос из Telegram-бота', subtitle: 'Из JSON-файлов и инструкций текущего бота',
       body: [
         h('p', { class: 'small soft' }, 'Текущий бот хранит данные в JSON-файлах, а правила — в markdown-инструкциях. Загрузите их: перенесём ставки, игроков и правила стратегии, дубликаты отбросим.'),
-        UI.kv([['Последний перенос', dateLong(U.since)], ['Перенесено', profiledN + ' ' + pl(profiledN, 'профиль игрока', 'профиля игроков', 'профилей игроков') + ', правила стратегии']]),
+        UI.kv([['Последний перенос', dateLong(U.since)], ['Профили игроков', String(profiledN)], ['Правила стратегии', 'стали версией ' + D.strategyVersions[0].id]]),
       ],
       foot: [button('Выбрать файлы', { kind: 'secondary', icon: 'upload', onClick: importModal })],
     });

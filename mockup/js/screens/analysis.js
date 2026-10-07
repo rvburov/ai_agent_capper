@@ -11,61 +11,69 @@
   const STRAT_V = (D.strategyVersions.find(v => v.status === 'active') || { id: 'v3' }).id;
 
   // ---------- шаги анализа ----------
-  // sec/tokens/cost — реальные значения запуска; dur — длительность шага в ускоренной анимации, мс
+  // sec/tokens/cost — значения запуска (пример); dur — длительность шага в ускоренной анимации, мс.
+  // Раскладка по docs/TOKEN_ECONOMY.md (4.6, 4.8, раздел 5): статистику считает код по архиву ATP в базе,
+  // веб-поиск — только новости и только на Sonnet 5.5 (effort low), Opus 5.5 работает без поиска.
+  // Цены за 1 млн токенов: Sonnet 5.5 $2 / $10, Opus 5.5 $4 / $20, запись в кэш ×1,25, чтение $0,20, поиск $0,01.
+  // Досье Руне: вход 9 000 × $2 + выход 800 × $10 + 3 поиска = $0,056.
+  // Opus: запись в кэш 12 500 × $5 + чтение 18 000 × $0,20 + выход 3 400 × $20 = $0,134.
+  const OPUS = { input: 30500, cached: 18000, output: 3400 };
   const STEPS = [
     { title: 'Разбор событий', model: 'Haiku 4.5', sec: 3, tokens: 2400, cost: 0.004, dur: 450,
       detail: '2 матча, 8 рынков, кэфы Fonbet на 09:39',
       live: ['Синнер — Руне: П1/П2 и фора ±1.5', 'Джокович — Рублёв: П1/П2 и фора ±1.5'] },
     { title: 'Проверка базы игроков', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
-      detail: 'Синнер, Джокович, Рублёв — данные свежие · Руне — нет в базе',
-      live: ['Синнер, Джокович, Рублёв — свежие', 'Руне — нет в базе, нужен сбор'] },
-    { title: 'Сбор профиля: Хольгер Руне', model: 'Haiku 4.5 + поиск', sec: 38, tokens: 9800, cost: 0.038, dur: 1100,
-      detail: 'Веб-поиск: atptour.com, tennisabstract.com · 3 запроса',
-      live: ['atptour.com — рейтинг и результаты сезона', 'tennisabstract.com — подача, приём, тай-брейки', 'atptour.com — новости: снялся в Токио 29 сен'] },
-    { title: 'Обновление формы: свежие матчи и новости', model: 'Haiku 4.5 + поиск', sec: 14, tokens: 6200, cost: 0.027, dur: 700,
-      detail: '2 запроса · 4 матча за 6 окт и 1 новость добавлены в досье',
-      live: ['Матчи 3-го круга 6 окт — 4 игрока', 'Новости за сутки: новых травм нет'] },
-    { title: 'Расчёт модели: Эло по покрытию, подача/приём, усталость', model: null, sec: 2, tokens: 0, cost: 0, dur: 350,
+      detail: 'Синнер, Джокович, Рублёв — досье свежие · Руне — есть только архив ATP, досье нет',
+      live: ['Синнер, Джокович, Рублёв — досье свежие', 'Руне — только архив ATP, нужно досье'] },
+    { title: 'Досье Руне: архив ATP и новости', model: 'Sonnet 5.5 + поиск', sec: 34, tokens: 9800, cost: 0.056, searches: 3, dur: 1100,
+      detail: 'Матчи, подача, приём и тай-брейки за 52 недели — из архива ATP в базе, считает код · новости — 3 запроса (atptour.com, tennis.com), effort low',
+      live: ['Архив ATP в базе: 64 матча за 2 сезона, статистика без ИИ', 'atptour.com — 5 окт: 1/16 финала, 4:6 6:3 6:4 с Тиафо', 'Слух о плече из соцсетей без подтверждения — по L-019 не учитываем'] },
+    { title: 'Новости Синнера, Джоковича, Рублёва', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
+      detail: 'Из кэша: обновлены ночью, моложе 12 ч — повторный поиск не нужен · матчи 1/16 финала (5 окт) уже в базе',
+      live: ['Синнер — 04:10, Джокович — 02:30, Рублёв — 21:50', 'Новых травм и снятий нет'] },
+    { title: 'Расчёт ML-модели: Эло по покрытию, подача/приём, нагрузка', model: null, sec: 2, tokens: 0, cost: 0, dur: 350,
       detail: 'Вероятности по 8 рынкам · формула, без ИИ',
       live: ['Эло на харде и форма за 10 матчей', 'Подача/приём, нагрузка за 14 дней'] },
-    { title: 'Анализ Claude: корректировка вероятностей', model: 'Opus 5.5', sec: 47, tokens: 22800, cost: 0.091, dur: 1500,
-      detail: 'Досье и уроки из кэша (86%) · Синнер 2:0: 62% → 66%, Джокович П1: 78% → 79%',
-      live: ['Читает досье 4 игроков и 5 уроков — из кэша', 'Сверяет новости с уроками L-014 и L-019', 'Поправки: Синнер 2:0 +4 п.п., Джокович П1 +1 п.п.'] },
+    { title: 'Анализ Claude: корректировка вероятностей', model: 'Opus 5.5', sec: 47, tokens: OPUS.input + OPUS.output, cost: 0.134, dur: 1500,
+      detail: 'Синнер 2:0: 62% → 66%, Джокович П1: 78% → 79% · 3 вызова без веб-поиска, вызовы 2–3 берут ' + Math.round(OPUS.cached / OPUS.input * 100) + '% входа из кэша',
+      live: ['Читает досье 4 игроков и 5 уроков', 'Сверяет новости с уроками L-014 и L-019', 'Поправки: Синнер 2:0 +4 п.п., Джокович П1 +1 п.п.'] },
     { title: 'Подбор экспресса по стратегии', model: null, sec: 3, tokens: 0, cost: 0, dur: 600,
       detail: 'Стратегия ' + STRAT_V + ' · отобраны 2 события из 8 рынков · сумма по таблице банка',
       live: ['Фильтр: p ≥ ' + STRAT.minProb + '%, кэф ' + fmt.odds(STRAT.oddsMin) + '–' + fmt.odds(STRAT.oddsMax), 'Итоговый кэф и сумма от банка'] },
   ];
   const TOTAL_MS = STEPS.reduce((a, s) => a + s.dur, 0);
-  const TOTAL = { sec: STEPS.reduce((a, s) => a + s.sec, 0), tokens: STEPS.reduce((a, s) => a + s.tokens, 0), cost: STEPS.reduce((a, s) => a + s.cost, 0) };
-  const CACHE_SHARE = 78;
+  const TOTAL = { sec: STEPS.reduce((a, s) => a + s.sec, 0), tokens: STEPS.reduce((a, s) => a + s.tokens, 0), cost: STEPS.reduce((a, s) => a + s.cost, 0), searches: STEPS.reduce((a, s) => a + (s.searches || 0), 0) };
+  const OPUS_CACHE = Math.round(OPUS.cached / OPUS.input * 100);
+  const NO_AI = STEPS.filter(s => !s.model).length;
+  const MODELS = ['Opus 5.5', 'Sonnet 5.5', 'Haiku 4.5'].filter(m => STEPS.some(s => s.model && s.model.startsWith(m)));
 
   // ---------- матчи и оценки (пример данных) ----------
   const MX = [
     {
       id: 'm1', a: 'sinner', b: 'rune', pick: 'h1m', conf: 'mid',
-      confNote: 'Профиль Руне собран только что, состояние спины до конца не ясно',
+      confNote: 'Досье Руне собрано только в этом анализе; слух о плече не подтверждён',
       fresh: 'Синнер — сегодня 04:10 · Руне — собран в этом анализе',
-      probs: { p1: [0.84, 0.87], h1m: [0.62, 0.66] }, // [модель, Claude]
+      probs: { p1: [0.84, 0.87], h1m: [0.62, 0.66] }, // [ML-модель, Claude]
       notes: { p1: 'Перевес меньше 5% — фора выгоднее', h2p: 'Отрицательный валуй', p2: 'Отрицательный валуй' },
+      // цифры совпадают с карточками игроков (#player-sinner, #player-rune)
       cmp: [
-        { label: 'Рейтинг ATP', l: '№1', r: '№12', better: 'l' },
         { label: 'Эло на харде', l: fmt.int(D.P.sinner.elo.hard), r: fmt.int(D.P.rune.elo.hard), better: 'l' },
         { label: 'Форма, 10 матчей', form: true, better: 'l' },
-        { label: 'Матчей за 14 дней', l: '7', ls: 'Пекин — титул, Шанхай — 2', r: '3', rs: 'снялся в Токио (спина)', rsWarn: true, better: null },
+        { label: 'Матчей за 14 дней', l: '3', ls: 'Пекин — 1 (снялся), Шанхай — 2', r: '4', rs: 'Токио — 2, Шанхай — 2', rsWarn: true, better: 'l' },
         { label: 'Очки на 1-й подаче', l: D.P.sinner.serve.firstWon + '%', r: D.P.rune.serve.firstWon + '%', better: 'l' },
         { label: 'Выиграно на приёме', l: '42%', r: '38%', better: 'l' },
-        { label: 'Тай-брейки за сезон', l: '21–9', ls: '70%', r: '14–13', rs: '52%', better: 'l' },
-        { label: 'Личные встречи', l: '4', ls: 'на харде 3–1', r: '3', better: 'l' },
+        { label: 'Тай-брейки, 52 недели', l: '21–9', ls: '70%', r: '10–12', rs: '45%', better: 'l' },
+        { label: 'Личные встречи', l: '3', ls: 'на харде 2–0', r: '1', better: 'l' },
       ],
       pro: [
-        { t: 'Руне снялся в Токио из-за спины, в Шанхае оба матча сыграл в трёх сетах — 4 ч 52 мин на корте', src: 'atptour.com, 29 сен и 6 окт' },
-        { t: 'Синнер выиграл 2:0 в 71% матчей на харде в сезоне (34 из 48 побед)', src: 'tennisabstract.com' },
-        { t: 'Тай-брейки: у Синнера 70% за сезон, у Руне 52% — сет, дошедший до тай-брейка, скорее за Синнером', src: 'tennisabstract.com' },
+        { t: 'Синнер свежее: за 14 дней 3 матча — после 1-го круга Пекина он снялся, чтобы восстановиться к Шанхаю. У Руне 4 матча, последний (5 окт) — три сета с Тиафо', src: 'база матчей (архив ATP) · ubitennis.com, 1 окт' },
+        { t: 'За 2 сезона у Синнера 48 побед на харде, 34 из них — 2:0 (71%)', src: 'база матчей (архив ATP)' },
+        { t: 'Тай-брейки за 52 недели: у Синнера 70%, у Руне 45% — сет, дошедший до тай-брейка, скорее за Синнером', src: 'база матчей (архив ATP)' },
       ],
       con: [
-        { t: 'Руне взял сет в 3 из 4 последних встреч с Синнером', src: 'tennisabstract.com, H2H' },
-        { t: 'Синнер сыграл 7 матчей за 14 дней, включая титул в Пекине', src: 'atptour.com, 1 окт' },
-        { t: 'Сам Руне говорит, что спина в порядке; медицинских данных нет', src: 'пресс-конференция, 5 окт' },
+        { t: 'Руне взял сет в 3 из 4 личных встреч с Синнером', src: 'база матчей (архив ATP), H2H' },
+        { t: 'Корты в Шанхае быстрее прошлогодних, эйсов на 18% больше: тай-брейков будет больше, а один отданный сет ломает 2:0', src: 'tennis.com, 5 окт' },
+        { t: 'Руне выиграл оба тай-брейка у Мунара в 1/32 (4 окт) — на своей подаче он держится', src: 'база матчей (архив ATP)' },
       ],
     },
     {
@@ -74,34 +82,36 @@
       fresh: 'Джокович — сегодня 02:30 · Рублёв — 6 окт 21:50',
       probs: { p1: [0.78, 0.79], h1m: [0.50, 0.54] },
       notes: { h1m: 'Кэф выше ' + fmt.odds(STRAT.oddsMax) + ' и p ниже ' + STRAT.minProb + '% — вне правил стратегии', h2p: 'Отрицательный валуй', p2: 'Отрицательный валуй' },
+      // цифры совпадают с карточками игроков (#player-djokovic, #player-rublev)
       cmp: [
-        { label: 'Рейтинг ATP', l: '№5', r: '№14', better: 'l' },
         { label: 'Эло на харде', l: fmt.int(D.P.djokovic.elo.hard), r: fmt.int(D.P.rublev.elo.hard), better: 'l' },
         { label: 'Форма, 10 матчей', form: true, better: 'l' },
-        { label: 'Матчей за 14 дней', l: '4', ls: 'Пекин — 2, Шанхай — 2', r: '6', rs: 'Токио — финал, Шанхай — 2', better: 'l' },
+        { label: 'Матчей за 14 дней', l: '2', ls: 'Шанхай — 2', r: '3', rs: 'Токио — 1, Шанхай — 2', better: 'l' },
         { label: 'Очки на 1-й подаче', l: D.P.djokovic.serve.firstWon + '%', r: D.P.rublev.serve.firstWon + '%', better: 'l' },
         { label: 'Выиграно на приёме', l: '43%', r: '37%', better: 'l' },
-        { label: 'Тай-брейки за сезон', l: '16–6', ls: '73%', r: '15–14', rs: '52%', better: 'l' },
-        { label: 'Личные встречи', l: '6', ls: 'на харде 3–0', r: '1', better: 'l' },
+        { label: 'Тай-брейки, 52 недели', l: '13–8', ls: '62%', r: '10–13', rs: '43%', better: 'l' },
+        { label: 'Личные встречи', l: '4', ls: 'на харде 2–1', r: '1', better: 'l' },
       ],
       pro: [
-        { t: 'Личные встречи 6–1, на харде 3–0', src: 'atptour.com' },
-        { t: 'Лучший приём в туре: 43% выигранных очков на приёме против 37% у Рублёва', src: 'tennisabstract.com' },
-        { t: 'Рублёв проиграл 4 из последних 6 матчей против топ-10', src: 'tennisabstract.com' },
+        { t: 'Личные встречи 4–1, на харде 2–1', src: 'база матчей (архив ATP)' },
+        { t: 'Лучший приём в туре: 43% выигранных очков на приёме против 37% у Рублёва', src: 'база матчей (архив ATP)' },
+        { t: 'Против топ-10 за 52 недели у Рублёва 4–11 (27%), у Джоковича 7–7', src: 'база матчей (архив ATP)' },
       ],
       con: [
-        { t: 'Джоковичу 39, вчера он провёл на корте 2 ч 38 мин в трёх сетах', src: 'atptour.com, 6 окт' },
-        { t: 'Рублёв выиграл оба матча в Шанхае, не отдав сета', src: 'atptour.com, 6 окт' },
+        { t: 'Джоковичу 39; в 1/32 (4 окт) он провёл на корте 2 ч 38 мин в трёх сетах, а на следующий день сыграл ещё матч', src: 'база матчей (архив ATP), 4–5 окт' },
+        { t: 'Рублёв выиграл оба матча в Шанхае, в том числе у Рууда (№10) в трёх сетах', src: 'база матчей (архив ATP), 4–5 окт' },
       ],
     },
   ];
+  // рейтинг — из базы, чтобы совпадал с карточками игроков
+  MX.forEach(m => m.cmp.unshift({ label: 'Рейтинг ATP', l: '№' + D.P[m.a].rank, r: '№' + D.P[m.b].rank, better: D.P[m.a].rank < D.P[m.b].rank ? 'l' : 'r' }));
   MX.forEach(m => { m.info = D.matchesToday.find(x => x.id === m.id); m.A = D.P[m.a]; m.B = D.P[m.b]; });
 
   const MK = {
-    p1: { label: 'П1', desc: m => 'победа ' + m.A.short, who: 'A' },
+    p1: { label: 'П1', desc: m => m.A.short + ' выигрывает матч', who: 'A' },
     h1m: { label: 'Ф1(−1.5)', desc: m => m.A.short + ' выигрывает 2:0', who: 'A' },
     h2p: { label: 'Ф2(+1.5)', desc: m => m.B.short + ' берёт хотя бы сет', who: 'B' },
-    p2: { label: 'П2', desc: m => 'победа ' + m.B.short, who: 'B' },
+    p2: { label: 'П2', desc: m => m.B.short + ' выигрывает матч', who: 'B' },
   };
   const PAIR = { p1: 'p2', p2: 'p1', h1m: 'h2p', h2p: 'h1m' };
   function noVig(odds, k) { const a = 1 / odds[k], b = 1 / odds[PAIR[k]]; return a / (a + b); }
@@ -136,7 +146,7 @@
 
   // ---------- состояние ----------
   const RUN = { startedAt: null, done: false, focusResult: false, runeMarked: false };
-  const ST = { stake: null, decision: null, betId: null, whyOpen: null, stepsOpen: false, tab: { m1: 'probs', m2: 'probs' } };
+  const ST = { stake: null, decision: null, betId: null, whyOpen: null, stepsOpen: false, calcOpen: false, tab: { m1: 'probs', m2: 'probs' } };
   // Новый запуск — только когда пришли из «Нового анализа»; возврат из «Ставок» показывает готовый результат
   window.addEventListener('hashchange', e => {
     const from = e && e.oldURL ? (e.oldURL.split('#')[1] || '') : '';
@@ -218,6 +228,8 @@
     }
     .analysis-done-row { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; }
     .analysis-done-row .analysis-prog-nums { flex: 1 1 260px; }
+    .analysis-done-row [aria-expanded] svg:last-child { transition: transform .15s; }
+    .analysis-done-row [aria-expanded="true"] svg:last-child { transform: rotate(180deg); }
     .analysis-skel-card { border-style: dashed; }
     .analysis-skel { display: flex; flex-direction: column; gap: 10px; }
     .analysis-skel i { display: block; height: 12px; border-radius: 6px; background: var(--surface-2); }
@@ -228,6 +240,9 @@
     @keyframes analysis-in { from { opacity: 0; transform: translateY(6px); } }
     .analysis-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
     @media (max-width: 1180px) { .analysis-result { grid-template-columns: minmax(0, 1fr); } .analysis-side { order: -1; } }
+    /* решение остаётся на виду, пока читаете оба матча */
+    /* только когда карточка целиком помещается в экран: при раскрытом расчёте суммы она выше — тогда обычная прокрутка */
+    @media (min-width: 1181px) and (min-height: 880px) { .analysis-side:not(.is-calc-open) { position: sticky; top: calc(var(--topbar-h) + 16px); } }
 
     /* карточка матча */
     .analysis-match .card-head { flex-wrap: wrap; }
@@ -260,6 +275,7 @@
     .analysis-vs-sub { font-size: var(--fs-xs); color: var(--fg-3); }
     .analysis-vs-sub.warn { color: var(--warn-ink); font-weight: 500; }
     .analysis-vs-form { display: inline-flex; align-items: center; gap: 8px; }
+    .analysis-vs-form .analysis-vs-num { margin-left: 0; }
     .analysis-plink { color: var(--fg); text-decoration: none; }
     .analysis-plink:hover { color: var(--accent-ink); text-decoration: underline; }
     @media (max-width: 720px) {
@@ -339,6 +355,10 @@
     .analysis-calnote svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }
     .analysis-stake { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
     .analysis-stake-value { font-family: var(--font-display); font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.02em; line-height: 1.1; white-space: nowrap; }
+    .analysis-calc-toggle { align-self: flex-start; }
+    .analysis-calc-toggle svg:last-child { transition: transform .15s; }
+    .analysis-calc-toggle[aria-expanded="true"] svg:last-child { transform: rotate(180deg); }
+    .analysis-calc[hidden] { display: none; }
     .analysis-calc { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; font-size: var(--fs-sm); padding: 12px; border-radius: var(--r-md); border: 1px solid var(--line); }
     .analysis-calc dt { color: var(--fg-2); min-width: 0; }
     .analysis-calc dd { margin: 0; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -392,7 +412,7 @@
         h('div', { class: 'analysis-eyebrow' }, h('span', { class: 'eyebrow' }, fmt.dateFull(TODAY) + ' · ' + tm.tournament + ' · ' + tm.category), UI.surfaceChip('hard')),
         h('h2', { id: 'analysis-title', tabindex: '-1' }, done ? 'Экспресс из ' + LEGS.length + ' событий · кэф ' + fmt.odds(TOTAL_ODDS) : 'Анализирую ' + MX.length + ' матча'),
         h('p', { class: 'lead' }, done
-          ? 'Модель посчитала вероятности, Claude поправил их по свежим новостям, стратегия ' + STRAT_V + ' отобрала рынки и сумму. Решение — за вами.'
+          ? 'ML-модель посчитала вероятности, Claude поправил их по свежим новостям, стратегия ' + STRAT_V + ' отобрала рынки и сумму. Решение — за вами.'
           : 'Шаги идут по порядку: сначала дешёвые проверки и формулы, дорогая модель — только там, где она нужна.')),
       button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new' }));
   }
@@ -470,7 +490,7 @@
           h('div', { class: 'analysis-prog-bar', role: 'progressbar', 'aria-label': 'Ход анализа', 'aria-valuemin': '0', 'aria-valuemax': String(STEPS.length) }, bar),
           nums),
         h('ol', { class: 'analysis-steps', 'aria-label': 'Шаги анализа' }, steps.map(s => s.el)),
-        UI.callout('', 'info', '3 из 7 шагов идут без ИИ: проверка базы, формула модели и правила стратегии. Платные токены тратятся только на разбор текста, сбор данных и итоговую оценку.'),
+        UI.callout('', 'info', NO_AI + ' из ' + STEPS.length + ' шагов идут без ИИ: проверка базы, новости из кэша, формула ML-модели и правила стратегии. Статистику считает код по архиву ATP, веб-поиск — только новости. Платные токены — на разбор текста, досье нового игрока и итоговую оценку.'),
         live,
       ],
     });
@@ -570,7 +590,7 @@
       h('table', { class: 'table analysis-ptable' },
         h('caption', { class: 'sr-only' }, 'Вероятности и валуй по рынкам: ' + D.match({ p1: m.a, p2: m.b })),
         h('thead', null, h('tr', null,
-          th('Исход', null, 'analysis-th-out'), th('Модель', 'Эло+признаки', 'r'), th('Claude', 'с новостями', 'r'), th('Рынок', 'без маржи', 'r'), th('Кэф', 'Fonbet', 'r'), th('Валуй', 'p·кэф−1', 'r'))),
+          th('Исход', null, 'analysis-th-out'), th('ML-модель', 'Эло + признаки', 'r'), th('Claude', 'с новостями', 'r'), th('Рынок', 'без маржи', 'r'), th('Кэф', 'Fonbet', 'r'), th('Валуй', 'p·кэф−1', 'r'))),
         h('tbody', null, m.rows.map(r => h('tr', { class: r.pick ? 'is-pick' : null },
           h('td', null, outcomeCell(r)),
           h('td', { class: 'r' }, h('span', { class: 'analysis-pnum' }, pr(r.model))),
@@ -584,7 +604,7 @@
     return h('ul', { class: 'analysis-plist', role: 'list', style: 'list-style:none;margin:0;padding:0', 'aria-label': 'Вероятности по рынкам' }, m.rows.map(r => h('li', { class: ['analysis-pitem', r.pick && 'is-pick'] },
       h('div', { class: 'analysis-pitem-top' }, outcomeCell(r), valueCell(r.value)),
       h('dl', { class: 'analysis-pgrid' },
-        h('div', null, h('dt', null, 'Модель'), h('dd', null, pr(r.model))),
+        h('div', null, h('dt', null, 'ML-модель'), h('dd', null, pr(r.model))),
         h('div', null, h('dt', null, 'Claude'), h('dd', null, pr(r.claude), ' ', h('small', null, ppDelta(r.claude - r.model).replace(' п.п.', '')))),
         h('div', null, h('dt', null, 'Рынок'), h('dd', null, pr(r.market))),
         h('div', null, h('dt', null, 'Кэф БК'), h('dd', { class: 'odds' }, fmt.odds(r.odds)))))));
@@ -627,7 +647,7 @@
     const drawPanel = () => {
       UI.clear(panel);
       const t = ST.tab[m.id];
-      if (t === 'probs') UI.append(panel, [h('p', { class: 'analysis-hint' }, 'Модель → Claude (поправка в п.п.) → рынок без маржи. Кэфы Fonbet на 09:39.'), probsList(m), h('p', { class: 'analysis-hint' }, PROB_HINT)]);
+      if (t === 'probs') UI.append(panel, [h('p', { class: 'analysis-hint' }, 'ML-модель → Claude (поправка в п.п.) → рынок без маржи. Кэфы Fonbet на 09:39.'), probsList(m), h('p', { class: 'analysis-hint' }, PROB_HINT)]);
       else if (t === 'cmp') UI.append(panel, [vsBlock(m), h('p', { class: 'analysis-hint' }, '✓ — лучший показатель в паре')]);
       else panel.appendChild(factorsBlock(m));
     };
@@ -640,6 +660,9 @@
 
   // ---------- экспресс ----------
   function stakePct(v) { return v / BANK * 100; }
+  // доля банка для показа: если сумма — округлённый шаг стратегии (1 080 ₽ = 2,25%), показываем шаг, а не 2,24% после округления
+  const PRESETS = [1.5, 2, 2.25, 2.5, 3];
+  function sharePct(v) { const pre = PRESETS.find(p => round10(BANK * p / 100) === v); return pctTxt(pre != null ? pre : Math.round(stakePct(v) * 100) / 100); }
   function expressCard(root) {
     const s = stake(), payout = Math.round(s * TOTAL_ODDS);
     const custom = ST.stake != null && ST.stake !== REC_STAKE;
@@ -653,7 +676,7 @@
           h('div', { class: 'analysis-leg-pick' }, r.name),
           h('div', { class: 'analysis-leg-meta' }, r.desc)),
         h('div', { class: 'analysis-leg-right' },
-          h('div', { class: 'analysis-leg-p' }, 'p', h('b', null, pr(r.claude))),
+          h('div', { class: 'analysis-leg-p', 'aria-label': 'Вероятность ' + pr(r.claude) }, h('span', { 'aria-hidden': 'true' }, 'шанс'), h('b', { 'aria-hidden': 'true' }, pr(r.claude))),
           UI.oddsBox('кэф', r.odds, true)));
     }));
 
@@ -667,7 +690,7 @@
 
     const lastTxt = LAST ? (LAST.status === 'win' ? 'выиграна' : LAST.status === 'loss' ? 'проиграна' : 'возврат') : '—';
     const adapt = UI.callout('accent', 'history',
-      h('b', null, 'Адаптация: '), 'последняя ставка ' + lastTxt + ' (#' + LAST.id + ', ' + fmt.date(LAST.date) + ', ' + fmt.signedMoney(LAST.profit) + ') → без изменений. ',
+      h('b', null, 'Адаптация: '), 'последняя ставка ' + lastTxt + ' (№' + LAST.id + ', ' + fmt.date(LAST.date) + ', ' + fmt.signedMoney(LAST.profit) + ') → без изменений. ',
       STREAK.type === 'win' ? 'Серия побед ' + STREAK.n + ' из 3 нужных для +20%.' : STREAK.type === 'loss' ? 'Поражений подряд ' + STREAK.n + ' из 3 — после трёх сумма −40%.' : '');
 
     const calc = h('dl', { class: 'analysis-calc' },
@@ -675,19 +698,26 @@
       h('dt', null, 'Кэф ' + fmt.odds(TOTAL_ODDS) + ' → ', nw('диапазон ' + BAND.range)), h('dd', null, BAND.pct + ' → ' + pctTxt(BASE_PCT)),
       h('dt', null, 'Валуй ног небольшой (' + MX.map(m => fmt.signedPct(m.pickRow.value * 100, 1)).join(', ') + ')'), h('dd', null, 'без поправки'),
       h('dt', null, 'Адаптация по истории'), h('dd', null, 'без изменений'),
-      h('dt', { class: 'is-sum' }, nw(fmt.money(BANK) + ' × ' + pctTxt(BASE_PCT)), ' = ', nw(fmt.money(BANK * BASE_PCT / 100)), ', округление до 10 ₽'), h('dd', { class: 'is-sum' }, fmt.money(REC_STAKE)));
+      h('dt', { class: 'is-sum' }, nw(fmt.money(BANK) + ' × ' + pctTxt(BASE_PCT)), ' = ', nw(fmt.money(BANK * BASE_PCT / 100)), ', ', nw('округление до 10 ₽')), h('dd', { class: 'is-sum' }, fmt.money(REC_STAKE)));
+    // расчёт суммы свёрнут: карточка решения короче и целиком видна рядом с матчами
+    const calcBox = h('div', { class: 'stack', id: 'analysis-calc', style: 'gap:10px', hidden: !ST.calcOpen }, calc, adapt);
+    const calcToggle = button('Как посчитана сумма', { kind: 'ghost', size: 'sm', icon: 'info', iconRight: 'chevronDown', attrs: { 'aria-expanded': String(ST.calcOpen), 'aria-controls': 'analysis-calc' }, onClick: () => {
+      ST.calcOpen = !ST.calcOpen; calcBox.hidden = !ST.calcOpen; calcToggle.setAttribute('aria-expanded', String(ST.calcOpen));
+      const side = calcToggle.closest('.analysis-side'); if (side) side.classList.toggle('is-calc-open', ST.calcOpen);
+    } });
+    calcToggle.classList.add('analysis-calc-toggle');
 
     const stakeRow = h('div', { class: 'analysis-stake' },
       h('div', { style: 'min-width:0' },
         h('div', { class: 'eyebrow' }, custom ? 'Сумма · изменена вручную' : 'Рекомендуемая сумма'),
         h('div', { class: 'analysis-stake-value' }, fmt.money(s)),
-        h('div', { class: 'small muted' }, (custom ? pctTxt(Math.round(stakePct(s) * 100) / 100) : pctTxt(BASE_PCT)) + ' банка · при выигрыше ' + fmt.money(payout) + ' (' + fmt.signedMoney(payout - s) + ')')),
+        h('div', { class: 'small muted' }, (custom ? sharePct(s) : pctTxt(BASE_PCT)) + ' банка · при выигрыше ' + fmt.money(payout) + ' (' + fmt.signedMoney(payout - s) + ')')),
       custom && button('Вернуть ' + fmt.money(REC_STAKE), { kind: 'ghost', size: 'sm', icon: 'refresh', onClick: () => { ST.stake = null; draw(root); UI.toast('Сумма возвращена к рекомендованной: ' + fmt.money(REC_STAKE), 'refresh'); } }));
 
     let foot;
     if (ST.decision === 'saved') {
       foot = h('div', { class: 'stack', style: 'width:100%;gap:10px' },
-        UI.callout('good', 'check', 'Ставка #' + ST.betId + ' в игре: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(TOTAL_ODDS) + '. Результат внесёте после матчей — модель сверит прогноз.'),
+        UI.callout('good', 'check', 'Ставка №' + ST.betId + ' в игре: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(TOTAL_ODDS) + '. Результат внесёте после матчей — модель сверит прогноз.'),
         h('div', { class: 'analysis-actions' }, button('Открыть в ставках', { kind: 'primary', icon: 'ticket', href: '#bets' })));
     } else if (ST.decision === 'skipped') {
       foot = h('div', { class: 'stack', style: 'width:100%;gap:10px' },
@@ -705,7 +735,7 @@
       h('div', { class: 'card-head' },
         h('div', { style: 'min-width:0' }, h('div', { class: 'eyebrow' }, 'Итог анализа'), h('h3', { id: 'analysis-exp-title' }, 'Экспресс'), h('div', { class: 'card-sub' }, LEGS.length + ' события · стратегия ' + STRAT_V)),
         statusChip),
-      h('div', { class: 'card-body' }, legs, totals, calNote, h('hr', { class: 'divider' }), stakeRow, calc, adapt,
+      h('div', { class: 'card-body' }, legs, totals, calNote, h('hr', { class: 'divider' }), stakeRow, calcToggle, calcBox,
         h('p', { class: 'analysis-disclaimer' }, icon('info'), 'Это оценка вероятностей, а не гарантия: экспресс с p ≈ ' + pr(P_EXP) + ' проигрывает примерно каждый второй раз. Ставьте только ту сумму, потерю которой готовы принять.')),
       h('div', { class: 'card-foot' }, foot));
   }
@@ -729,13 +759,12 @@
     }
     ST.decision = 'saved'; ST.betId = bet.id;
     logDecision('bet');
-    UI.toast('Ставка #' + bet.id + ' сохранена: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(TOTAL_ODDS), 'check');
+    UI.toast('Ставка №' + bet.id + ' сохранена: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(TOTAL_ODDS), 'check');
     UI.go('bets');
   }
 
   function stakeModal(root) {
     let val = stake();
-    const PRESETS = [1.5, 2, 2.25, 2.5, 3];
     const preview = h('div', { class: 'stack', style: 'gap:10px', 'aria-live': 'polite' });
     const fieldEl = UI.field({ label: 'Сумма ставки', id: 'analysis-stake-input', type: 'number', value: String(val), suffix: '₽', inputmode: 'numeric', hint: 'Рекомендовано ' + fmt.money(REC_STAKE) + ' — ' + pctTxt(BASE_PCT) + ' банка по стратегии ' + STRAT_V, attrs: { min: '50', step: '10' } });
     const input = fieldEl.querySelector('input');
@@ -751,7 +780,7 @@
       if (!ok) { preview.appendChild(UI.callout('bad', 'alert', val > BANK ? 'Сумма больше банка (' + fmt.money(BANK) + ').' : 'Минимальная ставка — 50 ₽.')); return; }
       const pct = stakePct(val);
       preview.appendChild(UI.kv([
-        ['Доля банка', pctTxt(Math.round(pct * 100) / 100)],
+        ['Доля банка', sharePct(val)],
         ['Выплата при выигрыше (@' + fmt.odds(TOTAL_ODDS) + ')', fmt.money(val * TOTAL_ODDS)],
         ['Чистая прибыль', fmt.signedMoney(val * TOTAL_ODDS - val)],
         ['При проигрыше', fmt.signedMoney(-val)],
@@ -769,7 +798,7 @@
         if (!(Number.isFinite(val) && val >= 50 && val <= BANK)) { input.focus(); return; }
         ST.stake = val === REC_STAKE ? null : val;
         close(); draw(root);
-        UI.toast('Сумма изменена: ' + fmt.money(val) + ' (' + pctTxt(Math.round(stakePct(val) * 100) / 100) + ' банка)', 'edit');
+        UI.toast('Сумма изменена: ' + fmt.money(val) + ' (' + sharePct(val) + ' банка)', 'edit');
       } } }, fieldEl, h('div', { class: 'stack', style: 'gap:6px' }, h('span', { class: 'field-label' }, 'Или доля банка'), segHolder), preview),
       actions: close => [
         button('Отмена', { kind: 'secondary', onClick: close }),
@@ -786,9 +815,9 @@
     const alt2 = m2.rows.find(r => r.k === 'h1m'), alt1 = m1.rows.find(r => r.k === 'p1');
     const body = h('div', { class: 'analysis-why-body', id: 'analysis-why', hidden: !ST.whyOpen },
       h('ol', { class: 'analysis-reasons' },
-        h('li', null, h('b', null, m1.A.short + ' 2:0. '), 'Модель по Эло даёт ' + pr(r1.model) + ', Claude поднял до ' + pr(r1.claude) + ': снятие Руне в Токио подтверждено ATP, а в Шанхае он дважды играл по три сета. Рынок закладывает ' + pr(r1.market) + '.'),
-        h('li', null, h('b', null, 'Уроки. '), 'L-014 (фора −1.5 против подающего левши) проверен и не применён: Руне правша, подача в среднем ' + m1.B.serve.speed + ' км/ч. По L-019 слухи из соцсетей о тейпе на спине не учитывались — только сообщение ATP.'),
-        h('li', null, h('b', null, m2.A.short + ' П1. '), 'Эло даёт ' + pr(r2.model) + ', Claude — ' + pr(r2.claude) + ': плюс за приём и личные встречи почти съеден возрастом и вчерашним трёхсетовиком.'),
+        h('li', null, h('b', null, m1.A.short + ' 2:0. '), 'ML-модель (Эло + признаки) даёт ' + pr(r1.model) + ', Claude поднял до ' + pr(r1.claude) + ': ' + m1.A.short + ' свежее (3 матча за 14 дней против 4 у ' + m1.B.short + ', у которого последний матч — три сета), а 71% его побед на харде — 2:0. Рынок закладывает ' + pr(r1.market) + '.'),
+        h('li', null, h('b', null, 'Уроки. '), 'L-014 (фора −1.5 против подающего левши) проверен и не применён: ' + m1.B.short + ' правша, подача в среднем ' + m1.B.serve.speed + ' км/ч. По L-019 пост из соцсетей о плече ' + m1.B.short + ' без подтверждения турнира не учитывался.'),
+        h('li', null, h('b', null, m2.A.short + ' П1. '), 'ML-модель даёт ' + pr(r2.model) + ', Claude — ' + pr(r2.claude) + ': плюс за приём и личные встречи почти съеден возрастом и трёхсетовиком в 1/32 (4 окт).'),
         h('li', null, h('b', null, 'Что отброшено. '), m2.A.short + ' Ф1(−1.5) даёт больший валуй (' + fmt.signedPct(alt2.value * 100, 1) + '), но кэф ' + fmt.odds(alt2.odds) + ' выше лимита ' + fmt.odds(STRAT.oddsMax) + ', а p ' + pr(alt2.claude) + ' ниже ' + STRAT.minProb + '%. П1 ' + m1.A.short + ' @' + fmt.odds(alt1.odds) + ' надёжнее, но перевес всего ' + fmt.signedPct(alt1.value * 100, 1) + '.'),
         h('li', null, h('b', null, 'Главный риск. '), 'Тай-брейк в матче ' + D.match({ p1: m1.a, p2: m1.b }) + ': один отданный сет — и нога проиграна. Если наши p завышены на 5 п.п. по каждой ноге, перевес экспресса исчезает.')),
       h('div', { class: 'stack', style: 'gap:8px' },
@@ -803,7 +832,7 @@
   }
   function rules() {
     const [l1, l2] = LEGS;
-    const form5 = id => { const f = D.P[id].form.slice(-5); const w = f.filter(x => x === 'W').length; return w + '–' + (5 - w); };
+    const form5 = id => { const f = D.P[id].form.slice(0, 5); const w = f.filter(x => x === 'W').length; return w + '–' + (5 - w); }; // form[0] — последний матч
     return [
       { ok: true, t: LEGS.length + ' события — разрешено 2–' + STRAT.maxLegs },
       { ok: true, t: 'Кэф каждой ноги ' + fmt.odds(STRAT.oddsMin) + '–' + fmt.odds(STRAT.oddsMax), d: LEGS.map(l => fmt.odds(l.odds)).join(' и ') },
@@ -811,13 +840,13 @@
       { ok: true, t: 'Итоговый кэф ≤ ' + fmt.odds(STRAT.totalMax), d: fmt.odds(TOTAL_ODDS) },
       { ok: true, t: 'Для форы −1.5 вероятность 2:0 ≥ 55%', d: pr(l1.p) },
       { ok: true, t: 'Форма за 5 матчей не хуже 3–2', d: D.P[l1.p1].short + ' ' + form5(l1.p1) + ', ' + D.P[l2.p1].short + ' ' + form5(l2.p1) },
-      { ok: false, t: 'Нет травм и перегруза', d: 'Травм нет. Нагрузка ' + D.P[l1.p1].short + ' на верхней границе: 7 матчей за 14 дней' },
+      { ok: true, t: 'Нет травм и перегруза', d: D.P[l1.p1].short + ' — 3 матча за 14 дней, ' + D.P[l2.p1].short + ' — 2; подтверждённых травм нет' },
     ];
   }
 
   function metaLine() {
     return h('a', { class: 'analysis-meta', href: '#costs', title: 'Подробнее о расходах на ИИ' }, icon('coins'),
-      h('span', null, h('b', null, 'Анализ #' + ID), ' · ' + fmt.int(TOTAL.tokens) + ' токенов, из кэша ' + CACHE_SHARE + '% · ' + fmt.usd(TOTAL.cost) + ' · ' + fmt.duration(TOTAL.sec) + ' · Opus 5.5 + Haiku 4.5'),
+      h('span', null, h('b', null, 'Анализ #' + ID), ' · ' + fmt.int(TOTAL.tokens) + ' токенов, вход Opus из кэша ' + OPUS_CACHE + '% · ' + TOTAL.searches + ' ' + fmt.plural(TOTAL.searches, 'поиск', 'поиска', 'поисков') + ' · ' + fmt.usd(TOTAL.cost) + ' · ' + fmt.duration(TOTAL.sec) + ' · ' + MODELS.join(' + ')),
       icon('chevronRight'));
   }
 
@@ -834,8 +863,8 @@
       headBlock(true),
       progressDone(root),
       h('div', { class: 'analysis-result' },
-        h('div', { class: 'analysis-col analysis-main' }, MX.map(m => matchCard(m, mobile))),
-        h('div', { class: 'analysis-col analysis-side' }, expressCard(root), whyCard())),
+        h('div', { class: 'analysis-col analysis-main' }, MX.map(m => matchCard(m, mobile)), whyCard()),
+        h('div', { class: ['analysis-col', 'analysis-side', ST.calcOpen && 'is-calc-open'] }, expressCard(root))),
       metaLine(),
     ]);
     if (RUN.focusResult) { RUN.focusResult = false; const t = root.querySelector('#analysis-title'); t && t.focus(); }
@@ -846,7 +875,10 @@
     nav: 'new',
     crumbs: 'Новый анализ → Анализ #' + ID,
     render(root) {
-      UI.setHeader({ title: 'Анализ', crumbs: h('span', null, h('a', { class: 'analysis-crumb', href: '#new' }, 'Новый анализ'), ' → Анализ #' + ID) });
+      // на телефоне — короткая крошка в одну строку: номер анализа и так виден на странице
+      UI.setHeader({ title: 'Анализ', crumbs: UI.isMobile()
+        ? h('a', { class: 'analysis-crumb', href: '#new' }, '← Новый анализ')
+        : h('span', null, h('a', { class: 'analysis-crumb', href: '#new' }, 'Новый анализ'), ' → Анализ #' + ID) });
       // при «уменьшении движения» анализ сразу показывается завершённым
       if (RUN.startedAt == null) RUN.startedAt = performance.now() - (reduced() ? TOTAL_MS : 0);
       if (!RUN.done && performance.now() - RUN.startedAt >= TOTAL_MS) finish(root);
