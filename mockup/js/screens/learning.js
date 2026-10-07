@@ -791,7 +791,7 @@
           ['Brier', fmt.dec(v.brier, 3)],
           ['ROI', h('span', null, signedPctEl(v.roi), h('span', { class: 'muted' }, ' · для наблюдения, ДИ ≈ ±20 п.п.'))],
           ['CLV', fmt.signedPct(v.clv)],
-          VERSION_INFO[v.id] && VERSION_INFO[v.id].goal === 'save' && ['Цель версии', 'Экономия: ' + tokSave() + '% токенов при качестве не хуже'],
+          VERSION_INFO[v.id] && VERSION_INFO[v.id].goal === 'save' && ['Цель версии', 'Экономия: ' + MINUS + tokSave() + '% токенов на анализ при качестве не хуже с допуском'],
           ['Событий в оценке', fmt.int(v.n)],
           info.tokens && ['Токенов на анализ', '≈ ' + info.tokens + ' тыс.'],
         ]),
