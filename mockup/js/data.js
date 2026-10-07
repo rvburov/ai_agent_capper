@@ -91,8 +91,9 @@
       const status = voided ? 'void' : won ? 'win' : 'loss';
       const profit = status === 'win' ? Math.round(stake * total - stake) : status === 'loss' ? -stake : 0;
       bank += profit;
-      const totalClosing = round(legs.reduce((a, l) => a * l.closing, 1), 2);
-      bets.push({ id, date, tournament: t.name, surface: t.surface, legs, total, stake, status, profit, bankAfter: bank, clv: round((total / totalClosing - 1) * 100, 1), bookmaker: pick(['Fonbet', 'Лига Ставок', 'Winline', 'Fonbet']) });
+      // CLV экспресса — из неокруглённых произведений кэфов, как при вводе результата на экране «Ставки»
+      const clv = round((legs.reduce((a, l) => a * l.odds, 1) / legs.reduce((a, l) => a * l.closing, 1) - 1) * 100, 1);
+      bets.push({ id, date, tournament: t.name, surface: t.surface, legs, total, stake, status, profit, bankAfter: bank, clv, bookmaker: pick(['Fonbet', 'Лига Ставок', 'Winline', 'Fonbet']) });
       bankHistory.push({ date, bank });
       id++;
     }

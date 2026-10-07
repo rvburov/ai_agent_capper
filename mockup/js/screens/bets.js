@@ -109,6 +109,7 @@
   const expanded = new Set();
   let expandInit = false;
   let lastSettled = null; // {id} — ставка, рассчитанная в этой сессии
+  let justSaved = null; // номер ставки, только что сохранённой на экране «Анализ»
   let ui = null;
 
   const norm = s => String(s).toLowerCase().replace(/ё/g, 'е');
@@ -210,6 +211,7 @@
     .bets-open-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
     @media (max-width: 1100px) { .bets-open-grid { grid-template-columns: minmax(0, 1fr); } }
     .card.bets-open { padding: 16px 18px; gap: 12px; border-color: color-mix(in srgb, var(--info-ink) 35%, var(--line)); }
+    .card.bets-open.is-new { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
     .bets-open-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; }
     .bets-open-title { font-weight: 600; font-family: var(--font-display); }
     .bets-olegs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -530,7 +532,7 @@
 
   function openCard(b) {
     const pay = Math.round(b.stake * b.total);
-    return h('article', { class: 'card bets-open', 'aria-label': 'Открытая ставка №' + b.id },
+    return h('article', { class: ['card bets-open', justSaved === b.id && 'is-new'], 'aria-label': 'Открытая ставка №' + b.id, 'data-open-bet': String(b.id) },
       h('div', { class: 'bets-open-head' },
         h('div', { style: 'min-width:0' }, h('div', { class: 'bets-open-title' }, betKindLong(b)),
           h('div', { class: 'xsmall muted' }, '№' + b.id + ' · ' + b.bookmaker + ' · ' + b.tournament + ', ' + dateLabel(b.date))),
@@ -1062,8 +1064,12 @@
     render(root, param) {
       UI.css('bets', CSS);
       ui = { root };
+      // пришли с экрана «Анализ» после «Сохранить ставку» — подсвечиваем новую ставку и прокручиваем к ней
+      const fresh = D.lastSavedBet;
+      delete D.lastSavedBet; justSaved = fresh || null;
       build();
       handleParam(param);
+      if (fresh && !param) setTimeout(() => { const el = root.querySelector('[data-open-bet="' + fresh + '"]'); if (el) el.scrollIntoView({ block: 'center' }); }, 80);
     },
   });
 })();

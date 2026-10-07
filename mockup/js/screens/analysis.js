@@ -906,6 +906,7 @@
     ST.decision = 'saved'; ST.betId = bet.id;
     logDecision('bet');
     UI.toast('Ставка №' + bet.id + ' сохранена: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(TOTAL_ODDS), 'check');
+    D.lastSavedBet = bet.id; // экран «Ставки» подсветит её и прокрутит к ней
     UI.go('bets');
   }
 
