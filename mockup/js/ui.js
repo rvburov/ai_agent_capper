@@ -527,5 +527,215 @@
   const mq = window.matchMedia('(max-width: 960px)');
   function isMobile() { return mq.matches; }
 
-  window.UI = { h, append, clear, fmt, icon, ICONS, button, card, stat, chip, dotChip, surfaceChip, statusChip, freshnessChip, formDots, table, tabs, segmented, field, toggle, callout, meter, kv, empty, oddsBox, toast, modal, lineChart, columnChart, hbars, calibrationChart, sparkline, legend, withTable, showTip, hideTip, register, screens, go, css, isMobile };
+  // ---------- выпадающие списки ----------
+  // Каждый <select> и <input list> на странице автоматически получает одинаковый вид:
+  // кнопка со стрелкой и список (на телефоне — шторка снизу). Исходный элемент остаётся в DOM,
+  // поэтому код экранов читает и пишет .value и слушает change как раньше.
+  const dd = { open: null };
+  const SHEET_MQ = window.matchMedia('(max-width: 600px)');
+  const valueDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  const indexDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex');
+  const norm = s => String(s).toLowerCase().replace(/ё/g, 'е').trim();
+
+  function fieldLabel(el) {
+    if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
+    if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) return l.textContent.trim(); }
+    return 'Выберите';
+  }
+
+  function closeDropdown(returnFocus) {
+    const o = dd.open; if (!o) return;
+    dd.open = null;
+    o.nodes.forEach(n => n.remove());
+    o.anchor.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', o.onDown, true);
+    window.removeEventListener('resize', o.onWin);
+    window.removeEventListener('scroll', o.onScroll, true);
+    if (returnFocus) o.anchor.focus({ preventScroll: true });
+    o.onClose && o.onClose();
+  }
+
+  // Общий список: items [{value,label,sub,disabled}], selected value, onPick(item)
+  function openList(anchor, o) {
+    closeDropdown(false);
+    const sheet = o.sheet && SHEET_MQ.matches;
+    const listId = 'dd-list-' + Math.random().toString(36).slice(2, 8);
+    const list = h('div', { class: sheet ? 'dd-sheet-list' : 'dd-pop', role: 'listbox', id: listId, tabindex: '-1', 'aria-label': o.title });
+    let active = -1;
+    const rows = [];
+    function setActive(i, scroll) {
+      if (!rows.length) return;
+      i = Math.max(0, Math.min(rows.length - 1, i));
+      let guard = 0;
+      while (o.items[i] && o.items[i].disabled && guard++ < rows.length) i = (i + 1) % rows.length;
+      rows.forEach((r, k) => r.classList.toggle('is-active', k === i));
+      active = i;
+      (o.focusEl || list).setAttribute('aria-activedescendant', rows[i].id);
+      if (scroll !== false) rows[i].scrollIntoView({ block: 'nearest' });
+    }
+    function pick(i) { const it = o.items[i]; if (!it || it.disabled) return; o.onPick(it); closeDropdown(o.returnFocus !== false); }
+    if (!o.items.length) list.appendChild(h('div', { class: 'dd-empty' }, o.emptyText || 'Ничего не найдено'));
+    o.items.forEach((it, i) => {
+      const row = h('div', { class: 'dd-opt', role: 'option', id: listId + '-' + i, 'aria-selected': String(it.value === o.selected), 'aria-disabled': it.disabled ? 'true' : null },
+        h('span', { class: 'dd-opt-label' }, it.labelNode || it.label), it.sub ? h('span', { class: 'dd-opt-sub' }, it.sub) : null,
+        h('span', { class: 'dd-opt-check' }, icon('check', { width: 18, height: 18 })));
+      row.addEventListener('pointermove', () => { if (active !== i) setActive(i, false); });
+      row.addEventListener('click', e => { e.preventDefault(); pick(i); });
+      rows.push(row); list.appendChild(row);
+    });
+    const nodes = [];
+    if (sheet) {
+      const back = h('div', { class: 'dd-sheet-back', on: { click: () => closeDropdown(true) } });
+      const box = h('div', { class: 'dd-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': o.title },
+        h('div', { class: 'dd-sheet-grip' }),
+        h('div', { class: 'dd-sheet-head' }, h('div', { class: 'dd-sheet-title' }, o.title), button('', { kind: 'ghost', size: 'sm', icon: 'x', title: 'Закрыть', onClick: () => closeDropdown(true) })),
+        list);
+      document.body.appendChild(back); document.body.appendChild(box); nodes.push(back, box);
+    } else {
+      document.body.appendChild(list); nodes.push(list);
+    }
+    function place() {
+      if (sheet) return;
+      const r = anchor.getBoundingClientRect();
+      const vh = window.innerHeight, vw = window.innerWidth, gap = 6;
+      const below = vh - r.bottom - 12, above = r.top - 12;
+      const want = Math.min(list.scrollHeight, 320);
+      const up = below < Math.min(want, 200) && above > below;
+      list.classList.toggle('above', up);
+      list.style.maxHeight = Math.max(120, Math.min(320, up ? above - gap : below - gap)) + 'px';
+      list.style.minWidth = r.width + 'px';
+      const w = Math.max(r.width, list.offsetWidth);
+      list.style.left = Math.max(12, Math.min(r.left, vw - w - 12)) + 'px';
+      if (up) { list.style.top = ''; list.style.bottom = (vh - r.top + gap) + 'px'; }
+      else { list.style.bottom = ''; list.style.top = (r.bottom + gap) + 'px'; }
+    }
+    place();
+    const onKey = e => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active < 0 ? 0 : active + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active < 0 ? rows.length - 1 : active - 1); }
+      else if (e.key === 'Home') { e.preventDefault(); setActive(0); }
+      else if (e.key === 'End') { e.preventDefault(); setActive(rows.length - 1); }
+      else if (e.key === 'Enter' || (e.key === ' ' && !o.focusEl)) { if (active >= 0) { e.preventDefault(); pick(active); } else if (!o.focusEl) { e.preventDefault(); closeDropdown(true); } }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDropdown(true); }
+      else if (e.key === 'Tab') closeDropdown(false);
+      else if (!o.focusEl && e.key.length === 1 && /\S/.test(e.key)) { // поиск по первым буквам
+        const q = norm(e.key), start = active + 1;
+        for (let k = 0; k < rows.length; k++) { const i = (start + k) % rows.length; if (norm(o.items[i].label).startsWith(q)) { setActive(i); break; } }
+      }
+    };
+    const keyTarget = o.focusEl || list;
+    keyTarget.addEventListener('keydown', onKey);
+    const state = {
+      anchor, nodes, onClose: () => { keyTarget.removeEventListener('keydown', onKey); keyTarget.removeAttribute('aria-activedescendant'); },
+      onDown: e => { if (!nodes.some(n => n.contains(e.target)) && !anchor.contains(e.target)) closeDropdown(false); },
+      onWin: () => closeDropdown(false),
+      onScroll: e => { if (!nodes.some(n => n.contains(e.target))) place(); },
+      setActive, list, rows,
+    };
+    dd.open = state;
+    anchor.setAttribute('aria-expanded', 'true');
+    anchor.setAttribute('aria-controls', listId);
+    document.addEventListener('pointerdown', state.onDown, true);
+    window.addEventListener('resize', state.onWin);
+    window.addEventListener('scroll', state.onScroll, true);
+    const sel = o.items.findIndex(it => it.value === o.selected);
+    if (sel >= 0) setActive(sel); else if (o.activateFirst) setActive(0);
+    if (!o.focusEl) list.focus({ preventScroll: true });
+    return state;
+  }
+
+  function enhanceSelect(sel) {
+    if (sel.dataset.dd) return;
+    sel.dataset.dd = '1';
+    const trigger = h('button', { type: 'button', class: Array.from(sel.classList).concat('dd-trigger').join(' '), 'aria-haspopup': 'listbox', 'aria-expanded': 'false' });
+    const valueEl = h('span', { class: 'dd-value' });
+    trigger.appendChild(valueEl);
+    trigger.appendChild(h('span', { class: 'dd-chev', 'aria-hidden': 'true' }, icon('chevronDown')));
+    sel.classList.remove('select'); sel.classList.add('dd-native');
+    sel.tabIndex = -1; sel.setAttribute('aria-hidden', 'true');
+    if (sel.style.cssText) trigger.style.cssText = sel.style.cssText;
+    sel.after(trigger);
+    const label = () => fieldLabel(sel);
+    function sync() {
+      const opt = sel.options[indexDesc.get.call(sel)];
+      valueEl.textContent = opt ? opt.textContent : '';
+      valueEl.classList.toggle('is-placeholder', !!opt && opt.value === '');
+      trigger.disabled = sel.disabled;
+      trigger.setAttribute('aria-label', label() + ': ' + (opt ? opt.textContent : 'не выбрано'));
+    }
+    sync();
+    // программная установка значения из кода экрана тоже обновляет кнопку
+    Object.defineProperty(sel, 'value', { configurable: true, get() { return valueDesc.get.call(this); }, set(v) { valueDesc.set.call(this, v); sync(); } });
+    Object.defineProperty(sel, 'selectedIndex', { configurable: true, get() { return indexDesc.get.call(this); }, set(v) { indexDesc.set.call(this, v); sync(); } });
+    sel.addEventListener('change', sync);
+    new MutationObserver(sync).observe(sel, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+    sel.addEventListener('focus', () => trigger.focus());
+    const open = () => {
+      if (trigger.disabled) return;
+      if (dd.open && dd.open.anchor === trigger) { closeDropdown(true); return; }
+      openList(trigger, {
+        title: label(), sheet: true, selected: valueDesc.get.call(sel),
+        items: Array.from(sel.options).map(op => ({ value: op.value, label: op.textContent, disabled: op.disabled })),
+        onPick: it => { if (valueDesc.get.call(sel) === it.value) return; valueDesc.set.call(sel, it.value); sync(); sel.dispatchEvent(new Event('input', { bubbles: true })); sel.dispatchEvent(new Event('change', { bubbles: true })); },
+      });
+    };
+    trigger.addEventListener('click', open);
+    trigger.addEventListener('keydown', e => {
+      if (dd.open && dd.open.anchor === trigger) return;
+      if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); open(); }
+    });
+  }
+
+  function enhanceCombo(input) {
+    if (input.dataset.dd) return;
+    const listId = input.getAttribute('list');
+    input.dataset.dd = '1';
+    input.dataset.ddList = listId;
+    input.removeAttribute('list'); // системный список подсказок больше не показывается
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-expanded', 'false');
+    input.setAttribute('autocomplete', 'off');
+    const source = () => { const dl = document.getElementById(listId); return dl ? Array.from(dl.options).map(op => op.value).filter(Boolean) : []; };
+    function show(all) {
+      const q = norm(input.value);
+      let items = source().map(v => ({ value: v, label: v }));
+      if (!all && q) items = items.filter(it => norm(it.label).includes(q));
+      if (q && items.length === 1 && norm(items[0].label) === q) { if (dd.open && dd.open.anchor === input) closeDropdown(false); return; }
+      items = items.slice(0, 8).map(it => {
+        if (!q) return it;
+        const i = norm(it.label).indexOf(q);
+        return i < 0 ? it : Object.assign({}, it, { labelNode: [it.label.slice(0, i), h('mark', null, it.label.slice(i, i + q.length)), it.label.slice(i + q.length)] });
+      });
+      if (!items.length) { if (dd.open && dd.open.anchor === input) closeDropdown(false); return; }
+      openList(input, {
+        title: fieldLabel(input), sheet: false, focusEl: input, returnFocus: true, selected: null, items,
+        onPick: it => { input.value = it.value; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); },
+      });
+    }
+    let picking = false;
+    input.addEventListener('focus', () => { if (!picking) show(!input.value); });
+    input.addEventListener('input', e => { if (e.isTrusted) show(false); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' && !(dd.open && dd.open.anchor === input)) { e.preventDefault(); show(true); }
+    });
+    input.addEventListener('blur', () => setTimeout(() => { if (dd.open && dd.open.anchor === input && !dd.open.nodes.some(n => n.contains(document.activeElement))) closeDropdown(false); }, 120));
+    input.addEventListener('change', () => { picking = true; setTimeout(() => { picking = false; }, 0); });
+  }
+
+  function enhanceSelects(root) {
+    (root || document).querySelectorAll('select:not([data-dd])').forEach(enhanceSelect);
+    (root || document).querySelectorAll('input[list]:not([data-dd])').forEach(enhanceCombo);
+  }
+  new MutationObserver(muts => {
+    for (const m of muts) for (const n of m.addedNodes) {
+      if (n.nodeType !== 1) continue;
+      if (n.matches && (n.matches('select:not([data-dd])') || n.matches('input[list]:not([data-dd])'))) enhanceSelects(n.parentNode);
+      else if (n.querySelector && n.querySelector('select:not([data-dd]), input[list]:not([data-dd])')) enhanceSelects(n);
+    }
+    if (dd.open && !dd.open.anchor.isConnected) closeDropdown(false);
+  }).observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('hashchange', () => closeDropdown(false));
+
+  window.UI = { h, append, clear, fmt, icon, ICONS, button, card, stat, chip, dotChip, surfaceChip, statusChip, freshnessChip, formDots, table, tabs, segmented, field, toggle, callout, meter, kv, empty, oddsBox, toast, modal, lineChart, columnChart, hbars, calibrationChart, sparkline, legend, withTable, showTip, hideTip, register, screens, go, css, isMobile, enhanceSelects, closeDropdown };
 })();
