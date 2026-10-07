@@ -192,7 +192,7 @@
 
   // table({columns:[{key,label,align:'r'|'c',render:(row)=>node, width, hideMobile}], rows, onRowClick, empty})
   function table(o) {
-    const cols = o.columns;
+    const cols = isMobile() ? o.columns.filter(c => !c.hideMobile) : o.columns;
     const thead = h('thead', null, h('tr', null, cols.map(c => h('th', { class: c.align, style: c.width ? 'width:' + c.width : null }, c.label))));
     const tbody = h('tbody', null, o.rows.length ? o.rows.map(r => h('tr', { class: o.onRowClick && 'clickable', on: o.onRowClick ? { click: () => o.onRowClick(r) } : null, tabindex: o.onRowClick ? '0' : null },
       cols.map(c => h('td', { class: c.align }, c.render ? c.render(r) : r[c.key])))) : h('tr', null, h('td', { colspan: cols.length }, h('div', { class: 'empty' }, o.empty || 'Нет данных'))));
@@ -462,7 +462,7 @@
       });
       svg.appendChild(h('text', { x: m.l + iw, y: H - 2, 'text-anchor': 'end' }, 'прогноз модели →'));
       svg.appendChild(h('line', { x1: X(d0), y1: Y(d0), x2: X(d1), y2: Y(d1), stroke: 'var(--fg-3)', 'stroke-width': 1, 'stroke-dasharray': '4 4' }));
-      svg.appendChild(h('text', { x: X(d1) - 6, y: Y(d1) + 14, 'text-anchor': 'end' }, 'идеальная калибровка'));
+      if (o.diagLabel) svg.appendChild(h('text', { x: X(d1) - 6, y: Y(d0 + (d1 - d0) * 0.88) + 18, 'text-anchor': 'end' }, 'идеальная калибровка'));
       const pts = o.bins.filter(b => b.n > 0);
       const color = o.color || 'var(--s1)';
       svg.appendChild(h('path', { d: pts.map((b, i) => (i ? 'L' : 'M') + X(b.p).toFixed(1) + ' ' + Y(Math.max(d0, Math.min(d1, b.actual))).toFixed(1)).join(''), fill: 'none', stroke: color, 'stroke-width': 2 }));

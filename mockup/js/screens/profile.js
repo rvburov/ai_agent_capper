@@ -660,7 +660,7 @@
       body: [
         h('div', { class: 'profile-list' },
           item({ ic: 'shield', icKind: 'good', title: 'Приложение-аутентификатор (TOTP)', meta: 'Настроено ' + dateLong(U.since) + ' · Google Authenticator, Яндекс Ключ или 1Password', below: true,
-            side: button('Перенести на другой телефон', { kind: 'ghost', size: 'sm', icon: 'refresh', onClick: () => UI.toast('Откроется мастер с новым QR-кодом — как при регистрации. Старое приложение перестанет работать', 'refresh') }) }),
+            side: button('Перенести на другой телефон', { kind: 'secondary', size: 'sm', icon: 'refresh', onClick: () => UI.toast('Откроется мастер с новым QR-кодом — как при регистрации. Старое приложение перестанет работать', 'refresh') }) }),
           item({ ic: 'key', title: 'Резервные коды', titleExtra: st.codesLeft < 4 ? chip('Осталось мало', 'warn', 'alert') : null, meta: st.codesLeft + ' из 8 не использованы · созданы ' + dateLong(st.codesCreated), below: true,
             side: button('Показать резервные коды', { kind: 'secondary', size: 'sm', icon: 'eye', onClick: codesModal }) })),
         h('hr', { class: 'divider' }),
@@ -772,7 +772,7 @@
       body: h('div', { class: mobile ? 'profile-list' : 'profile-sessions' }, list.map(s => item({ below: !mobile,
         ic: s.ic, icKind: s.current ? 'good' : null, title: s.name, titleExtra: s.current ? chip('Этот сеанс', 'accent', 'check') : null,
         meta: [s.where, s.ip && h('span', { class: 'profile-ip' }, s.ip), s.seen].filter(Boolean).reduce((a, x, i) => a.concat(i ? [' · ', x] : [x]), []),
-        side: s.current ? null : button('Завершить', { kind: 'ghost', size: 'sm', onClick: () => endSession(s), ariaLabel: 'Завершить сеанс: ' + s.name }),
+        side: s.current ? null : button('Завершить', { kind: mobile ? 'ghost' : 'secondary', size: 'sm', onClick: () => endSession(s), ariaLabel: 'Завершить сеанс: ' + s.name }),
       }))),
       foot: others.length ? [endBtn, confirmBox] : [h('span', { class: 'small muted' }, 'Других активных сеансов нет.')],
     });
