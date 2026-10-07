@@ -742,7 +742,7 @@
     const busy = jobs[p.id] === 'running';
     const status = h('div', { class: 'players-hero-status' },
       h('div', { class: 'players-hero-st' }, statusChip(p),
-        h('small', null, missing ? (jobs[p.id] === 'queued' ? 'сбор в ночном пакете, к 05:00' : 'есть только архив ATP') : busy ? 'идёт обновление…' : 'обновлено ' + ago(p.updated) + ' · ' + fmt.datetime(p.updated))),
+        h('small', null, busy ? (missing ? 'собираем профиль, 1–2 мин' : 'идёт обновление…') : missing ? (jobs[p.id] === 'queued' ? 'сбор в ночном пакете, к 05:00' : 'есть только архив ATP') : 'обновлено ' + ago(p.updated) + ' · ' + fmt.datetime(p.updated))),
       missing
         ? button(busy ? 'Собираем…' : 'Собрать профиль', { kind: 'primary', size: 'sm', icon: 'database', disabled: busy, onClick: () => { const b = document.querySelector('#players-collect-btn'); if (b) b.click(); } })
         : button(busy ? 'Обновляем…' : 'Обновить сейчас', { kind: 'secondary', size: 'sm', icon: 'refresh', disabled: busy, title: 'Новости, состояние и статистика · ~' + fmt.usd(COST.now) + ' · около минуты', onClick: () => runNow([p.id]) }));

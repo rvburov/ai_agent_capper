@@ -29,6 +29,7 @@
     return el;
   }
   function append(el, children) {
+    if (!Array.isArray(children)) children = [children];
     for (const c of children) {
       if (c == null || c === false || c === true) continue;
       if (Array.isArray(c)) append(el, c);
