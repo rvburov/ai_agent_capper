@@ -269,15 +269,16 @@
     const prevFocus = document.activeElement;
     const close = () => { back.remove(); document.removeEventListener('keydown', onKey); prevFocus && prevFocus.focus && prevFocus.focus(); o.onClose && o.onClose(); };
     const onKey = e => { if (e.key === 'Escape') close(); };
-    const box = h('div', { class: ['modal', o.wide && 'wide'], role: 'dialog', 'aria-modal': 'true', 'aria-label': o.title },
+    const box = h('div', { class: ['modal', o.wide && 'wide'], tabindex: '-1', role: 'dialog', 'aria-modal': 'true', 'aria-label': o.title },
       h('div', { class: 'modal-head' }, h('h3', null, o.title), button('', { kind: 'ghost', size: 'sm', icon: 'x', title: 'Закрыть', onClick: close })),
       h('div', { class: 'modal-body' }, typeof o.body === 'function' ? o.body(close) : o.body),
       o.actions && h('div', { class: 'modal-foot' }, typeof o.actions === 'function' ? o.actions(close) : o.actions));
     const back = h('div', { class: 'modal-backdrop', on: { click: e => { if (e.target === back) close(); } } }, box);
     document.body.appendChild(back);
     document.addEventListener('keydown', onKey);
-    const f = box.querySelector('input, select, textarea, button:not([title="Закрыть"])');
-    (f || box).focus && setTimeout(() => (f || box).focus(), 30);
+    // фокус только на поле в теле окна, иначе на само окно: шторка на телефоне открывается с начала
+    const f = box.querySelector('.modal-body input, .modal-body select, .modal-body textarea');
+    setTimeout(() => { (f || box).focus({ preventScroll: true }); box.scrollTop = 0; }, 30);
     return { close };
   }
 
