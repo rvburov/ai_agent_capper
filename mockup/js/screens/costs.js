@@ -15,8 +15,20 @@
   const SEARCH_TOKENS = 4000;   // примерно столько входных токенов добавляют результаты одного поиска
   const DAYS = 7, MONTH_DAYS = 31, PER_MONTH = MONTH_DAYS / DAYS;
   // Текущий бот (bot.py): Sonnet 4.6, до 20 циклов tool use, без кэша — оценка на один анализ
-  const OLD = { model: 'Sonnet 4.6', pin: 3, pout: 15, input: 420000, output: 18000, searches: 8 };
+  // по docs/TOKEN_ECONOMY.md §3.2 (12 итераций, ≈580 тыс. входа, ≈18 тыс. выхода; разброс $1–4,5).
+  // Поиск — DuckDuckGo Instant Answer (bot.py:158–194), он бесплатный.
+  const OLD = { model: 'Sonnet 4.6', pin: 3, pout: 15, input: 580000, output: 18000, searches: 0 };
   OLD.cost = (OLD.input * OLD.pin + OLD.output * OLD.pout) / 1e6 + OLD.searches * SEARCH;
+  // Тот же цикл на Opus 5.5 без досье (§3.2): ≈750 тыс. входа (новый токенизатор) и ≈35 тыс. выхода;
+  // с кэшем внутри цикла ≈84% входа читается из кэша — это ≈$1,3 вместо ≈$3,7.
+  const NO_DOSSIER = { input: 750000, output: 35000, cacheShare: 0.84 };
+
+  // Effort (глубина размышлений): множитель к выходным токенам относительно уровня, на котором
+  // сняты фактические запуски (DEFAULTS.effort). Оценка: §4.5 — −20…50% выхода на low.
+  const EFFORT_K = { low: 0.55, medium: 1, high: 1.5 };
+  const EFFORT_LABEL = { low: 'Низкая', medium: 'Средняя', high: 'Высокая' };
+  const EFFORT_LEVELS = { analysis: ['low', 'medium', 'high'], refresh: ['low', 'medium'], postmortem: ['low', 'medium'], parse: ['low', 'medium'] };
+  const supportsEffort = model => model !== 'Haiku 4.5';
 
   const TYPES = [
     { id: 'analysis', label: 'Анализ матчей', short: 'Анализ', tiny: 'Анализ', bar: 'Анализ матчей', what: 'Вероятности по событиям, валуй и экспресс', options: ['Opus 5.5', 'Sonnet 5.5'] },
@@ -70,14 +82,24 @@
   const tourName = date => { const t = D.calendar.find(c => date >= c.from && date <= c.to); return t ? t.name : 'Шанхай'; };
   (function buildMeta() {
     const an = A.runs.filter(r => r.type === 'analysis'), rf = A.runs.filter(r => r.type === 'refresh'), ps = A.runs.filter(r => r.type === 'parse'), pm = A.runs.filter(r => r.type === 'postmortem');
+    // Номера анализов идут до #A-0141: #A-0142 — живой демо-анализ на экране «Анализ».
+    // Последний анализ дня, после которого появилась ставка, ссылается на неё.
     an.forEach((r, i) => {
-      const last = i === an.length - 1;
-      const n = last ? 3 : 2 + (i % 2);
+      const day = r.at.slice(0, 10);
+      const sameDay = an.filter(x => x.at.slice(0, 10) === day);
+      const bet = sameDay[sameDay.length - 1] === r ? D.bets.find(b => b.date === day) : null;
+      const n = bet ? bet.legs.length : 2 + (i % 2);
+      const ref = 'анализ #A-' + String(131 + i).padStart(4, '0');
       META[r.id] = {
-        ref: 'анализ #A-' + String(132 + i).padStart(4, '0'), href: '#analysis',
-        what: last ? 'Синнер — Руне, Джокович — Рублёв, Зверев — Музетти' : n + ' ' + fmt.plural(n, 'событие', 'события', 'событий') + ' · ' + tourName(r.at.slice(0, 10)),
+        ref: bet ? ref + ' → ставка №' + bet.id : ref,
+        href: bet ? (bet.status === 'open' ? '#bets' : '#bets-' + bet.id) : null,
+        btn: bet ? 'К ставке №' + bet.id : null,
+        what: bet
+          ? bet.legs.map(D.match).join(', ') + (bet.status === 'open' ? ' · ставка в игре' : '')
+          : n + ' ' + fmt.plural(n, 'событие', 'события', 'событий') + ' · ' + tourName(day) + ' · ставка не сформирована: ни одно событие не прошло порог ' + D.strategy.minProb + '%',
         prompt: 'analysis v3 · стратегия ' + activeStrategy.id,
-        prefix: 'Инструкции, стратегия ' + activeStrategy.id + ', уроки ' + lessonsInPrompt.join(', ') + ' и досье игроков',
+        effort: 'medium',
+        prefix: 'Итерации 2–3 читают из кэша то, что записала первая: инструкции, стратегию ' + activeStrategy.id + ', уроки ' + lessonsInPrompt.join(', ') + ' и досье игроков',
       };
     });
     rf.forEach((r, i) => {

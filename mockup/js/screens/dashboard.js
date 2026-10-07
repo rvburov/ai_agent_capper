@@ -139,12 +139,12 @@
     .dashboard-bet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
     .dashboard-bet-head > div { min-width: 0; }
     .dashboard-legs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-    .dashboard-leg { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 8px 0; border-top: 1px dashed var(--line); }
+    .dashboard-leg { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; padding: 8px 0; border-top: 1px dashed var(--line); }
     .dashboard-leg:first-child { border-top: 0; padding-top: 0; }
     .dashboard-leg-time { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--fg-2); padding-top: 1px; }
-    .dashboard-leg-main { min-width: 0; }
-    .dashboard-leg-match { font-size: var(--fs-md); line-height: 1.35; }
-    .dashboard-leg-meta { font-size: var(--fs-xs); color: var(--fg-3); margin-top: 2px; }
+    .dashboard-leg-match { font-size: var(--fs-md); line-height: 1.35; min-width: 0; }
+    .dashboard-leg-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; column-gap: 8px; row-gap: 0; font-size: var(--fs-xs); color: var(--fg-3); min-width: 0; }
+    .dashboard-leg-meta > span { white-space: nowrap; }
     .dashboard-leg-meta b { color: var(--fg-2); font-weight: 600; }
     .dashboard-leg .odds { font-size: var(--fs-md); padding-top: 1px; }
     .dashboard-bet-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 10px 12px; border-radius: var(--r-sm); background: var(--surface-2); }
@@ -339,16 +339,15 @@
           const implied = 1 / l.odds;
           return h('li', { class: 'dashboard-leg' },
             h('span', { class: 'dashboard-leg-time' }, m ? m.time : '—'),
-            h('div', { class: 'dashboard-leg-main' },
-              h('div', { class: 'dashboard-leg-match' }, playerLink(l.p1), ' — ', playerLink(l.p2)),
-              h('div', { class: 'dashboard-leg-meta', title: 'Вероятность исхода: оценка ИИ и вероятность по кэфу букмекера' }, h('b', null, l.marketLabel), ' · ', h('span', { style: 'white-space:nowrap' }, 'ИИ ' + fmt.prob(l.p) + ' · рынок ' + fmt.prob(implied)))),
-            h('span', { class: 'odds', 'aria-label': 'Кэф ' + fmt.odds(l.odds) }, fmt.odds(l.odds)));
+            h('div', { class: 'dashboard-leg-match' }, playerLink(l.p1), ' — ', playerLink(l.p2)),
+            h('span', { class: 'odds', 'aria-label': 'Кэф ' + fmt.odds(l.odds) }, fmt.odds(l.odds)),
+            h('div', { class: 'dashboard-leg-meta', title: 'Вероятность исхода: оценка модели и 1/кэф букмекера (с его маржой)' }, h('b', null, l.marketLabel), h('span', null, 'модель ' + fmt.prob(l.p) + ' · по кэфу ' + fmt.prob(implied))));
         })),
         h('dl', { class: 'dashboard-bet-sum' },
           h('div', null, h('dt', null, 'Кэф'), h('dd', { class: 'odds' }, fmt.odds(b.total))),
           h('div', null, h('dt', null, 'Ставка'), h('dd', null, fmt.money(b.stake))),
           h('div', null, h('dt', null, 'Выплата'), h('dd', null, fmt.money(payout)))),
-        button('Внести результат', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#bets', block: true }));
+        button('Внести результат', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#bets-' + b.id, block: true, ariaLabel: 'Внести результат ставки №' + b.id }));
     }) : UI.empty('Открытых ставок нет. Запустите анализ матчей дня — ИИ предложит экспресс.');
     return card({
       class: 'dashboard-card',
@@ -429,15 +428,25 @@
         items.push({
           tone: 'accent', ic: 'flask', sr: 'Нужно решение',
           title: 'Нужно решение: кандидат стратегии ' + cand.id,
-          text: 'Промпт на английском и сжатое досье — меньше токенов на анализ. На тех же ' + cand.n + ' событиях Brier ' + fmt.dec(cand.brier, 3) + ' против ' + fmt.dec(act.brier, 3) + ' у ' + act.id + '. Включать ли — решаете вы.',
+          text: 'Промпт на английском и сжатое досье — примерно на 30% меньше токенов на анализ. На тех же ' + cand.n + ' событиях Brier ' + fmt.dec(cand.brier, 3) + ' против ' + fmt.dec(act.brier, 3) + ' у ' + act.id + ' — разница в пределах шума, то есть качество не хуже. Включать ли ради экономии — решаете вы.',
           action: button('Сравнить ' + act.id + ' и ' + cand.id, { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#learning' }),
         });
       }
+      // Адаптации размера ставки — те же правила, что в «Профиль → Банк и стратегия»; статус считается из DATA.stats
+      const sk = S.streak, fromPeak = (S.bank - S.peak) / S.peak * 100;
+      const streakText = sk.n + ' ' + (sk.type === 'win' ? fmt.plural(sk.n, 'выигрыш', 'выигрыша', 'выигрышей') : sk.type === 'loss' ? fmt.plural(sk.n, 'проигрыш', 'проигрыша', 'проигрышей') : fmt.plural(sk.n, 'возврат', 'возврата', 'возвратов'));
+      const activeRules = [
+        sk.type === 'loss' && sk.n >= 3 && 'после ' + streakText + ' подряд сумма −40%',
+        sk.type === 'win' && sk.n >= 3 && 'после ' + streakText + ' подряд сумма +20% (не больше 3% банка)',
+        fromPeak <= -10 && 'при просадке ' + fmt.signedPct(fromPeak) + ' ставка не больше 2,5% банка',
+      ].filter(Boolean);
       items.push({
-        tone: 'info', ic: 'shield', sr: 'Информация',
-        title: 'Правило стратегии: ставка снижалась после серии',
-        text: 'После 2 проигрышей подряд (3–4 окт) ставка 5 окт снижена до 1,75% банка — 820 ₽. Она сыграла, и сегодня размеры снова по таблице.',
-        action: button('Правила стратегии', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#learning' }),
+        tone: activeRules.length ? 'warn' : 'info', ic: 'shield', sr: activeRules.length ? 'Предупреждение' : 'Информация',
+        title: activeRules.length ? 'Размер ставки изменён правилом адаптации' : 'Размер ставки: адаптации не действуют',
+        text: 'Серия — ' + streakText + ', ' + (fromPeak < 0 ? 'банк ' + fmt.signedPct(fromPeak) + ' от пика' : 'банк на пике') + '. ' + (activeRules.length
+          ? 'Сейчас ' + activeRules.join('; ') + '. Новые анализы предложат суммы с учётом этого.'
+          : 'Ставка снизится на 40% после 3 проигрышей подряд и не превысит 2,5% банка при просадке от −10%. Сегодня суммы — по таблице.'),
+        action: button('Правила ставок', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#profile-bank' }),
       });
       items.forEach(it => list.appendChild(h('div', { class: 'dashboard-alert' },
         h('div', { class: ['dashboard-alert-ic', it.tone] }, icon(it.ic)),
@@ -447,10 +456,12 @@
           it.action))));
     }
     draw();
-    const n = 2 + (cand ? 1 : 0) + missing.length;
+    const n = list.children.length;
     return card({ class: 'dashboard-card dashboard-attn-card', title: 'Требует внимания', subtitle: n + ' ' + fmt.plural(n, 'пункт', 'пункта', 'пунктов') + ' · данные и стратегия', body: list });
   }
 
+  // Уроки о сборе данных (не о вероятностях) принимаются по правилу «не хуже на ≥ 10 случаях»
+  const isProcessLesson = l => /сбор/i.test(l.scope || '');
   function learningCard() {
     const confirmed = D.lessons.filter(l => l.status === 'confirmed').sort((a, b) => b.created.localeCompare(a.created));
     const latest = confirmed[0];
@@ -467,7 +478,8 @@
         latest && h('figure', { class: 'dashboard-lesson' },
           h('div', { class: 'row', style: 'gap:6px' }, chip(latest.id, 'outline'), chip('Подтверждён', 'good', 'check'), latest.inPrompt && chip('В инструкциях анализа', 'accent', 'book')),
           h('p', null, latest.text),
-          h('figcaption', { class: 'xsmall muted' }, latest.evidence + ' ' + fmt.plural(latest.evidence, 'случай', 'случая', 'случаев') + ' · ' + latest.effect + ' · ' + latest.scope + ' · с ' + fmt.date(latest.created))),
+          h('figcaption', { class: 'xsmall muted' }, latest.evidence + ' ' + fmt.plural(latest.evidence, 'случай', 'случая', 'случаев') + ' · ' + latest.effect + ' · ' + latest.scope + ' · с ' + fmt.date(latest.created)),
+          isProcessLesson(latest) && h('div', { class: 'dashboard-howto' }, icon('info'), 'Урок про сбор данных: вероятности не меняет, убирает лишние поиски. Такие принимаются, если качество не хуже на 10+ случаях; уроки о вероятностях — от 20 своих случаев.')),
         hyp && h('div', { class: 'stack', style: 'gap:6px' },
           h('div', { class: 'row-between small' }, h('span', { class: 'soft', style: 'min-width:0' }, 'Проверяется гипотеза ', h('b', null, hyp.id), ': ', hyp.scope), h('span', { class: 'num', style: 'font-weight:600' }, hyp.evidence + ' из ' + need + ' случаев')),
           UI.meter(hyp.evidence, need)),

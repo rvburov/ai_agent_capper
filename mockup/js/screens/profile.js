@@ -28,6 +28,7 @@
   const inPlay = openBets.reduce((a, b) => a + b.stake, 0);
   const staleN = D.players.filter(p => p.fresh === 'stale').length;
   const missingN = D.players.filter(p => p.fresh === 'missing').length;
+  const profiledN = D.players.length - missingN;
   const lastRun = D.ai.runs.reduce((a, r) => (r.at > a ? r.at : a), '');
   const refreshSearches = D.ai.runs.filter(r => r.type === 'refresh').map(r => r.searches);
   const activeVersion = D.strategyVersions.find(v => v.status === 'active');
@@ -87,12 +88,22 @@
     { value: 'Asia/Shanghai', label: 'Шанхай (UTC+8)' },
     { value: 'Asia/Vladivostok', label: 'Владивосток (UTC+10)' },
   ];
-  const CUR = [{ value: 'RUB', label: '₽ — российский рубль' }, { value: 'USD', label: '$ — доллар США' }, { value: 'EUR', label: '€ — евро' }];
+  const CUR = [{ value: 'RUB', label: '₽ — рубль' }, { value: 'USD', label: '$ — доллар США' }, { value: 'EUR', label: '€ — евро' }];
   const LANG = [{ value: 'ru', label: 'Русский' }, { value: 'en', label: 'English' }];
+
+  const VALUE_ADJ = [
+    { t: 'Сильный', d: 'перевес от 15%', v: '+0,5%' },
+    { t: 'Хороший', d: '10–14%', v: '+0,25%' },
+    { t: 'Небольшой', d: '5–9%', v: 'без поправки' },
+    { t: 'Нет', d: 'меньше 5%', v: '−0,25%' },
+  ];
+  // Итог недели: банк сейчас к банку на конец дня неделю назад
+  const weekBase = D.bankHistory.filter(x => x.date <= addDays(TODAY, -7)).pop() || D.bankHistory[0];
+  const weekPct = (S.bank - weekBase.bank) / weekBase.bank * 100;
 
   const NOTIF = [
     { id: 'results', t: 'Результаты матчей и расчёт ставок', d: 'Счёт, исход экспресса и новый банк — сразу после матча' },
-    { id: 'stale', t: 'Устаревшие данные игроков', d: 'Если профиль игрока из анализа старше 48 часов. Сейчас: ' + staleN + ' ' + pl(staleN, 'профиль устарел', 'профиля устарели', 'профилей устарели') + ', ' + missingN + ' ' + pl(missingN, 'игрока', 'игроков', 'игроков') + ' нет в базе' },
+    { id: 'stale', t: 'Устаревшие данные игроков', d: 'Если профиль игрока из анализа старше 24 часов. Сейчас: ' + staleN + ' ' + pl(staleN, 'профиль устарел', 'профиля устарели', 'профилей устарели') + ', ' + missingN + ' ' + pl(missingN, 'игрока', 'игроков', 'игроков') + ' нет в базе' },
     { id: 'budget', t: 'Превышение лимита расходов на ИИ', d: 'При 80% и 100% месячного бюджета ($' + D.ai.budget + ')' },
     { id: 'login', t: 'Вход с нового устройства', d: 'Город, браузер и время входа. Хотя бы один канал обязателен', guard: true },
     { id: 'weekly', t: 'Еженедельный отчёт', d: 'По понедельникам в 09:00: ROI, CLV, калибровка, расходы ИИ' },
@@ -117,7 +128,7 @@
     books: books0, bankAdj: 0,
     rules: { minProb: D.strategy.minProb, oddsMin: D.strategy.oddsMin, oddsMax: D.strategy.oddsMax, maxLegs: D.strategy.maxLegs, totalMax: D.strategy.totalMax },
     stakes: D.strategy.stakeTable.map(r => { const [a, b] = r.pct.split('–'); return { range: r.range, min: num(a), max: num(b) }; }),
-    adapt: { lose3: true, win3: true, dd10: true, dd20: true },
+    adapt: { lose3: true, win3: true, dd10: true, dd20: true, up15: true, weekLoss: true, weekWin: true },
     limits: { count: 3, amount: 4000 }, limitsPending: null,
     pauseDays: '7', pauseConfirm: false, pause: null,
     key: { last: '4f2a', checked: lastRun },
@@ -223,6 +234,16 @@
     .profile-stake-inputs .input-wrap .input.has-suffix { height: 36px; text-align: right; padding: 0 26px 0 8px; }
     .profile-stake-inputs .input-suffix { right: 9px; }
 
+    .profile-value { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+    .profile-value > div { background: var(--surface); padding: 8px 12px; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .profile-value dt { font-weight: 600; font-size: var(--fs-sm); }
+    .profile-value dt small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); }
+    .profile-value dd { margin: 0; font-family: var(--font-mono); font-weight: 500; font-size: var(--fs-sm); color: var(--fg); white-space: nowrap; }
+    .profile-rule-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 12px; }
+    .profile-rule-group { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; }
+    .profile-rule-group-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .profile-rule-group-head h4 { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .05em; color: var(--fg-3); }
+    .profile-rule-group .callout { margin-top: 10px; }
     .profile-rule { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: start; }
     .profile-rule:last-child { border-bottom: 0; padding-bottom: 0; }
     .profile-rule-text { display: flex; flex-direction: column; gap: 2px; cursor: pointer; min-width: 0; }
@@ -285,6 +306,7 @@
       .profile-usage { grid-template-columns: minmax(0, 1fr); }
       .profile-stake { padding: 10px; gap: 8px; }
       .profile-stake-inputs .input-wrap { width: 68px; }
+      .profile-value { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
   `);
 
@@ -442,8 +464,8 @@
   // =====================================================================
   function panelProfile() {
     return h('div', { class: 'grid' },
-      h('div', { class: 'col-7 profile-col' }, personalCard(), regionCard()),
-      h('div', { class: 'col-5 profile-col' }, appearanceCard(), accessCard()));
+      h('div', { class: 'col-7 profile-col' }, personalCard(), accessCard()),
+      h('div', { class: 'col-5 profile-col' }, appearanceCard(), regionCard()));
   }
 
   function personalCard() {
@@ -508,7 +530,7 @@
       id: 'profile-region', title: 'Регион и язык', subtitle: 'Время, деньги и язык ответов ИИ',
       body: [
         h('div', { class: 'profile-fields collapse' }, h('div', { class: 'span-2' }, tzF), curF, langF),
-        h('p', { class: 'xsmall muted' }, 'Служебные инструкции для ИИ хранятся на английском — так они занимают меньше токенов. Анализы и отчёты ИИ пишет на выбранном языке.'),
+        h('p', { class: 'xsmall muted' }, 'Перевод служебных инструкций на английский (вместе со сжатым досье −31% токенов) — кандидат v4, решение за вами в ', h('a', { href: '#learning' }, 'Обучении модели'), '. Анализы и отчёты ИИ пишет на выбранном языке.'),
         note,
       ],
       foot: [save, status],
@@ -822,11 +844,12 @@
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Текущий банк', icon: 'coins', value: fmt.money(b), delta: fmt.signedPct(growth), trend: growth >= 0 ? 'up' : 'down', hint: 'к старту' })),
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'В игре', icon: 'clock', value: fmt.money(inPlay), hint: openBets.length + ' ' + pl(openBets.length, 'ставка', 'ставки', 'ставок') + ' · ' + fmt.pct(inPlay / b * 100) + ' банка' })),
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'От пика банка', icon: 'arrowDown', value: dd ? fmt.signedPct(dd) : '0%', hint: 'пик ' + fmt.money(S.peak) })));
-    if (mobile) return h('div', { class: 'profile-panel' }, tiles, responsibleCard(), strategyCard(), adaptCard(dd), booksCard());
+    if (mobile) return h('div', { class: 'profile-panel' }, tiles, responsibleCard(), strategyCard(), adaptCard(dd, growth), booksCard());
     return h('div', { class: 'profile-panel' }, tiles,
       h('div', { class: 'grid' },
-        h('div', { class: 'col-7 profile-col' }, strategyCard(), adaptCard(dd)),
-        h('div', { class: 'col-5 profile-col' }, responsibleCard(), booksCard())));
+        h('div', { class: 'col-7 profile-col' }, strategyCard()),
+        h('div', { class: 'col-5 profile-col' }, responsibleCard(), booksCard())),
+      adaptCard(dd, growth));
   }
 
   function strategyCard() {
@@ -880,7 +903,9 @@
         h('div', { class: 'stack', style: 'gap:8px' },
           h('div', { class: 'profile-section-title' }, h('h4', null, 'Ставка по итоговому кэфу'), h('span', { class: 'xsmall muted' }, '% от банка ' + fmt.money(b))),
           h('div', { class: 'profile-stakes' }, stakeRows.map(x => x.row)),
-          h('p', { class: 'xsmall muted' }, 'Чем выше итоговый кэф, тем меньше ставка. Внутри диапазона сумму выбирает ИИ по уверенности в экспрессе; суммы округляются до 10 ₽.')),
+          h('div', { class: 'profile-section-title', style: 'margin-top:6px' }, h('h4', null, 'Поправка на валуй'), h('span', { class: 'xsmall muted' }, 'средний перевес ног экспресса')),
+          h('dl', { class: 'profile-value', 'aria-label': 'Поправка ставки на валуй, в процентах банка' }, VALUE_ADJ.map(x => h('div', null, h('dt', null, x.t, h('small', null, x.d)), h('dd', null, x.v)))),
+          h('p', { class: 'xsmall muted' }, 'Чем выше итоговый кэф, тем меньше ставка. Внутри диапазона берётся середина, затем поправка на валуй и адаптации ниже; суммы округляются до 10 ₽.')),
         risk,
       ],
       foot: [save, reset],
@@ -904,18 +929,40 @@
     });
   }
 
-  function adaptCard(dd) {
+  function adaptCard(dd, growth) {
     const ddAbs = Math.abs(dd), max = 25;
-    const RULES = [
-      { id: 'lose3', t: '3 проигрыша подряд → ставка −40%', d: 'До первого выигрыша', active: S.streak.type === 'loss' && S.streak.n >= 3, now: 'Сейчас серия: ' + streakText },
-      { id: 'win3', t: '3 выигрыша подряд → ставка +20%', d: 'Но не больше 3% банка', active: S.streak.type === 'win' && S.streak.n >= 3, now: 'Сейчас серия: ' + streakText },
-      { id: 'dd10', t: 'Банк −10% от пика → ставка не больше 2,5%', d: 'Пока банк не поднимется выше этой отметки', active: dd <= -10, now: 'Сейчас ' + fmt.signedPct(dd) + ' от пика' },
-      { id: 'dd20', t: 'Банк −20% от пика → защитный режим', d: 'Только 2 события, кэф события ≤ 1.50, ставка 1,5% банка', active: dd <= -20, now: 'Сейчас ' + fmt.signedPct(dd) + ' от пика' },
+    const GROUPS = [
+      { id: 'streak', title: 'Серии', doubt: true, rules: [
+        { id: 'lose3', t: '3 проигрыша подряд → ставка −40%', d: 'До первого выигрыша', active: S.streak.type === 'loss' && S.streak.n >= 3, now: 'Сейчас серия: ' + streakText },
+        { id: 'win3', t: '3 выигрыша подряд → ставка +20%', d: 'Но не больше 3% банка', active: S.streak.type === 'win' && S.streak.n >= 3, now: 'Сейчас серия: ' + streakText },
+      ] },
+      { id: 'bank', title: 'Банк', rules: [
+        { id: 'dd10', t: 'Банк −10% от пика → ставка не больше 2,5%', d: 'Пока банк не поднимется выше этой отметки', active: dd <= -10, now: 'Сейчас ' + fmt.signedPct(dd) + ' от пика' },
+        { id: 'dd20', t: 'Банк −20% от пика → защитный режим', d: 'Только 2 события, кэф события ≤ 1.50, ставка 1,5% банка', active: dd <= -20, now: 'Сейчас ' + fmt.signedPct(dd) + ' от пика' },
+        { id: 'up15', t: 'Банк +15% к старту и винрейт ≥ 60% → ставка до 4%', d: 'Потолок поднимается с 3% до 4%, пока выполнены оба условия', active: growth >= 15 && S.winrate >= 60, now: 'Сейчас банк ' + fmt.signedPct(growth) + ', винрейт ' + fmt.pct(S.winrate) },
+      ] },
+      { id: 'week', title: 'Итог недели', rules: [
+        { id: 'weekLoss', t: 'Убыточная неделя (−5% и больше) → ставка не больше 2%', d: 'Считаем по банку за последние 7 дней', active: weekPct <= -5, now: 'За 7 дней ' + fmt.signedPct(weekPct) },
+        { id: 'weekWin', t: 'Прибыльная неделя (+10% и больше) → ставка +0,5%', d: 'К проценту из таблицы, но не выше потолка', active: weekPct >= 10, now: 'За 7 дней ' + fmt.signedPct(weekPct) },
+      ] },
     ];
+    const RULES = GROUPS.reduce((a, g) => a.concat(g.rules), []);
     const ruleChip = r => !st.adapt[r.id] ? chip('Выключено', 'outline', 'pause') : r.active ? chip('Действует сейчас', 'warn', 'bolt') : chip('Ждёт условия', 'outline', 'clock');
     const anyActive = RULES.some(r => r.active && st.adapt[r.id]);
+    const ruleRow = r => {
+      const id = 'profile-rule-' + r.id;
+      const chipSlot = h('span', null, ruleChip(r));
+      return h('div', { class: 'profile-rule' },
+        h('label', { class: 'profile-rule-text', for: id }, h('span', { class: 'profile-rule-title' }, r.t), h('span', { class: 'profile-rule-hint' }, r.d)),
+        switchInput(id, st.adapt[r.id], r.t, v => {
+          st.adapt[r.id] = v; UI.clear(chipSlot).appendChild(ruleChip(r));
+          UI.toast((v ? 'Правило включено: ' : 'Правило выключено: ') + r.t, v ? 'check' : 'pause');
+        }),
+        h('div', { class: 'profile-rule-status' }, chipSlot, h('span', { class: 'xsmall muted' }, r.now)));
+    };
+    const streakOn = st.adapt.lose3 || st.adapt.win3;
     return card({
-      id: 'profile-adapt', class: 'profile-anchor', title: 'Адаптации ставки', subtitle: 'Автоматически меняют размер ставки после серий и просадок',
+      id: 'profile-adapt', class: 'profile-anchor', title: 'Адаптации ставки', subtitle: 'Меняют размер ставки по сериям, просадке и итогу недели · правила из бота',
       body: [
         h('div', { class: 'profile-dd' },
           h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Просадка от пика ' + fmt.money(S.peak)), h('b', { class: 'num' }, fmt.signedPct(dd))),
@@ -924,18 +971,19 @@
             h('span', { class: 'profile-dd-mark', style: { left: (10 / max * 100) + '%' } }),
             h('span', { class: 'profile-dd-mark', style: { left: (20 / max * 100) + '%' } })),
           h('div', { class: 'profile-dd-scale', 'aria-hidden': 'true' }, h('span', { style: 'left:0' }, '0%'), h('span', { style: { left: (10 / max * 100) + '%' } }, '−10%'), h('span', { style: { left: (20 / max * 100) + '%' } }, '−20%')),
-          h('div', { class: 'xsmall muted' }, anyActive ? 'Сейчас действует хотя бы одно правило — ставки в новых анализах уменьшены.' : 'Серия — ' + streakText + ', просадка меньше 10%: ни одно правило сейчас не действует.')),
-        h('div', null, RULES.map(r => {
-          const id = 'profile-rule-' + r.id;
-          const chipSlot = h('span', null, ruleChip(r));
-          return h('div', { class: 'profile-rule' },
-            h('label', { class: 'profile-rule-text', for: id }, h('span', { class: 'profile-rule-title' }, r.t), h('span', { class: 'profile-rule-hint' }, r.d)),
-            switchInput(id, st.adapt[r.id], r.t, v => {
-              st.adapt[r.id] = v; UI.clear(chipSlot).appendChild(ruleChip(r));
-              UI.toast((v ? 'Правило включено: ' : 'Правило выключено: ') + r.t, v ? 'check' : 'pause');
-            }),
-            h('div', { class: 'profile-rule-status' }, chipSlot, h('span', { class: 'xsmall muted' }, r.now)));
-        })),
+          h('div', { class: 'xsmall muted' }, anyActive
+            ? 'Сейчас действует хотя бы одно правило — ставки в новых анализах изменены.'
+            : 'Серия — ' + streakText + ', просадка ' + fmt.signedPct(dd) + ', за 7 дней ' + fmt.signedPct(weekPct) + ': ни одно правило сейчас не действует.')),
+        h('div', { class: 'profile-rule-groups' }, GROUPS.map(g => h('div', { class: 'profile-rule-group', role: 'group', 'aria-labelledby': 'profile-rg-' + g.id },
+          h('div', { class: 'profile-rule-group-head' }, h('h4', { id: 'profile-rg-' + g.id }, g.title), g.doubt && chip('Под вопросом', 'outline', 'alert')),
+          g.rules.map(ruleRow),
+          g.doubt && UI.callout('info', 'info', h('div', { class: 'stack', style: 'gap:8px' },
+            h('div', null, 'Перенесено из бота. При честных вероятностях серии случайны — предлагаем выключить и оставить лимиты просадки (LLM_LEARNING.md §3.5).'),
+            streakOn && h('div', { class: 'row' }, button('Выключить оба правила серий', { kind: 'secondary', size: 'sm', icon: 'pause', onClick: () => {
+              st.adapt.lose3 = false; st.adapt.win3 = false; drawPanel();
+              requestAnimationFrame(() => { const el = document.getElementById('profile-rule-lose3'); if (el) el.focus(); });
+              UI.toast('Правила серий выключены. Остаются лимиты просадки и итог недели', 'pause');
+            } }))))))),
       ],
     });
   }
@@ -974,7 +1022,7 @@
           usage('Ставок сегодня', todayN, L.count, todayN + ' из ' + L.count),
           usage('Сумма сегодня', todaySum, L.amount, fmt.int(todaySum) + ' из ' + fmt.money(L.amount))),
         h('div', { class: 'profile-fields bottom' }, cF, aF),
-        h('p', { class: 'xsmall muted' }, 'При достижении лимита кнопка «Поставить» блокируется до полуночи по вашему времени. Понизить лимит можно сразу, повысить — через 24 часа после запроса.'),
+        h('p', { class: 'xsmall muted' }, 'При достижении лимита кнопка «Сохранить ставку» блокируется до полуночи по вашему времени. Понизить лимит можно сразу, повысить — через 24 часа после запроса.'),
         P && UI.callout('info', 'clock', h('div', { class: 'stack', style: 'gap:8px' },
           h('div', null, 'Запрошено повышение: ' + [P.count && 'до ' + P.count + ' ' + pl(P.count, 'ставки', 'ставок', 'ставок'), P.amount && 'до ' + fmt.money(P.amount)].filter(Boolean).join(' и ') + ' в день. Вступит в силу ' + dateDay(addDays(TODAY, 1)) + ', через 24 часа.'),
           h('div', { class: 'row' }, button('Отменить запрос', { kind: 'ghost', size: 'sm', onClick: () => { st.limitsPending = null; drawPanel(); UI.toast('Запрос на повышение лимита отменён', 'x'); } })))),
@@ -1304,7 +1352,7 @@
         UI.kv([
           ['Ставки и экспрессы', D.bets.length + ' · из них ' + openBets.length + ' в игре'],
           ['События в экспрессах', String(D.allLegs.length + openLegs)],
-          ['Профили игроков', String(D.players.length)],
+          ['Профили игроков', profiledN + ' + ' + missingN + ' без профиля'],
           ['Уроки модели и версии стратегии', D.lessons.length + ' и ' + D.strategyVersions.length],
           ['Запуски ИИ: токены и стоимость', String(D.ai.runs.length)],
           ['Настройки', 'без паролей и ключей'],
@@ -1327,7 +1375,7 @@
       title: 'Перенос из Telegram-бота', subtitle: 'Из JSON-файлов и инструкций текущего бота',
       body: [
         h('p', { class: 'small soft' }, 'Текущий бот хранит данные в JSON-файлах, а правила — в markdown-инструкциях. Загрузите их: перенесём ставки, игроков и правила стратегии, дубликаты отбросим.'),
-        UI.kv([['Последний перенос', dateLong(U.since)], ['Перенесено', D.players.length + ' игроков, правила стратегии']]),
+        UI.kv([['Последний перенос', dateLong(U.since)], ['Перенесено', profiledN + ' ' + pl(profiledN, 'профиль игрока', 'профиля игроков', 'профилей игроков') + ', правила стратегии']]),
       ],
       foot: [button('Выбрать файлы', { kind: 'secondary', icon: 'upload', onClick: importModal })],
     });

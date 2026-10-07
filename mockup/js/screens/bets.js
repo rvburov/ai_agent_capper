@@ -144,7 +144,8 @@
   // ---------- стили ----------
   const CSS = `
     .bets-head .lead { max-width: 70ch; }
-    .bets-head h2 { font-size: var(--fs-xl); }
+    .bets-head h2 { font-size: var(--fs-2xl); }
+    @media (max-width: 720px) { .bets-head h2 { font-size: var(--fs-xl); } }
 
     .bets-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
     .bets-search { position: relative; flex: 1 1 220px; min-width: 0; }
@@ -477,7 +478,7 @@
         anyActive(F) && !UI.isMobile() ? button('Сбросить фильтры', { kind: 'ghost', size: 'sm', icon: 'x', onClick: resetFilters, attrs: { class: 'btn ghost sm bets-sum-reset' } }) : null),
       h('div', { class: 'bets-sum-grid' },
         cell('Рассчитано ставок', String(s.n), s.open.length ? ['и ещё ' + s.open.length + ' в игре: ', h('span', { class: 'bets-nw' }, fmt.money(s.openStake))] : 'открытых нет'),
-        cell([h('span', { class: 'bets-l-full' }, 'Выигрыш · проигрыш · возврат'), h('span', { class: 'bets-l-short' }, 'Выигр. · проигр. · возвр.')], s.wins + ' · ' + s.losses + ' · ' + s.voids, s.winrate == null ? 'нет рассчитанных' : 'проходимость ' + fmt.pct(s.winrate), null, wlv),
+        cell([h('span', { class: 'bets-l-full' }, 'Выигрыш · проигрыш · возврат'), h('span', { class: 'bets-l-short' }, 'Выигр. · проигр. · возвр.')], s.wins + ' · ' + s.losses + ' · ' + s.voids, s.winrate == null ? 'нет рассчитанных' : 'винрейт ' + fmt.pct(s.winrate), null, wlv),
         cell('Оборот', fmt.money(s.turnover), s.avgStake ? ['в среднем ', h('span', { class: 'bets-nw' }, fmt.money(s.avgStake))] : '—'),
         cell('Прибыль', fmt.signedMoney(s.profit), anyActive(F) ? 'по выбранным ставкам' : ['банк сейчас ', h('span', { class: 'bets-nw' }, fmt.money(S.bank))], toneCls(s.profit)),
         cell('ROI', pctOrDash(s.roi), 'прибыль ÷ оборот', toneCls(s.roi)),
@@ -535,7 +536,7 @@
           h('span', { class: 'bets-oleg-time' }, m ? m.time : '—'),
           h('div', { style: 'min-width:0' },
             h('div', { class: 'bets-oleg-match' }, plink(l.p1), ' — ', plink(l.p2)),
-            h('div', { class: 'bets-oleg-meta', title: 'Вероятность исхода: оценка модели и вероятность по кэфу (1 / кэф)' }, h('b', null, l.marketLabel), ' · ', h('span', { class: 'bets-nw' }, 'модель ' + fmt.prob(l.p)), ' · ', h('span', { class: 'bets-nw' }, 'по кэфу ' + fmt.prob(1 / l.odds)))),
+            h('div', { class: 'bets-oleg-meta', title: 'Вероятность исхода: оценка ИИ и вероятность по кэфу (1 / кэф)' }, h('b', null, l.marketLabel), ' · ', h('span', { class: 'bets-nw' }, 'ИИ ' + fmt.prob(l.p)), ' · ', h('span', { class: 'bets-nw' }, 'по кэфу ' + fmt.prob(1 / l.odds)))),
           h('span', { class: 'odds bets-oleg-odds' }, fmt.odds(l.odds)));
       })),
       h('dl', { class: 'bets-open-sum' },
@@ -638,7 +639,7 @@
   function legsTable(b) {
     const th = (t, cls, title) => h('th', { class: cls, title }, t);
     return h('div', { class: 'table-wrap' }, h('table', { class: 'table bets-legtable' },
-      h('thead', null, h('tr', null, th('Событие'), th('Счёт', 'c'), th('Кэф', 'r'), th('Закрытие', 'r', 'Кэф перед началом матча'), th('CLV', 'r'), th('Модель', 'r', 'Вероятность исхода по оценке ИИ'), th('По кэфу', 'r', 'Вероятность по кэфу: 1 / кэф'), th('Перевес', 'r', 'Модель минус вероятность по кэфу'), th('Итог'))),
+      h('thead', null, h('tr', null, th('Событие'), th('Счёт', 'c'), th('Кэф', 'r'), th('Закрытие', 'r', 'Кэф перед началом матча'), th('CLV', 'r'), th('ИИ', 'r', 'Вероятность исхода по оценке ИИ'), th('По кэфу', 'r', 'Вероятность по кэфу: 1 / кэф'), th('Разница', 'r', 'ИИ − по кэфу, п.п.'), th('Итог'))),
       h('tbody', null, b.legs.map((l, i) => {
         const implied = 1 / l.odds, edge = (l.p - implied) * 100, clv = legClv(l), sc = legScore(b, l, i);
         return h('tr', null,
@@ -664,7 +665,7 @@
       ['Прибыль', h('span', { class: toneCls(b.profit) }, fmt.signedMoney(b.profit))],
       ['Банк после', fmt.money(b.bankAfter)],
       ['CLV ставки', h('span', { class: toneCls(b.clv) }, clvText(b.clv))],
-      ['Шанс: модель / кэф', fmt.prob(pModel) + ' / ' + fmt.prob(1 / b.total)],
+      ['Шанс: ИИ / кэф', fmt.prob(pModel) + ' / ' + fmt.prob(1 / b.total)],
     ]);
   }
 
@@ -679,15 +680,15 @@
       c('Прибыль', fmt.signedMoney(b.profit), toneCls(b.profit)),
       c('Банк после', fmt.money(b.bankAfter)),
       c('CLV ставки', clvText(b.clv), toneCls(b.clv)),
-      c('Шанс: модель / кэф', fmt.prob(pModel) + ' / ' + fmt.prob(1 / b.total)));
+      c('Шанс: ИИ / кэф', fmt.prob(pModel) + ' / ' + fmt.prob(1 / b.total)));
   }
 
   function detailBlock(b) {
     return h('div', { class: 'bets-detail' },
       h('div', { class: 'bets-detail-main' },
-        h('div', { class: 'bets-detail-cap' }, h('h4', null, 'События ставки'), h('span', { class: 'xsmall muted' }, 'Перевес = вероятность модели − вероятность по кэфу. CLV = кэф ÷ закрывающий − 1.')),
+        h('div', { class: 'bets-detail-cap' }, h('h4', null, 'События ставки'), h('span', { class: 'xsmall muted' }, 'Разница = вероятность ИИ − вероятность по кэфу, п.п. CLV = кэф ÷ закрывающий − 1.')),
         legsTable(b),
-        b.status === 'void' && h('div', { class: 'bets-detail-note' }, UI.callout('', 'refresh', 'Букмекер аннулировал ставку (снятие игрока до начала матча) — сумма вернулась на счёт. В калибровке и обучении не учитывается.'))),
+        b.status === 'void' && h('div', { class: 'bets-detail-note' }, UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счёт. В калибровке и обучении не учитывается.'))),
       h('div', { class: 'bets-detail-bottom' },
         h('div', { class: 'bets-detail-box' }, h('span', { class: 'eyebrow' }, 'Расчёт'), kvGrid(b)),
         h('div', { class: 'bets-detail-box' },
@@ -751,10 +752,10 @@
               h('dl', { class: 'bets-dleg-grid' },
                 h('div', null, h('dt', null, 'Закрытие'), h('dd', { class: 'odds' }, l.closing ? fmt.odds(l.closing) : '—')),
                 h('div', null, h('dt', null, 'CLV'), h('dd', { class: toneCls(clv) }, clvText(clv))),
-                h('div', null, h('dt', null, 'Модель'), h('dd', null, fmt.prob(l.p))),
+                h('div', null, h('dt', null, 'ИИ'), h('dd', null, fmt.prob(l.p))),
                 h('div', null, h('dt', null, 'По кэфу'), h('dd', null, fmt.prob(1 / l.odds)))));
           }),
-          b.status === 'void' && UI.callout('', 'refresh', 'Букмекер аннулировал ставку (снятие игрока до начала матча) — сумма вернулась на счёт.'),
+          b.status === 'void' && UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счёт.'),
           b.status === 'open'
             ? UI.kv([['Букмекер', b.bookmaker], ['Итоговый кэф', h('span', { class: 'odds' }, fmt.odds(b.total))], ['Выплата при выигрыше', fmt.money(Math.round(b.stake * b.total))]])
             : betKv(b),
@@ -782,10 +783,10 @@
       const head = h('b', null, D.match(l) + ' · ' + l.marketLabel + ' @' + fmt.odds(l.odds));
       let text;
       if (r === 'win') {
-        text = [' — зашло' + (sc ? ' (' + sc + ')' : '') + '. Модель ' + fmt.prob(l.p) + ', по кэфу ' + fmt.prob(1 / l.odds) + '. ',
+        text = [' — зашло' + (sc ? ' (' + sc + ')' : '') + '. ИИ ' + fmt.prob(l.p) + ', по кэфу ' + fmt.prob(1 / l.odds) + '. ',
           clv == null ? 'Закрывающий кэф не внесён — CLV не посчитать.' : clv >= 0 ? 'Кэф к старту упал до ' + fmt.odds(l.closing) + ' (CLV ' + fmt.signedPct(clv) + ') — рынок согласился с оценкой.' : 'Кэф к старту вырос до ' + fmt.odds(l.closing) + ' (CLV ' + fmt.signedPct(clv) + '): рынок был против, выигрыш скорее удачный.'];
       } else if (r === 'loss') {
-        text = [' — не зашло' + (sc ? ' (' + sc + ')' : '') + '. Модель давала ' + fmt.prob(l.p) + ', по кэфу ' + fmt.prob(1 / l.odds) + '. ',
+        text = [' — не зашло' + (sc ? ' (' + sc + ')' : '') + '. ИИ давал ' + fmt.prob(l.p) + ', по кэфу ' + fmt.prob(1 / l.odds) + '. ',
           clv == null ? 'Закрывающий кэф не внесён, поэтому отличить невезение от ошибки сложнее.'
             : clv >= 0 ? 'К старту кэф упал до ' + fmt.odds(l.closing) + ' — рынок согласился с нами. Такой исход ожидаем примерно в ' + fmt.prob(1 - l.p) + ' случаев: это дисперсия.'
               : 'К старту кэф вырос до ' + fmt.odds(l.closing) + ' — рынок оценил шансы ниже модели. Проверяю, что могло быть упущено: усталость после прошлого матча, новости, статистика на покрытии.',
@@ -800,7 +801,7 @@
       title: 'Разбор ставки №' + b.id,
       wide: true,
       body: [
-        UI.callout('info', 'info', 'Пример разбора. В рабочей версии его пишет Claude Sonnet сразу после внесения результата, около 0,03 $ за ставку. Одна ставка не доказывает ошибку: невезение от систематического промаха отделяют только на дистанции.'),
+        UI.callout('info', 'info', 'Пример разбора. В рабочей версии его пишет Claude Sonnet 5.5 сразу после внесения результата, около $0,02 за ставку. Одна ставка не доказывает ошибку: невезение от систематического промаха отделяют только на дистанции.'),
         h('div', { class: 'row' }, h('span', { class: 'small muted' }, fmt.dateFull(b.date) + ' · ' + betKind(b) + ' @' + fmt.odds(b.total) + ' · CLV ' + clvText(b.clv)), v && chip(v.label, v.kind, v.icon)),
         h('h4', null, 'По событиям'),
         h('ul', { class: 'bets-review-legs' }, items),
@@ -906,7 +907,7 @@
         h('legend', { class: 'sr-only' }, 'Событие ' + (i + 1) + ': ' + D.match(l)),
         h('div', { class: 'bets-sleg-head' },
           h('div', null, h('div', { class: 'bets-sleg-match' }, D.match(l)),
-            h('div', { class: 'xsmall muted' }, (m ? m.time + ' · ' + m.round + ' · ' : '') + l.marketLabel + ' · модель ' + fmt.prob(l.p))),
+            h('div', { class: 'xsmall muted' }, (m ? m.time + ' · ' + m.round + ' · ' : '') + l.marketLabel + ' · ИИ ' + fmt.prob(l.p))),
           h('span', { class: 'odds bets-sleg-odds', 'aria-label': 'Кэф ' + fmt.odds(l.odds) }, fmt.odds(l.odds))),
         h('div', { class: 'bets-sleg-grid' },
           h('div', { class: 'field bets-sleg-res' }, h('div', { class: 'field-label' }, 'Исход ставки'), seg, autoNote),

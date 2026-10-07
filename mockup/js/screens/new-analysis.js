@@ -16,9 +16,9 @@
     { key: 'h2p', label: 'Ф2(+1.5)' },
   ];
   const MODES = [
-    { id: 'precise', label: 'Точный', model: 'Opus 5.5', perEvent: 0.09, secs: 45, note: 'Глубокий разбор и поиск свежих новостей. Для решения о ставке.' },
-    { id: 'balanced', label: 'Сбалансированный', model: 'Sonnet 5.5', perEvent: 0.045, secs: 30, note: 'Та же схема без поиска новостей. Для типовых матчей.' },
-    { id: 'eco', label: 'Экономный', model: 'Haiku 4.5 + кэш', perEvent: 0.02, secs: 20, note: 'Черновая оценка по сохранённым профилям, чтобы отсеять лишнее.' },
+    { id: 'precise', label: 'Точный', model: 'Opus 5.5', perEvent: 0.09, secs: 45, note: 'Свежие новости о травмах и снятиях ищет Sonnet 5.5, вероятности считает Opus 5.5. Для решения о ставке.' },
+    { id: 'balanced', label: 'Сбалансированный', model: 'Sonnet 5.5', perEvent: 0.045, secs: 30, flag: 'не проверен', note: 'Та же схема без поиска новостей. Качество на eval-наборе ещё не проверено — для решения о ставке выбирайте «Точный».' },
+    { id: 'eco', label: 'Экономный', model: 'Haiku 4.5 + кэш', perEvent: 0.02, secs: 20, note: 'Черновая оценка по сохранённым профилям, чтобы отсеять лишнее. Не для решения о ставке.' },
   ];
   const COLLECT = { cost: 0.05, secs: 40 };   // сбор профиля игрока, которого нет в базе
   const REFRESH = { cost: 0.01, secs: 15 };   // обновление устаревшего профиля
@@ -28,6 +28,7 @@
   const SURF_WORDS = [[/крыт|indoor|зал/i, 'indoor'], [/хард|hard/i, 'hard'], [/грунт|clay/i, 'clay'], [/трав|grass/i, 'grass']];
   const TOURS = [...new Set(D.calendar.flatMap(c => c.name.split(' / ')))];
   const LESSONS_ON = D.lessons.filter(l => l.inPrompt).length;
+  const LEGS = '2–' + ST.maxLegs; // экспресс из 2–3 событий, ординаров стратегия не допускает
 
   const EXAMPLE = [
     'Текущий банк: ' + fmt.int(S.bank) + ' ₽',
@@ -252,6 +253,7 @@
     .new-step.done .new-step-n { background: var(--accent-soft); color: var(--accent-ink); }
     .new-step.current { color: var(--fg); border-color: var(--accent); font-weight: 600; }
     .new-step.current .new-step-n { background: var(--accent); color: var(--accent-fg); }
+    .new-step-short { display: none; }
 
     .new-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 380px); gap: 16px; align-items: start; }
     .new-main, .new-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -365,9 +367,9 @@
     .new-today-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); color: var(--fg); text-align: left; cursor: pointer; min-width: 0; }
     .new-today-btn:hover { border-color: var(--line-strong); }
     .new-today-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
-    .new-today-top { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 6px; font-size: var(--fs-xs); color: var(--fg-3); }
+    .new-today-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; width: 100%; gap: 2px 6px; font-size: var(--fs-xs); color: var(--fg-3); min-width: 0; }
     .new-today-top .mono { color: var(--fg-2); font-weight: 500; }
-    .new-today-state { display: inline-flex; align-items: center; gap: 3px; }
+    .new-today-state { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
     .new-today-state svg { width: 12px; height: 12px; }
     .new-today-btn[aria-pressed="true"] .new-today-state { color: var(--accent-ink); font-weight: 600; }
     .new-today-name { font-weight: 600; line-height: 1.3; }
@@ -398,6 +400,7 @@
     .new-mode-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .new-mode-title { font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
     .new-mode-model { font-size: var(--fs-xs); color: var(--fg-3); font-weight: 500; }
+    .new-mode-title .chip { font-weight: 500; }
     .new-mode.on .new-mode-model { color: var(--accent-ink); }
     .new-mode-note { font-size: var(--fs-xs); color: var(--fg-2); }
     .new-mode-cost { display: flex; flex-direction: column; align-items: flex-end; text-align: right; white-space: nowrap; }
@@ -451,9 +454,11 @@
     @media (max-width: 480px) {
       .tabs.new-tabs button svg { display: none; }
       .tabs.new-tabs button { font-size: var(--fs-sm); padding: 13px 6px; }
-      .new-step:not(.current) .new-step-label { display: none; }
-      .new-step:not(.current) { padding-right: 4px; }
-      .new-steps { gap: 6px 22px; }
+      .new-step-full { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      .new-step-short { display: inline; }
+      .new-step { padding-right: 10px; gap: 6px; }
+      .new-steps { gap: 6px 18px; }
+      .new-step + .new-step::before { left: -15px; width: 12px; }
     }
   `);
 
@@ -925,7 +930,7 @@
         const on = m.id === state.mode;
         return h('label', { class: ['new-mode', on && 'on'] },
           h('input', { type: 'radio', name: 'new-mode', value: m.id, checked: on, 'data-fk': 'mode-' + m.id, on: { change: () => { state.mode = m.id; renderSide(); } } }),
-          h('span', { class: 'new-mode-main' }, h('span', { class: 'new-mode-title' }, m.label, h('span', { class: 'new-mode-model' }, m.model)), h('span', { class: 'new-mode-note' }, m.note)),
+          h('span', { class: 'new-mode-main' }, h('span', { class: 'new-mode-title' }, m.label, h('span', { class: 'new-mode-model' }, m.model), m.flag && chip(m.flag, 'warn', 'flask')), h('span', { class: 'new-mode-note' }, m.note)),
           h('span', { class: 'new-mode-cost' }, h('b', null, usd(Math.max(1, a.n) * m.perEvent)), h('small', null, fmtTime(Math.max(1, a.n) * m.secs))));
       }),
       a.n ? null : h('span', { class: 'xsmall muted' }, 'Цена указана за одно событие.'));
@@ -936,7 +941,7 @@
     const bud = h('div', { class: 'new-sub', style: 'gap:6px' },
       h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Бюджет ИИ на ' + D.ai.month), h('span', { class: 'num' }, h('b', null, fmt.usd(spent)), ' из ' + fmt.usd(budget, 0))),
       UI.meter(after, budget, after / budget > 0.9 ? 'bad' : after / budget > 0.7 ? 'warn' : null),
-      h('div', { class: 'xsmall muted' }, 'После запуска ≈ ' + fmt.usd(after) + '. Профили и правила стратегии берутся из кэша промпта — в ' + D.ai.month + 'е так пришло ' + D.ai.cacheShare + '% входных токенов.'));
+      h('div', { class: 'xsmall muted' }, 'После запуска ≈ ' + fmt.usd(after) + '. Профили и правила стратегии берутся из кэша промпта — в ' + D.ai.month.replace(/ь$/, 'е') + ' так пришло ' + D.ai.cacheShare + '% входных токенов.'));
     const launchBtn = button('Запустить анализ', { kind: 'primary', size: 'lg', icon: 'spark', block: true, disabled: !!a.reason, onClick: launch, attrs: { id: 'new-launch', 'data-fk': 'launch' } });
     return UI.card({
       class: 'new-launch-card', title: 'Перед запуском', subtitle: 'Что уйдёт в анализ и сколько это стоит',
@@ -955,7 +960,7 @@
     else steps.push(['database', 'accent', 'Данные игроков свежие', 'Обновлять ничего не нужно — профили берём из базы.']);
     steps.push(['brain', '', 'Оценим вероятности исходов', 'Форма, Эло на покрытии, подача и приём, личные встречи, усталость' + (a.mode.id === 'precise' ? ', свежие новости о травмах и снятиях' : '') + ' и ' + LESSONS_ON + ' ' + fmt.plural(LESSONS_ON, 'подтверждённый урок', 'подтверждённых урока', 'подтверждённых уроков') + ' из прошлых ставок.']);
     steps.push(['target', '', 'Сравним с рынком', 'Уберём маржу букмекера и отметим исходы, где оценка модели выше рынка.']);
-    steps.push(['ticket', '', 'Соберём экспресс', 'До ' + ST.maxLegs + ' событий с итоговым кэфом ≤ ' + fmt.odds(ST.totalMax) + ' и сумму по таблице ставок от банка ' + fmt.money(state.bank) + '.']);
+    steps.push(['ticket', '', 'Соберём экспресс', LEGS + ' ' + fmt.plural(ST.maxLegs, 'событие', 'события', 'событий') + ' с итоговым кэфом ≤ ' + fmt.odds(ST.totalMax) + ' (ординары стратегия не допускает) и сумму по таблице ставок от банка ' + fmt.money(state.bank) + '.']);
     steps.push(['check', '', 'Решение за вами', 'ИИ может ошибаться и сам ставки не делает. Результат вы внесёте после матча — на нём модель учится.']);
     return UI.card({
       title: 'Что произойдёт после запуска',
@@ -972,12 +977,14 @@
         UI.kv([
           ['Вероятность события', '≥ ' + ST.minProb + '%'],
           ['Кэф события', fmt.odds(ST.oddsMin) + '–' + fmt.odds(ST.oddsMax)],
-          ['Событий в экспрессе', 'до ' + ST.maxLegs],
+          ['Событий в экспрессе', LEGS],
           ['Итоговый кэф', '≤ ' + fmt.odds(ST.totalMax)],
         ]),
         a.n > ST.maxLegs
           ? UI.callout('info', 'info', 'Событий больше ' + ST.maxLegs + ' — в экспресс попадут не больше ' + ST.maxLegs + ' лучших, остальные получат отдельную оценку.')
-          : h('p', { class: 'xsmall muted' }, 'События, которые не проходят эти правила, ИИ в экспресс не включит, даже если вы их ввели, — но оценку по ним покажет.'),
+          : a.n === 1
+            ? UI.callout('warn', 'alert', 'Одно событие — экспресс из него не собрать, а ординары стратегия не допускает. Оценку покажем, ставку не предложим. Добавьте ещё одно событие.')
+            : h('p', { class: 'xsmall muted' }, 'События, которые не проходят эти правила, ИИ в экспресс не включит, даже если вы их ввели, — но оценку по ним покажет.'),
       ],
     });
   }
@@ -986,10 +993,11 @@
     const s = refs.steps; if (!s) return;
     clear(s);
     const inputDone = a.n > 0 && !(state.tab === 'text' && (isDirty() || state.parsing));
-    [['Ввод событий', inputDone ? 'done' : 'current'], ['Проверка', inputDone ? 'current' : ''], ['Анализ', '']].forEach(([label, st], i) =>
+    // На телефоне видны короткие подписи, полная подпись остаётся для экранного диктора
+    [['Ввод событий', 'Ввод', inputDone ? 'done' : 'current'], ['Проверка', 'Проверка', inputDone ? 'current' : ''], ['Анализ', 'Анализ', '']].forEach(([label, short, st], i) =>
       s.appendChild(h('li', { class: ['new-step', st], 'aria-current': st === 'current' ? 'step' : null },
         h('span', { class: 'new-step-n' }, st === 'done' ? [icon('check'), h('span', { class: 'sr-only' }, 'готово:')] : String(i + 1)),
-        h('span', { class: 'new-step-label' }, label))));
+        h('span', { class: 'new-step-label' }, h('span', { class: 'new-step-full' }, label), h('span', { class: 'new-step-short', 'aria-hidden': 'true' }, short)))));
   }
 
   function renderBar(a) {

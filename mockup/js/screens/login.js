@@ -34,7 +34,7 @@
   function fresh() {
     return {
       step: 'login', lastStep: null,
-      email: DATA.user.email, pwd: '', remember: false, attempts: MAX_ATTEMPTS, error: false, emailError: null,
+      email: DATA.user.email, pwd: '', remember: false, attempts: MAX_ATTEMPTS, error: false, emailError: null, pwdError: null,
       otp: '', otpError: null, backup: '', backupError: null,
       resetEmail: null, resetError: null, resent: false,
       reg: { invite: 'CAP-7Q4M-2KXD', email: '', pwd: '', pwd2: '', agree: false }, regErr: {},
@@ -465,23 +465,25 @@
           h('div', null, h('b', null, 'Неверный email или пароль.'), ' Осталось попыток: ' + S.attempts),
           S.attempts === 1 && h('div', null, 'После следующей ошибки вход закроется на 15 минут, а в Telegram придёт уведомление.'))),
       email,
-      pwField({ id: 'login-password', label: 'Пароль', value: S.pwd, autocomplete: 'current-password', invalid: !!err, describedBy: err ? 'login-error' : null, autofocus: true,
-        aside: h('a', { class: 'login-link', href: '#login-reset' }, 'Забыли пароль?'), onInput: v => { S.pwd = v; } }),
+      pwField({ id: 'login-password', label: 'Пароль', value: S.pwd, autocomplete: 'current-password', invalid: !!(err || S.pwdError), error: S.pwdError, describedBy: err ? 'login-error' : null, autofocus: true,
+        aside: h('a', { class: 'login-link', href: '#login-reset' }, 'Забыли пароль?'), onInput: v => { S.pwd = v; S.pwdError = null; } }),
       check({ id: 'login-remember', checked: S.remember, title: 'Запомнить это устройство на 30 дней', hint: 'Код 2FA здесь не спросим 30 дней. Не отмечайте на чужом компьютере.', onChange: v => { S.remember = v; } }),
       button('Войти', { kind: 'primary', size: 'lg', block: true, type: 'submit', iconRight: 'arrowRight' }),
       h('div', { class: 'login-alt' }, h('span', { class: 'muted' }, 'Нет аккаунта?'), h('a', { class: 'login-link', href: '#login-invite' }, 'Регистрация только по приглашению', icon('chevronRight'))),
-      demoHint('В макете пароль «wrong» или пустое поле покажут ошибку, любой другой пароль ведёт к шагу с кодом.'));
+      demoHint('В макете пароль «wrong» покажет ошибку и спишет одну попытку из 5, любой другой пароль ведёт к шагу с кодом.'));
     return { node: form };
   }
   function submitLogin(e) {
     e.preventDefault();
     if (busy) return;
-    S.emailError = null;
+    S.emailError = null; S.pwdError = null;
+    // пустые поля проверяем до сервера: такая ошибка не тратит попытку входа
     if (!validEmail(S.email)) { S.error = false; S.emailError = 'Введите email в формате name@example.com'; draw(); focusSel('#login-email'); return; }
+    if (!S.pwd) { S.error = false; S.pwdError = 'Введите пароль'; draw(); focusSel('#login-password'); return; }
     busy = true;
     setBusy(e.target.querySelector('[type=submit]'), 'Проверяем…');
     later(450, () => {
-      if (!S.pwd || S.pwd === 'wrong') {
+      if (S.pwd === 'wrong') {
         S.attempts -= 1; S.pwd = '';
         if (S.attempts <= 0) { S.attempts = 0; S.error = false; UI.go('login-locked'); return; }
         S.error = true; draw(); focusSel('#login-password'); return;
@@ -744,7 +746,7 @@
         h('div', { class: 'login-brandrow' }, UI.brandMark(), h('div', null, h('div', { class: 'brand-name' }, 'AI Capper'), h('div', { class: 'brand-sub' }, 'личный теннисный аналитик'))),
         h('div', { class: 'login-hero' },
           h('div', { class: 'eyebrow' }, 'Закрытый личный кабинет'),
-          h('p', { class: 'login-hero-h' }, 'Теннисная аналитика, которая учится на своих ставках'),
+          h('p', { class: 'login-hero-h' }, 'Теннисная аналитика, которая учится на ваших ставках'),
           h('p', { class: 'login-hero-p' }, 'Claude собирает данные об игроках, разбирает матчи, которые вы внесли, предлагает экспресс и сверяет прогнозы с результатами.'),
           h('p', { class: 'login-hero-note' }, icon('info'), 'Аналитика и вероятности — не гарантия выигрыша.')),
         h('section', { class: 'login-sec', 'aria-labelledby': 'login-sec-title' },
@@ -764,7 +766,7 @@
         h('div', { class: 'login-m-top' },
           h('div', { class: 'login-brandrow' }, UI.brandMark(), h('div', { style: 'min-width:0' }, h('div', { class: 'brand-name' }, 'AI Capper'), h('div', { class: 'brand-sub' }, 'личный теннисный аналитик'))),
           themeBtn()),
-        h('p', { class: 'login-m-lead' }, 'Разбор матчей и экспресс от Claude, который учится на своих ставках.')),
+        h('p', { class: 'login-m-lead' }, 'Разбор матчей и экспресс от Claude. Система учится на ваших ставках: уроки, стратегия, своя ML-модель.')),
       h('main', { class: 'login-m-card' }, v.node),
       h('details', { class: 'login-secd' },
         h('summary', null, icon('shield'),
@@ -795,7 +797,7 @@
       const changed = S.lastStep !== null && S.lastStep !== step;
       if (changed) {
         // уходя с шага, сбрасываем его ошибки и одноразовые поля
-        S.emailError = null; S.otpError = null; S.backupError = null; S.resetError = null;
+        S.emailError = null; S.pwdError = null; S.otpError = null; S.backupError = null; S.resetError = null;
         S.regErr = {}; S.setupErr = {}; S.otp = ''; S.backup = '';
         if (step !== 'login') S.error = false;
         if (step !== 'sent') S.resent = false;
