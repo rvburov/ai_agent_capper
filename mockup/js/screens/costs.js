@@ -329,7 +329,7 @@
     .costs-total { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); font-size: var(--fs-sm); color: var(--fg-2); }
     .costs-total b { color: var(--fg); font-variant-numeric: tabular-nums; }
 
-    .costs-compare { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1fr) minmax(0, 1fr); margin: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; font-size: var(--fs-sm); }
+    .costs-compare { display: grid; grid-template-columns: minmax(0, .75fr) minmax(0, .85fr) minmax(0, 1.4fr); margin: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; font-size: var(--fs-sm); }
     .costs-compare > div { padding: 8px 10px; border-top: 1px solid var(--line); min-width: 0; line-height: 1.4; }
     .costs-compare > .hd { border-top: 0; background: var(--surface-2); font-size: var(--fs-xs); font-weight: 600; color: var(--fg-2); }
     .costs-compare > .hd.new { color: var(--accent-ink); background: var(--accent-soft); }
@@ -781,9 +781,9 @@
   function compareCard() {
     const an = BASE.analysis;
     const rows = [
-      ['Модель', OLD.model, 'Opus 5.5', 'сильнее; за токен дороже ($4 / $20 против $3 / $15), но токенов ≈ в ' + Math.round(OLD.input / an.avgIn) + ' раз меньше'],
-      ['Запросов к модели', 'до 20', '2–4', 'лимит 4; разбор текста (Haiku) и новости (Sonnet) — отдельными короткими шагами'],
-      ['Входных токенов', '≈ ' + fmt.tokens(OLD.input), '≈ ' + fmt.tokens(an.avgIn), pct(an.cacheShare) + ' из кэша: итерации 2–3 читают то, что записала первая'],
+      ['Модель', OLD.model, 'Opus 5.5', 'сильнее; за токен дороже ($4 / $20 против $3 / $15), но токенов в ≈ ' + Math.round(OLD.input / an.avgIn) + ' раз меньше'],
+      ['Запросов к модели', 'до 20', '2–4', 'лимит 4; текст (Haiku) и новости (Sonnet) — отдельными шагами'],
+      ['Входных токенов', '≈ ' + fmt.tokens(OLD.input), '≈ ' + fmt.tokens(an.avgIn), pct(an.cacheShare) + ' из кэша — на итерациях 2–3'],
       ['Откуда данные', 'Читает .md и JSON по одному', 'Готовое досье из базы', 'поиск — только новости, отдельным шагом'],
       ['Время', '≈ 3–5 мин', fmt.duration(Math.round(an.avgDuration)), 'в среднем за октябрь'],
       ['Цена анализа', '≈ ' + usd(OLD.cost) + ' (оценка)', usd(an.avgCost), 'факт за 1–7 окт'],
@@ -794,7 +794,7 @@
       subtitle: 'Один анализ: бот в Telegram сейчас и новая схема',
       body: [
         UI.hbars({ items: [
-          { label: 'Бот сейчас', value: OLD.cost, color: 'var(--chart-muted)', note: 'оценка $1–4,5' },
+          { label: 'Бот сейчас', value: OLD.cost, color: 'var(--chart-muted)', note: 'оценка' },
           { label: 'Новая схема', value: an.avgCost, color: 'var(--s1)', note: 'факт' },
         ], valueFormat: v => usd(v) }),
         h('div', { class: 'costs-compare' },
@@ -823,14 +823,14 @@
     }).reverse();
     const cand = rows.find(r => r.v.status === 'candidate'), act = rows.find(r => r.fact);
     const status = v => v.status === 'active' ? chip('активна', 'good', 'check') : v.status === 'candidate' ? chip('кандидат', 'info', 'flask') : null;
-    const costCell = r => [h('b', null, '≈ ' + usd(r.cost)), h('div', { class: 'costs-sub' }, r.fact ? 'факт, 1–7 окт' : 'оценка по токенам')];
+    const costCell = r => [h('b', null, '≈ ' + usd(r.cost)), h('div', { class: 'costs-sub' }, r.fact ? 'факт' : 'оценка')];
     const body = mobile
       ? mlist(rows.map(r => ({ title: h('span', { class: 'costs-ver-name' }, r.v.id, status(r.v)), sub: 'лог-лосс ' + fmt.dec(r.v.logloss, 3) + ' · Brier ' + fmt.dec(r.v.brier, 3) + ' · ≈ ' + r.t + ' тыс. токенов' + (r.fact ? '' : ' · оценка'), value: '≈ ' + usd(r.cost) })))
       : h('div', { class: 'costs-ver' }, UI.table({
         columns: [
           { label: 'Версия', render: r => h('span', { class: 'costs-ver-name' }, r.v.id, status(r.v)) },
           { label: 'Токенов', align: 'r', render: r => '≈ ' + r.t + ' тыс.' },
-          { label: 'Цена анализа', align: 'r', render: costCell },
+          { label: 'Цена', align: 'r', render: costCell },
           { label: 'Лог-лосс', align: 'r', render: r => fmt.dec(r.v.logloss, 3) },
         ],
         rows,
@@ -838,7 +838,7 @@
     return card({
       class: 'costs-card costs-o-5',
       title: 'Версии: цена анализа и качество',
-      subtitle: 'Экономию оцениваем только вместе с качеством той же версии. Лог-лосс — на ' + (act ? act.v.n : 220) + ' событиях отложенной выборки, меньше — лучше.',
+      subtitle: 'Экономию оцениваем только вместе с качеством той же версии. Цена ' + activeStrategy.id + ' — факт за 1–7 окт, остальных — оценка по токенам. Лог-лосс — на ' + (act ? act.v.n : 220) + ' событиях отложенной выборки, меньше — лучше.',
       body: [
         body,
         cand && act ? howto(cand.v.id + ' дешевле ' + act.v.id + ' на ' + Math.round((1 - cand.cost / act.cost) * 100) + '%, а разница лог-лосса (' + d3(cand.v.logloss - act.v.logloss) + ') — в пределах шума. Как более дешёвую, ' + cand.v.id + ' проверяют по правилу «не хуже с допуском»; решение — в «Обучении модели».') : null,

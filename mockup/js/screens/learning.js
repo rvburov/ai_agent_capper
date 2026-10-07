@@ -813,9 +813,12 @@
     const body = [
       h('dl', { class: 'learning-strip' },
         h('div', null, h('dt', null, 'Последнее обучение'), h('dd', null, fmt.date(ml.at) + ', ' + hhmm(ml.at), h('small', null, 'по понедельникам и после турниров Шлема'))),
-        h('div', null, h('dt', null, 'Матчей в обучении'), h('dd', null, fmt.int(HIST + S.legs), h('small', null, fmt.int(HIST) + ' исторических + ' + S.legs + ' своих'))),
+        h('div', null, h('dt', null, 'Матчей в обучении'), h('dd', null, fmt.int(HIST), h('small', null, 'основной тур ATP с 2019 г.; Эло считается по всей истории с 2000 г.'))),
         h('div', null, h('dt', null, 'Признаков'), h('dd', null, '14', h('small', null, 'кэфов букмекеров среди них нет'))),
-        h('div', null, h('dt', null, 'Brier, сентябрь'), h('dd', null, fmt.dec(ml.brier, 3), h('small', null, 'рынок ' + fmt.dec(WF[WF.length - 1].market, 3) + ' — пока чуть точнее')))),
+        h('div', null, h('dt', null, 'Brier, сентябрь'), h('dd', null, fmt.dec(ml.brier, 3), h('small', null, 'рынок ' + fmt.dec(WF[WF.length - 1].market, 3) + ': разница в пределах шума'))),
+        h('div', null, h('dt', null, 'Калибровка, ECE'), h('dd', null, fmt.pct(2.1), h('small', null, 'на валидации; 0% — идеальная калибровка'))),
+        h('div', null, h('dt', null, 'Доверие к поправкам Claude, c'), h('dd', null, '≈ ' + fmt.dec(0.42, 2), h('small', null, 'предварительно: 95% ДИ 0,1…0,7 на ' + OWN + ' событиях; в расчёт — с 300')))),
+      hint('c показывает, помогают ли поправки Claude к вероятности модели: c ≈ 0 — информации не несут, c ≈ 1 — берём как есть. Подбирается на валидации по своим снимкам с новостями; пока событий меньше 300, поправка Claude ограничена ±10 п.п.'),
     ];
     if (ml.training) {
       const stage = ml.progress < 35 ? 'Собираем признаки на дату каждого матча' : ml.progress < 80 ? 'Обучаем градиентный бустинг' : 'Проверяем на валидации — заменим, только если не хуже';
@@ -823,7 +826,13 @@
         h('div', { class: 'row-between' }, h('span', { class: 'soft' }, stage), h('b', { class: 'num' }, Math.round(ml.progress) + '%')),
         UI.meter(ml.progress, 100)));
     } else if (ml.prev != null) {
-      body.push(UI.callout('good', 'check', 'Переобучена сегодня в ' + hhmm(ml.at) + ': Brier на валидации ' + fmt.dec(ml.brier, 3) + ' (было ' + fmt.dec(ml.prev, 3) + '). Новая версия включена автоматически — она не хуже прежней.'));
+      body.push(UI.callout('good', 'check', h('div', { class: 'stack', style: 'gap:8px' },
+        h('span', null, 'Переобучена сегодня в ' + hhmm(ml.at) + ': Brier на валидации ' + fmt.dec(ml.brier, 3) + ' (было ' + fmt.dec(ml.prev, 3) + '). Это плановое переобучение той же модели на новых матчах — оно включается само, если на валидации не хуже с допуском (Brier до +0,005). Новые признаки и c — только с вашего подтверждения.'),
+        button('Вернуть прежнюю модель', { kind: 'secondary', size: 'sm', icon: 'history', onClick: () => {
+          ml.brier = ml.prev; ml.prev = null; ml.at = ml.prevAt || ml.at;
+          drawMlHead(); drawTiles();
+          UI.toast('Вернули модель от ' + fmt.date(ml.at) + ', ' + hhmm(ml.at) + ' · Brier ' + fmt.dec(ml.brier, 3), 'history');
+        } }))));
     }
     body.push(UI.callout('info', 'info', 'Сама по себе модель чуть уступает рынку — это ожидаемо: букмекер учитывает новости и травмы, а модель видит только статистику. Её роль — независимое второе мнение: Claude видит её вероятность, а расхождение больше 8 п.п. анализ подсвечивает и объясняет.'));
     return card({
@@ -848,9 +857,10 @@
         const now = new Date();
         st.ml.training = false;
         st.ml.prev = st.ml.brier;
+        st.ml.prevAt = st.ml.at;
         st.ml.brier = 0.193;
         st.ml.at = TODAY + 'T' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-        UI.toast('Модель переобучена на ' + fmt.int(HIST + S.legs) + ' матчах · Brier на валидации 0,193 (было 0,194)', 'check');
+        UI.toast('Модель переобучена на ' + fmt.int(HIST) + ' матчах · Brier на валидации ' + fmt.dec(st.ml.brier, 3) + ' (было ' + fmt.dec(st.ml.prev, 3) + ')', 'check');
         drawTiles();
       }
       drawMlHead();
@@ -896,7 +906,7 @@
           ],
           rows: WF,
         })),
-        hint('Ниже — лучше. Отставание от рынка сократилось с ' + fmt.dec(first.model - first.market, 3) + ' в апреле до ' + fmt.dec(last.model - last.market, 3) + ' в сентябре.'),
+        hint('Ниже — лучше. Отставание от рынка сократилось с ' + fmt.dec(first.model - first.market, 3) + ' в апреле до ' + fmt.dec(last.model - last.market, 3) + ' в сентябре. Но при ' + Math.min(...WF.map(r => r.n)) + '–' + Math.max(...WF.map(r => r.n)) + ' матчах в месяц разница меньше ≈ 0,005 — шум: обогнать рынок модель не обещает.'),
       ],
     });
     return h('div', { class: 'learning-panel' }, mlHeadSlot, h('div', { class: 'learning-two' }, feat, wf));
@@ -904,15 +914,17 @@
 
   // ---------- 4. Датасет и лаборатория ----------
   function jsonPreview(anon) {
-    const l = leg0927 || { odds: 1.74, closing: 1.70, p: 0.61, betId: 61 };
+    const l = leg0927 || { odds: 1.74, closing: 1.70, p: 0.641, betId: 69 };
     const hl = (a, b) => h('span', { class: ['learning-hl', !anon && 'exposed'] }, anon ? a : b);
     const pA = D.P.zverev, pB = D.P.draper;
+    const qClose = Math.round(1 / (l.closing || 1.70) * 0.955 * 1000) / 1000;
     return h('pre', { class: 'learning-code', 'aria-label': 'Пример записи JSONL' },
       '{"id": "own-', String(l.betId).padStart(4, '0'), '", "date": ', hl('"2026, неделя 39"', '"2026-09-27"'), ', "event": ', hl('"ATP 500 · хард"', '"ATP 500 Пекин"'), ',\n',
-      ' "a": {"name": ', hl('"Игрок A"', '"' + pA.name + '"'), ', "hand": "R", "elo_surface": ', String(pA.elo.hard), ', "serve_kmh": ', String(pA.serve.speed), '},\n',
-      ' "b": {"name": ', hl('"Игрок B"', '"' + pB.name + '"'), ', "hand": "L", "elo_surface": ', String(pB.elo.hard), ', "serve_kmh": ', String(pB.serve.speed), '},\n',
+      ' "a": {"name": ', hl('"Игрок A"', '"' + pA.name + '"'), ', "hand": "R", "elo_surface": ', String(pA.elo.hard), ', "sets_7d": 6},\n',
+      ' "b": {"name": ', hl('"Игрок B"', '"' + pB.name + '"'), ', "hand": "L", "elo_surface": ', String(pB.elo.hard), ', "sets_7d": 3},\n',
+      ' "news": "', hl('Игрок A', pA.short), ' накануне сыграл три сета в четвертьфинале",\n',
       ' "market": "Ф1(−1.5)", "odds": ', fmt.odds(l.odds), ', "odds_close": ', fmt.odds(l.closing || 1.70), ',\n',
-      ' "claude": {"p": ', String(l.p), ', "reasoning": "', hl('Игрок A', pA.short), ' стабильнее на приёме, но ', hl('Игрок B', pB.short), ' — левша с подачей 210+: тай-брейки вероятны…"},\n',
+      ' "p_base": ', String(Math.round((l.p - 0.04) * 1000) / 1000), ', "p_claude": ', String(l.p), ', "q_close_novig": ', String(qClose), ',\n',
       ' "label": {"sets": "2:1", "bet_won": false}}');
   }
 
@@ -931,15 +943,16 @@
     const left = h('div', { class: 'stack', style: 'gap:14px' },
       h('div', { class: 'learning-ds-total' }, h('b', null, fmt.int(SNAPSHOTS)), h('span', { class: 'soft' }, 'снимков матчей')),
       h('div', { class: 'learning-ds-parts' },
-        h('div', null, h('b', null, fmt.int(HIST)), 'исторических: матчи ATP 2019–2026 из открытых архивов'),
-        h('div', null, h('b', null, fmt.int(OWN)), 'своих событий: ' + S.legs + ' из ставок' + (OWN_NO_BET > 0 ? ' и ' + OWN_NO_BET + ' разобраны без ставки' : '') + ' — с рассуждением Claude')),
+        h('div', null, h('b', null, fmt.int(HIST)), 'исторических: все матчи основного тура ATP с 2019 г. по 6 окт 2026 — кэфы tennis-data.co.uk, статистика Сакманна. Новостей и скорости подачи нет'),
+        h('div', null, h('b', null, fmt.int(OWN)), 'своих событий: ' + S.legs + ' из ставок' + (OWN_NO_BET > 0 ? ' и ' + OWN_NO_BET + ' разобраны без ставки' : '') + ' — с замороженным досье, новостями и вероятностью Claude')),
       h('div', { class: 'stack', style: 'gap:8px' },
         h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Деление по времени'), h('span', { class: 'xsmall muted' }, 'train / val / test')),
         h('div', { class: 'learning-split', role: 'img', 'aria-label': SPLIT.map(s => s.label + ' ' + fmt.int(s.n)).join(', ') }, SPLIT.map(s => h('i', { style: { width: (s.n / total * 100).toFixed(2) + '%', background: s.color } }))),
         h('dl', { class: 'learning-split-legend' }, SPLIT.map(s => h('div', null,
           h('dt', null, h('i', { style: { background: s.color } }), s.label + ' · ' + fmt.int(s.n)),
           h('dd', null, s.period + (s.note ? ', ' + s.note : ''))))),
-        hint('Делим по времени, а не случайно: иначе модель «подсмотрит» матчи из будущего, и проверка покажет то, чего в жизни не будет.')),
+        hint('Делим по времени, а не случайно: иначе модель «подсмотрит» матчи из будущего, и проверка покажет то, чего в жизни не будет.'),
+        hint('Тест «с 1 июн» — для своей ML-модели. Для LLM тест начинается с ' + fmt.date(LLM_FROM) + ' 2026: срез знаний Opus 5.5 — июнь 2026, плюс месяц запаса, иначе модель может «помнить» исход. Таких событий ' + fmt.int(LLM_TEST) + ', из них ' + HOLDOUT + ' — отложенная выборка для версий стратегии.')),
       anonToggle);
     const right = h('div', { class: 'stack', style: 'gap:8px' },
       h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Одна запись в экспорте'), h('span', { class: 'xsmall muted' }, 'подсвечено то, что меняет анонимизация')),
@@ -970,14 +983,14 @@
     function draw() {
       UI.clear(slot);
       const running = st.popt === 'running';
-      const done = POPT.filter(p => p.ll != null).length;
+      const done = POPT.filter(p => p.smoke != null).length;
       slot.appendChild(expCard({
         status: running ? chip('Идёт', 'accent', 'refresh') : chip('На паузе', 'warn', 'pause'),
         kind: 'без дообучения',
         title: 'Prompt-оптимизация по eval-набору',
         goal: 'Автоматически переписывать инструкции Claude и оставлять варианты, которые снижают лог-лосс.',
-        metric: 'Лог-лосс на ' + HOLDOUT + ' событиях отложенной выборки и токены на анализ.',
-        budget: '$6,10 из $10 · Batch API, ночью',
+        metric: 'Лог-лосс: smoke на ' + SMOKE + ' событиях отсеивает явно плохие варианты, лучший проходит полный прогон на ' + HOLDOUT + '. Плюс токены на анализ.',
+        budget: fmt.usd(POPT_SPENT) + ' из ' + fmt.usd(EXP_BUDGET, 0) + ' в месяц · отдельный ключ, Batch API ночью',
         extra: h('div', { class: 'stack', style: 'gap:6px' },
           h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Итерация ' + POPT.length + ' из 12'), h('span', { class: 'num', style: 'font-weight:600' }, done + ' посчитано')),
           UI.meter(POPT.length, 12),
@@ -992,16 +1005,15 @@
       }));
       slot.appendChild(expCard({
         status: chip('Запланирован', 'info', 'calendar'),
-        kind: 'дообучение',
-        title: 'SFT + LoRA открытой 7–8B модели на рассуждениях Claude',
-        goal: 'Научить небольшую открытую модель рассуждать в нашем формате — как дешёвый первый проход перед Claude.',
-        metric: 'Brier на тесте хуже Claude v3 не больше чем на 0,01; валидный JSON ≥ 99%.',
-        budget: '≈ $30: аренда GPU (1×A100, около 6 ч)',
+        kind: 'дообучение · шаг 7',
+        title: 'SFT + LoRA открытой модели 0,5–3B: досье → обоснование и p',
+        goal: 'Освоить дообучение: модель учится выдавать вероятность своей ML-модели (учителя) в формате JSON. Цель — откалиброванная p уровня 4 или рынка без маржи.',
+        metric: 'Валидный JSON ≥ 99%; лог-лосс на тесте хуже учителя не больше чем на 0,01.',
+        budget: '$0 — Colab с T4, ≈ 2–4 ч: для модели 0,5–3B этого хватает',
         extra: h('div', { class: 'stack', style: 'gap:8px' },
-          h('div', { class: 'stack', style: 'gap:6px' },
-            h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Рассуждений для обучения'), h('span', { class: 'num', style: 'font-weight:600' }, OWN + ' из 1 000')),
-            UI.meter(OWN, 1000, 'warn')),
-          h('p', { class: 'learning-note warn' }, icon('alert'), h('span', null, 'Перед стартом — сверить с условиями Anthropic: обучение других моделей на ответах Claude ограничено.'))),
+          h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Обучающих примеров'), h('span', { class: 'row', style: 'gap:6px' }, h('span', { class: 'num', style: 'font-weight:600' }, fmt.int(HIST_TRAIN)), chip('хватает', 'good', 'check'))),
+          h('p', { class: 'learning-note' }, icon('info'), h('span', null, 'Примеры собираются из исторических снимков без Claude: цель p — своя ML-модель, обоснование — шаблон из признаков.')),
+          h('p', { class: 'learning-note warn' }, icon('alert'), h('span', null, 'Рассуждения Claude как образцы не берём: условия Anthropic ограничивают обучение других моделей на его ответах.'))),
         actions: [button('План эксперимента', { kind: 'secondary', size: 'sm', icon: 'list', onClick: sftModal })],
       }));
       slot.appendChild(expCard({
@@ -1009,8 +1021,8 @@
         kind: 'дообучение',
         title: 'RL (GRPO) с наградой = лог-скор вероятности',
         goal: 'Награждать модель за точную вероятность, а не за угаданного победителя.',
-        metric: 'Лог-лосс и калибровка на тесте.',
-        budget: '≈ $80–150 GPU · только после SFT',
+        metric: 'Лог-лосс лучше той же модели после SFT; обогнать рынок не ожидаем.',
+        budget: '≈ $30–100 аренды GPU · только после SFT',
         extra: h('div', { class: 'stack', style: 'gap:8px' },
           h('dl', { class: 'learning-reward', 'aria-label': 'Пример награды' },
             h('dt', null, 'Прогноз 70%, игрок выиграл'), h('dd', null, 'ln 0,70 = −0,36'),
@@ -1024,20 +1036,32 @@
   }
 
   function poptModal() {
+    const mobile = UI.isMobile();
+    const smokeEl = r => r.smoke == null ? h('span', { class: 'muted' }, 'считается')
+      : r.base ? h('span', { class: 'muted' }, 'база')
+      : h('span', { class: r.best ? 'learning-best' : null }, signedDec(r.smoke));
+    const fullEl = r => r.full == null ? h('span', { class: 'muted' }, '—') : h('span', { class: r.best ? 'learning-best' : null }, fmt.dec(r.full, 3));
+    const list = mobile
+      ? h('div', { class: 'learning-cmp-list' }, POPT.map(r => h('div', { class: 'learning-cmp-item' },
+          h('div', { class: 'learning-cmp-top' }, h('b', null, r.i + '. ' + r.change), r.best && chip('кандидат v4', 'info', 'flask')),
+          h('div', { class: 'small num soft' }, 'Smoke: ', smokeEl(r), ' · полный: ', fullEl(r), ' · ≈ ' + r.tok + ' тыс. токенов'))))
+      : UI.table({
+          columns: [
+            { label: '№', render: r => String(r.i), width: '40px' },
+            { label: 'Что изменили', render: r => h('span', null, r.change, r.best && [' ', chip('кандидат v4', 'info', 'flask')]) },
+            { label: 'Smoke · ' + SMOKE + ', Δ к v3', align: 'r', render: smokeEl },
+            { label: 'Полный · ' + HOLDOUT, align: 'r', render: fullEl },
+            { label: 'Токенов', align: 'r', render: r => '≈ ' + r.tok + ' тыс.' },
+          ],
+          rows: POPT,
+        });
     UI.modal({
       title: 'Prompt-оптимизация: журнал',
       wide: true,
       body: h('div', { class: 'stack' },
-        h('p', { class: 'small soft' }, 'Каждая итерация — вариант инструкций, посчитанный на ' + HOLDOUT + ' событиях через Batch API. Ниже лог-лосс — лучше; активная v3 — ' + fmt.dec(vById('v3') ? vById('v3').logloss : 0.583, 3) + '.'),
-        UI.table({
-          columns: [
-            { label: '№', render: r => String(r.i), width: '40px' },
-            { label: 'Что изменили', render: r => h('span', null, r.change, r.best && [' ', chip('кандидат v4', 'accent', 'flask')]) },
-            { label: 'Лог-лосс', align: 'r', render: r => r.ll == null ? h('span', { class: 'muted' }, 'считается') : h('span', { class: r.best ? 'learning-best' : null }, fmt.dec(r.ll, 3)) },
-            { label: 'Токенов', align: 'r', render: r => '≈ ' + r.tok + ' тыс.' },
-          ],
-          rows: POPT,
-        })),
+        h('p', { class: 'small soft' }, 'Каждый вариант — smoke на ' + SMOKE + ' событиях (≈ ' + fmt.usd(SMOKE_COST) + '), лучший — полный прогон на ' + HOLDOUT + ' (≈ ' + fmt.usd(FULL_COST) + '). Всё через Batch API, из отдельного бюджета экспериментов. Ниже лог-лосс — лучше.'),
+        list,
+        hint('На ' + SMOKE + ' событиях разница меньше ±0,02 — шум: smoke только отсеивает явно плохие правки. Решение по варианту — по полному прогону и правилу приёма версий.')),
       actions: close => [button('Закрыть', { kind: 'primary', onClick: close })],
     });
     settleModal();
@@ -1045,18 +1069,18 @@
 
   function sftModal() {
     const steps = [
-      ['Собрать ≥ 1 000 рассуждений', OWN + ' своих уже есть; остальные — разметка исторических матчей через Batch API, ≈ $9.'],
-      ['Анонимизировать и разделить по времени', 'Как в датасете выше: train / val / test без пересечений по датам.'],
-      ['Дообучить LoRA', 'Открытая модель 7–8B, 2–3 эпохи на арендованной GPU, ≈ 6 часов.'],
-      ['Оценить на тесте', 'Brier, лог-лосс, доля валидного JSON — против Claude v3 на тех же событиях.'],
-      ['Решить, где использовать', 'Если не хуже на 0,01 — как дешёвый первый проход; финальное решение остаётся за Claude.'],
+      ['Собрать примеры из снимков', 'Вход — обезличенное досье, цель p — вероятность своей ML-модели (или рынка без маржи), обоснование — шаблон из признаков. Claude не нужен, $0.'],
+      ['Анонимизировать и разделить по времени', 'Как в датасете выше: train / val / test без пересечений по датам, игроки — «A / B».'],
+      ['Дообучить LoRA', 'r = 16 на открытой модели 0,5–3B (сверить лицензию) в Colab с T4, ≈ 2–4 часа.'],
+      ['Сравнить на тесте', 'Доля валидного JSON, лог-лосс и калибровка — против учителя и той же модели без дообучения.'],
+      ['Отдельным экспериментом — рассуждения Claude', 'Только после проверки актуальных условий Anthropic: они ограничивают обучение других моделей на его ответах.'],
     ];
     UI.modal({
       title: 'План: SFT + LoRA',
       body: h('div', { class: 'stack', style: 'gap:14px' },
-        h('ol', { class: 'learning-rules' }, steps.map(([t, d], i) => h('li', null, h('span', { 'aria-hidden': 'true' }, String(i + 1)), h('div', null, h('b', { style: 'font-weight:600' }, t), h('span', { class: 'soft' }, d))))),
-        UI.callout('info', 'info', 'Честно: модель, дообученная на тысяче примеров, вряд ли обгонит Claude. Цель — дешёвый черновик и ваш опыт обучения LLM.'),
-        UI.callout('warn', 'alert', 'Перед стартом сверить с условиями использования Anthropic: обучение других моделей на ответах Claude ограничено.')),
+        h('ol', { class: 'learning-rules' }, steps.map(([t, d], i) => h('li', null, h('span', { 'aria-hidden': 'true' }, String(i + 1)), h('div', null, h('b', null, t), h('span', { class: 'soft' }, d))))),
+        UI.callout('info', 'info', 'Честно: такая модель повторит учителя, но не обгонит ни его, ни рынок. Цель — ваш опыт: SFT, LoRA и честная оценка. На ставки она не влияет.'),
+        UI.callout('warn', 'alert', 'Ответы Claude в обучающие данные по умолчанию не попадают: условия использования Anthropic ограничивают обучение других моделей на них.')),
       actions: close => [button('Понятно', { kind: 'primary', onClick: close })],
     });
     settleModal();
