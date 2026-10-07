@@ -905,7 +905,7 @@
   }
 
   function settingsCard(redraw) {
-    const hints = {};
+    const hints = {}, effortSlots = {};
     const forecastNum = h('div', { class: 'costs-forecast-num', 'aria-live': 'polite' });
     const forecastChip = h('span');
     const warnSlot = h('div', { class: 'stack', style: 'gap:8px' });
@@ -925,53 +925,84 @@
       UI.clear(forecastChip).appendChild(lim && next > lim ? chip('Выше лимита ' + usd(lim, 0), 'bad', 'alert') : chip(pct(lim ? next / lim : 0) + ' лимита', budgetKind(lim ? next / lim : 0), 'check'));
       UI.clear(warnSlot);
       const perAn = perRun('analysis', draft);
-      if (draft.limitRun > 0 && perAn > draft.limitRun) warnSlot.appendChild(UI.callout('warn', 'alert', 'Средний анализ (≈ ' + usd(perAn) + ') дороже лимита на анализ (' + usd(+draft.limitRun) + '): запуски будут останавливаться на сборе данных.'));
-      if (!draft.dossier) warnSlot.appendChild(UI.callout('warn', 'alert', 'Без досье ИИ снова читает файлы в 15–20 итераций, как бот сейчас: анализ дороже в ≈ ' + Math.round(perAn / BASE.analysis.avgCost) + ' раз.'));
-      if (!draft.eval) warnSlot.appendChild(UI.callout('bad', 'shield', 'Проверка на eval-наборе выключена: смена модели применится сразу, и просадку качества вы увидите только по проигранным ставкам.'));
+      if (draft.limitHard > 0 && perAn > draft.limitHard) warnSlot.appendChild(UI.callout('warn', 'alert', 'Средний анализ (≈ ' + usd(perAn) + ') дороже жёсткого порога (' + usd(+draft.limitHard) + '): запуски будут останавливаться без ставки.'));
+      else if (draft.limitSoft > 0 && perAn > draft.limitSoft) warnSlot.appendChild(UI.callout('warn', 'alert', 'Средний анализ (≈ ' + usd(perAn) + ') дороже порога предупреждения (' + usd(+draft.limitSoft) + '): уведомление будет приходить почти каждый раз.'));
+      if (draft.searchDay > 0 && TOT.searches / DAYS > draft.searchDay) warnSlot.appendChild(UI.callout('warn', 'alert', 'Сейчас в среднем ' + fmt.dec(TOT.searches / DAYS, 1) + ' поиска в день — больше лимита ' + draft.searchDay + '. Лишние поиски не выполнятся, новости возьмутся из кэша.'));
+      if (!draft.dossier) warnSlot.appendChild(UI.callout('warn', 'alert', 'Без досье ИИ снова читает файлы в 10–20 итераций, как бот сейчас: анализ дороже в ≈ ' + Math.round(perAn / BASE.analysis.avgCost) + ' раз.'));
+      if (draft.effort.analysis !== saved.effort.analysis && draft.models.analysis !== 'Haiku 4.5') warnSlot.appendChild(UI.callout('info', 'flask', 'Effort анализа меняет глубину размышлений, а значит и качество на трудных матчах. При сохранении настройка пройдёт проверку на eval-наборе.'));
+      if (!draft.eval) warnSlot.appendChild(UI.callout('bad', 'shield', 'Проверка на eval-наборе выключена: смена модели или effort применится сразу, и просадку качества вы увидите только по проигранным ставкам.'));
       const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
       dirtyEl.textContent = dirty ? 'Есть несохранённые изменения' : 'Изменений нет';
       dirtyEl.classList.toggle('on', dirty);
       resetBtn.disabled = !dirty;
     }
 
+    // Глубина размышлений: переключатель зависит от выбранной модели (Haiku 4.5 effort не поддерживает)
+    function drawEffort(id) {
+      const slot = UI.clear(effortSlots[id]);
+      const model = draft.models[id];
+      const labelId = 'costs-effort-' + id + '-label';
+      if (!supportsEffort(model)) {
+        slot.appendChild(h('div', { class: 'costs-effort-off' }, icon('info'), 'Глубина размышлений (effort): не поддерживается в ' + model));
+        return;
+      }
+      const levels = EFFORT_LEVELS[id];
+      if (!levels.includes(draft.effort[id])) draft.effort[id] = levels[0];
+      const seg = UI.segmented({
+        label: 'Глубина размышлений (effort) — ' + typeOf(id).label.toLowerCase(),
+        items: levels.map(e => ({ id: e, label: EFFORT_LABEL[e] })),
+        active: draft.effort[id],
+        onChange: e => { draft.effort[id] = e; refresh(); },
+      });
+      seg.querySelectorAll('button').forEach((b, i) => { b.title = 'effort: ' + levels[i]; });
+      slot.appendChild(h('div', { class: 'costs-effort' }, h('span', { class: 'costs-effort-label', id: labelId }, 'Глубина размышлений (effort)'), seg));
+    }
+
+    const TASK_LABEL = { parse: 'Разбор текста событий', analysis: 'Анализ матчей', postmortem: 'Разбор ставок', refresh: 'Обновление профилей и новостей (ночью, через Batch)' };
     const modelFields = ['parse', 'analysis', 'postmortem', 'refresh'].map(id => {
       const t = typeOf(id);
-      const label = id === 'refresh' ? 'Обновление профилей (ночью, через Batch)' : id === 'postmortem' ? 'Разбор ставок' : id === 'analysis' ? 'Анализ матчей' : 'Разбор текста событий';
       const f = UI.field({
-        id: 'costs-model-' + id, label,
+        id: 'costs-model-' + id, label: TASK_LABEL[id],
         options: t.options.map(m => ({ value: m, label: m + ' — ' + usd(PRICE[m].in, 0) + ' / ' + usd(PRICE[m].out, 0) + ' за 1M' + (m === saved.models[id] ? ' (сейчас)' : '') })),
-        value: draft.models[id], hint: ' ',
-        attrs: { on: { change: e => { draft.models[id] = e.target.value; refresh(); } } },
+        value: draft.models[id],
+        attrs: { on: { change: e => { draft.models[id] = e.target.value; drawEffort(id); refresh(); } } },
       });
-      hints[id] = f.querySelector('.field-hint');
-      return f;
+      effortSlots[id] = h('div');
+      hints[id] = h('div', { class: 'costs-task-hint', 'aria-live': 'polite' });
+      drawEffort(id);
+      return h('div', { class: 'costs-task-set' }, f, effortSlots[id], hints[id]);
     });
-    const num = (id, key, label, suffix, hint, dec) => UI.field({
-      id, label, value: dec ? nf(dec).format(draft[key]) : String(draft[key]), suffix, hint, inputmode: dec ? 'decimal' : 'numeric', autocomplete: 'off',
+    const num = (id, key, label, suffix, hint, dec, cls) => UI.field({
+      id, label, value: dec ? nf(dec).format(draft[key]) : String(draft[key]), suffix, hint, inputmode: dec ? 'decimal' : 'numeric', autocomplete: 'off', class: cls,
       attrs: { on: { input: e => { const v = e.target.value.replace(/\s/g, '').replace(',', '.'); draft[key] = v === '' ? 0 : (isNaN(+v) ? NaN : +v); refresh(); } } },
     });
     const tog = (key, label, hint) => UI.toggle({ id: 'costs-t-' + key, label, hint, checked: draft[key], onChange: v => { draft[key] = v; refresh(); } });
+    const maxRun = Math.max(...A.runs.filter(r => r.type === 'analysis').map(r => r.cost));
 
     const form = h('form', { class: 'card costs-card', id: 'costs-settings', novalidate: true, 'aria-labelledby': 'costs-settings-title', on: { submit: e => { e.preventDefault(); save(); } } },
-      h('div', { class: 'card-head' }, h('div', { style: 'min-width:0' }, h('h3', { id: 'costs-settings-title' }, 'Настройки экономии'), h('div', { class: 'card-sub' }, 'Модели, лимиты и приёмы, которые снижают расход. Применяются со следующего запуска.'))),
+      h('div', { class: 'card-head' }, h('div', { style: 'min-width:0' }, h('h3', { id: 'costs-settings-title' }, 'Настройки экономии'), h('div', { class: 'card-sub' }, 'Модель и глубина размышлений для каждой задачи, лимиты и приёмы, которые снижают расход. Применяются со следующего запуска.'))),
       h('div', { class: 'card-body' },
         h('div', { class: 'costs-settings-grid' },
           h('div', { class: 'costs-settings-col' },
-            h('div', { class: 'eyebrow' }, 'Модель для каждой задачи'),
+            h('div', { class: 'eyebrow' }, 'Модель и effort для каждой задачи'),
             modelFields,
-            h('div', { class: 'eyebrow', style: 'margin-top:6px' }, 'Лимиты'),
+            h('div', { class: 'eyebrow', style: 'margin-top:6px' }, 'Лимиты на деньги'),
             h('div', { class: 'costs-limits' },
-              num('costs-limit-month', 'limitMonth', 'На месяц', '$', 'потрачено ' + usd(A.spent), 0),
-              num('costs-limit-run', 'limitRun', 'На анализ', '$', 'макс. было ' + usd(Math.max(...A.runs.filter(r => r.type === 'analysis').map(r => r.cost))), 2),
-              num('costs-limit-search', 'searchLimit', 'Поисков', 'шт', 'на анализ; 0 — без лимита', 0))),
+              num('costs-limit-month', 'limitMonth', 'На месяц', '$', 'потрачено ' + usd(A.spent), 0, 'costs-wide'),
+              num('costs-limit-soft', 'limitSoft', 'Предупредить при', '$', 'цена одного анализа', 2),
+              num('costs-limit-hard', 'limitHard', 'Остановить анализ при', '$', 'макс. было ' + usd(maxRun) + '; ставка не формируется', 2)),
+            h('div', { class: 'eyebrow', style: 'margin-top:6px' }, 'Лимиты на веб-поиск'),
+            h('div', { class: 'costs-limits two' },
+              num('costs-limit-search', 'searchLimit', 'На анализ, не больше', 'шт', '2–3 на игрока; 0 — без лимита', 0),
+              num('costs-limit-day', 'searchDay', 'В день, не больше', 'шт', 'сейчас ≈ ' + fmt.dec(TOT.searches / DAYS, 1) + ' в день', 0))),
           h('div', { class: 'costs-settings-col' },
             h('div', { class: 'eyebrow' }, 'Приёмы экономии'),
             h('div', { class: 'costs-toggles' },
-              tog('cache', 'Кэширование промпта', 'Инструкции, стратегия, уроки и досье читаются из кэша — в 10–20 раз дешевле обычного входа.'),
+              tog('cache', 'Кэширование промпта', 'Внутри одного анализа итерации 2–3 читают инструкции, уроки и досье из кэша — у Opus 5.5 в 20 раз дешевле обычного входа. Между анализами кэш (5 мин) обычно не доживает.'),
               tog('batch', 'Ночные обновления через Batch API (−50%)', 'Профили игроков обновляются пакетом ночью: ответ до 24 ч, цена вдвое ниже.'),
-              tog('newsCache', 'Кэш новостей 12 ч', 'Новости по игроку не ищутся повторно, если им меньше 12 часов.'),
-              tog('dossier', 'Сжатое досье вместо чтения файлов', 'Одно досье на 2–3 тыс. токенов на игрока вместо 15–20 обращений к файлам.'),
-              tog('eval', 'Проверять качество на eval-наборе перед сменой модели', 'Новая модель принимается, только если Brier и лог-лосс на 220 рассчитанных событиях не хуже.')),
+              tog('newsCache', 'Кэш новостей 12 ч', 'Новости по игроку не ищутся повторно, если им меньше 12 часов. Кэш общий: найденное один раз переиспользуется.'),
+              tog('dossier', 'Сжатое досье вместо чтения файлов', 'Одно досье на 2–3 тыс. токенов на игрока вместо 10–20 обращений к файлам.'),
+              tog('eval', 'Проверять качество на eval-наборе перед сменой модели или effort', 'Новая настройка анализа принимается, только если на 220 событиях отложенной выборки она ' + RULE_TEXT + '.')),
             h('div', { class: 'costs-forecast' },
               h('div', { style: 'min-width:0' }, h('div', { class: 'small soft' }, 'Прогноз на октябрь с этими настройками'), forecastNum),
               forecastChip),
@@ -980,8 +1011,10 @@
 
     function validate() {
       if (!(draft.limitMonth >= 1)) return 'Лимит на месяц — не меньше $1';
-      if (!(draft.limitRun > 0)) return 'Лимит на анализ должен быть больше нуля';
+      if (!(draft.limitSoft > 0)) return 'Порог предупреждения должен быть больше нуля';
+      if (!(draft.limitHard >= draft.limitSoft)) return 'Порог остановки анализа — не меньше порога предупреждения';
       if (draft.searchLimit < 0 || draft.searchLimit > 10 || Math.round(draft.searchLimit) !== draft.searchLimit) return 'Поисков на анализ — целое число от 0 до 10';
+      if (draft.searchDay < 0 || draft.searchDay > 50 || Math.round(draft.searchDay) !== draft.searchDay) return 'Поисков в день — целое число от 0 до 50';
       return null;
     }
     function commit(msg) {
@@ -994,13 +1027,21 @@
       const err = validate();
       if (err) { UI.toast(err, 'alert'); return; }
       if (JSON.stringify(draft) === JSON.stringify(saved)) { UI.toast('Изменений нет — всё уже сохранено', 'info'); return; }
-      const changes = TYPES.filter(t => draft.models[t.id] !== saved.models[t.id]).map(t => ({ type: t.id, from: saved.models[t.id], to: draft.models[t.id] }));
+      const changes = [];
+      TYPES.forEach(t => {
+        if (draft.models[t.id] !== saved.models[t.id]) changes.push({ type: t.id, kind: 'model', from: saved.models[t.id], to: draft.models[t.id] });
+        else if (supportsEffort(draft.models[t.id]) && draft.effort[t.id] !== saved.effort[t.id]) changes.push({ type: t.id, kind: 'effort', from: saved.effort[t.id], to: draft.effort[t.id] });
+      });
       if (changes.length && draft.eval) {
         evalModal(changes, res => {
           if (!res) return;
           const rejected = res.filter(r => !r.ok);
-          rejected.forEach(r => { draft.models[r.type] = r.from; if (r.type === 'analysis' && r.to === 'Sonnet 5.5') candidateState = 'rejected'; });
-          commit(rejected.length ? 'Сохранено. Не принято по качеству: ' + rejected.map(r => r.to + ' для «' + typeOf(r.type).label.toLowerCase() + '»').join(', ') : 'Модели сменены, качество на eval-наборе не хуже');
+          rejected.forEach(r => {
+            if (r.kind === 'effort') draft.effort[r.type] = r.from; else draft.models[r.type] = r.from;
+            const lv = LEVERS.find(l => l.candidate && l.check && (c => c.type === r.type && c.kind === r.kind && c.to === r.to)(l.check()));
+            if (lv) candidateState[lv.id] = 'rejected';
+          });
+          commit(rejected.length ? 'Сохранено. Не принято по качеству: ' + rejected.map(r => changeLabel(r) + ' для «' + typeOf(r.type).label.toLowerCase() + '»').join(', ') : 'Сохранено: качество на eval-наборе в пределах допуска');
         });
         return;
       }

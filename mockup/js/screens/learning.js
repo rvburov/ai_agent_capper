@@ -634,7 +634,7 @@
 
     const actions = [
       A && B && button('Сравнить ' + A.id + ' и ' + B.id, { kind: 'primary', size: 'sm', icon: 'layers', onClick: compareModal }),
-      button('Оценить на истории', { kind: 'secondary', size: 'sm', icon: 'play', onClick: () => UI.toast('Запущено на ' + HOLDOUT + ' событиях · ≈ ' + usd(FULL_COST) + ' через Batch API (из бюджета экспериментов)', 'clock') }),
+      button('Оценить на истории', { kind: 'secondary', size: 'sm', icon: 'play', onClick: () => UI.toast('Запущено на ' + HOLDOUT + ' событиях · ≈ ' + fmt.usd(FULL_COST) + ' через Batch API (из бюджета экспериментов)', 'clock') }),
     ];
     let listNode;
     if (mobile) {
@@ -670,7 +670,13 @@
       actions,
       flush: !mobile,
       body: listNode,
+      foot: hint('ROI и CLV — для наблюдения, решения по ним не принимаем: на ' + HOLDOUT + ' событиях 95% ДИ ROI около ±20 п.п. CLV — вторичная проверка.'),
     });
+    const toMarket = v => {
+      const ci = MARKET_CI[v.id];
+      return h('div', null, h('div', null, signedDec(v.logloss - MARKET_LL)), ci && h('div', { class: 'xsmall muted', style: 'white-space:nowrap' }, 'ДИ ' + signedDec(ci[0]) + '…' + signedDec(ci[1])));
+    };
+    const vsMarket = V.filter(v => v.logloss < MARKET_LL).map(v => v.logloss - MARKET_LL).sort((a, b) => b - a);
 
     const chart = UI.lineChart({
       labels: V.map(v => v.id),
@@ -690,11 +696,11 @@
           columns: [
             { label: 'Версия', render: v => v.name },
             { label: 'Лог-лосс', align: 'r', render: v => fmt.dec(v.logloss, 3) },
-            { label: 'К рынку', align: 'r', render: v => signedDec(v.logloss - MARKET_LL) },
+            { label: 'К рынку, 95% ДИ', align: 'r', render: toMarket },
           ],
           rows: V,
         })),
-        hint('Ниже — лучше: лог-лосс сильнее штрафует уверенные ошибки. С v3 стратегия чуть точнее закрывающей линии, но разница v3 и v4 — в пределах шума.'),
+        hint('Ниже — лучше. На ' + HOLDOUT + ' событиях разница с закрывающей линией' + (vsMarket.length ? ' (' + vsMarket.map(d => signedDec(d)).join('…') + ')' : '') + ' в пределах шума: чтобы показать перевес над рынком, нужны тысячи событий. Разница v3 и v4 тоже в пределах шума.'),
       ],
     });
 
@@ -704,17 +710,19 @@
   function rulesCard() {
     const A = vById('v3'), B = vById('v4');
     const pending = B && B.status === 'candidate';
-    const rule = (n, text, status) => h('li', null, h('span', { 'aria-hidden': 'true' }, String(n)), h('div', null, h('span', null, text), status));
+    const rule = (n, title, text, status) => h('li', null, h('span', { 'aria-hidden': 'true' }, String(n)), h('div', null, title && h('b', null, title), h('span', null, text), status));
     return card({
       class: 'learning-card',
       title: 'Как принимается новая версия',
-      subtitle: pending ? 'Проверка кандидата ' + B.id + ' против ' + A.id : 'Правило для следующих кандидатов',
+      subtitle: pending ? 'Кандидат ' + B.id + ' нужен ради экономии — его проверяют по правилу 3' : 'Правила для следующих кандидатов',
       body: [
         h('ol', { class: 'learning-rules' },
-          rule(1, 'Кандидат и активная версия считаются на одних и тех же ' + HOLDOUT + ' событиях.', pending && chip('Выполнено', 'good', 'check')),
-          rule(2, 'Лог-лосс лучше, и 95% доверительный интервал разницы целиком ниже нуля.', pending && chip('Не доказано: −0,009 … +0,005', 'warn', 'alert')),
-          rule(3, 'ROI и CLV не хуже, чем у активной версии.', pending && chip('Выполнено', 'good', 'check')),
-          rule(4, 'Последнее слово за вами: версия включается кнопкой, откат — в один клик.', null)),
+          rule(1, null, 'Кандидат и активная версия считаются на одних и тех же ' + HOLDOUT + ' событиях, без веб-поиска.', pending && chip('Выполнено', 'good', 'check')),
+          rule(2, 'Если версия должна улучшить прогноз', '95% ДИ разницы лог-лосса (новая − текущая) целиком ниже нуля.', pending && chip('К ' + B.id + ' не относится', 'outline', 'info')),
+          rule(3, 'Если версия нужна ради экономии', 'Качество не хуже с допуском: верхняя граница 95% ДИ разницы лог-лосса ≤ +0,01, Brier ≤ +0,005, калибровки (ECE) ≤ +2 п.п.; ошибок формата не больше; расход по логам ниже.',
+            pending && h('div', { class: 'learning-chips' }, SAVE_CHECKS().map(t => chip(t, 'good', 'check')))),
+          rule(4, null, 'ROI и CLV показываем для наблюдения, решения по ним не принимаем: на ' + HOLDOUT + ' событиях 95% ДИ ROI около ±20 п.п. CLV — вторичная проверка.', null),
+          rule(5, null, 'Последнее слово за вами: версия включается кнопкой, откат — в один клик.', null)),
         A && B && button('Сравнить ' + A.id + ' и ' + B.id, { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', onClick: compareModal }),
       ],
     });
@@ -724,13 +732,15 @@
     const A = vById('v3'), B = vById('v4');
     if (!A || !B) return;
     const tA = VERSION_INFO.v3.tokens, tB = VERSION_INFO.v4.tokens;
-    const V_NOISE = ['в пределах шума', 'warn', 'alert'], V_OK = ['не хуже', 'good', 'check'];
+    const OK = t => [t, 'good', 'check'], OBS = ['для наблюдения', 'outline', 'eye'];
     const rows = [
-      { k: 'Лог-лосс', a: fmt.dec(A.logloss, 3), b: fmt.dec(B.logloss, 3), d: signedDec(B.logloss - A.logloss), ci: '95% ДИ: −0,009 … +0,005', v: V_NOISE },
-      { k: 'Brier', a: fmt.dec(A.brier, 3), b: fmt.dec(B.brier, 3), d: signedDec(B.brier - A.brier), ci: '95% ДИ: −0,004 … +0,002', v: V_NOISE },
-      { k: 'ROI', a: fmt.signedPct(A.roi), b: fmt.signedPct(B.roi), d: pp(B.roi - A.roi), v: V_OK },
-      { k: 'CLV', a: fmt.signedPct(A.clv), b: fmt.signedPct(B.clv), d: pp(B.clv - A.clv), v: V_OK },
-      { k: 'Токенов на анализ', a: '≈ ' + tA + ' тыс.', b: '≈ ' + tB + ' тыс.', d: fmt.signedPct((tB / tA - 1) * 100, 0), v: ['дешевле', 'good', 'check'] },
+      { k: 'Лог-лосс', a: fmt.dec(A.logloss, 3), b: fmt.dec(B.logloss, 3), d: signedDec(B.logloss - A.logloss), ci: '95% ДИ: −0,009 … +0,005', v: OK('не хуже: до +0,005 ≤ +0,01') },
+      { k: 'Brier', a: fmt.dec(A.brier, 3), b: fmt.dec(B.brier, 3), d: signedDec(B.brier - A.brier), ci: '95% ДИ: −0,004 … +0,002', v: OK('не хуже: до +0,002 ≤ +0,005') },
+      { k: 'Калибровка (ECE)', a: fmt.pct(ECE.v3), b: fmt.pct(ECE.v4), d: pp(ECE.v4 - ECE.v3), ci: '95% ДИ: −0,7 … +1,1 п.п.', v: OK('не хуже: до +1,1 ≤ +2') },
+      { k: 'Ошибок формата', a: FORMAT_ERR.v3 + ' из ' + HOLDOUT, b: FORMAT_ERR.v4 + ' из ' + HOLDOUT, d: (FORMAT_ERR.v4 - FORMAT_ERR.v3 < 0 ? MINUS : '+') + Math.abs(FORMAT_ERR.v4 - FORMAT_ERR.v3), v: OK('не больше') },
+      { k: 'Токенов на анализ', a: '≈ ' + tA + ' тыс.', b: '≈ ' + tB + ' тыс.', d: MINUS + tokSave() + '%', ci: 'по логам запусков', v: OK('дешевле') },
+      { k: 'ROI', a: fmt.signedPct(A.roi), b: fmt.signedPct(B.roi), d: pp(B.roi - A.roi), ci: '95% ДИ ROI ≈ ±20 п.п.', v: OBS },
+      { k: 'CLV', a: fmt.signedPct(A.clv), b: fmt.signedPct(B.clv), d: pp(B.clv - A.clv), ci: 'вторичная проверка', v: OBS },
     ];
     const verdict = r => chip(r.v[0], r.v[1], r.v[2]);
     const cmp = UI.isMobile()
@@ -753,18 +763,18 @@
       title: 'Сравнение ' + A.id + ' и ' + B.id,
       wide: true,
       body: h('div', { class: 'stack', style: 'gap:14px' },
-        h('p', { class: 'small soft' }, 'Обе версии посчитаны на одних и тех же ' + HOLDOUT + ' событиях отложенной выборки.'),
+        h('p', { class: 'small soft' }, 'Обе версии посчитаны на одних и тех же ' + HOLDOUT + ' событиях отложенной выборки. ' + B.id + ' сделана ради экономии, поэтому проверяется по правилу «не хуже с допуском».'),
         cmp,
         h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'eyebrow' }, 'Что изменилось в ' + B.id), h('ul', { class: 'learning-changes' }, VERSION_INFO.v4.changes.map(c => h('li', null, c)))),
-        UI.callout('accent', 'shield', h('b', null, 'Правило: '), 'кандидат принимается, если лог-лосс лучше на доверительном интервале и ROI не хуже.'),
+        UI.callout('accent', 'shield', h('b', null, 'Правило экономии: '), 'качество не хуже с допуском (лог-лосс до +0,01, Brier до +0,005, ECE до +2 п.п.), ошибок формата не больше, а расход по логам ниже. Улучшения прогноза не требуется. ROI и CLV — для наблюдения.'),
         accepted
-          ? UI.callout('good', 'check', B.id + ' включена вами вручную. ' + A.id + ' в архиве — вернуть можно здесь же.')
-          : UI.callout('warn', 'alert', h('b', null, 'Сейчас: '), 'ROI и CLV не хуже, но улучшение лог-лосса не доказано — интервал захватывает ноль. Сама ' + B.id + ' не включится. Можно оставить ' + A.id + ' и досчитать ' + B.id + ' на новых матчах (≈ 2 недели) или включить её вручную ради экономии токенов: качество не хуже.')),
+          ? UI.callout('good', 'check', B.id + ' включена вами. ' + A.id + ' в архиве — вернуть можно здесь же.')
+          : UI.callout('good', 'check', h('b', null, 'Вывод: '), B.id + ' проходит правило экономии — качество не хуже в пределах допуска, анализ дешевле на ' + tokSave() + '%. Рекомендуем включить, решение за вами. Точнее ' + A.id + ' она не стала: ДИ разницы захватывает ноль.')),
       actions: close => accepted
         ? [button('Вернуть ' + A.id, { kind: 'secondary', icon: 'history', onClick: () => { A.status = 'active'; B.status = 'candidate'; close(); afterVersionChange(); UI.toast('Снова активна ' + A.id + ' · ' + B.id + ' вернулась в кандидаты', 'history'); } }),
            button('Закрыть', { kind: 'primary', onClick: close })]
-        : [button('Включить ' + B.id + ' вручную', { kind: 'secondary', onClick: () => { B.status = 'active'; A.status = 'archived'; close(); afterVersionChange(); UI.toast(B.id + ' работает со следующего анализа · ' + A.id + ' в архиве, откат в один клик', 'check'); } }),
-           button('Оставить ' + A.id + ', проверять дальше', { kind: 'primary', onClick: () => { close(); UI.toast('Остаётся ' + A.id + '. ' + B.id + ' досчитывается на новых матчах — сравнение обновится через ≈ 2 недели', 'clock'); } })],
+        : [button('Оставить ' + A.id, { kind: 'secondary', onClick: () => { close(); UI.toast('Остаётся ' + A.id + '. ' + B.id + ' остаётся кандидатом — включить можно в любой момент', 'clock'); } }),
+           button('Включить ' + B.id, { kind: 'primary', icon: 'check', onClick: () => { B.status = 'active'; A.status = 'archived'; close(); afterVersionChange(); UI.toast(B.id + ' работает со следующего анализа · ' + A.id + ' в архиве, откат в один клик', 'check'); } })],
     });
     settleModal();
   }
@@ -777,10 +787,11 @@
       body: h('div', { class: 'stack', style: 'gap:14px' },
         h('div', { class: 'row' }, versionChip(v), h('span', { class: 'small muted' }, 'создана ' + fmt.dateFull(v.date))),
         facts([
-          ['Лог-лосс', fmt.dec(v.logloss, 3) + ' (рынок ' + fmt.dec(MARKET_LL, 3) + ')'],
+          ['Лог-лосс', fmt.dec(v.logloss, 3) + ' · рынок ' + fmt.dec(MARKET_LL, 3) + (MARKET_CI[v.id] ? ' · разница ' + signedDec(v.logloss - MARKET_LL) + ' (95% ДИ ' + signedDec(MARKET_CI[v.id][0]) + '…' + signedDec(MARKET_CI[v.id][1]) + ')' + (MARKET_CI[v.id][0] < 0 && MARKET_CI[v.id][1] > 0 ? ' — в пределах шума' : '') : '')],
           ['Brier', fmt.dec(v.brier, 3)],
-          ['ROI', signedPctEl(v.roi)],
+          ['ROI', h('span', null, signedPctEl(v.roi), h('span', { class: 'muted' }, ' · для наблюдения, ДИ ≈ ±20 п.п.'))],
           ['CLV', fmt.signedPct(v.clv)],
+          VERSION_INFO[v.id] && VERSION_INFO[v.id].goal === 'save' && ['Цель версии', 'Экономия: ' + tokSave() + '% токенов при качестве не хуже'],
           ['Событий в оценке', fmt.int(v.n)],
           info.tokens && ['Токенов на анализ', '≈ ' + info.tokens + ' тыс.'],
         ]),

@@ -358,7 +358,7 @@
     .analysis-calc-toggle { align-self: flex-start; }
     .analysis-calc-toggle svg:last-child { transition: transform .15s; }
     .analysis-calc-toggle[aria-expanded="true"] svg:last-child { transform: rotate(180deg); }
-    .analysis-calc[hidden] { display: none; }
+    .analysis-calc-box[hidden], .analysis-steps[hidden] { display: none; }
     .analysis-calc { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; font-size: var(--fs-sm); padding: 12px; border-radius: var(--r-md); border: 1px solid var(--line); }
     .analysis-calc dt { color: var(--fg-2); min-width: 0; }
     .analysis-calc dd { margin: 0; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -700,7 +700,7 @@
       h('dt', null, 'Адаптация по истории'), h('dd', null, 'без изменений'),
       h('dt', { class: 'is-sum' }, nw(fmt.money(BANK) + ' × ' + pctTxt(BASE_PCT)), ' = ', nw(fmt.money(BANK * BASE_PCT / 100)), ', ', nw('округление до 10 ₽')), h('dd', { class: 'is-sum' }, fmt.money(REC_STAKE)));
     // расчёт суммы свёрнут: карточка решения короче и целиком видна рядом с матчами
-    const calcBox = h('div', { class: 'stack', id: 'analysis-calc', style: 'gap:10px', hidden: !ST.calcOpen }, calc, adapt);
+    const calcBox = h('div', { class: 'stack analysis-calc-box', id: 'analysis-calc', style: 'gap:10px', hidden: !ST.calcOpen }, calc, adapt);
     const calcToggle = button('Как посчитана сумма', { kind: 'ghost', size: 'sm', icon: 'info', iconRight: 'chevronDown', attrs: { 'aria-expanded': String(ST.calcOpen), 'aria-controls': 'analysis-calc' }, onClick: () => {
       ST.calcOpen = !ST.calcOpen; calcBox.hidden = !ST.calcOpen; calcToggle.setAttribute('aria-expanded', String(ST.calcOpen));
       const side = calcToggle.closest('.analysis-side'); if (side) side.classList.toggle('is-calc-open', ST.calcOpen);

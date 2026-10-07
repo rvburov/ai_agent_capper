@@ -101,19 +101,21 @@
   // Неделя Шанхая (с 2 окт): игроки сегодняшних 1/8 в истории только побеждают и не встречаются между собой.
   // Меняем только имена; рынок, кэфы, вероятности и исходы остаются прежними, поэтому вся статистика не меняется.
   const TODAY_IDS = ['sinner', 'rune', 'djokovic', 'rublev', 'zverev', 'musetti', 'alcaraz', 'shelton', 'fritz', 'deminaur'];
-  const OTHERS = ['medvedev', 'draper', 'Хачанов', 'Бублик', 'Умбер', 'Махач', 'Кобольи', 'Попырин', 'Табило', 'Мунар', 'Нисиока', 'Шан Цзюньчэн'];
+  const OTHERS = ['medvedev', 'draper', 'Хачанов', 'Бублик', 'Умбер', 'Махач', 'Коболли', 'Попырин', 'Табило', 'Мунар', 'Нисиока', 'Шан Цзюньчэн'];
   const winnerSide = l => l.market === 'p1' || l.market === 'h1m' ? (l.result === 'win' ? 'p1' : 'p2')
     : l.market === 'p2' ? (l.result === 'win' ? 'p2' : 'p1')
     : l.result === 'loss' ? (l.market === 'h2p' ? 'p1' : 'p2') : null; // фора +1.5 сыграла — победитель матча неизвестен
-  let other = 0;
+  const weekUsed = new Set(); // кроме сегодняшних победителей, каждый игрок встречается на неделе один раз
+  const nextOther = () => OTHERS.find(n => !weekUsed.has(n));
   bets.filter(b => b.date >= '2026-10-02').forEach(b => {
     const usedToday = new Set();
     b.legs.forEach(l => {
       const w = winnerSide(l);
       ['p1', 'p2'].forEach(side => {
-        const isToday = TODAY_IDS.includes(l[side]);
-        if (isToday && side === w && !usedToday.has(l[side])) { usedToday.add(l[side]); return; }
-        if (isToday || l[side] === l[side === 'p1' ? 'p2' : 'p1']) l[side] = OTHERS[other++ % OTHERS.length];
+        const name = l[side], isToday = TODAY_IDS.includes(name);
+        if (isToday && side === w && !usedToday.has(name)) { usedToday.add(name); return; }
+        if (!isToday && !weekUsed.has(name)) { weekUsed.add(name); return; }
+        const n = nextOther(); weekUsed.add(n); l[side] = n;
       });
       const twin = allLegs.find(a => a.betId === b.id && a.market === l.market && a.odds === l.odds && a.result === l.result);
       if (twin) { twin.p1 = l.p1; twin.p2 = l.p2; }
