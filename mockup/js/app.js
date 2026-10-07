@@ -75,7 +75,7 @@
     if (o.actions) UI.append(extra, [o.actions]);
   };
 
-  function moreSheet() {
+  function moreSheet(navId) {
     const items = [
       { id: 'players', label: 'Игроки', icon: 'users' },
       { id: 'learning', label: 'Обучение модели', icon: 'brain' },
@@ -85,7 +85,8 @@
     UI.modal({
       title: 'Ещё',
       body: close => h('nav', { class: 'list', 'aria-label': 'Дополнительные разделы' },
-        items.map(it => h('a', { class: 'nav-link', href: '#' + it.id, on: { click: close } }, icon(it.icon), it.label)),
+        h('div', { class: 'demo-pill', role: 'note', style: 'align-self:flex-start;margin-bottom:8px' }, 'Макет · все цифры вымышлены'),
+        items.map(it => h('a', { class: 'nav-link', href: '#' + it.id, 'aria-current': navId === it.id ? 'page' : null, on: { click: close } }, icon(it.icon), it.label)),
         h('button', { class: 'nav-link', type: 'button', style: 'border:0;background:none;cursor:pointer;width:100%', on: { click: () => { close(); toggleTheme(); } } }, icon(currentTheme() === 'dark' ? 'sun' : 'moon'), currentTheme() === 'dark' ? 'Светлая тема' : 'Тёмная тема'),
         h('button', { class: 'nav-link', type: 'button', style: 'border:0;background:none;cursor:pointer;width:100%;color:var(--bad-ink)', on: { click: () => { close(); UI.auth.logout(); } } }, icon('logout'), 'Выйти')),
     });
@@ -119,13 +120,15 @@
     headerSlot = topbar;
 
     const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Нижняя навигация' }, TABS.map(t => {
-      if (t.id === 'more') return h('button', { class: 'tab', type: 'button', 'aria-current': ['players', 'learning', 'costs', 'profile'].includes(navId) ? 'page' : null, on: { click: moreSheet } }, icon(t.icon), t.label);
+      if (t.id === 'more') return h('button', { class: 'tab', type: 'button', 'aria-current': ['players', 'learning', 'costs', 'profile'].includes(navId) ? 'page' : null, on: { click: () => moreSheet(navId) } }, icon(t.icon), t.label);
       if (t.primary) return h('a', { class: 'tab tab-primary', href: '#' + t.id, 'aria-current': navId === t.id ? 'page' : null }, h('span', { class: 'tab-plus' }, icon(t.icon)), t.label);
       return h('a', { class: 'tab', href: '#' + t.id, 'aria-current': navId === t.id ? 'page' : null }, icon(t.icon), t.label);
     }));
 
     const view = h('main', { class: 'view', id: 'view', tabindex: '-1' });
-    const root = h('div', { class: 'shell' }, h('div', { class: 'sidebar-col' }, sidebar), h('div', { class: 'main' }, topbar, view), tabbar);
+    // на телефоне плашка «демо» скрыта в шапке — показываем её над содержимым
+    const demoNote = UI.isMobile() ? h('div', { class: 'demo-pill', role: 'note', style: 'align-self:flex-start;margin:10px var(--gutter) 0' }, 'Макет · все цифры вымышлены') : null;
+    const root = h('div', { class: 'shell' }, h('div', { class: 'sidebar-col' }, sidebar), h('div', { class: 'main' }, topbar, demoNote, view), tabbar);
     return { root, view };
   }
 

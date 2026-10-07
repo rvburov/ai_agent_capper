@@ -343,9 +343,13 @@
       const svg = h('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': o.ariaLabel || o.series.map(s => s.name).join(', ') });
       ticks.forEach(t => { if (t < lo - 1e-9 || t > hi + 1e-9) return; svg.appendChild(h('line', { class: 'grid-line', x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t) })); svg.appendChild(h('text', { x: m.l - 8, y: Y(t) + 4, 'text-anchor': 'end' }, yf(t))); });
       // x labels
-      const maxLabels = Math.max(2, Math.floor(iw / 72));
+      // прореживаем подписи по их реальной ширине; последняя точка подписывается всегда
+      const lw = Math.max(...o.labels.map((l, i) => textWidth(xf(l, i)))) + 16;
+      const maxLabels = Math.max(2, Math.floor(iw / lw) + 1);
       const stepL = Math.ceil(n / maxLabels);
-      for (let i = 0; i < n; i += stepL) svg.appendChild(h('text', { x: X(i), y: H - 6, 'text-anchor': i === 0 ? 'start' : 'middle' }, xf(o.labels[i], i)));
+      let lastI = -1;
+      for (let i = 0; i < n; i += stepL) { svg.appendChild(h('text', { x: X(i), y: H - 6, 'text-anchor': i === 0 ? 'start' : 'middle' }, xf(o.labels[i], i))); lastI = i; }
+      if (n > 1 && lastI !== n - 1 && X(n - 1) - X(lastI) >= lw) svg.appendChild(h('text', { x: X(n - 1), y: H - 6, 'text-anchor': 'end' }, xf(o.labels[n - 1], n - 1)));
       (o.refLines || []).forEach(r => {
         svg.appendChild(h('line', { x1: m.l, x2: W - m.r, y1: Y(r.value), y2: Y(r.value), stroke: 'var(--fg-3)', 'stroke-width': 1, 'stroke-dasharray': '4 4' }));
         if (r.label) svg.appendChild(h('text', { x: W - m.r, y: Y(r.value) - 6, 'text-anchor': 'end' }, r.label));
