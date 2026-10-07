@@ -166,6 +166,7 @@
   }
   const CONF = { high: ['Уверенность: высокая', 'good', 'shield'], mid: ['Уверенность: средняя', 'warn', 'alert'], low: ['Уверенность: низкая', 'bad', 'alert'] };
   function confChip(m) { const [t, k, i] = CONF[m.conf]; const c = chip(t, k, i); c.title = m.confNote; return c; }
+  const nw = t => h('span', { style: 'white-space:nowrap' }, t);
   const plink = p => h('a', { class: 'analysis-plink', href: '#player-' + p.id }, p.short);
 
   // ---------- стили ----------
@@ -210,6 +211,8 @@
     .analysis-step.is-done .analysis-step-meta, .analysis-step.is-active .analysis-step-meta { color: var(--fg-2); }
     .analysis-model { font-weight: 600; }
     @media (max-width: 720px) {
+      .analysis-running .analysis-head .lead { display: none; }
+      .analysis-running .analysis-step.is-done .analysis-step-detail { display: none; }
       .analysis-step { grid-template-columns: 28px minmax(0, 1fr); }
       .analysis-step-meta { grid-column: 2; text-align: left; padding-top: 0; white-space: normal; }
     }
@@ -260,7 +263,7 @@
     .analysis-plink { color: var(--fg); text-decoration: none; }
     .analysis-plink:hover { color: var(--accent-ink); text-decoration: underline; }
     @media (max-width: 720px) {
-      .analysis-vs-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "lab lab" "l r"; gap: 2px 8px; padding: 6px 0 8px; }
+      .analysis-vs-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "lab lab" "l r"; gap: 2px 8px; padding: 6px 0 8px; align-items: start; }
       .analysis-vs-row .analysis-vs-label { grid-area: lab; }
       .analysis-vs-row .analysis-vs-side.l { grid-area: l; }
       .analysis-vs-row .analysis-vs-side.r { grid-area: r; }
@@ -482,18 +485,18 @@
       bar.parentNode.setAttribute('aria-valuenow', String(ph.i));
       if (ph.i !== lastI) {
         lastI = ph.i;
-        stepLabel.textContent = (ph.i + 1) + ' из ' + STEPS.length;
+        stepLabel.textContent = String(ph.i + 1);
         live.textContent = 'Шаг ' + (ph.i + 1) + ' из ' + STEPS.length + ': ' + STEPS[ph.i].title;
       }
-      UI.clear(nums).appendChild(numsLine(totalsAt(ph), h('span', null, 'Шаг ', stepLabel)));
+      UI.clear(nums).appendChild(numsLine(totalsAt(ph), h('span', null, 'Шаг ', stepLabel, ' из ' + STEPS.length)));
       setTimeout(tick, 70);
     }
     // первый кадр синхронно — чтобы не было пустого состояния
     setTimeout(tick, 0);
     const t0 = performance.now() - RUN.startedAt, ph0 = phaseAt(t0);
     steps.forEach((s, i) => s.set(i < ph0.i ? 'done' : i === ph0.i ? 'active' : 'pending', i === ph0.i ? ph0.f : 0));
-    stepLabel.textContent = Math.min(ph0.i + 1, STEPS.length) + ' из ' + STEPS.length;
-    nums.appendChild(numsLine(totalsAt(ph0), h('span', null, 'Шаг ', stepLabel)));
+    stepLabel.textContent = String(Math.min(ph0.i + 1, STEPS.length));
+    nums.appendChild(numsLine(totalsAt(ph0), h('span', null, 'Шаг ', stepLabel, ' из ' + STEPS.length)));
     return el;
   }
 
@@ -669,10 +672,10 @@
 
     const calc = h('dl', { class: 'analysis-calc' },
       h('dt', null, 'Банк сейчас'), h('dd', null, fmt.money(BANK)),
-      h('dt', null, 'Кэф ' + fmt.odds(TOTAL_ODDS) + ' → диапазон ' + BAND.range), h('dd', null, BAND.pct + ' → ' + pctTxt(BASE_PCT)),
+      h('dt', null, 'Кэф ' + fmt.odds(TOTAL_ODDS) + ' → ', nw('диапазон ' + BAND.range)), h('dd', null, BAND.pct + ' → ' + pctTxt(BASE_PCT)),
       h('dt', null, 'Валуй ног небольшой (' + MX.map(m => fmt.signedPct(m.pickRow.value * 100, 1)).join(', ') + ')'), h('dd', null, 'без поправки'),
       h('dt', null, 'Адаптация по истории'), h('dd', null, 'без изменений'),
-      h('dt', { class: 'is-sum' }, fmt.money(BANK) + ' × ' + pctTxt(BASE_PCT) + ' = ' + fmt.money(BANK * BASE_PCT / 100) + ', округление до 10 ₽'), h('dd', { class: 'is-sum' }, fmt.money(REC_STAKE)));
+      h('dt', { class: 'is-sum' }, nw(fmt.money(BANK) + ' × ' + pctTxt(BASE_PCT)), ' = ', nw(fmt.money(BANK * BASE_PCT / 100)), ', округление до 10 ₽'), h('dd', { class: 'is-sum' }, fmt.money(REC_STAKE)));
 
     const stakeRow = h('div', { class: 'analysis-stake' },
       h('div', { style: 'min-width:0' },
@@ -760,7 +763,7 @@
     input.addEventListener('input', () => { val = Math.round(Number(input.value)); drawSeg(); drawPreview(); });
     drawSeg(); drawPreview();
     UI.modal({
-      title: 'Сумма ставки',
+      title: 'Изменить сумму',
       body: close => h('form', { id: 'analysis-stake-form', class: 'stack', style: 'gap:14px', novalidate: true, on: { submit: e => {
         e.preventDefault();
         if (!(Number.isFinite(val) && val >= 50 && val <= BANK)) { input.focus(); return; }
@@ -822,6 +825,7 @@
   function draw(root) {
     const mobile = UI.isMobile();
     UI.clear(root);
+    root.classList.toggle('analysis-running', !RUN.done);
     if (!RUN.done) {
       UI.append(root, [headBlock(false), progressRunning(root), skeleton()]);
       return;

@@ -171,8 +171,9 @@
     .bets-active .bets-chipbtn { height: 30px; padding: 0 10px; }
 
     .bets-sum { overflow: hidden; }
+    .bets-sum-reset { margin: -6px -8px -6px auto; }
     .bets-sum-cap { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 12px 18px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
-    .bets-sum-grid { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .8fr) minmax(0, 1.05fr); gap: 1px; background: var(--line); }
+    .bets-sum-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .9fr) minmax(0, 1.05fr); gap: 1px; background: var(--line); }
     .bets-sum-cell { background: var(--surface); padding: 14px 18px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .bets-sum-l { font-size: var(--fs-xs); color: var(--fg-2); }
     .bets-l-short { display: none; }
@@ -232,6 +233,7 @@
     .bets-res.open { background: var(--info-soft); color: var(--info-ink); }
 
     .bets-hist .card-head { align-items: center; }
+    .bets-table th:last-child { position: relative; }
     .bets-table td { vertical-align: top; }
     .bets-table td.r { white-space: nowrap; }
     .bets-row { cursor: pointer; }
@@ -244,7 +246,8 @@
     .bets-legline { display: flex; align-items: center; gap: 7px; min-width: 0; line-height: 1.35; }
     .bets-legline + .bets-legline { margin-top: 5px; }
     .bets-legline-t { min-width: 0; }
-    .bets-legline-m { color: var(--fg); }
+    .bets-legline-m { color: var(--fg); white-space: nowrap; }
+    @media (max-width: 1240px) { .bets-table .bets-sub { white-space: normal; align-items: flex-start; } .bets-table .bets-sub .bets-dot { margin-top: 4px; } }
     .bets-profit { font-weight: 600; }
     .bets-exp { margin: -6px 0; }
     .bets-exp svg { transition: transform .15s; }
@@ -375,8 +378,6 @@
   }
 
   function desktopFilters() {
-    const reset = button('Сбросить', { kind: 'ghost', size: 'sm', icon: 'x', onClick: resetFilters });
-    ui.resetBtn = reset;
     const chips = h('div', { class: 'bets-chips', role: 'group', 'aria-label': 'Покрытие' });
     const drawChips = () => {
       UI.clear(chips);
@@ -390,7 +391,7 @@
       periodSeg(),
       nativeSelect('Статус ставки', STATUS_OPTS, F.status, v => { F.status = v; shown = PAGE; refresh(); }),
       nativeSelect('Рынок', MARKET_OPTS, F.market, v => { F.market = v; shown = PAGE; refresh(); }),
-      chips, reset);
+      chips);
   }
 
   function mobileFilters() {
@@ -472,14 +473,15 @@
     const wlv = s.n ? h('div', { class: 'bets-wlv', 'aria-hidden': 'true' },
       [['win', s.wins], ['loss', s.losses], ['void', s.voids]].filter(x => x[1]).map(([k, n]) => h('i', { class: k, style: { flexGrow: String(n) } }))) : null;
     return h('section', { class: 'card bets-sum', 'aria-label': 'Итоги по ставкам' },
-      h('div', { class: 'bets-sum-cap' }, h('span', { class: 'eyebrow' }, 'Итоги'), h('span', { class: 'small muted' }, describe(F))),
+      h('div', { class: 'bets-sum-cap' }, h('span', { class: 'eyebrow' }, 'Итоги'), h('span', { class: 'small muted', style: 'min-width:0' }, describe(F)),
+        anyActive(F) && !UI.isMobile() ? button('Сбросить фильтры', { kind: 'ghost', size: 'sm', icon: 'x', onClick: resetFilters, attrs: { class: 'btn ghost sm bets-sum-reset' } }) : null),
       h('div', { class: 'bets-sum-grid' },
-        cell('Рассчитано ставок', String(s.n), s.open.length ? 'ещё ' + s.open.length + ' в игре на ' + fmt.money(s.openStake) : 'открытых нет'),
+        cell('Рассчитано ставок', String(s.n), s.open.length ? ['и ещё ' + s.open.length + ' в игре: ', h('span', { class: 'bets-nw' }, fmt.money(s.openStake))] : 'открытых нет'),
         cell([h('span', { class: 'bets-l-full' }, 'Выигрыш · проигрыш · возврат'), h('span', { class: 'bets-l-short' }, 'Выигр. · проигр. · возвр.')], s.wins + ' · ' + s.losses + ' · ' + s.voids, s.winrate == null ? 'нет рассчитанных' : 'проходимость ' + fmt.pct(s.winrate), null, wlv),
-        cell('Оборот', fmt.money(s.turnover), s.avgStake ? 'средняя ставка ' + fmt.money(s.avgStake) : '—'),
-        cell('Прибыль', fmt.signedMoney(s.profit), anyActive(F) ? 'по выбранным ставкам' : 'банк сейчас ' + fmt.money(S.bank), toneCls(s.profit)),
+        cell('Оборот', fmt.money(s.turnover), s.avgStake ? ['в среднем ', h('span', { class: 'bets-nw' }, fmt.money(s.avgStake))] : '—'),
+        cell('Прибыль', fmt.signedMoney(s.profit), anyActive(F) ? 'по выбранным ставкам' : ['банк сейчас ', h('span', { class: 'bets-nw' }, fmt.money(S.bank))], toneCls(s.profit)),
         cell('ROI', pctOrDash(s.roi), 'прибыль ÷ оборот', toneCls(s.roi)),
-        cell('Средний CLV', pctOrDash(s.clv), s.clvN ? 'кэф лучше закрытия в ' + s.clvPos + ' из ' + s.clvN : 'нет закрывающих кэфов', toneCls(s.clv))),
+        cell('Средний CLV', pctOrDash(s.clv), s.clvN ? ['лучше закрытия: ', h('span', { class: 'bets-nw' }, s.clvPos + ' из ' + s.clvN)] : 'нет закрывающих кэфов', toneCls(s.clv))),
       h('div', { class: 'bets-sum-note' }, icon('info'),
         h('span', null, 'CLV — на сколько ваш кэф выше закрывающего, то есть кэфа перед началом матча. Если CLV стабильно в плюсе, модель находит перевес, даже когда отдельные ставки проигрывают.')));
   }
@@ -495,7 +497,7 @@
         h('div', null, h('b', null, 'Ставка №' + b.id + ' рассчитана: ' + res + '. '), 'Банк — ' + fmt.money(S.bank) + '.'),
         h('div', null, b.status === 'void'
           ? 'Возврат не участвует в обучении и калибровке, разбор не нужен.'
-          : 'ИИ разбирает ставку: сравнит прогноз с исходом и закрывающей линией. Если найдёт повторяющуюся ошибку, предложит урок в разделе «Обучение модели». Урок не попадёт в промпт, пока не подтвердится на 20 и более похожих случаях.'),
+          : 'ИИ сравнит прогноз с исходом и закрывающей линией. Если ошибка повторяется, предложит урок — в промпт он попадёт только после проверки на 20+ похожих случаях.'),
         h('div', { class: 'row' },
           b.status !== 'void' && button('Посмотреть разбор', { kind: 'secondary', size: 'sm', icon: 'spark', onClick: () => reviewModal(b) }),
           button('Обучение модели', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', href: '#learning' }))),
@@ -896,7 +898,7 @@
         closeIn.classList.toggle('invalid', !!raw && !v && raw.length >= 3);
         if (raw && !v && raw.length >= 3) { closeHint.className = 'field-error'; closeHint.textContent = 'Кэф от 1.01, например ' + fmt.odds(l.odds); return; }
         closeHint.className = 'field-hint';
-        if (v) { const clv = (l.odds / v - 1) * 100; closeHint.append('перед началом матча · ', h('b', { class: toneCls(clv) }, 'CLV ' + fmt.signedPct(clv))); }
+        if (v) { const clv = (l.odds / v - 1) * 100; closeHint.append('перед стартом · ', h('b', { class: [toneCls(clv), 'bets-nw'] }, 'CLV ' + fmt.signedPct(clv))); }
         else closeHint.textContent = 'кэф перед началом матча';
       });
 
@@ -917,7 +919,7 @@
       applySettle(b, st, o);
       close();
       UI.rerender();
-      UI.toast('Ставка №' + b.id + ' рассчитана: ' + (o.status === 'void' ? 'возврат' : fmt.signedMoney(o.profit)) + ', банк ' + fmt.money(S.bank), o.status === 'loss' ? 'x' : 'check');
+      UI.toast(('Ставка №' + b.id + ' рассчитана: ' + (o.status === 'void' ? 'возврат' : fmt.signedMoney(o.profit)) + ', банк ' + fmt.money(S.bank)).replace(/ ₽/g, '\u00a0₽'), o.status === 'loss' ? 'x' : 'check');
     };
 
     UI.modal({
@@ -978,14 +980,12 @@
     put(ui.summaryHost, summaryCard(list));
     put(ui.openHost, openSection(list));
     put(ui.listHost, historySection(list, mobile));
-    if (ui.resetBtn) ui.resetBtn.hidden = !anyActive(F);
   }
 
   function build() {
     const root = ui.root;
     const mobile = UI.isMobile();
     UI.clear(root);
-    ui.resetBtn = null;
     if (!expandInit) {
       expandInit = true;
       const newest = D.bets.filter(b => b.status !== 'open').sort(newestFirst)[0];
@@ -1002,7 +1002,7 @@
   // #bets-<номер>: открытая ставка → ввод результата, рассчитанная → детали
   function handleParam(param) {
     if (!param) return;
-    try { history.replaceState(null, '', '#bets'); } catch (e) { /* окружение без history — не страшно */ }
+    try { history.replaceState(history.state, '', location.href.split('#')[0] + '#bets'); } catch (e) { /* окружение без history — не страшно */ }
     const b = D.bets.find(x => String(x.id) === String(param));
     if (!b) { UI.toast('Ставка №' + param + ' не найдена', 'alert'); return; }
     if (b.status === 'open') { setTimeout(() => settleModal(b), 60); return; }

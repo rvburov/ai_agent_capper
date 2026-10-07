@@ -516,7 +516,7 @@
 
   // Инъекция CSS экрана один раз
   const injected = new Set();
-  function css(id, text) { if (injected.has(id)) return; injected.add(id); document.head.appendChild(h('style', { 'data-screen': id }, text)); }
+  function css(id, text) { if (injected.has(id)) return; injected.add(id); document.body.appendChild(h('style', { 'data-screen': id }, text)); } // после общих стилей страницы — стили экрана выигрывают при равной специфичности
 
   const mq = window.matchMedia('(max-width: 960px)');
   function isMobile() { return mq.matches; }

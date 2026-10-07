@@ -26,7 +26,7 @@
     { id: '90', label: '3 месяца', days: 90, ctx: 'за 3 месяца', prev: 'к пред. 3 месяцам' },
     { id: 'all', label: 'Всё время', days: null, ctx: 'за всё время', prev: null },
   ];
-  const MARKET_INFO = { p1: 'победа игрока 1', p2: 'победа игрока 2', h1m: 'игрок 1 выигрывает 2:0 по сетам', h2p: 'игрок 2 берёт хотя бы сет', h1p: 'игрок 1 берёт хотя бы сет' };
+  const MARKET_SHORT = { p1: 'победа игрока 1', p2: 'победа игрока 2', h1m: 'игрок 1 — 2:0 по сетам', h2p: 'игрок 2 — хотя бы сет', h1p: 'игрок 1 — хотя бы сет' };
   const MARKETS = D.markets.filter(m => D.allLegs.some(l => l.market === m.id));
   const mLabel = id => (D.markets.find(m => m.id === id) || { label: id }).label;
   const SURF_KEYS = Object.keys(D.surfaces);
@@ -176,10 +176,9 @@
       .analytics-kpis .stat-value { font-size: var(--fs-xl); }
     }
 
-    .analytics-top { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
     .analytics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-    @media (max-width: 1180px) { .analytics-top, .analytics-grid { grid-template-columns: minmax(0, 1fr); } }
-    @media (max-width: 720px) { .analytics-top, .analytics-grid { gap: 12px; } }
+    @media (max-width: 1180px) { .analytics-grid { grid-template-columns: minmax(0, 1fr); } }
+    @media (max-width: 720px) { .analytics-grid { gap: 12px; } }
     .analytics-card .card-body { flex: 1 1 auto; }
     .analytics-card .card-head > div:first-child { flex: 1 1 220px; }
 
@@ -190,8 +189,9 @@
     .analytics-howto { margin-top: auto; font-size: var(--fs-xs); color: var(--fg-3); display: flex; gap: 6px; align-items: flex-start; line-height: 1.45; }
     .analytics-howto svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
     .analytics-howto b { color: var(--fg-2); font-weight: 600; }
-    .analytics-foot-note { font-size: var(--fs-xs); color: var(--fg-3); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-    .analytics-foot-note svg { width: 13px; height: 13px; flex: none; color: var(--warn-ink); }
+    .analytics-foot-note { font-size: var(--fs-xs); color: var(--fg-3); display: flex; gap: 6px; align-items: flex-start; line-height: 1.45; }
+    .analytics-foot-note > span { min-width: 0; }
+    .analytics-foot-note svg { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--warn-ink); }
     .analytics-small { display: inline-flex; color: var(--warn-ink); flex: none; }
     .analytics-small svg { width: 13px; height: 13px; }
 
@@ -220,8 +220,8 @@
     .analytics-ins-text { font-size: var(--fs-sm); color: var(--fg-2); }
     .analytics-ins-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
     @container (min-width: 640px) {
-      .analytics-ins { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-      .analytics-ins > li, .analytics-ins > li:first-child, .analytics-ins > li:last-child { border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; grid-template-columns: minmax(0, 1fr); }
+      .analytics-ins { display: grid; grid-template-columns: repeat(var(--ins-n, 3), minmax(0, 1fr)); gap: 12px; }
+      .analytics-ins > li, .analytics-ins > li:first-child, .analytics-ins > li:last-child { border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
       .analytics-ins-foot { margin-top: auto; padding-top: 6px; }
     }
 
@@ -231,7 +231,7 @@
     .analytics-mtable tr.is-active td { background: var(--accent-soft); }
     .analytics-mtable tr.is-total td { font-weight: 600; background: var(--surface-2); }
     .analytics-mname { font-weight: 600; white-space: nowrap; }
-    .analytics-mdesc { font-size: var(--fs-xs); color: var(--fg-3); }
+    .analytics-mdesc { font-size: var(--fs-xs); color: var(--fg-3); white-space: nowrap; }
     .analytics-mlist { list-style: none; margin: 0; padding: 0; display: none; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
     .analytics-mlist > li + li { border-top: 1px solid var(--line); }
     .analytics-mrow { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 10px 12px; background: var(--surface); border: 0; text-align: left; cursor: pointer; color: var(--fg); }
@@ -248,8 +248,19 @@
     .analytics-scroll { max-height: 300px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r-md); }
     .analytics-scroll .table th { position: sticky; top: 0; background: var(--surface); }
     .analytics-tablebox { border: 1px solid var(--line); border-radius: var(--r-md); }
+    /* компактные таблицы внутри карточек: без прокрутки вбок даже в узкой колонке */
+    .analytics-tablebox .table th, .analytics-tablebox .table td, .analytics-scroll .table th, .analytics-scroll .table td { padding: 9px 8px; }
+    .analytics-tablebox .table th, .analytics-scroll .table th { white-space: normal; letter-spacing: .03em; vertical-align: bottom; }
+    .analytics-tablebox .table th:first-child, .analytics-tablebox .table td:first-child, .analytics-scroll .table th:first-child, .analytics-scroll .table td:first-child { padding-left: 14px; }
+    .analytics-tablebox .table th:last-child, .analytics-tablebox .table td:last-child, .analytics-scroll .table th:last-child, .analytics-scroll .table td:last-child { padding-right: 14px; }
+    @media (max-width: 720px) {
+      .analytics-tablebox .table th, .analytics-tablebox .table td, .analytics-scroll .table th, .analytics-scroll .table td { padding: 9px 7px; }
+      .analytics-tablebox .table th:first-child, .analytics-tablebox .table td:first-child, .analytics-scroll .table th:first-child, .analytics-scroll .table td:first-child { padding-left: 12px; }
+      .analytics-tablebox .table th:last-child, .analytics-tablebox .table td:last-child, .analytics-scroll .table th:last-child, .analytics-scroll .table td:last-child { padding-right: 12px; }
+    }
     .analytics-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 40px 20px; }
     .analytics-empty-ic { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-3); }
+    .analytics-nowrap { white-space: nowrap; }
     .analytics-empty-ic svg { width: 24px; height: 24px; }
     .analytics-empty p { max-width: 52ch; color: var(--fg-2); font-size: var(--fs-sm); }
     .analytics-check { display: flex; flex-direction: column; gap: 10px; }
@@ -258,8 +269,13 @@
   // ---------- мелкие блоки ----------
   const howto = (...content) => h('div', { class: 'analytics-howto' }, icon('info'), h('span', null, content));
   const smallMark = () => h('span', { class: 'analytics-small', title: 'Меньше ' + SMALL + ' событий — ROI может быть случайным' }, icon('alert'), h('span', { class: 'sr-only' }, 'мало данных'));
-  const smallNote = () => h('div', { class: 'analytics-foot-note' }, icon('alert'), 'меньше ' + SMALL + ' событий — ROI может быть случайным');
+  const footNote = text => h('div', { class: 'analytics-foot-note' }, icon('alert'), h('span', null, text));
+  const smallNote = () => footNote('меньше ' + SMALL + ' событий — ROI может быть случайным');
+  const nowrap = t => h('span', { class: 'analytics-nowrap' }, t);
+  const deltaPP = d => { const r = Math.round(d * 10) / 10; return (r === 0 ? '0,0' : signedDec(r, 1)) + ' п.п.'; };
   const hover = () => (UI.isMobile() ? 'Коснитесь' : 'Наведите на');
+  // Таблица с колонками hideMobile, которые на телефоне скрываются, чтобы не было прокрутки вбок
+  const mtable = o => UI.table(Object.assign({}, o, { columns: UI.isMobile() ? o.columns.filter(c => !c.hideMobile) : o.columns }));
   const tableBox = node => h('div', { class: 'analytics-tablebox' }, node);
   const roiCls = v => (v > 0 ? 'good-text' : v < 0 ? 'bad-text' : null);
   const roiText = v => h('span', { class: roiCls(v), style: 'font-weight:600;white-space:nowrap' }, fmt.signedPct(v));
@@ -299,7 +315,7 @@
     drawPeriod();
     const marketField = UI.field({
       id: 'analytics-market', label: 'Рынок', value: state.market,
-      options: [{ value: 'all', label: 'Все рынки' }].concat(MARKETS.map(m => ({ value: m.id, label: m.label + ' — ' + MARKET_INFO[m.id] }))),
+      options: [{ value: 'all', label: 'Все рынки' }].concat(MARKETS.map(m => ({ value: m.id, label: m.label }))),
       attrs: { on: { change: e => { state.market = e.target.value; onChange(); } } },
     });
     const surfaceField = UI.field({
@@ -319,12 +335,12 @@
       reset.hidden = isDefault();
       UI.clear(scope);
       const dates = s.bets.map(b => b.date).sort();
-      const range = dates.length ? (dates[0] === dates[dates.length - 1] ? fmt.date(dates[0]) : fmt.date(dates[0]) + ' – ' + fmt.date(dates[dates.length - 1])) : 'нет ставок';
+      const range = dates.length ? ' · ' + (dates[0] === dates[dates.length - 1] ? fmt.date(dates[0]) : fmt.date(dates[0]) + ' – ' + fmt.date(dates[dates.length - 1])) : '';
       const chips = [];
       if (state.market !== 'all') chips.push(h('button', { type: 'button', class: 'chip accent analytics-chip-btn', title: 'Убрать фильтр по рынку', on: { click: () => { state.market = 'all'; onChange(); } } }, 'Рынок: ' + mLabel(state.market), icon('x')));
       if (state.surface !== 'all') chips.push(h('button', { type: 'button', class: 'chip accent analytics-chip-btn', title: 'Убрать фильтр по покрытию', on: { click: () => { state.surface = 'all'; onChange(); } } }, 'Покрытие: ' + D.surfaces[state.surface].label, icon('x')));
       UI.append(scope, [
-        h('span', null, 'В выборке ', h('b', null, nBets(s.sum.n)), ' и ', h('b', null, nEv(s.legs.length)), ' · ' + range),
+        h('span', null, 'В выборке ', h('b', null, nBets(s.sum.n)), ' и ', h('b', null, nEv(s.legs.length)), range),
         chips,
         h('span', { class: 'muted xsmall' }, OPEN_N + ' ' + fmt.plural(OPEN_N, 'ставка', 'ставки', 'ставок') + ' в игре не учитываются'),
       ]);
@@ -338,10 +354,10 @@
     const profit = { label: 'Прибыль', icon: 'wallet', value: fmt.signedMoney(c.profit), hint: 'оборот ' + fmt.money(c.turnover) };
     if (pv) Object.assign(profit, { delta: fmt.signedMoney(c.profit - pv.profit), trend: trendOf(c.profit - pv.profit), hint: s.p.prev });
     const roi = { label: 'ROI', icon: 'coins', value: c.roi == null ? '—' : fmt.signedPct(c.roi), hint: 'к сумме ставок' };
-    if (pv && pv.roi != null && c.roi != null) Object.assign(roi, { delta: signedDec(c.roi - pv.roi, 1) + ' п.п.', trend: trendOf(Math.round((c.roi - pv.roi) * 10)), hint: s.p.prev });
+    if (pv && pv.roi != null && c.roi != null) Object.assign(roi, { delta: deltaPP(c.roi - pv.roi), trend: trendOf(Math.round((c.roi - pv.roi) * 10)), hint: s.p.prev });
     const wr = { label: 'Винрейт', icon: 'trophy', value: c.winrate == null ? '—' : fmt.pct(c.winrate), hint: c.wins + ' В · ' + c.losses + ' П' + (c.voids ? ' · ' + c.voids + ' возвр.' : '') };
     const clv = { label: 'Средний CLV', icon: 'bolt', value: c.clv == null ? '—' : fmt.signedPct(Math.round(c.clv * 10) / 10), hint: 'лучше закрытия в ' + c.clvPos + ' из ' + c.n };
-    if (pv && pv.clv != null && c.clv != null) Object.assign(clv, { delta: signedDec(c.clv - pv.clv, 1) + ' п.п.', trend: trendOf(Math.round((c.clv - pv.clv) * 10)) });
+    if (pv && pv.clv != null && c.clv != null) Object.assign(clv, { delta: deltaPP(c.clv - pv.clv), trend: trendOf(Math.round((c.clv - pv.clv) * 10)) });
     const b = s.brier;
     const br = { label: 'Brier модели', icon: 'target', value: b.model == null ? '—' : fmt.dec(b.model, 3) };
     if (b.model != null) {
@@ -395,12 +411,12 @@
         const end = byWeek ? addDays(k, 6) : k + '-31';
         return { label: byWeek ? fmt.date(k) + ' – ' + fmt.date(addDays(k, 6)) : MONTHS[+k.slice(5, 7) - 1] + (k.slice(5, 7) === TODAY.slice(5, 7) ? ' (по ' + fmt.date(TODAY) + ')' : ''), n: sm.n, profit: sm.profit, roi: sm.roi, end: isBank ? bankAt(end < TODAY ? end : TODAY) : cum };
       });
-      return tableBox(UI.table({
+      return tableBox(mtable({
         columns: [
           { key: 'label', label: byWeek ? 'Неделя' : 'Месяц', render: r => h('span', { style: 'white-space:nowrap' }, r.label) },
-          { key: 'n', label: 'Ставок', align: 'r' },
+          { key: 'n', label: 'Ставок', align: 'r', hideMobile: true },
           { key: 'profit', label: 'Прибыль', align: 'r', render: r => h('span', { class: roiCls(r.profit), style: 'white-space:nowrap;font-weight:600' }, fmt.signedMoney(r.profit)) },
-          { key: 'roi', label: 'ROI', align: 'r', render: r => (r.roi == null ? '—' : roiText(r.roi)) },
+          { key: 'roi', label: 'ROI', align: 'r', hideMobile: true, render: r => (r.roi == null ? '—' : roiText(r.roi)) },
           { key: 'end', label: isBank ? 'Банк на конец' : 'Итог нарастающим', align: 'r', render: r => h('span', { style: 'white-space:nowrap' }, isBank ? fmt.money(r.end) : fmt.signedMoney(r.end)) },
         ],
         rows, empty: 'Нет ставок за период',
@@ -434,7 +450,7 @@
     if (worst && worst.p - worst.actual >= 0.04) {
       const gap = Math.round((worst.p - worst.actual) * 100);
       const range = pctRange(worst.lo, worst.hi);
-      out.push({ id: 'calib-' + range, tone: 'warn', ic: 'target', title: 'Переоценка фаворитов в диапазоне ' + range,
+      out.push({ id: 'calib-' + range, tone: 'warn', ic: 'target', title: ['Переоценка фаворитов в диапазоне ', nowrap(range)],
         text: 'Модель давала в среднем ' + fmt.prob(worst.p) + ', а сыграло ' + fmt.prob(worst.actual) + ' — на ' + gap + ' п.п. меньше. Валуй в этом диапазоне, вероятно, завышен.',
         basis: nEv(worst.n), action: 'hypothesis', range, gap, n: worst.n });
     } else if (bins.length) {
@@ -446,7 +462,7 @@
     if (tot && tot.roi < 0) {
       const st = D.strategy.stakeTable.find(x => x.range === tot.key);
       const biggest = D.strategy.stakeTable[0].range === tot.key;
-      out.push({ id: 'total-' + tot.key, tone: 'bad', ic: 'alert', title: 'Экспрессы с итоговым кэфом ' + tot.label + ' в минусе',
+      out.push({ id: 'total-' + tot.key, tone: 'bad', ic: 'alert', title: ['Экспрессы с итоговым кэфом ', nowrap(tot.label), ' в минусе'],
         text: 'ROI ' + fmt.signedPct(tot.roi) + ' на ' + onBets(tot.n) + ' (' + fmt.signedMoney(tot.profit) + '). ' + (st ? (biggest ? 'При этом по таблице стратегии на них идёт самая крупная ставка — ' : 'Ставка по таблице стратегии — ') + st.pct + ' банка.' : ''),
         basis: nBets(tot.n), action: 'bets' });
     }
@@ -468,6 +484,12 @@
         text: 'Brier ' + fmt.dec(s.brier.model, 3) + ' против ' + fmt.dec(s.brier.market, 3) + ' у рынка' + (Math.abs(diff) < 0.01 ? ' — разница в пределах шума на ' + onEv(s.brier.n) + '.' : '.') + ' Надёжнее смотреть на CLV: ' + fmt.signedPct(Math.round(s.sum.clv * 10) / 10) + ' в среднем, лучше закрытия в ' + s.sum.clvPos + ' из ' + s.sum.n + '.',
         basis: nEv(s.brier.n), action: 'explain' });
     }
+    // 0. Общая оговорка, если данных мало — ставим первой
+    if (s.legs.length < 30) {
+      out.unshift({ id: 'sample', tone: 'info', ic: 'info', title: 'Выборка слишком мала для выводов',
+        text: 'Под фильтром ' + nBets(s.sum.n) + ' и ' + nEv(s.legs.length) + '. На таком объёме ROI и калибровка почти целиком зависят от везения — опирайтесь на них не раньше 30 событий.',
+        basis: nEv(s.legs.length), action: state.period !== 'all' ? 'widen' : s.filtered ? 'clear' : null });
+    }
     return out.slice(0, 3);
   }
 
@@ -477,7 +499,7 @@
       title: 'Гипотеза для обучения модели',
       body: [
         h('p', { class: 'soft small' }, 'ИИ подготовил черновик урока по этому наблюдению. Урок не попадёт в промпт анализа, пока не подтвердится на новых событиях и вы его не одобрите в разделе «Обучение модели».'),
-        UI.field({ id: 'analytics-hyp-text', label: 'Формулировка', rows: 3, value: 'При прогнозе ' + ins.range + ' на фаворита модель завышает вероятность примерно на ' + ins.gap + ' п.п. Снижать оценку на ' + Math.max(2, Math.round(ins.gap / 2)) + ' п.п. перед расчётом валуя.' }),
+        UI.field({ id: 'analytics-hyp-text', label: 'Формулировка', rows: 4, value: 'При прогнозе ' + ins.range + ' на фаворита модель завышает вероятность примерно на ' + ins.gap + ' п.п. Снижать оценку на ' + Math.max(2, Math.round(ins.gap / 2)) + ' п.п. перед расчётом валуя.' }),
         UI.field({ id: 'analytics-hyp-scope', label: 'Где проверять', value: 'all', options: [{ value: 'all', label: 'Все покрытия и рынки' }, { value: 'fav', label: 'Только П1 и Ф1(−1.5) — ставки на фаворита' }, { value: 'hard', label: 'Только хард' }] }),
         UI.kv([['Основание сейчас', nEv(ins.n)], ['Порог подтверждения', '≥ 20 новых событий'], ['Номер', num]]),
       ],
@@ -539,6 +561,8 @@
       }
       if (ins.action === 'bets') return button('Открыть ставки', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#bets' });
       if (ins.action === 'filter') return button('Показать только ' + ins.label, { kind: 'secondary', size: 'sm', icon: 'filter', onClick: () => { state[ins.dim] = ins.key; update(); scrollToFilters(); UI.toast('Фильтр: ' + ins.label, 'filter'); } });
+      if (ins.action === 'widen') return button('Показать за всё время', { kind: 'secondary', size: 'sm', icon: 'calendar', onClick: () => { state.period = 'all'; update(true); } });
+      if (ins.action === 'clear') return button('Снять фильтры', { kind: 'secondary', size: 'sm', icon: 'refresh', onClick: () => { state.market = 'all'; state.surface = 'all'; update(); } });
       if (ins.action === 'explain') return button('Что это значит', { kind: 'secondary', size: 'sm', icon: 'book', onClick: explainModal });
       return null;
     };
@@ -548,7 +572,7 @@
       subtitle: 'Автоматически по рассчитанным ставкам ' + s.p.ctx,
       actions: [chip('Обновлено ' + fmt.date(SETTLED[SETTLED.length - 1].date), 'outline', 'clock')],
       body: list.length
-        ? h('ol', { class: 'analytics-ins', 'aria-label': 'Выводы модели' }, list.map(ins => h('li', null,
+        ? h('ol', { class: 'analytics-ins', 'aria-label': 'Выводы модели', style: { '--ins-n': String(list.length) } }, list.map(ins => h('li', null,
           h('span', { class: ['analytics-ins-ic', ins.tone], 'aria-hidden': 'true' }, icon(ins.ic)),
           h('div', { class: 'analytics-ins-body' },
             h('span', { class: 'sr-only' }, TONE_LABEL[ins.tone] + ': '),
@@ -573,18 +597,18 @@
       class: 'analytics-card', title: 'ROI по покрытиям', subtitle: 'События экспрессов как ординары на равную сумму',
       actions: [chip(nEv(sum(groups, g => g.n)), 'outline')],
       body: [
-        groups.length ? UI.withTable(roiBars(groups, { colorOf: k => D.surfaces[k].color, selected: state.surface }), () => tableBox(UI.table({
+        groups.length ? UI.withTable(roiBars(groups, { colorOf: k => D.surfaces[k].color, selected: state.surface }), () => tableBox(mtable({
           columns: [
             { key: 'label', label: 'Покрытие', render: g => UI.surfaceChip(g.key) },
             { key: 'n', label: 'Событий', align: 'r' },
             { key: 'winrate', label: 'Винрейт', align: 'r', render: g => fmt.pct(g.winrate) },
-            { key: 'avgOdds', label: 'Ср. кэф', align: 'r', render: g => h('span', { class: 'odds' }, fmt.odds(g.avgOdds)) },
+            { key: 'avgOdds', label: 'Ср. кэф', align: 'r', hideMobile: true, render: g => h('span', { class: 'odds' }, fmt.odds(g.avgOdds)) },
             { key: 'roi', label: 'ROI', align: 'r', render: g => roiText(g.roi) },
           ], rows: groups,
         }))) : UI.empty('Нет событий за период'),
         (groups.some(g => g.n < SMALL) || missing.length) && h('div', { class: 'stack', style: 'gap:4px' },
           groups.some(g => g.n < SMALL) && smallNote(),
-          missing.length && h('div', { class: 'analytics-foot-note' }, missing.map(k => D.surfaces[k].label).join(', ') + ': событий ' + (missing.includes('indoor') && missing.length === 1 ? 'пока нет — сезон в залах начнётся после Шанхая' : 'за период нет'))),
+          missing.length && h('div', { class: 'analytics-foot-note', style: 'padding-left:19px' }, h('span', null, missing.map(k => D.surfaces[k].label).join(', ') + ': событий ' + (missing.includes('indoor') && missing.length === 1 ? 'пока нет — сезон в залах начнётся после Шанхая' : 'за период нет')))),
         howto(h('b', null, 'Как читать: '), 'каждое событие считается отдельной ставкой одного размера — так видно, где прогнозы точнее, без влияния размера ставки. Полоса вправо — плюс, влево — минус.'),
       ],
     });
@@ -609,17 +633,17 @@
       class: 'analytics-card', title: 'ROI по кэфу события', subtitle: 'Диапазоны кэфа отдельного события',
       actions: [chip(nEv(s.legs.length), 'outline')],
       body: [
-        groups.length ? UI.withTable(roiBars(groups, {}), () => tableBox(UI.table({
+        groups.length ? UI.withTable(roiBars(groups, {}), () => tableBox(mtable({
           columns: [
-            { key: 'label', label: 'Кэф', render: g => h('span', { class: 'odds' }, g.label) },
-            { key: 'n', label: 'Событий', align: 'r' },
+            { key: 'label', label: 'Кэф', render: g => h('span', { class: 'odds analytics-nowrap' }, g.label) },
+            { key: 'n', label: 'Событий', align: 'r', hideMobile: true },
             { key: 'winrate', label: 'Винрейт', align: 'r', render: g => fmt.pct(g.winrate) },
-            { key: 'need', label: 'Нужно для нуля', align: 'r', render: g => h('span', { class: 'muted' }, fmt.pct(100 / g.avgOdds)) },
+            { key: 'need', label: 'Для нуля', align: 'r', render: g => h('span', { class: 'muted' }, fmt.pct(100 / g.avgOdds)) },
             { key: 'roi', label: 'ROI', align: 'r', render: g => roiText(g.roi) },
           ], rows: groups,
         }))) : UI.empty('Нет событий за период'),
         groups.some(g => g.n < SMALL) && smallNote(),
-        howto(h('b', null, 'Как читать: '), 'высокий винрейт на низких кэфах ещё не прибыль: при кэфе 1,25 нужно угадывать 80% только чтобы выйти в ноль. Сравните винрейт с колонкой «Нужно для нуля» в таблице.'),
+        howto(h('b', null, 'Как читать: '), 'высокий винрейт на низких кэфах ещё не прибыль: при кэфе 1,25 нужно угадывать 80% только чтобы выйти в ноль. Сравните винрейт с колонкой «Для нуля» в таблице.'),
       ],
     });
   }
@@ -635,16 +659,16 @@
           valueFormat: v => fmt.signedPct(v),
           items: groups.map(g => ({ label: g.label, value: g.roi, color: 'var(--s1)', note: nBets(g.n),
             labelNode: [h('i', { style: { width: '8px', height: '8px', borderRadius: '2px', background: 'var(--s1)', flex: 'none' } }), h('span', { class: 'odds' }, g.label), g.n < SMALL && smallMark()] })),
-        }), () => tableBox(UI.table({
+        }), () => tableBox(mtable({
           columns: [
-            { key: 'label', label: 'Итоговый кэф', render: g => h('span', { class: 'odds' }, g.label) },
+            { key: 'label', label: 'Кэф', render: g => h('span', { class: 'odds analytics-nowrap' }, g.label) },
             { key: 'n', label: 'Ставок', align: 'r' },
-            { key: 'pct', label: 'Ставка по стратегии', align: 'r', render: g => stakeOf(g.key) + ' банка' },
+            { key: 'pct', label: 'Ставка', align: 'r', hideMobile: true, render: g => h('span', { class: 'analytics-nowrap', title: 'Размер ставки по таблице стратегии, % банка' }, stakeOf(g.key)) },
             { key: 'profit', label: 'Прибыль', align: 'r', render: g => h('span', { class: roiCls(g.profit), style: 'white-space:nowrap;font-weight:600' }, fmt.signedMoney(g.profit)) },
             { key: 'roi', label: 'ROI', align: 'r', render: g => roiText(g.roi) },
           ], rows: groups,
         }))) : UI.empty('Нет ставок за период'),
-        groups.some(g => g.n < SMALL) && h('div', { class: 'analytics-foot-note' }, icon('alert'), 'меньше ' + SMALL + ' ставок — ROI может быть случайным'),
+        groups.some(g => g.n < SMALL) && footNote('меньше ' + SMALL + ' ставок — ROI может быть случайным'),
         howto(h('b', null, 'Как читать: '), 'здесь считаются деньги, а не отдельные события. На экспрессы до 1,70 по таблице стратегии идёт самая крупная ставка (', stakeOf('1.28–1.70'), ' банка), поэтому их ROI сильнее всего влияет на банк.'),
       ],
     });
@@ -661,7 +685,9 @@
     const worst = big.reduce((w, b) => (!w || b.p - b.actual > w.p - w.actual ? b : w), null);
     const under = big.reduce((w, b) => (!w || b.actual - b.p > w.actual - w.p ? b : w), null);
     let insight;
-    if (worst && worst.p - worst.actual >= 0.03) {
+    if (!big.length) {
+      insight = UI.callout('', 'info', 'Ни в одном диапазоне нет 8+ событий — по калибровке пока рано делать выводы.');
+    } else if (worst && worst.p - worst.actual >= 0.03) {
       insight = UI.callout('warn', 'alert', h('b', null, 'Диапазон ' + pctRange(worst.lo, worst.hi) + ': '), 'прогноз ' + fmt.prob(worst.p) + ', сбылось ' + fmt.prob(worst.actual) + ' (' + nEv(worst.n) + '). Модель переоценивает фаворитов на ' + Math.round((worst.p - worst.actual) * 100) + ' п.п.' + (under && under.actual - under.p >= 0.02 ? ' А в диапазоне ' + pctRange(under.lo, under.hi) + ' — наоборот, недооценивает: ' + fmt.prob(under.p) + ' против ' + fmt.prob(under.actual) + '.' : ''));
     } else {
       insight = UI.callout('good', 'check', 'Во всех диапазонах с 8+ событиями прогноз расходится с фактом меньше чем на 3 п.п.');
@@ -671,17 +697,17 @@
       actions: [chip(nEv(s.legs.length), 'outline')],
       body: [
         UI.legend([{ name: 'Модель · размер точки — число событий', color: 'var(--s1)' }, { name: 'Идеальная калибровка', type: 'dash' }]),
-        UI.withTable(chart, () => tableBox(UI.table({
+        UI.withTable(chart, () => tableBox(mtable({
           columns: [
-            { key: 'r', label: 'Прогноз', render: b => pctRange(b.lo, b.hi) },
-            { key: 'n', label: 'Событий', align: 'r' },
-            { key: 'p', label: 'Средний прогноз', align: 'r', render: b => fmt.prob(b.p) },
-            { key: 'a', label: 'Сбылось', align: 'r', render: b => fmt.prob(b.actual) },
-            { key: 'd', label: 'Разница', align: 'r', render: b => { const d = Math.round((b.actual - b.p) * 100); return h('span', { class: d <= -4 ? 'bad-text' : null, style: 'white-space:nowrap' }, (d > 0 ? '+' : d < 0 ? '−' : '') + Math.abs(d) + ' п.п.'); } },
+            { key: 'r', label: 'Диапазон', render: b => nowrap(pctRange(b.lo, b.hi)) },
+            { key: 'n', label: 'Событий', align: 'r', hideMobile: true },
+            { key: 'p', label: 'Модель', align: 'r', render: b => fmt.prob(b.p) },
+            { key: 'a', label: 'Факт', align: 'r', render: b => fmt.prob(b.actual) },
+            { key: 'd', label: 'Разница, п.п.', align: 'r', render: b => { const d = Math.round((b.actual - b.p) * 100); return h('span', { class: d <= -4 ? 'bad-text' : null, style: 'white-space:nowrap', title: d <= -4 ? 'Модель переоценивает этот диапазон' : null }, (d > 0 ? '+' : d < 0 ? '−' : '') + Math.abs(d)); } },
           ], rows: bins,
         }))),
         insight,
-        s.legs.length < 60 && h('div', { class: 'analytics-foot-note' }, icon('alert'), 'Меньше 60 событий: точки калибровки сильно скачут, выводы преждевременны'),
+        s.legs.length < 60 && footNote('Меньше 60 событий: точки калибровки сильно скачут, выводы преждевременны.'),
         howto(h('b', null, 'Как читать: '), 'если модель говорит 70%, такие события должны сыграть примерно в 7 из 10 случаев. Точки ниже диагонали — модель переоценивает фаворитов, выше — недооценивает.'),
       ],
     });
@@ -705,7 +731,7 @@
       actions: [chip('Модель точнее в ' + better + ' из ' + pts.length + ' окон', better * 2 >= pts.length ? 'good' : 'warn', better * 2 >= pts.length ? 'check' : 'alert')],
       body: [
         UI.legend([{ name: 'Модель · сейчас ' + fmt.dec(last.model, 3), color: 'var(--s1)' }, { name: 'Рынок (закрытие) · ' + fmt.dec(last.market, 3), color: 'var(--s2)' }]),
-        UI.withTable(chart, () => h('div', { class: 'analytics-scroll' }, UI.table({
+        UI.withTable(chart, () => h('div', { class: 'analytics-scroll' }, mtable({
           columns: [
             { key: 'date', label: 'Окно по', render: p => h('span', { style: 'white-space:nowrap' }, fmt.date(p.date)) },
             { key: 'model', label: 'Модель', align: 'r', render: p => fmt.dec(p.model, 3) },
@@ -741,7 +767,7 @@
       actions: [chip('Средний ' + fmt.signedPct(Math.round(avg * 10) / 10), avg > 0 ? 'good' : 'bad', avg > 0 ? 'arrowUp' : 'arrowDown')],
       body: [
         UI.legend([{ name: 'Кэф не хуже закрытия · ' + (clvs.length - neg), color: 'var(--s1)', type: 'box' }, { name: 'Линия ушла против вас · ' + neg, color: 'var(--fg-3)', type: 'box' }]),
-        UI.withTable(chart, () => tableBox(UI.table({
+        UI.withTable(chart, () => tableBox(mtable({
           columns: [
             { key: 'label', label: 'CLV', render: it => h('span', { style: 'white-space:nowrap' }, it.label) },
             { key: 'value', label: 'Ставок', align: 'r' },
@@ -767,7 +793,7 @@
     const rows = groups.concat(total ? [total] : []);
     const tbl = UI.table({
       columns: [
-        { key: 'label', label: 'Рынок', width: '40%', render: g => h('div', { style: 'min-width:0' }, h('div', { class: 'analytics-mname' }, g.label, g.n < SMALL && !g.total ? [' ', smallMark()] : null), !g.total && h('div', { class: 'analytics-mdesc' }, MARKET_INFO[g.key])) },
+        { key: 'label', label: 'Рынок', width: '40%', render: g => h('div', { style: 'min-width:0' }, h('div', { class: 'analytics-mname' }, g.label, g.n < SMALL && !g.total ? [' ', smallMark()] : null), !g.total && h('div', { class: 'analytics-mdesc' }, MARKET_SHORT[g.key])) },
         { key: 'n', label: 'Событий', align: 'r' },
         { key: 'winrate', label: 'Винрейт', align: 'r', render: g => fmt.pct(g.winrate) },
         { key: 'roi', label: 'ROI', align: 'r', render: g => roiText(Math.round(g.roi * 10) / 10) },
@@ -784,7 +810,7 @@
     });
     const list = h('ul', { class: 'analytics-mlist' }, rows.map(g => h('li', null,
       h('button', { type: 'button', class: 'analytics-mrow', 'aria-pressed': String(g.key === state.market), on: { click: () => pick(g.key) } },
-        h('span', null, h('span', { class: 'analytics-mname' }, g.label, g.n < SMALL && !g.total ? [' ', smallMark()] : null), h('span', { class: 'analytics-mrow-sub', style: 'display:block' }, (g.total ? (state.market === 'all' ? 'итог без фильтра' : 'снять фильтр') : MARKET_INFO[g.key]) + ' · ' + nEv(g.n))),
+        h('span', null, h('span', { class: 'analytics-mname' }, g.label, g.n < SMALL && !g.total ? [' ', smallMark()] : null), h('span', { class: 'analytics-mrow-sub', style: 'display:block' }, (g.total ? (state.market === 'all' ? 'итог без фильтра' : 'снять фильтр') : MARKET_SHORT[g.key]) + ' · ' + nEv(g.n))),
         h('span', { class: 'analytics-mrow-val' }, roiText(Math.round(g.roi * 10) / 10), h('span', { class: 'analytics-mrow-sub', style: 'display:block' }, fmt.pct(g.winrate, 0) + ' побед · кэф ' + fmt.odds(g.avgOdds)))))));
     return card({
       class: 'analytics-card analytics-mkt-card', title: 'Сводка по рынкам', subtitle: 'Нажмите на рынок, чтобы отфильтровать всю страницу',
@@ -829,13 +855,21 @@
 
   function emptyState(s) {
     const indoor = state.surface === 'indoor';
+    // Есть ли такие ставки за всё время — тогда предлагаем расширить период, а не сбрасывать фильтры
+    const ever = SETTLED.filter(b => (state.surface === 'all' || b.surface === state.surface) && (state.market === 'all' || b.legs.some(l => l.market === state.market)));
+    const canWiden = state.period !== 'all' && ever.length > 0;
+    const reset = () => { Object.assign(state, DEFAULTS); update(true); };
     return h('section', { class: 'card analytics-empty' },
       h('span', { class: 'analytics-empty-ic' }, icon('filter')),
       h('h3', null, 'Под фильтр не попало ни одной ставки'),
       h('p', null, indoor
         ? 'На крытом харде ставок пока не было: сезон в залах начнётся после Шанхая. Первые события появятся здесь в конце октября.'
-        : 'За выбранный период нет рассчитанных ставок с таким рынком и покрытием. Расширьте период или снимите один из фильтров.'),
-      button('Сбросить фильтры', { kind: 'primary', icon: 'refresh', onClick: () => { Object.assign(state, DEFAULTS); update(true); } }));
+        : canWiden
+          ? s.p.ctx[0].toUpperCase() + s.p.ctx.slice(1) + ' таких ставок нет. Последняя была ' + fmt.date(ever[ever.length - 1].date) + ', всего за сезон — ' + nBets(ever.length) + '.'
+          : 'Нет рассчитанных ставок с таким рынком и покрытием. Снимите один из фильтров.'),
+      h('div', { class: 'row', style: 'justify-content:center' },
+        canWiden && button('Показать за всё время', { kind: 'primary', icon: 'calendar', onClick: () => { state.period = 'all'; update(true); } }),
+        button('Сбросить фильтры', { kind: canWiden ? 'secondary' : 'primary', icon: 'refresh', onClick: reset })));
   }
 
   function drawContent() {
@@ -873,7 +907,7 @@
           h('h2', null, 'Прибыльность и точность'),
           h('p', { class: 'lead' }, 'Где стратегия приносит деньги и насколько точны вероятности модели. Фильтры ниже пересчитывают все блоки.')),
         h('div', { class: 'analytics-head-actions' },
-          button('Выгрузить', { kind: 'secondary', icon: 'download', onClick: () => exportModal(compute()) })));
+          button('Выгрузить', { kind: 'secondary', size: UI.isMobile() ? 'sm' : null, icon: 'download', onClick: () => exportModal(compute()) })));
       filters = filterBar(reset => update(reset));
       contentEl = h('div', { class: 'stack', style: 'gap:inherit' });
       UI.append(root, [head, filters.el, contentEl]);

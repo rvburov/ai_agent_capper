@@ -77,9 +77,9 @@
     { label: 'Общий Эло', value: 14 },
     { label: 'Очки на своей подаче, 52 нед.', value: 12 },
     { label: 'Очки на приёме второй подачи', value: 9 },
-    { label: 'Усталость: сеты за 7 дней', value: 8, note: 'урок L-017' },
+    { label: 'Усталость: сеты за 7 дней', value: 8, note: 'L-017' },
     { label: 'Форма: 10 последних матчей', value: 7 },
-    { label: 'Левша против правши', value: 5, note: 'урок L-014' },
+    { label: 'Левша против правши', value: 5, note: 'L-014' },
     { label: 'Личные встречи на покрытии', value: 4 },
   ];
   const FEATURES_REST = 100 - FEATURES.reduce((a, f) => a + f.value, 0);
@@ -111,10 +111,10 @@
 
   // ---------- состояние экрана ----------
   const TABS = [
-    { id: 'lessons', label: 'Уроки' },
-    { id: 'versions', label: 'Версии стратегии' },
-    { id: 'ml', label: 'Своя ML-модель' },
-    { id: 'lab', label: 'Датасет и LLM · лаборатория' },
+    { id: 'lessons', label: 'Уроки', short: 'Уроки' },
+    { id: 'versions', label: 'Версии стратегии', short: 'Версии' },
+    { id: 'ml', label: 'Своя ML-модель', short: 'ML-модель' },
+    { id: 'lab', label: 'Датасет и LLM · лаборатория', short: 'Лаборатория' },
   ];
   const st = {
     tab: 'lessons',
@@ -193,6 +193,10 @@
     .learning-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
     .learning-two.wide-left { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
     @media (max-width: 1180px) { .learning-two, .learning-two.wide-left { grid-template-columns: minmax(0, 1fr); } }
+    .learning-card > .card-head > div:first-child { flex: 1 1 320px; }
+    .learning-card > .card-head > .row { flex-wrap: wrap; }
+    .learning-card .card-body > .segmented, .learning-card .card-body > .btn { align-self: flex-start; }
+    .learning-modal:focus, .learning-modal:focus-visible { outline: none; }
     .learning-hint { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-xs); color: var(--fg-3); }
     .learning-hint svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
 
@@ -213,6 +217,7 @@
     .learning-meta dd { margin: 0; font-weight: 500; min-width: 0; }
     .learning-lesson-side { display: flex; flex-direction: column; justify-content: center; gap: 10px; min-width: 0; padding-left: 20px; border-left: 1px solid var(--line); }
     .learning-lesson-side .btn { align-self: flex-start; }
+    .learning-lesson-side .btn.ghost { margin-left: -12px; }
     .learning-progress { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); }
     @media (max-width: 960px) {
       .learning-lesson { grid-template-columns: minmax(0, 1fr); padding: 12px 14px; }
@@ -265,6 +270,7 @@
     @media (max-width: 720px) { .learning-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .learning-feat .hbar { grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) 4.5rem; }
     .learning-feat .hbar-label { white-space: normal; }
+    .learning-feat .hbar-label .chip { height: 20px; padding: 0 7px; flex: none; }
     @media (max-width: 720px) {
       .learning-feat .hbar { grid-template-columns: minmax(0, 1fr) 4.5rem; row-gap: 4px; padding: 6px 0; }
       .learning-feat .hbar-label { grid-column: 1 / -1; }
@@ -311,6 +317,19 @@
   const hint = (text) => h('p', { class: 'learning-hint' }, icon('info'), h('span', null, text));
   const signedPctEl = v => h('span', { class: v > 0 ? 'good-text' : v < 0 ? 'bad-text' : null }, fmt.signedPct(v));
 
+  // Информационные окна: фокус на самом окне, а не на первой кнопке внизу (на телефоне иначе окно прокручивается вниз)
+  function settleModal() {
+    setTimeout(() => {
+      const all = document.querySelectorAll('.modal');
+      const m = all[all.length - 1];
+      if (!m) return;
+      m.setAttribute('tabindex', '-1');
+      m.classList.add('learning-modal');
+      m.focus({ preventScroll: true });
+      m.scrollTop = 0;
+    }, 60);
+  }
+
   const lessons = () => D.lessons;
   const countLessons = s => lessons().filter(l => l.status === s).length;
   const inAnalysis = () => lessons().filter(l => l.status === 'confirmed' && l.inPrompt).length;
@@ -331,7 +350,7 @@
 
   function tile(o) {
     return h('button', { type: 'button', class: ['learning-tile', st.tab === o.tab && 'is-active'], 'aria-current': st.tab === o.tab ? 'true' : null, 'aria-controls': 'learning-panel', on: { click: () => setTab(o.tab, { rebuildTabs: true, scroll: true }) } },
-      h('span', { class: 'learning-tile-label' }, icon(o.icon), h('span', { style: 'min-width:0' }, o.label), h('span', { class: 'learning-tile-go' }, icon('chevronRight', { width: 16, height: 16 }))),
+      h('span', { class: 'learning-tile-label' }, icon(o.icon), h('span', { style: 'min-width:0' }, UI.isMobile() ? o.short : o.label), h('span', { class: 'learning-tile-go' }, icon('chevronRight', { width: 16, height: 16 }))),
       h('span', { class: 'learning-tile-value' }, o.value, h('small', null, o.unit)),
       h('span', { class: 'learning-tile-hint' }, o.hint));
   }
@@ -341,10 +360,10 @@
     const hyp = countLessons('hypothesis'), rej = countLessons('rejected');
     UI.clear(tilesSlot);
     UI.append(tilesSlot, [
-      tile({ tab: 'lessons', icon: 'book', label: 'Память уроков', value: String(inAnalysis()), unit: 'в анализе', hint: 'из ' + lessons().length + ' · ' + hyp + ' ' + fmt.plural(hyp, 'гипотеза', 'гипотезы', 'гипотез') + ', ' + rej + ' ' + fmt.plural(rej, 'отклонён', 'отклонены', 'отклонены') }),
-      tile({ tab: 'versions', icon: 'layers', label: 'Версия стратегии', value: act ? act.id : '—', unit: 'активна', hint: cand ? 'кандидат ' + cand.id + ' ждёт решения' : 'кандидатов нет' }),
-      tile({ tab: 'ml', icon: 'chart', label: 'Своя ML-модель', value: fmt.dec(st.ml.brier, 3), unit: 'Brier', hint: st.ml.training ? 'идёт переобучение…' : 'обучена ' + fmt.date(st.ml.at) + ', ' + hhmm(st.ml.at) }),
-      tile({ tab: 'lab', icon: 'flask', label: 'Лаборатория LLM', value: fmt.int(SNAPSHOTS), unit: 'снимков', hint: runningExps() ? '1 эксперимент идёт · 2 в плане' : 'всё на паузе · 2 в плане' }),
+      tile({ tab: 'lessons', icon: 'book', label: 'Память уроков', short: 'Уроки', value: String(inAnalysis()), unit: 'в анализе', hint: 'из ' + lessons().length + ' · ' + hyp + ' ' + fmt.plural(hyp, 'гипотеза', 'гипотезы', 'гипотез') + ', ' + rej + ' ' + fmt.plural(rej, 'отклонён', 'отклонены', 'отклонены') }),
+      tile({ tab: 'versions', icon: 'layers', label: 'Версия стратегии', short: 'Стратегия', value: act ? act.id : '—', unit: 'активна', hint: cand ? 'кандидат ' + cand.id + ' ждёт решения' : 'кандидатов нет' }),
+      tile({ tab: 'ml', icon: 'chart', label: 'Своя ML-модель', short: 'ML-модель', value: fmt.dec(st.ml.brier, 3), unit: 'Brier', hint: st.ml.training ? 'идёт переобучение…' : 'обучена ' + fmt.date(st.ml.at) + ', ' + hhmm(st.ml.at) }),
+      tile({ tab: 'lab', icon: 'flask', label: 'Лаборатория LLM', short: 'Лаборатория', value: fmt.int(SNAPSHOTS), unit: 'снимков', hint: runningExps() ? '1 эксперимент идёт · 2 в плане' : 'всё на паузе · 2 в плане' }),
     ]);
   }
 
@@ -366,6 +385,7 @@
       i < STEPS.length - 1 && h('span', { class: 'learning-step-arrow', 'aria-hidden': 'true' }, icon('arrowRight')))));
     const loop = h('div', { class: 'learning-loop' }, h('span', { class: 'learning-loop-label' }, icon('refresh'), h('span', null, h('b', null, 'Следующая ставка'), ' — цикл повторяется уже с учётом урока')));
     return card({
+      class: 'learning-card',
       title: 'Как модель учится',
       subtitle: 'Один цикл на каждую рассчитанную ставку — и выигранную, и проигранную',
       body: [
@@ -378,9 +398,18 @@
 
   // ---------- вкладки ----------
   function makeTabs() {
-    const el = UI.tabs({ items: TABS.map(t => ({ id: t.id, label: t.id === 'lessons' ? t.label + ' · ' + lessons().length : t.label })), active: st.tab, onChange: id => setTab(id) });
+    const m = UI.isMobile();
+    const el = UI.tabs({ items: TABS.map(t => ({ id: t.id, label: (m ? t.short : t.label) + (t.id === 'lessons' ? ' · ' + lessons().length : '') })), active: st.tab, onChange: id => { setTab(id); revealTab(el); } });
     el.setAttribute('aria-label', 'Разделы обучения');
+    revealTab(el);
     return el;
+  }
+  // На телефоне вкладки прокручиваются: держим выбранную в поле зрения
+  function revealTab(el) {
+    requestAnimationFrame(() => {
+      const b = el.querySelector('[aria-selected="true"]');
+      if (b && el.scrollWidth > el.clientWidth) el.scrollLeft = Math.max(0, b.offsetLeft - (el.clientWidth - b.offsetWidth) / 2);
+    });
   }
   function setTab(id, o = {}) {
     st.tab = id;
@@ -405,11 +434,12 @@
   function lessonsPanel() {
     const order = { confirmed: 0, hypothesis: 1, rejected: 2 };
     const list = h('div', { class: 'learning-lessons', 'aria-live': 'polite' });
+    const cnt = n => (UI.isMobile() ? '' : ' · ' + n);
     const filters = [
-      { id: 'all', label: 'Все · ' + lessons().length },
-      { id: 'confirmed', label: 'Подтверждены · ' + countLessons('confirmed') },
-      { id: 'hypothesis', label: 'Гипотезы · ' + countLessons('hypothesis') },
-      { id: 'rejected', label: 'Отклонены · ' + countLessons('rejected') },
+      { id: 'all', label: 'Все' + cnt(lessons().length) },
+      { id: 'confirmed', label: 'Подтверждены' + cnt(countLessons('confirmed')) },
+      { id: 'hypothesis', label: 'Гипотезы' + cnt(countLessons('hypothesis')) },
+      { id: 'rejected', label: 'Отклонены' + cnt(countLessons('rejected')) },
     ];
     function drawList() {
       UI.clear(list);
@@ -420,6 +450,7 @@
     }
     drawList();
     return card({
+      class: 'learning-card',
       title: 'Уроки',
       subtitle: 'Выводы из разборов ставок. В анализ попадают только подтверждённые — и только те, что вы не выключили.',
       actions: [button('Предложить урок вручную', { kind: 'secondary', size: 'sm', icon: 'plus', onClick: proposeLesson })],
@@ -444,8 +475,9 @@
         h('span', { class: 'learning-date' }, 'с ' + fmt.date(l.created))),
       h('p', { class: 'learning-lesson-text' }, l.text),
       h('dl', { class: 'learning-meta' },
-        h('div', null, h('dt', null, 'Случаев'), h('dd', { class: 'num' }, evidence)),
-        h('div', null, h('dt', null, 'Эффект'), h('dd', null, l.effect)),
+        l.status !== 'hypothesis' && h('div', null, h('dt', null, 'Случаев'), h('dd', { class: 'num' }, evidence)),
+        l.status === 'confirmed' && h('div', null, h('dt', null, 'Эффект'), h('dd', null, l.effect)),
+        l.status === 'hypothesis' && h('div', null, h('dt', null, 'Ждёт'), h('dd', null, 'ещё ' + cases(Math.max(0, NEED - l.evidence)) + (info.hist === 0 ? ' из своих ставок' : ''))),
         h('div', null, h('dt', null, 'Где'), h('dd', null, l.scope))));
 
     const side = h('div', { class: 'learning-lesson-side' });
@@ -471,7 +503,9 @@
       if (st.notify[l.id]) side.appendChild(chip('Сообщим при ' + NEED + ' случаях', 'info', 'bell'));
       else side.appendChild(button('Сообщить, когда наберётся', { kind: 'secondary', size: 'sm', icon: 'bell', onClick: () => { st.notify[l.id] = true; item.replaceWith(lessonItem(l)); UI.toast('Напомним, когда у ' + l.id + ' будет ' + NEED + ' случаев и пройдёт проверка', 'bell'); } }));
     } else {
-      side.appendChild(h('p', { class: 'small soft' }, 'Не используется: ' + l.effect + ' на ' + cases(l.evidence + (info.hist || 0)) + '.'));
+      const n = l.evidence + (info.hist || 0);
+      const chk = info.check && info.check.length > 1 ? ': ' + info.check[0][0].toLowerCase() + ' ' + info.check[0][1] + ', без урока ' + info.check[1][1] : '';
+      side.appendChild(h('p', { class: 'small soft' }, 'Не используется — ' + l.effect + ' на ' + n + ' ' + fmt.plural(n, 'случае', 'случаях', 'случаях') + chk + '.'));
     }
     side.appendChild(button('Подробнее', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => lessonModal(l) }));
     const item = h('article', { class: ['learning-lesson', 'is-' + l.status, off && 'is-off'], 'aria-label': 'Урок ' + l.id }, main, side);
@@ -493,6 +527,7 @@
           h('p', { class: 'learning-code' }, info.line))),
       actions: close => [button('Закрыть', { kind: 'secondary', onClick: close })],
     });
+    settleModal();
   }
 
   function proposeLesson() {
@@ -571,6 +606,7 @@
       });
     }
     const tableCard = card({
+      class: 'learning-card',
       title: 'Версии стратегии',
       subtitle: 'Стратегия — это инструкции анализа, принятые уроки и правила отбора. Все версии считаются на одной отложенной выборке: ' + HOLDOUT + ' событий, которых ни одна версия не видела при настройке.',
       actions,
@@ -587,6 +623,7 @@
       ariaLabel: 'Лог-лосс по версиям стратегии: ' + V.map(v => v.id + ' ' + fmt.dec(v.logloss, 3)).join(', '),
     });
     const chartCard = card({
+      class: 'learning-card',
       title: 'Лог-лосс по версиям',
       subtitle: 'на отложенной выборке, ' + HOLDOUT + ' событий',
       body: [
@@ -611,6 +648,7 @@
     const pending = B && B.status === 'candidate';
     const rule = (n, text, status) => h('li', null, h('span', { 'aria-hidden': 'true' }, String(n)), h('div', null, h('span', null, text), status));
     return card({
+      class: 'learning-card',
       title: 'Как принимается новая версия',
       subtitle: pending ? 'Проверка кандидата ' + B.id + ' против ' + A.id : 'Правило для следующих кандидатов',
       body: [
@@ -670,6 +708,7 @@
         : [button('Включить ' + B.id + ' вручную', { kind: 'secondary', onClick: () => { B.status = 'active'; A.status = 'archived'; close(); afterVersionChange(); UI.toast(B.id + ' работает со следующего анализа · ' + A.id + ' в архиве, откат в один клик', 'check'); } }),
            button('Оставить ' + A.id + ', проверять дальше', { kind: 'primary', onClick: () => { close(); UI.toast('Остаётся ' + A.id + '. ' + B.id + ' досчитывается на новых матчах — сравнение обновится через ≈ 2 недели', 'clock'); } })],
     });
+    settleModal();
   }
   function afterVersionChange() { if (st.tab === 'versions') drawPanel(); drawTiles(); }
 
@@ -693,6 +732,7 @@
         button('Закрыть', { kind: 'primary', onClick: close }),
       ].filter(Boolean),
     });
+    settleModal();
   }
 
   // ---------- 3. Своя ML-модель ----------
@@ -718,6 +758,7 @@
     }
     body.push(UI.callout('info', 'info', 'Сама по себе модель чуть уступает рынку — это ожидаемо: букмекер учитывает новости и травмы, а модель видит только статистику. Её роль — независимое второе мнение: Claude видит её вероятность, а расхождение больше 8 п.п. анализ подсвечивает и объясняет.'));
     return card({
+      class: 'learning-card',
       eyebrow: 'Своя ML-модель',
       title: 'Эло + градиентный бустинг',
       subtitle: 'Считается на сервере без ИИ — за миллисекунды и бесплатно',
@@ -751,10 +792,11 @@
     const mobile = UI.isMobile();
     mlHeadSlot = h('div', { style: 'min-width:0' }, mlHeadCard());
     const feat = card({
+      class: 'learning-card',
       title: 'Что важнее всего для модели',
       subtitle: 'Вклад признака в прогноз, %',
       body: [
-        h('div', { class: 'learning-feat' }, UI.hbars({ items: FEATURES.map(f => ({ label: f.label, value: f.value, note: f.note, dot: false })), color: 'var(--s1)', valueFormat: v => v + '%', domain: [0, 25] })),
+        h('div', { class: 'learning-feat' }, UI.hbars({ items: FEATURES.map(f => ({ label: f.label + (f.note ? ', из урока ' + f.note : ''), value: f.value, labelNode: f.note ? [h('span', { style: 'min-width:0' }, f.label), chip('урок ' + f.note, 'outline')] : null, dot: false })), color: 'var(--s1)', valueFormat: v => v + '%', domain: [0, 25] })),
         h('p', { class: 'small soft' }, 'Ещё 6 признаков вместе — ' + FEATURES_REST + '%: возраст, перелёт и смена часового пояса, высота над уровнем моря, скорость покрытия, раунд, рейтинг ATP.'),
         hint('Кэфы букмекеров намеренно не входят в признаки — иначе модель просто повторяла бы рынок. Два признака появились из подтверждённых уроков.'),
       ],
@@ -771,6 +813,7 @@
     });
     const first = WF[0], last = WF[WF.length - 1];
     const wf = card({
+      class: 'learning-card',
       title: 'Проверка walk-forward',
       subtitle: 'Brier по месяцам: модель учится только на прошлом и прогнозирует следующий месяц',
       body: [
@@ -833,6 +876,7 @@
       h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Одна запись в экспорте'), h('span', { class: 'xsmall muted' }, 'подсвечено то, что меняет анонимизация')),
       previewSlot);
     return card({
+      class: 'learning-card',
       title: 'Датасет снимков матчей',
       subtitle: 'Снимок — всё, что было известно до начала матча, плюс исход. Будущее в снимок не попадает.',
       actions: [button('Экспорт JSONL', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => UI.toast('Экспорт собран: train / val / test, ' + fmt.int(SNAPSHOTS) + ' строк' + (st.anon ? ', анонимизировано' : ', с именами') + '. В макете файл не скачивается', 'download') })],
@@ -927,6 +971,7 @@
         })),
       actions: close => [button('Закрыть', { kind: 'primary', onClick: close })],
     });
+    settleModal();
   }
 
   function sftModal() {
@@ -945,6 +990,7 @@
         UI.callout('warn', 'alert', 'Перед стартом сверить с условиями использования Anthropic: обучение других моделей на ответах Claude ограничено.')),
       actions: close => [button('Понятно', { kind: 'primary', onClick: close })],
     });
+    settleModal();
   }
 
   function labPanel() {

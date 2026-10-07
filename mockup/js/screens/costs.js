@@ -19,10 +19,10 @@
   OLD.cost = (OLD.input * OLD.pin + OLD.output * OLD.pout) / 1e6 + OLD.searches * SEARCH;
 
   const TYPES = [
-    { id: 'analysis', label: 'Анализ матчей', short: 'Анализ', bar: 'Анализ матчей', what: 'Вероятности по событиям, валуй и экспресс', options: ['Opus 5.5', 'Sonnet 5.5'] },
-    { id: 'refresh', label: 'Обновление профилей', short: 'Профили', bar: 'Профили', what: 'Ночью пакетом: статистика, форма, новости', options: ['Sonnet 5.5', 'Haiku 4.5', 'Opus 5.5'] },
-    { id: 'postmortem', label: 'Разбор ставки', short: 'Разбор ставок', bar: 'Разбор ставки', what: 'После расчёта: что сработало — кандидаты в уроки', options: ['Sonnet 5.5', 'Opus 5.5', 'Haiku 4.5'] },
-    { id: 'parse', label: 'Разбор текста', short: 'Разбор текста', bar: 'Разбор текста', what: 'Вставленный текст → список событий', options: ['Haiku 4.5', 'Sonnet 5.5', 'Opus 5.5'] },
+    { id: 'analysis', label: 'Анализ матчей', short: 'Анализ', tiny: 'Анализ', bar: 'Анализ матчей', what: 'Вероятности по событиям, валуй и экспресс', options: ['Opus 5.5', 'Sonnet 5.5'] },
+    { id: 'refresh', label: 'Обновление профилей', short: 'Профили', tiny: 'Профили', bar: 'Профили', what: 'Ночью пакетом: статистика, форма, новости', options: ['Sonnet 5.5', 'Haiku 4.5', 'Opus 5.5'] },
+    { id: 'postmortem', label: 'Разбор ставки', short: 'Разбор ставок', tiny: 'Ставки', bar: 'Разбор ставки', what: 'После расчёта: что сработало — кандидаты в уроки', options: ['Sonnet 5.5', 'Opus 5.5', 'Haiku 4.5'] },
+    { id: 'parse', label: 'Разбор текста', short: 'Разбор текста', tiny: 'Текст', bar: 'Разбор текста', what: 'Вставленный текст → список событий', options: ['Haiku 4.5', 'Sonnet 5.5', 'Opus 5.5'] },
   ];
   const typeOf = id => TYPES.find(t => t.id === id);
 
@@ -175,7 +175,7 @@
   UI.css('costs', `
     .costs-head h2 { font-size: var(--fs-2xl); }
     .costs-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .costs-hero { padding: 18px; gap: 14px; height: 100%; justify-content: space-between; }
+    .card.stat.costs-hero { padding: 18px; gap: 14px; height: 100%; justify-content: space-between; }
     .costs-hero-top { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
     .costs-hero-value { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
     .costs-hero-value .stat-value { white-space: nowrap; }
@@ -198,6 +198,7 @@
     .costs-kv dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .costs-kv dd small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); white-space: normal; }
     .costs-tiles > .card { height: 100%; }
+    .costs-hero-actions .btn.ghost { margin-left: -12px; }
     .costs-main { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 16px; align-items: start; }
     .costs-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
     @media (max-width: 1180px) {
@@ -255,10 +256,19 @@
     }
 
     .costs-nowrap { white-space: nowrap; }
+    @media (max-width: 960px) {
+      .segmented.costs-runs-filter { display: flex; width: 100%; }
+      .segmented.costs-runs-filter button { flex: 1 1 auto; padding: 6px 6px; }
+    }
     .costs-sub { font-size: var(--fs-xs); color: var(--fg-3); white-space: nowrap; }
     .costs-task { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-weight: 500; }
     .costs-table .table td { white-space: nowrap; }
     .costs-table .table td:nth-child(2) { white-space: normal; }
+    .costs-table .table-wrap { position: relative; }
+    @media (max-width: 1180px) {
+      .costs-table .table th:nth-child(7), .costs-table .table td:nth-child(7),
+      .costs-table .table th:nth-child(9), .costs-table .table td:nth-child(9) { display: none; }
+    }
     .costs-table tbody tr:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
     .costs-runlist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
     .costs-runlist li + li { border-top: 1px solid var(--line); }
@@ -292,6 +302,17 @@
     .costs-verdict { display: flex; align-items: center; gap: 4px; }
     .costs-progress { display: flex; flex-direction: column; gap: 6px; }
     .costs-price-model b { display: block; }
+    .costs-mlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .costs-mlist li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px 0; border-top: 1px solid var(--line); align-items: center; }
+    .costs-mlist li:first-child { border-top: 0; padding-top: 2px; }
+    .costs-mlist .t { font-weight: 500; min-width: 0; }
+    .costs-mlist .s { grid-column: 1 / 2; font-size: var(--fs-xs); color: var(--fg-3); min-width: 0; }
+    .costs-mlist .v { grid-row: 1 / 3; grid-column: 2; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    @media (max-width: 720px) {
+      .kv.costs-detail { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+      .kv.costs-detail dt { font-size: var(--fs-xs); color: var(--fg-3); }
+      .kv.costs-detail dd { text-align: left; margin-bottom: 8px; }
+    }
     .costs-price-model .mono { font-size: var(--fs-xs); color: var(--fg-3); }
   `);
 
@@ -299,6 +320,8 @@
   const modelChip = m => chip(m, 'outline');
   const batchChip = () => chip('Batch −50%', 'accent', 'layers');
   const howto = text => h('div', { class: 'costs-howto' }, icon('info'), h('span', null, text));
+  // Список для телефона вместо широкой таблицы: [{title, sub, value}]
+  const mlist = items => h('ul', { class: 'costs-mlist' }, items.map(it => h('li', null, h('span', { class: 't' }, it.title), it.sub ? h('span', { class: 's' }, it.sub) : null, it.value != null ? h('span', { class: 'v' }, it.value) : null)));
   const budgetKind = share => share > 0.9 ? 'bad' : share > 0.7 ? 'warn' : 'good';
 
   // ---------- окно: разбор стоимости запуска ----------
@@ -332,7 +355,7 @@
           h('div', { class: 'costs-split', role: 'img', 'aria-label': 'Из чего сложилась цена: ' + shown.map(x => x.name + ' ' + usd(x.cost, 4)).join(', ') },
             shown.map(x => h('i', { style: { width: (x.cost / total * 100) + '%', background: x.color }, title: x.name + ': ' + usd(x.cost, 4) }))),
           UI.legend(shown.map(x => ({ name: x.name + ' · ' + pct(x.cost / total), color: x.color, type: 'box' })))),
-        UI.table({
+        UI.isMobile() ? mlist(parts.map(x => ({ title: x.name, sub: x.tokens != null ? fmt.int(x.tokens) + ' ток. × ' + usd(x.price) + ' за 1M' + (r.batch ? ' × 0,5' : '') : x.n + ' ' + fmt.plural(x.n, 'поиск', 'поиска', 'поисков') + ' × $0,01', value: usd(x.cost, 4) }))) : UI.table({
           columns: [
             { label: 'Статья', render: x => x.name },
             { label: 'Объём', align: 'r', render: x => x.tokens != null ? fmt.int(x.tokens) + ' ток.' : x.n + ' ' + fmt.plural(x.n, 'поиск', 'поиска', 'поисков') },
@@ -343,13 +366,13 @@
         }),
         r.batch ? h('div', { class: 'small soft' }, 'Batch API: токены на 50% дешевле, ответ — в течение суток. Подходит для ночных задач.') : null,
         h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'eyebrow' }, 'Формула'), h('div', { class: 'costs-formula' }, formula)),
-        UI.kv([
+        h('dl', { class: 'kv costs-detail' }, [
           ['Связано', m.href ? h('a', { href: m.href, on: { click: close } }, m.ref) : (m.ref || '—')],
           ['Что сделал', m.what || t.what],
           ['Версия промпта', h('span', { class: 'mono' }, m.prompt || '—')],
           ['Из кэша читается', m.prefix || 'Не кэшируется: запрос короче минимального префикса для кэша'],
           ['ID модели', h('span', { class: 'mono' }, p.id)],
-        ]),
+        ].map(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
         howto('Цены — прайс Anthropic за 1M токенов на 7 окт 2026. Запись в кэш (×1,25 к цене входа, раз в 5 минут) в макете не выделена отдельно.'),
       ],
       actions: close => [
@@ -366,8 +389,8 @@
       title: 'Цены моделей',
       wide: true,
       body: [
-        h('p', { class: 'soft' }, 'За 1 млн токенов, прайс Anthropic на 7 октября 2026. В приложении цены берутся из настроек, а не зашиты в код.'),
-        UI.table({
+        h('p', { class: 'soft' }, 'За 1 млн токенов, прайс Anthropic на 7 октября 2026' + (UI.isMobile() ? ' (справа — вход / выход)' : '') + '. В приложении цены берутся из настроек, а не зашиты в код.'),
+        UI.isMobile() ? mlist(Object.keys(PRICE).map(m => ({ title: m, sub: h('span', null, h('span', { class: 'mono' }, PRICE[m].id), h('br'), 'кэш ' + usd(PRICE[m].cache) + ' · ' + used(m)), value: usd(PRICE[m].in, 0) + ' / ' + usd(PRICE[m].out, 0) }))) : UI.table({
           columns: [
             { label: 'Модель', render: m => h('div', { class: 'costs-price-model' }, h('b', null, m), h('span', { class: 'mono' }, PRICE[m].id)) },
             { label: 'Вход', align: 'r', render: m => usd(PRICE[m].in) },
@@ -406,7 +429,7 @@
       UI.clear(bodyEl);
       UI.append(bodyEl, [
         h('p', { class: 'soft' }, 'Перед сменой модели прогоняем её на событиях, для которых уже известен результат, и сравниваем с текущей. Промпт тот же, данные те же — меняется только модель.'),
-        UI.table({
+        UI.isMobile() ? mlist(changes.map(c => ({ title: typeOf(c.type).label + ': ' + c.from + ' → ' + c.to, sub: 'Набор: ' + EVAL[c.type].set }))) : UI.table({
           columns: [
             { label: 'Задача', render: c => typeOf(c.type).label },
             { label: 'Смена', render: c => h('span', { class: 'costs-nowrap' }, c.from + ' → ' + c.to) },
@@ -440,10 +463,10 @@
       UI.clear(bodyEl);
       results.forEach(res => {
         const before = perRun(res.type, saved), after = perRun(res.type, withSet(saved, { models: { [res.type]: res.to } }));
-        UI.append(bodyEl, h('section', { class: 'stack', style: 'gap:10px' },
+        UI.append(bodyEl, [h('section', { class: 'stack', style: 'gap:10px' },
           h('div', { class: 'row-between' }, h('h4', null, typeOf(res.type).label + ': ' + res.from + ' → ' + res.to),
             res.ok ? chip('Принято', 'good', 'check') : chip('Не принято', 'bad', 'x')),
-          UI.table({
+          UI.isMobile() ? mlist(res.rows.map(x => ({ title: x[0], sub: 'сейчас ' + x[1] + ' → ' + res.to + ': ' + x[2], value: verdict(x[3]) })).concat([{ title: 'Цена одного запуска', sub: usd(before, 3) + ' → ' + usd(after, 3), value: null }])) : UI.table({
             columns: [
               { label: 'Метрика', render: x => x[0] },
               { label: 'Сейчас', align: 'r', render: x => x[1] },
@@ -452,12 +475,12 @@
             ],
             rows: res.rows.concat([['Цена одного запуска', usd(before, 3), usd(after, 3), null]]),
           }),
-          h('p', { class: 'small soft' }, res.why)));
+          h('p', { class: 'small soft' }, res.why))]);
       });
       const rejected = results.filter(r => !r.ok);
-      UI.append(bodyEl, rejected.length
+      UI.append(bodyEl, [rejected.length
         ? UI.callout('warn', 'shield', 'Экономия не принята: качество на eval-наборе хуже. Оставляем ' + rejected.map(r => r.from + ' для задачи «' + typeOf(r.type).label.toLowerCase() + '»').join(', ') + '.')
-        : UI.callout('good', 'check', 'Качество не хуже — смену можно применить.'));
+        : UI.callout('good', 'check', 'Качество не хуже — смену можно применить.')]);
       UI.clear(footEl);
       UI.append(footEl, rejected.length
         ? [button('Подробнее в «Обучении модели»', { kind: 'ghost', href: '#learning', attrs: { on: { click: () => ui.close() } } }), button(results.some(r => r.ok) ? 'Применить принятое' : 'Оставить ' + rejected[0].from, { kind: 'primary', onClick: () => { ui.close(); done(results); } })]
@@ -499,7 +522,7 @@
         h('div', null, h('dt', null, 'Осталось'), h('dd', null, usd(budget - A.spent), h('small', null, 'до 31 окт'))),
         h('div', null, h('dt', null, 'В день'), h('dd', null, usd(daily), h('small', null, 'в среднем'))),
         h('div', null, h('dt', null, 'Можно в день'), h('dd', null, usd(pace), h('small', null, 'чтобы уложиться')))),
-      h('div', { class: 'row' },
+      h('div', { class: 'row costs-hero-actions' },
         button('Изменить лимит', { kind: 'ghost', size: 'sm', icon: 'edit', onClick: () => scrollToSettings('costs-limit-month') }),
         h('span', { class: 'stat-hint' }, 'При 100% новые анализы встают на паузу, ставки и история доступны.')));
   }
@@ -510,9 +533,9 @@
     const change = (an.avgCost / OLD.cost - 1) * 100;
     return [
       UI.stat({ class: 'col-6 half-mobile', icon: 'spark', label: 'Средняя цена анализа', value: usd(an.avgCost), delta: fmt.signedPct(change, 0) + ' к боту', trend: 'down', good: false, hint: an.n + ' анализов', spark: anCosts, sparkColor: 'var(--s1)' }),
-      UI.stat({ class: 'col-6 half-mobile', icon: 'database', label: 'Вход из кэша', value: pct(A.cacheShare / 100), hint: 'сэкономил ' + usd(cacheSavedWeek) + ' за 7 дней' }),
+      UI.stat({ class: 'col-6 half-mobile', icon: 'database', label: 'Вход из кэша', value: pct(A.cacheShare / 100), hint: 'сэкономил ' + usd(cacheSavedWeek) + ' за 7 дней', spark: byDay.map(d => sum(d.runs, r => r.cached) / sum(d.runs, r => r.input)), sparkColor: 'var(--s1)' }),
       UI.stat({ class: 'col-6 half-mobile', icon: 'layers', label: 'Токенов за месяц', value: fmt.tokens(TOT.input + TOT.output), hint: 'вход ' + fmt.tokens(TOT.input) + ' · выход ' + fmt.tokens(TOT.output), spark: byDay.map(d => d.tokens), sparkColor: 'var(--s1)' }),
-      UI.stat({ class: 'col-6 half-mobile', icon: 'globe', label: 'Веб-поисков', value: String(TOT.searches), hint: usd(TOT.searches * SEARCH) + ' · лимит ' + (saved.searchLimit || '∞') + ' на анализ' }),
+      UI.stat({ class: 'col-6 half-mobile', icon: 'globe', label: 'Веб-поисков', value: String(TOT.searches), hint: usd(TOT.searches * SEARCH) + ' · лимит ' + (saved.searchLimit || '∞') + ' на анализ', spark: byDay.map(d => sum(d.runs, r => r.searches)), sparkColor: 'var(--s1)' }),
     ];
   }
 
@@ -648,10 +671,11 @@
     const shown = showAllRuns ? filtered : filtered.slice(0, LIMIT);
     const filter = UI.segmented({
       label: 'Тип задачи',
-      items: [{ id: 'all', label: 'Все' }].concat(TYPES.map(t => ({ id: t.id, label: t.short }))),
+      items: [{ id: 'all', label: 'Все' }].concat(TYPES.map(t => ({ id: t.id, label: mobile ? t.tiny : t.short }))),
       active: runFilter,
       onChange: id => { runFilter = id; showAllRuns = false; redraw('costs-runs'); },
     });
+    filter.classList.add('costs-runs-filter');
     let list;
     if (mobile) {
       list = h('ul', { class: 'costs-runlist' }, shown.map(r => h('li', null,
@@ -733,7 +757,7 @@
       const label = id === 'refresh' ? 'Обновление профилей (ночью, через Batch)' : id === 'postmortem' ? 'Разбор ставок' : id === 'analysis' ? 'Анализ матчей' : 'Разбор текста событий';
       const f = UI.field({
         id: 'costs-model-' + id, label,
-        options: t.options.map(m => ({ value: m, label: m + ' — ' + usd(PRICE[m].in, 0) + ' / ' + usd(PRICE[m].out, 0) + ' за 1M' + (m === DEFAULTS.models[id] ? ' (сейчас)' : '') })),
+        options: t.options.map(m => ({ value: m, label: m + ' — ' + usd(PRICE[m].in, 0) + ' / ' + usd(PRICE[m].out, 0) + ' за 1M' + (m === saved.models[id] ? ' (сейчас)' : '') })),
         value: draft.models[id], hint: ' ',
         attrs: { on: { change: e => { draft.models[id] = e.target.value; refresh(); } } },
       });
