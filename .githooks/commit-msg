@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Проверка сообщения коммита по правилам из CLAUDE.md.
+set -uo pipefail
+
+msg=$(grep -v '^#' "$1")
+fail=0
+
+pattern=$(printf '\321\221|\320\201')
+if printf '%s\n' "$msg" | LC_ALL=C grep -qE "$pattern"; then
+  echo "Ошибка: в сообщении коммита есть буква «е с двумя точками», пишите «е»." >&2
+  fail=1
+fi
+
+if printf '%s\n' "$msg" | grep -qiE '^(co-authored-by:.*(claude|anthropic)|claude-session:)|generated with .*claude'; then
+  echo "Ошибка: в сообщении коммита строка о соавторстве Claude. Удалите ее, см. CLAUDE.md." >&2
+  fail=1
+fi
+
+exit $fail

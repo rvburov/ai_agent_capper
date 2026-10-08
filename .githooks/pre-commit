@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Проверки перед коммитом по правилам из CLAUDE.md.
+# Включить один раз в каждой копии репозитория: git config core.hooksPath .githooks
+set -uo pipefail
+
+fail=0
+
+# 1. Автор и коммитер — владелец проекта, а не Claude.
+for var in GIT_AUTHOR_IDENT GIT_COMMITTER_IDENT; do
+  ident=$(git var "$var")
+  if printf '%s' "$ident" | grep -qiE 'claude|anthropic'; then
+    echo "Ошибка: $var = ${ident% * *}" >&2
+    echo "  Автор коммитов: Roman Burov <romanburov89@gmail.com>, см. CLAUDE.md" >&2
+    fail=1
+  fi
+done
+
+# 2. Буква «е с двумя точками» (U+0451 и U+0401) в добавленных и измененных файлах.
+pattern=$(printf '\321\221|\320\201')
+while IFS= read -r -d '' file; do
+  hits=$(git show ":$file" | LC_ALL=C grep -nIE "$pattern" | head -5)
+  if [ -n "$hits" ]; then
+    echo "Ошибка: в $file есть буква «е с двумя точками», пишите «е»:" >&2
+    printf '%s\n' "$hits" | sed "s|^|  $file:|" >&2
+    fail=1
+  fi
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
+
+exit $fail
