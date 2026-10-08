@@ -45,7 +45,7 @@
   const pctOf = (a, b, d = 0) => fmt.pct(b ? a / b * 100 : 0, d);
   const num = v => parseFloat(String(v).replace(/\s/g, '').replace(',', '.'));
   const dec = n => String(Math.round(n * 100) / 100).replace('.', ',');
-  const pl = (n, a, b, c) => n + ' ' + fmt.plural(n, a, b, c);
+  const pl = (n, a, b, c) => n + '\u00a0' + fmt.plural(n, a, b, c); // неразрывный пробел: число не отрывается от слова
   const sum = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
   const limitText = L => usdL(L.monthly) + ' в месяц · ' + pl(L.daily, 'анализ', 'анализа', 'анализов') + ' в день · ' + usdL(L.perAnalysis) + ' на анализ';
 
@@ -79,7 +79,7 @@
     const runs = D.ai.runs, personal = runs.filter(r => r.type !== 'refresh');
     const pCost = sum(personal, r => r.cost) || 1;
     const membersSpent = A.budget.spent - A.budget.shared;
-    const SHORT = { analysis: 'Анализ матчей', refresh: 'Профили игроков', postmortem: 'Разбор ставок', parse: 'Разбор текста' };
+    const SHORT = { analysis: 'Анализ матчей', refresh: 'Профили', postmortem: 'Разбор ставок', parse: 'Разбор текста' };
     return D.ai.runTypes.map(t => {
       const rs = runs.filter(r => r.type === t.id);
       const input = sum(rs, r => r.input), cached = sum(rs, r => r.cached);
@@ -171,27 +171,35 @@
     .adm-private svg { width: 15px; height: 15px; flex: none; }
     .adm-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+    /* 9 вкладок: на широком экране — строка (с иконками от 1521px), уже — сетка кнопок, как в личном кабинете на телефоне */
     .tabs.adm-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 10px 11px; }
-    .tabs.adm-tabs button svg { width: 16px; height: 16px; flex: none; }
+    .tabs.adm-tabs button svg { width: 16px; height: 16px; flex: none; display: none; }
+    @media (min-width: 1521px) { .tabs.adm-tabs button svg { display: block; } }
     .adm-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
-    @media (max-width: 1300px) and (min-width: 961px) { .tabs.adm-tabs button svg { display: none; } .tabs.adm-tabs button { padding: 10px 10px; } }
-    @media (max-width: 960px) {
-      .tabs.adm-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; border-bottom: 0; overflow: visible; }
+    @media (max-width: 1280px) {
+      .tabs.adm-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; border-bottom: 0; overflow: visible; }
       .tabs.adm-tabs button { justify-content: center; padding: 8px 4px; min-height: 42px; border: 1px solid var(--line); border-radius: var(--r-md); margin: 0; background: var(--surface); color: var(--fg-2); font-size: var(--fs-sm); line-height: 1.25; white-space: normal; text-align: center; min-width: 0; }
+      .tabs.adm-tabs button:hover { color: var(--fg); border-color: var(--line-strong); }
       .tabs.adm-tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); }
     }
+    @media (max-width: 960px) { .tabs.adm-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
     .adm-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; outline: none; }
     .adm-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
     .adm-col > .card.adm-fill { flex: 1 1 auto; }
+    .card.adm-fill > .card-body { flex: 1 1 auto; }
+    .card.adm-nowrap-head > .card-head { flex-wrap: nowrap; }
+    .card.adm-nowrap-head > .card-head > div:first-child { flex: 1 1 auto; }
+    .card.adm-nowrap-head > .card-head > .row { flex: none; }
+    .adm-bleed { margin: 0 -18px; }
+    @media (max-width: 720px) { .adm-bleed { margin: 0 -14px; } }
     .adm-main { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 16px; align-items: start; }
     @media (max-width: 1180px) { .adm-main { grid-template-columns: minmax(0, 1fr); } }
     .adm-third { grid-column: span 4; min-width: 0; display: flex; flex-direction: column; }
     .adm-third > .card { flex: 1; }
     @media (max-width: 720px) { .grid > .adm-third { grid-column: span 12; } }
-    .adm-wide-only { display: block; }
     .adm-narrow-only { display: none; }
-    @media (max-width: 1180px) { .adm-wide-only { display: none !important; } .adm-narrow-only { display: flex; } }
+    @media (max-width: 1280px) { .adm-wide-only { display: none !important; } .adm-narrow-only { display: flex; } }
     .adm-howto { font-size: var(--fs-xs); color: var(--fg-3); display: flex; gap: 6px; align-items: flex-start; }
     .adm-howto svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
     .adm-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
@@ -263,6 +271,10 @@
     .adm-spend .meter { height: 6px; }
     .adm-users-table tr.is-blocked .adm-person, .adm-users-table tr.is-blocked .adm-spend { opacity: .6; }
     .adm-users-table td:last-child { width: 1%; }
+    .adm-users-wrap { border-top: 1px solid var(--line); }
+    .btn.adm-more svg { stroke-width: 3.2; width: 20px; height: 20px; }
+    .btn.adm-more { color: var(--fg-2); }
+    .adm-users-table .adm-person { min-width: 230px; }
     .adm-ucards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     @media (max-width: 720px) { .adm-ucards { grid-template-columns: minmax(0, 1fr); } }
     .card.adm-ucard { padding: 14px; gap: 12px; }
@@ -271,6 +283,7 @@
     .adm-ucard.is-blocked .adm-ava, .adm-ucard.is-blocked .adm-spend { opacity: .6; }
     .adm-chips { gap: 6px; }
     .adm-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+    .adm-facts.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .adm-facts > div { background: var(--surface); padding: 8px 10px; min-width: 0; }
     .adm-facts dt { font-size: var(--fs-xs); color: var(--fg-3); }
     .adm-facts dd { margin: 2px 0 0; font-weight: 600; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
@@ -289,7 +302,7 @@
     .adm-item-meta { font-size: var(--fs-sm); color: var(--fg-3); overflow-wrap: anywhere; }
     .adm-item-side { display: flex; align-items: center; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
     .adm-item.is-old { opacity: .75; }
-    @media (max-width: 720px) { .adm-item { grid-template-columns: 40px minmax(0, 1fr); } .adm-item-side { grid-column: 2; justify-content: flex-start; } .adm-item-side:empty { display: none; } }
+    @media (max-width: 720px) { .adm-item { grid-template-columns: 40px minmax(0, 1fr); align-items: start; } .adm-item-side { grid-column: 2; justify-content: flex-start; } .adm-item-side:empty { display: none; } }
     .adm-group { display: flex; flex-direction: column; gap: 4px; }
     .adm-group + .adm-group { border-top: 1px solid var(--line-strong); padding-top: 14px; }
     .adm-group-title { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--fg-3); font-weight: 600; margin-bottom: 6px; }
@@ -405,6 +418,9 @@
     .adm-urow-val small { display: block; font-size: var(--fs-xs); color: var(--fg-3); }
     .adm-urow-bar { grid-column: 1 / -1; height: 6px; border-radius: 999px; background: var(--surface-2); margin-top: 6px; position: relative; overflow: hidden; }
     .adm-urow-bar > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; }
+    .adm-urows.compact .adm-urow { padding: 8px 0; }
+    .adm-urows.compact .adm-urow:first-child { padding-top: 0; }
+    .adm-urows.compact .adm-urow-bar { height: 4px; margin-top: 4px; }
 
     /* обзор: последние действия, журнал */
     .adm-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -502,9 +518,10 @@
     return u.aiMode === 'own' ? chip('Свой ключ …' + (u.ownKey ? u.ownKey.last4 : '••••'), 'info', 'key') : chip('Ключ администратора', 'outline', 'key');
   }
   function keyCell(u) {
-    if (u.aiMode === 'own') return h('div', { class: 'adm-cell2' }, h('span', null, 'Свой ключ'), h('span', { class: 'adm-sub mono' }, 'sk-ant-…' + (u.ownKey ? u.ownKey.last4 : '••••')), u.returnRequested && chip('просит вернуть', 'warn', 'key'));
-    return h('div', { class: 'adm-cell2' }, h('span', null, 'Ключ администратора'), h('span', { class: 'adm-sub' }, u.limit ? 'лимит ' + usdL(u.limit.monthly) + ' в месяц' : 'без личного лимита'));
+    if (u.aiMode === 'own') return h('div', { class: 'adm-cell2' }, h('span', { class: 'adm-nowrap' }, 'Свой ключ'), h('span', { class: 'adm-sub mono' }, 'sk-ant-…' + (u.ownKey ? u.ownKey.last4 : '••••')), u.returnRequested && chip('просит вернуть', 'warn', 'key'));
+    return h('div', { class: 'adm-cell2' }, h('span', { class: 'adm-nowrap' }, 'Администратора'), h('span', { class: 'adm-sub' }, u.limit ? limitShort(u.limit) : 'без личного лимита'));
   }
+  const limitShort = L => usdL(L.monthly) + ' · ' + L.daily + ' в день · ' + usdL(L.perAnalysis);
 
   function spendBlock(u) {
     if (u.aiMode === 'own') {
@@ -888,7 +905,7 @@
         UI.callout('warn', 'clock', 'Код действует 24 часа — до ' + lc(when(r.expires)) + '. Передайте его участнику сами: почты и Telegram в программе нет. Код показывается один раз.' + (r.replaced ? ' Прежний код перестал действовать.' : '')),
         h('div', { class: 'eyebrow' }, 'Что делать участнику'),
         resetInstructions(u)),
-      actions: close => [button('Готово', { kind: 'primary', onClick: () => { close(); refresh(); } })],
+      actions: close => [button('Готово', { kind: 'primary', onClick: close })],
       onClose: refresh,
     });
   }
@@ -1132,8 +1149,8 @@
     const all = people(), active = all.filter(u => u.status === 'active').length, blocked = all.length - active;
     const admins = all.filter(u => u.role === 'admin').length;
     const inv = A.invites.filter(i => i.status === 'active').length;
-    const facts = [active + ' ' + fmt.plural(active, 'активен', 'активны', 'активны')];
-    if (blocked) facts.push(blocked + ' ' + fmt.plural(blocked, 'заблокирован', 'заблокированы', 'заблокированы'));
+    const facts = [pl(active, 'активен', 'активны', 'активны')];
+    if (blocked) facts.push(pl(blocked, 'заблокирован', 'заблокированы', 'заблокированы'));
     facts.push(pl(admins, 'администратор', 'администратора', 'администраторов'));
     return h('div', { class: 'page-head adm-head' },
       h('div', { style: 'min-width:0' },
@@ -1206,7 +1223,7 @@
         actions: [button('Отозвать', { kind: 'secondary', size: 'sm', icon: 'x', onClick: () => revokeInvite(i) }), button('Приглашения', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => switchTab('invites') })] });
     });
     return card({
-      title: 'Что требует внимания', class: 'adm-fill',
+      title: 'Что требует внимания', class: 'adm-fill adm-nowrap-head',
       subtitle: items.length ? 'Просьбы участников, лимиты и коды, которые еще действуют' : 'Просьб и предупреждений нет',
       actions: items.length ? [chip(String(items.length), 'warn')] : [chip('Все спокойно', 'good', 'check')],
       body: items.length ? h('ul', { class: 'adm-att-list' }, rows) : h('p', { class: 'small soft' }, 'Когда участник попросит вернуть ключ администратора, подойдет к лимиту или будет ждать код — это появится здесь.'),
@@ -1233,15 +1250,27 @@
       budgetBar(b),
       h('dl', { class: 'adm-kv3' },
         h('div', null, h('dt', null, 'Осталось'), h('dd', null, usd(b.left), h('small', null, 'до ' + MONTH_DAYS + ' окт'))),
-        h('div', null, h('dt', null, 'До конца месяца'), h('dd', null, pl(b.daysLeft, 'день', 'дня', 'дней'), h('small', null, 'сегодня ' + dateDay(TODAY)))),
+        h('div', null, h('dt', null, 'До конца месяца'), h('dd', null, pl(b.daysLeft, 'день', 'дня', 'дней'), h('small', null, 'сегодня ' + fmt.date(TODAY)))),
         h('div', null, h('dt', null, 'Прогноз'), h('dd', null, '≈ ' + usd(b.forecast), h('small', null, pctOf(b.forecast, b.monthly) + ' бюджета')))),
     ];
+  }
+  function spendersList(b, n) {
+    const rows = onAdminKey().filter(u => u.spent > 0).sort((x, y) => y.spent - x.spent).slice(0, n)
+      .map(u => ({ name: u.name, me: isMe(u), spent: u.spent, r: ratio(u), note: u.limit ? 'лимит ' + usdL(u.limit.monthly) : 'без личного лимита' }))
+      .concat([{ name: 'Общие фоновые задачи', spent: A.budget.shared, note: 'обновление профилей игроков', shared: true }]);
+    const max = Math.max(...rows.map(x => x.spent)) || 1;
+    return h('ul', { class: 'adm-urows compact', 'aria-label': 'Кто тратит' }, rows.map(x => h('li', { class: 'adm-urow' },
+      h('div', { class: 'adm-urow-name' }, x.name, x.me && chip('вы', 'accent')),
+      h('div', { class: 'adm-urow-val' }, h('b', null, usd(x.spent)), h('small', null, pctOf(x.spent, b.monthly, 1) + ' бюджета')),
+      h('div', { class: 'adm-urow-meta' }, x.note + (x.r != null ? ' · израсходовано ' + fmt.pct(x.r * 100, 0) : '')),
+      h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: (x.spent / max * 100) + '%', background: x.shared ? 'var(--fg-3)' : toneOf(x.r) === 'bad' ? 'var(--bad)' : toneOf(x.r) === 'warn' ? 'var(--warn)' : 'var(--accent)' } })))));
   }
   function budgetCard() {
     const b = budget();
     return card({
       title: 'Бюджет ключа администратора', subtitle: 'Октябрь · расходы на Claude всегда в долларах', class: 'adm-fill',
-      body: [...budgetBody(b), howto(b.fShare >= 1 ? 'Прогноз выше бюджета: поднимите бюджет или снизьте лимиты участников.' : 'Прогноз учитывает личные лимиты: на 100% лимита анализы участника останавливаются.')],
+      body: [...budgetBody(b), howto(b.fShare >= 1 ? 'Прогноз выше бюджета: поднимите бюджет или снизьте лимиты участников.' : 'Прогноз учитывает личные лимиты: на 100% лимита анализы участника останавливаются.'),
+        h('div', { class: 'eyebrow', style: 'margin-top:4px' }, 'Кто тратит'), spendersList(b, 3)],
       foot: [button('Бюджет и лимиты', { kind: 'ghost', size: 'sm', icon: 'sliders', iconRight: 'chevronRight', onClick: () => switchTab('key') })],
     });
   }
@@ -1280,12 +1309,12 @@
   function recentCard() {
     const list = A.audit.slice(0, 5);
     return card({
-      title: 'Последние действия', subtitle: 'Из журнала: действия администраторов, участников с ключом и команды терминала',
+      title: 'Последние действия', subtitle: 'Из журнала действий', class: 'adm-nowrap-head',
       actions: [button('Весь журнал', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => switchTab('audit') })],
       body: h('ul', { class: 'adm-recent' }, list.map(e => h('li', null,
         h('span', { class: 'adm-recent-ic', 'aria-hidden': 'true' }, icon(actionOf(e)[1])),
         h('div', { class: 'adm-recent-text' },
-          h('div', null, h('b', null, actionOf(e)[0]), e.target ? ' · ' + e.target : '', h('span', { class: 'soft' }, e.details ? ' — ' + e.details : '')),
+          h('div', null, h('b', null, actionOf(e)[0]), e.target ? ': ' + e.target : ''),
           h('div', { class: 'muted' }, when(e.at) + ' · ' + actorText(e))),
         e.fresh ? chip('новое', 'accent') : h('span')))),
     });
@@ -1312,12 +1341,14 @@
   function usersTable(rows) {
     const t = UI.table({
       columns: [
-        { label: 'Участник', render: u => personRow(u) },
-        { label: 'Роль и статус', render: u => h('div', { class: 'adm-cell2' }, roleChip(u), statusChip(u)) },
+        { label: 'Участник · роль и статус', render: u => h('div', { class: 'adm-person' }, avatar(u), h('div', null,
+          h('div', { class: 'adm-person-name' }, h('span', { class: 'adm-nowrap' }, u.name), isMe(u) && chip('вы', 'accent')),
+          h('div', { class: 'adm-person-mail adm-nowrap' }, u.email),
+          h('div', { class: 'row adm-chips', style: 'margin-top:6px' }, roleChip(u), statusChip(u)))) },
         { label: 'Ключ Claude', render: keyCell },
         { label: 'Расход ИИ за октябрь', render: spendBlock },
         { label: 'Анализы', align: 'r', render: analysesCell },
-        { label: 'Последний вход', render: u => h('div', { class: 'adm-cell2' }, h('span', { class: 'adm-nowrap' }, when(u.lastLogin)), h('span', { class: ['adm-sub', !u.twoFa && 'warn-text'] }, u.twoFa ? '2FA включена' : u.twoFaReset ? '2FA сброшена' : '2FA не настроена')) },
+        { label: 'Вход и 2FA', render: u => h('div', { class: 'adm-cell2' }, h('span', { class: 'adm-nowrap' }, when(u.lastLogin)), h('span', { class: ['adm-sub', !u.twoFa && 'warn-text'] }, u.twoFa ? '2FA включена' : u.twoFaReset ? '2FA сброшена' : '2FA не настроена')) },
         { label: h('span', { class: 'sr-only' }, 'Действия'), align: 'r', render: menuButton },
       ],
       rows, empty: 'Никого нет',
@@ -1333,11 +1364,10 @@
         menuButton(u)),
       h('div', { class: 'row adm-chips' }, roleChip(u), statusChip(u), keyChip(u), u.returnRequested && chip('просит вернуть ключ', 'warn')),
       spendBlock(u),
-      h('dl', { class: 'adm-facts' },
+      h('dl', { class: 'adm-facts two' },
         h('div', null, h('dt', null, 'Анализов сегодня'), h('dd', null, u.todayAnalyses + (u.aiMode === 'admin' && u.limit ? ' из ' + u.limit.daily : ''))),
-        h('div', null, h('dt', null, 'За октябрь'), h('dd', null, String(u.analyses))),
-        h('div', null, h('dt', null, 'Вход'), h('dd', null, when(u.lastLogin)))),
-      h('div', { class: 'row', style: 'gap:6px' }, twoFaChip(u), h('span', { class: 'xsmall muted' }, 'в программе с ' + dateDay(u.since))));
+        h('div', null, h('dt', null, 'За октябрь'), h('dd', null, pl(u.analyses, 'анализ', 'анализа', 'анализов')))),
+      h('div', { class: 'row', style: 'gap:6px 10px' }, twoFaChip(u), h('span', { class: 'xsmall muted' }, 'Вход: ' + lc(when(u.lastLogin)))));
   }
   PANELS.users = () => {
     const all = people();
@@ -1346,13 +1376,15 @@
     const seg = UI.segmented({ label: 'Показать', items: USER_FILTERS.map(x => ({ id: x.id, label: x.label + ' · ' + all.filter(x.test).length })), active: f.id, onChange: id => { st.userFilter = id; redrawPanel(); } });
     const privacy = UI.callout('info', 'eyeOff', h('b', null, 'Здесь только расход на ИИ и активность: '), 'входы и число анализов. Ставки, банк и стратегию участника не видит никто, кроме него самого — администратор тоже.');
     return [
-      card({
-        title: 'Участники', subtitle: pl(all.length, 'человек', 'человека', 'человек') + ' · расход ИИ за октябрь в долларах', class: 'adm-wide-only',
-        actions: [button('Пригласить', { kind: 'secondary', size: 'sm', icon: 'userPlus', onClick: inviteModal })],
-        body: [h('div', { class: 'adm-toolbar' }, seg), privacy],
-        foot: null,
-      }),
-      h('div', { class: 'adm-wide-only' }, card({ flush: true, body: usersTable(rows) })),
+      (() => {
+        const c = card({
+          title: 'Участники', subtitle: pl(all.length, 'человек', 'человека', 'человек') + ' · расход ИИ за октябрь в долларах', class: 'adm-wide-only',
+          actions: [button('Пригласить', { kind: 'secondary', size: 'sm', icon: 'userPlus', onClick: inviteModal })],
+          body: [h('div', { class: 'adm-toolbar' }, seg), privacy],
+        });
+        c.appendChild(h('div', { class: 'adm-users-wrap' }, usersTable(rows)));
+        return c;
+      })(),
       h('div', { class: 'adm-narrow-only stack' },
         h('div', { class: 'adm-toolbar' }, UI.segmented({ label: 'Показать', items: USER_FILTERS.map(x => ({ id: x.id, label: x.label + ' · ' + all.filter(x.test).length })), active: f.id, onChange: id => { st.userFilter = id; redrawPanel(); } })),
         privacy.cloneNode(true),
@@ -1365,7 +1397,7 @@
   // =====================================================================
   function inviteItem(i) {
     const keyText = i.aiMode === 'admin' ? 'ключ администратора' + (i.limit ? ', ' + usdL(i.limit) + ' в месяц' : '') : 'свой ключ';
-    const base = ROLE[i.role] + ' · ' + keyText + ' · код ' + maskCode(i.code);
+    const base = [ROLE[i.role] + ' · ' + keyText + ' · код ', h('span', { class: 'adm-nowrap mono' }, maskCode(i.code))];
     if (i.status === 'active') {
       return item({ ic: 'mail', icKind: 'info', title: i.email, titleExtra: [chip('Ждет', 'info', 'clock'), i.fresh && chip('новое', 'accent')],
         meta: [h('div', null, base), h('div', null, 'Создано ' + lc(when(i.created)) + ' · действует до ' + lc(when(i.expires)) + ' (' + left(i.expires) + ')')],
@@ -1374,8 +1406,7 @@
     if (i.status === 'used') {
       const u = people().find(x => x.email === i.email);
       return item({ ic: 'check', icKind: 'good', title: i.email, titleExtra: chip('Использовано', 'good'),
-        meta: [h('div', null, base), h('div', null, 'Зарегистрировался ' + lc(when(i.usedAt)) + (u ? ' — ' + u.name : ''))],
-        side: u ? button('Участник', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => switchTab('users') }) : null });
+        meta: [h('div', null, base), h('div', null, 'Зарегистрировался ' + lc(when(i.usedAt)) + (u ? ' — ' + u.name : ''))] });
     }
     return item({ ic: i.status === 'revoked' ? 'x' : 'clock', title: i.email, titleExtra: chip(i.status === 'revoked' ? 'Отозвано' : 'Истекло', 'outline'), old: true,
       meta: [h('div', null, base), h('div', null, i.status === 'revoked' ? 'Отозвано ' + lc(when(i.revokedAt || i.created)) : 'Истекло ' + lc(when(i.expires)) + ', не использовано')] });
@@ -1551,7 +1582,7 @@
   function budgetEditCard() {
     const b = budget();
     const fM = UI.field({ id: 'adm-budget', label: 'Бюджет в месяц, $', value: dec(A.budget.monthly), inputmode: 'decimal', autocomplete: 'off' });
-    const fA = UI.field({ id: 'adm-alert', label: 'Уведомить меня при', options: [50, 70, 80, 90].map(v => ({ value: String(v), label: v + '% бюджета' })), value: String(A.budget.alertAt) });
+    const fA = UI.field({ id: 'adm-alert', label: 'Уведомить при', options: [50, 70, 80, 90].map(v => ({ value: String(v), label: v + '%' })), value: String(A.budget.alertAt) });
     const limited = onAdminKey().filter(u => u.limit);
     const limitsSum = sum(limited, u => u.limit.monthly);
     let save = null;
@@ -1652,7 +1683,7 @@
           h('div', null, h('dt', null, 'В день'), h('dd', null, pl(u.limit.daily, 'анализ', 'анализа', 'анализов'))),
           h('div', null, h('dt', null, 'На анализ'), h('dd', null, usdL(u.limit.perAnalysis)))),
         spendBlock(u),
-        h('label', { class: 'row-between', style: 'cursor:pointer;flex-wrap:nowrap', for: 'adm-pause-' + u.id + '-m' }, h('span', { class: 'small' }, 'Пауза: анализы на вашем ключе остановлены'),
+        h('label', { class: 'row-between', style: 'cursor:pointer;flex-wrap:nowrap', for: 'adm-pause-' + u.id + '-m' }, h('span', { class: 'small', style: 'min-width:0' }, h('b', null, 'Пауза'), h('span', { class: 'muted' }, ' — остановить анализы на вашем ключе')),
           switchInput('adm-pause-' + u.id + '-m', u.limit.paused, 'Пауза: ' + u.name, v => { u.limit.paused = v; log('limit_change', u.name, v ? 'Анализы на вашем ключе на паузе' : 'Пауза снята'); UI.toast(v ? u.name + ': анализы на паузе' : u.name + ': пауза снята', v ? 'pause' : 'play'); refresh(); })));
     }));
     return card({
@@ -1690,7 +1721,7 @@
     const tiles = h('div', { class: 'grid' },
       UI.stat({ class: 'col-3 half-mobile', icon: 'coins', label: 'С вашего ключа', value: usd(b.spent), hint: pctOf(b.spent, b.monthly) + ' бюджета ' + usdL(b.monthly) }),
       UI.stat({ class: 'col-3 half-mobile', icon: 'spark', label: 'Анализов на вашем ключе', value: String(analyses), hint: '≈ ' + usd(analyses ? membersSpent / analyses : 0) + ' за анализ' }),
-      UI.stat({ class: 'col-3 half-mobile', icon: 'database', label: 'Вход из кэша', value: fmt.pct(D.ai.cacheShare, 0), hint: 'по всем задачам, в 10–20 раз дешевле' }),
+      UI.stat({ class: 'col-3 half-mobile', icon: 'database', label: 'Вход из кэша', value: fmt.pct(D.ai.cacheShare, 0), hint: 'по всем задачам за октябрь' }),
       UI.stat({ class: 'col-3 half-mobile', icon: 'key', label: 'На своих ключах', value: usd(ownSpent), hint: 'в ваш бюджет не входит' }));
 
     const peopleCard = card({
@@ -1719,14 +1750,14 @@
       title: 'По задачам', subtitle: 'Те же ' + usd(b.spent) + ', разложенные по типам запусков',
       body: [
         UI.hbars({ items: tasks.map(t => ({ label: t.short, value: t.cost, note: pctOf(t.cost, b.monthly, 1), color: t.shared ? 'var(--fg-3)' : 'var(--s1)', dot: false })), valueFormat: v => usd(v) }),
-        UI.table({
+        h('div', { class: 'adm-bleed' }, UI.table({
           columns: [
             { label: 'Задача', render: t => t.label },
             { label: 'Модель', render: t => h('span', { class: 'adm-nowrap' }, t.model) },
             { label: 'Кэш', align: 'r', render: t => t.cache ? fmt.pct(t.cache * 100, 0) : 'нет' },
           ],
           rows: tasks,
-        }),
+        })),
         howto('Кэш — какая часть входных токенов читается из кэша: это в 10–20 раз дешевле обычного входа. Разбор текста короткий, его не кэшируем.'),
       ],
     });
@@ -1824,7 +1855,7 @@
     });
   }
   function tzCard() {
-    const f = UI.field({ id: 'adm-tz', label: 'Часовой пояс', options: TZ, value: st.tz, hint: 'Время сейчас, в октябре. Каждый участник может выбрать свой пояс в личном кабинете' });
+    const f = UI.field({ id: 'adm-tz', label: 'Часовой пояс', options: TZ, value: st.tz, hint: 'Смещение от UTC — на октябрь. Каждый участник может выбрать свой пояс в личном кабинете' });
     let save = null;
     save = button('Сохранить', { kind: 'primary', size: 'sm', icon: 'check', disabled: true, onClick: () => {
       const v = valOf(f);
@@ -1915,8 +1946,8 @@
     ta.addEventListener('input', sync);
     const userSel = UI.field({ id: 'adm-msg-user', label: 'Получатель', options: rec.map(u => ({ value: u.id, label: u.name })), value: st.msg.user });
     userSel.querySelector('select').addEventListener('change', e => { st.msg.user = e.target.value; });
-    userSel.hidden = st.msg.to !== 'one';
-    const seg = UI.segmented({ label: 'Кому', items: [{ id: 'all', label: 'Всем участникам · ' + rec.length }, { id: 'one', label: 'Одному' }], active: st.msg.to, onChange: id => { st.msg.to = id; userSel.hidden = id !== 'one'; sync(); } });
+    userSel.style.display = st.msg.to === 'one' ? '' : 'none';
+    const seg = UI.segmented({ label: 'Кому', items: [{ id: 'all', label: 'Всем участникам · ' + rec.length }, { id: 'one', label: 'Одному' }], active: st.msg.to, onChange: id => { st.msg.to = id; userSel.style.display = id === 'one' ? '' : 'none'; sync(); } });
     send = button('Отправить', { kind: 'primary', icon: 'send', attrs: { id: 'adm-msg-send' }, onClick: () => {
       const text = ta.value.trim(), to = toWhom();
       if (!text || !to.length) return;

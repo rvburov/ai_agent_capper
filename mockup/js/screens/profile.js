@@ -401,8 +401,8 @@
     .profile-keyinput { display: flex; gap: 8px; align-items: center; min-width: 0; }
     .profile-keyinput .input { flex: 1; font-family: var(--font-mono); font-size: var(--fs-sm); }
     .profile-keyinput .btn { flex: none; width: 42px; height: 42px; }
-    .profile-cap { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
-    .profile-cap .field { width: 200px; max-width: 100%; }
+    .profile-cap { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .profile-cap .input { width: 120px; flex: none; font-variant-numeric: tabular-nums; }
     .profile-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; counter-reset: pstep; }
     .profile-steps > li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; font-size: var(--fs-sm); color: var(--fg-2); counter-increment: pstep; overflow-wrap: anywhere; }
     .profile-steps > li::before { content: counter(pstep); width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); display: grid; place-items: center; font-weight: 600; font-family: var(--font-display); font-size: var(--fs-sm); }
@@ -763,11 +763,11 @@
           ['Вход', 'email + пароль + код 2FA'],
           ['Другие пользователи', adm
             ? h('a', { href: '#admin-users' }, others.length + ' ' + pl(others.length, 'пользователь', 'пользователя', 'пользователей') + (waiting ? ' · ' + waiting + ' ' + pl(waiting, 'приглашение ждет', 'приглашения ждут', 'приглашений ждут') : ''))
-            : 'видят только свое'],
+            : 'закрытый круг · приглашает администратор'],
         ]),
         h('p', { class: 'xsmall muted' }, adm
           ? 'Участников, приглашения, ключ Claude и бюджет вы ведете в «Администрировании». Администраторов может быть несколько: следующих назначаете вы.'
-          : 'Роль назначает администратор. Он видит только ваш расход на ИИ и активность — входы и число анализов. Ставки, банк и стратегия видны только вам.'),
+          : 'Администратор видит только ваш расход на ИИ и активность — входы и число анализов. Ставки, банк и стратегия видны только вам.'),
       ],
       foot: adm ? [button('Администрирование', { kind: 'secondary', icon: 'admin', href: '#admin-users' }), button('Пригласить участника', { kind: 'ghost', icon: 'userPlus', href: '#admin-invites' })] : null,
     });
@@ -1498,17 +1498,20 @@
       k.verified = nowIso(); drawPanel();
       UI.toast('Ключ работает: доступны Opus 5.5, Sonnet 5.5 и Haiku 4.5', 'check');
     }) });
-    const capF = UI.field({ label: 'Потолок на один анализ, $', id: 'profile-key-cap', value: fmt.dec(st.keyCap, 2), inputmode: 'decimal', autocomplete: 'off' });
-    const capSave = button('Сохранить', { kind: 'secondary', icon: 'check', type: 'submit' });
-    const capForm = h('form', { class: 'profile-cap', novalidate: true, on: {
+    const capInput = h('input', { class: 'input', id: 'profile-key-cap', value: fmt.dec(st.keyCap, 2), inputmode: 'decimal', autocomplete: 'off', 'aria-describedby': 'profile-key-cap-hint' });
+    const capF = h('div', { class: 'field' },
+      h('label', { class: 'field-label', for: 'profile-key-cap' }, h('span', null, 'Свой потолок на один анализ, $')),
+      h('div', { class: 'profile-cap' }, capInput, button('Сохранить', { kind: 'secondary', icon: 'check', type: 'submit' })),
+      h('div', { class: 'field-hint', id: 'profile-key-cap-hint' }, 'Анализ, который выйдет дороже, остановится до формирования ставки. Средний анализ сейчас ≈ ' + usd(avgAnalysis) + '.'));
+    const capForm = h('form', { novalidate: true, on: {
       input: () => setFieldError(capF, null),
       submit: e => {
         e.preventDefault();
-        const v = num(valOf(capF));
+        const v = num(capInput.value);
         if (!(v >= 0.1 && v <= 20)) return setFieldError(capF, 'От $0,10 до $20');
         st.keyCap = Math.round(v * 100) / 100; drawPanel();
         UI.toast('Потолок на анализ: ' + usd(st.keyCap), 'check');
-      } } }, capF, capSave);
+      } } }, capF);
     const before = st.spentBefore || 0;
     const confirm = st.keyDelConfirm && h('div', { class: 'profile-confirm' },
       UI.callout('warn', 'alert', adm
@@ -1530,10 +1533,9 @@
         UI.kv([
           ['Кто платит', 'вы, со счета в консоли Anthropic'],
           ['Лимит трат', 'ставите сами в консоли Anthropic'],
-          before > 0 ? ['До перехода, на ключе администратора', usd(before)] : null,
+          before > 0 ? ['На ключе администратора', usd(before) + ' до перехода'] : null,
         ].filter(Boolean)),
-        h('div', { class: 'stack', style: 'gap:6px' }, capForm,
-          h('div', { class: 'field-hint' }, 'Свой потолок: анализ, который выйдет дороже, остановится до формирования ставки. Средний анализ сейчас ≈ ' + usd(avgAnalysis) + '.')),
+        capForm,
         UI.callout('warn', 'lock', h('b', null, 'Никому не пересылайте ключ'), ' — ни в чате, ни по почте, ни администратору. Если ключ мог утечь, удалите его в консоли Anthropic и замените здесь.'),
         confirm,
       ],

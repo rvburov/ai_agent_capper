@@ -243,7 +243,7 @@
   // Лимиты на ключе администратора (Р13: по умолчанию $10 в месяц, 3 анализа в день, не больше $1 за анализ)
   const LIMIT_DEFAULT = { monthly: 10, daily: 3, perAnalysis: 1 };
   const users = [
-    { id: 'u1', name: 'Роман Буров', email: 'roman@example.com', role: 'admin', status: 'active', aiMode: 'admin', limit: null, spent: personalSpent, analyses: analysesN, todayAnalyses: analysesToday, lastLogin: '2026-10-07T08:41', twoFa: true, since: '2026-06-28', you: true },
+    { id: 'u1', name: 'Роман Буров', email: 'roman@example.com', role: 'admin', status: 'active', aiMode: 'admin', limit: null, spent: personalSpent, analyses: analysesN, todayAnalyses: analysesToday, lastLogin: '2026-10-07T08:41', twoFa: true, since: '2026-06-28', you: true, consent: true },
     { id: 'u2', name: 'Ольга Лехтинен', email: 'olga@example.com', role: 'member', status: 'active', aiMode: 'admin', limit: Object.assign({}, LIMIT_DEFAULT), spent: personalSpent, analyses: analysesN, todayAnalyses: analysesToday, lastLogin: '2026-10-07T07:55', twoFa: true, since: '2026-06-30', consent: true },
     { id: 'u3', name: 'Алексей Ковалев', email: 'alexey@example.com', role: 'member', status: 'active', aiMode: 'admin', limit: { monthly: 8, daily: 5, perAnalysis: 1 }, spent: 7.28, analyses: 33, todayAnalyses: 4, lastLogin: '2026-10-07T09:12', twoFa: true, since: '2026-07-15', consent: true },
     { id: 'u4', name: 'Дмитрий Шульц', email: 'dmitry@example.com', role: 'member', status: 'active', aiMode: 'own', ownKey: { last4: '7Qx2', verified: '2026-09-02T18:30' }, limit: null, spent: 3.40, analyses: 15, todayAnalyses: 0, lastLogin: '2026-10-05T20:03', twoFa: true, since: '2026-08-20', consent: false, returnRequested: '2026-10-06T21:15' },
