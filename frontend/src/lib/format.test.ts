@@ -132,6 +132,9 @@ describe('даты в часовом поясе пользователя', () =>
     expect(formatDateTime('2026-10-09T17:00:00Z', o)).toBe('Завтра, 20:00');
     expect(formatDateTime('2026-10-01T09:00:00Z', o)).toBe('1 окт, 12:00');
     expect(formatDateTime('2026-10-08T11:05:00Z', { ...o, calendar: false })).toBe('8 окт, 14:05');
+    expect(formatDateTime('2026-10-08T11:05:00Z', { ...o, calendar: false, year: 'always' })).toBe(
+      '8 окт 2026, 14:05',
+    );
   });
 
   it('пояс пользователя задается один раз для всех функций', () => {

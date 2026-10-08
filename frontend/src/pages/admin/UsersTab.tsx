@@ -108,10 +108,15 @@ export function UsersTab({ me }: { me: Me }) {
           <Avatar user={user} meId={me.id} className={cx(user.status === 'blocked' && 'adm-dim')} />
           <div>
             <div className={cx('adm-person-name', user.status === 'blocked' && 'adm-dim')}>
-              <span className="adm-nowrap">{personName(user)}</span>
+              <span className="adm-nowrap" title={personName(user)}>
+                {personName(user)}
+              </span>
               {user.id === me.id && <MeChip />}
             </div>
-            <div className={cx('adm-person-mail adm-nowrap', user.status === 'blocked' && 'adm-dim')}>
+            <div
+              className={cx('adm-person-mail adm-nowrap', user.status === 'blocked' && 'adm-dim')}
+              title={user.email}
+            >
               {user.email}
             </div>
             <div className="row adm-chips" style={{ marginTop: 6 }}>
@@ -157,7 +162,7 @@ export function UsersTab({ me }: { me: Me }) {
         </div>
       ),
     },
-    { key: 'menu', label: '', align: 'r', render: menu },
+    { key: 'menu', label: t('admin.users.columns.actions'), hideLabel: true, align: 'r', render: menu },
   ];
 
   return (

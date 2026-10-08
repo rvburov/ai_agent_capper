@@ -226,10 +226,13 @@ export function formatDateLong(
   return i18n.t('format.dateYear', { day: p.day, month: months[p.month - 1] ?? p.month, year: p.year });
 }
 
-/** «Сегодня, 14:05», «Вчера, 09:30», «8 окт, 14:05». calendar: false — без «Сегодня». */
+/**
+ * «Сегодня, 14:05», «Вчера, 09:30», «8 окт, 14:05». calendar: false — без «Сегодня»;
+ * year: 'always' — с годом и в текущем году: «8 окт 2026, 14:05» (для файлов, которые хранят).
+ */
 export function formatDateTime(
   value: DateInput | null | undefined,
-  options: DateFormatOptions & { calendar?: boolean } = {},
+  options: DateFormatOptions & { calendar?: boolean; year?: 'auto' | 'always' } = {},
 ): string {
   const date = toDate(value);
   if (!date) return DASH;

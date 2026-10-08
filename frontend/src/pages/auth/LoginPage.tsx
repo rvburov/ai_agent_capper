@@ -174,6 +174,7 @@ export function LoginPage() {
         mode="login"
         email={email}
         focus={moved}
+        remember={remember}
         onRestart={restart}
         onLocked={lock}
         onNotYou={() => go('login')}

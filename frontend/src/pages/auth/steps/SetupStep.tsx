@@ -9,7 +9,7 @@ import { codeFailure, type Failure } from '../../../features/auth/flow';
 import { useConfirmTotpSetup, useTotpSetup, type TotpSetupDoneOut } from '../../../features/auth/useTwoFactor';
 import { cx } from '../../../lib/cx';
 import { EMPTY_OTP, OtpInput, otpValue, type OtpDigits, type OtpHandle } from '../OtpInput';
-import { AUTH_TITLE_ID, AccountRow, AuthHead, Consent, Stepper, useStepFocus } from '../parts';
+import { AUTH_TITLE_ID, AccountRow, AuthHead, Consent, Note, Stepper, useStepFocus } from '../parts';
 
 export type SetupMode = 'register' | 'login';
 
@@ -18,6 +18,11 @@ interface SetupStepProps {
   mode: SetupMode;
   email: string;
   focus: boolean;
+  /**
+   * На шаге «Пароль» отметили «Запомнить устройство». Настройка 2FA устройство не запоминает
+   * (сервер берет флажок только у кода при входе) — говорим об этом, а не молчим.
+   */
+  remember?: boolean;
   /** Незавершенный вход сброшен сервером (истек, аккаунт заблокирован): снова шаг «Пароль». */
   onRestart: (failure: Extract<Failure, { kind: 'restart' }>) => void;
   onLocked: (retryAfter: number) => void;
@@ -31,7 +36,16 @@ interface SetupStepProps {
  * и завершает вход, 3) восемь резервных кодов, которые сервер показывает один раз.
  * Коды приходят только после проверки кода, поэтому шаг 3 до нее ждет.
  */
-export function SetupStep({ mode, email, focus, onRestart, onLocked, onNotYou, onDone }: SetupStepProps) {
+export function SetupStep({
+  mode,
+  email,
+  focus,
+  remember = false,
+  onRestart,
+  onLocked,
+  onNotYou,
+  onDone,
+}: SetupStepProps) {
   const { t } = useTranslation();
   const toast = useToast();
   const formRef = useRef<HTMLFormElement>(null);
@@ -134,6 +148,7 @@ export function SetupStep({ mode, email, focus, onRestart, onLocked, onNotYou, o
         sub={register ? t('auth.setup.sub') : t('auth.setup.loginSub')}
       />
       {!register && !done && <AccountRow email={email} onNotYou={onNotYou} />}
+      {!register && !done && remember && <Note icon="device">{t('auth.setup.rememberLater')}</Note>}
       {setupFailure?.kind === 'form' && !setup.isFetching && (
         <Callout kind="bad" icon="alert" role="alert">
           <div className="stack">

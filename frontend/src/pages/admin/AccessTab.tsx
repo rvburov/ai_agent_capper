@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { errorMessage } from '../../api/errors';
 import type { Me } from '../../api/hooks/useMe';
@@ -27,6 +27,7 @@ import {
   useCreateResetCode,
   useRevokeResetCode,
 } from '../../features/admin/useResetCodes';
+import { SERVER_CLI, TERMINAL_CLI } from '../../lib/terminal';
 import { CodeBox, ConfirmDialog, Item, LoadError, PersonRow } from './parts';
 import { useUserActions, type AccessNavState } from './UserActions';
 
@@ -45,7 +46,7 @@ export function AccessTab({ me }: { me: Me }) {
           <TwoFactorCard
             me={me}
             users={users.data}
-            onReset={(user) => actions.open('reset2fa', user)}
+            onReset={(user, onDone) => actions.open('reset2fa', user, onDone)}
           />
         </div>
       </div>
@@ -67,6 +68,7 @@ function ResetCard({ me, users, codes }: ResetCardProps) {
   const { t } = useTranslation();
   const toast = useToast();
   const location = useLocation();
+  const navigate = useNavigate();
   const create = useCreateResetCode();
   const navState = location.state as Partial<AccessNavState> | null;
   const [selected, setSelected] = useState<number | null>(navState?.resetUserId ?? null);
@@ -78,13 +80,22 @@ function ResetCard({ me, users, codes }: ResetCardProps) {
   const [error, setError] = useState<string | null>(null);
   const goRef = useRef<HTMLButtonElement>(null);
 
-  // Пришли из меню участника «Выдать код сброса пароля»: карточка на виду, фокус на «Выдать код»
-  const fromMenu = navState?.resetUserId ?? null;
+  // Пришли из меню участника «Выдать код сброса пароля»: карточка на виду, фокус на «Выдать код».
+  // Один раз, когда загрузился список: его обновление (например, после сброса 2FA) не должно
+  // уводить прокрутку и фокус. Затем state стирается, чтобы не сработать снова после перезагрузки.
+  const fromMenu = navState?.resetUserId != null;
+  const loaded = users !== undefined;
+  const handled = useRef(false);
   useEffect(() => {
-    if (fromMenu === null || !users) return;
+    if (!fromMenu || !loaded || handled.current) return;
+    handled.current = true;
     document.getElementById('adm-reset')?.scrollIntoView({ block: 'start' });
     goRef.current?.focus({ preventScroll: true });
-  }, [fromMenu, users]);
+    void navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { replace: true, state: null, preventScrollReset: true },
+    );
+  }, [fromMenu, loaded, navigate, location.pathname, location.search, location.hash]);
 
   const candidates = users ? resetCandidates(users, me.id) : [];
   const user = candidates.find((u) => u.id === selected) ?? null;
@@ -118,7 +129,7 @@ function ResetCard({ me, users, codes }: ResetCardProps) {
     body = (
       <>
         <PersonRow user={shown.user} meId={me.id} boxed />
-        <CodeBox code={created.code} label={t('admin.access.reset.codeLabel')} />
+        <CodeBox code={created.code} label={t('admin.access.reset.codeLabel')} reveal />
         <Callout kind="warn" icon="clock">
           {t('admin.access.reset.valid', { date: whenInline(created.reset_code.expires_at) })}
           {shown.replaced ? ` ${t('admin.access.reset.replaced')}` : ''}
@@ -212,17 +223,29 @@ function ResetSteps({ email }: { email: string }) {
 interface TwoFactorCardProps {
   me: Me;
   users: AdminUser[] | undefined;
-  onReset: (user: AdminUser) => void;
+  /** onDone — после успешного сброса, когда окно уже закрыто. */
+  onReset: (user: AdminUser, onDone: () => void) => void;
 }
 
 /** «Сбросить 2FA»: участники с включенной 2FA; подтверждение кодом 2FA администратора. */
 function TwoFactorCard({ me, users, onReset }: TwoFactorCardProps) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<number | null>(null);
+  const [refocus, setRefocus] = useState(false);
   const candidates = users ? twoFactorCandidates(users, me.id) : [];
   const user = candidates.find((u) => u.id === selected) ?? null;
   const selectId = 'adm-2fa-user';
   const hint = t('admin.access.twofa.hint');
+
+  // После сброса у участника больше нет 2FA: он уходит из списка, а «Сбросить 2FA» становится
+  // недоступна, и окно не может вернуть на нее фокус. Фокус — на выбор участника. Эффект
+  // срабатывает в том же обновлении, где закрывается окно, уже после его попытки вернуть фокус.
+  useEffect(() => {
+    if (!refocus) return;
+    setRefocus(false);
+    document.getElementById(selectId)?.focus();
+  }, [refocus]);
+
   return (
     <Card
       className="adm-fill"
@@ -260,7 +283,18 @@ function TwoFactorCard({ me, users, onReset }: TwoFactorCardProps) {
         <Skeleton height={42} />
       )}
       <div className="row">
-        <Button kind="danger" icon="shield" disabled={!user} onClick={() => user && onReset(user)}>
+        <Button
+          kind="danger"
+          icon="shield"
+          disabled={!user}
+          onClick={() =>
+            user &&
+            onReset(user, () => {
+              setSelected(null);
+              setRefocus(true);
+            })
+          }
+        >
           {t('admin.access.twofa.go')}
         </Button>
       </div>
@@ -344,8 +378,9 @@ function CodesCard({ codes }: { codes: CodesQuery }) {
   );
 }
 
-// Команды терминала (Р6): как в макете, docker compose на сервере
-const CLI = 'docker compose exec api python -m app.admin.cli';
+// Команды терминала (Р6) — в форме deploy/local.sh (src/lib/terminal.ts). Вариант для сервера
+// из макета показан строкой ниже списка.
+const CLI = TERMINAL_CLI;
 
 type CommandKey = 'resetCode' | 'reset2fa' | 'createAdmin' | 'setRole' | 'unblock' | 'setAdminKey';
 
@@ -397,6 +432,13 @@ function TerminalCard({ me }: { me: Me }) {
           );
         })}
       </ul>
+      <p className="xsmall muted">
+        {t('admin.access.terminal.serverBefore')}
+        <code className="adm-inline-code">{SERVER_CLI}</code>
+        {t('admin.access.terminal.serverMiddle')}
+        <code className="adm-inline-code">{CLI}</code>
+        {t('admin.access.terminal.serverAfter')}
+      </p>
     </Card>
   );
 }

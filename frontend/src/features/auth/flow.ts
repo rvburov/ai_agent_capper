@@ -1,4 +1,5 @@
 import { isApiError } from '../../api/errors';
+import type { components } from '../../api/schema';
 import i18n from '../../i18n';
 
 /*
@@ -9,7 +10,7 @@ import i18n from '../../i18n';
  */
 
 export type LoginStep = 'login' | '2fa' | 'backup' | 'setup' | 'locked';
-export type LoginStatus = 'ok' | 'totp_required' | 'totp_setup_required';
+export type LoginStatus = components['schemas']['LoginOut']['status'];
 
 /** Куда идти после ответа «вход паролем» (и после регистрации). */
 export function stepAfterLogin(status: LoginStatus): 'done' | '2fa' | 'setup' {

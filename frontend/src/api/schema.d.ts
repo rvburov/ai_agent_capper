@@ -287,7 +287,9 @@ export interface paths {
         };
         /**
          * Login Events
-         * @description Журнал входов за 90 дней, новые сверху.
+         * @description Журнал входов за 90 дней, новые сверху. result (можно несколько раз) — только
+         *     такие попытки: по ok, bad_totp и bad_recovery интерфейс ищет подозрительный вход,
+         *     и тысячи неудачных паролей от чужих людей его не вытеснят.
          */
         get: operations["login_events_api_me_login_events_get"];
         put?: never;
@@ -476,7 +478,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Block User */
+        /**
+         * Block User
+         * @description Блокировка. Администратора — только с totp_code.
+         */
         post: operations["block_user_api_admin_users__user_id__block_post"];
         delete?: never;
         options?: never;
@@ -527,7 +532,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Revoke Sessions */
+        /**
+         * Revoke Sessions
+         * @description Завершает все сеансы. Сеансы администратора — только с totp_code.
+         */
         post: operations["revoke_sessions_api_admin_users__user_id__sessions_revoke_post"];
         delete?: never;
         options?: never;
@@ -654,6 +662,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AdminActionIn
+         * @description Блокировка и завершение сеансов: код 2FA нужен, только если цель — администратор
+         *     (с угнанным сеансом без телефона нельзя по одному отключить других администраторов).
+         */
+        AdminActionIn: {
+            /** Totp Code */
+            totp_code?: string | null;
+        };
         /**
          * AdminUserDetailOut
          * @description Карточка участника: плюс число действующих сеансов и последние 20 входов.
@@ -1819,6 +1836,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                result?: ("ok" | "bad_password" | "bad_totp" | "bad_recovery" | "rate_limited" | "blocked")[] | null;
             };
             header?: never;
             path?: never;
@@ -2186,7 +2204,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AdminActionIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2283,7 +2305,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AdminActionIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {

@@ -71,9 +71,12 @@ export function AuthLayout({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   const mobile = useMediaQuery(MOBILE_QUERY);
 
-  if (mobile) {
-    return (
-      <div className="login-m">
+  // Форма шага в обеих раскладках стоит в одном месте дерева (div → main → div): при смене
+  // ширины через 960 px (поворот планшета, сужение окна) React не пересоздает шаг, и введенное,
+  // и показанные один раз резервные коды остаются. Меняются только классы и блоки вокруг формы
+  return (
+    <div className={mobile ? 'login-m' : 'login-page'}>
+      {mobile ? (
         <header className="login-m-hero">
           <Court dir="h" />
           <div className="login-m-top">
@@ -82,7 +85,44 @@ export function AuthLayout({ children }: { children: ReactNode }) {
           </div>
           <p className="login-m-lead">{t('auth.brand.mobileLead')}</p>
         </header>
-        <main className="login-m-card">{children}</main>
+      ) : (
+        <aside className="login-brand" aria-label={t('auth.brand.label')}>
+          <Court dir="v" />
+          <BrandRow />
+          <div className="login-hero">
+            <div className="eyebrow">{t('auth.brand.eyebrow')}</div>
+            <p className="login-hero-h">{t('auth.brand.hero')}</p>
+            <p className="login-hero-p">{t('auth.brand.lead')}</p>
+            <p className="login-hero-note">
+              <Icon name="info" />
+              {t('auth.brand.note')}
+            </p>
+          </div>
+          <section className="login-sec" aria-labelledby="login-sec-title">
+            <div className="login-sec-head">
+              <Icon name="shield" />
+              <h2 id="login-sec-title">{t('auth.security.title')}</h2>
+              <Chip kind="accent" icon="check">
+                {t('auth.security.count')}
+              </Chip>
+            </div>
+            <SecurityList />
+          </section>
+          <div className="login-brandfoot">
+            <span>{t('auth.brand.copyright')}</span>
+            <span>{t('auth.brand.https')}</span>
+          </div>
+        </aside>
+      )}
+      <main className={mobile ? 'login-m-card' : 'login-main'}>
+        {!mobile && (
+          <div className="login-topline">
+            <ThemeButton />
+          </div>
+        )}
+        <div className={mobile ? undefined : 'login-center'}>{children}</div>
+      </main>
+      {mobile && (
         <details className="login-secd">
           <summary>
             <Icon name="shield" />
@@ -95,49 +135,13 @@ export function AuthLayout({ children }: { children: ReactNode }) {
           </summary>
           <SecurityList />
         </details>
+      )}
+      {mobile && (
         <footer className="login-m-foot">
           <span>{t('auth.brand.copyright')}</span>
           <span>{t('auth.brand.https')}</span>
         </footer>
-      </div>
-    );
-  }
-
-  return (
-    <div className="login-page">
-      <aside className="login-brand" aria-label={t('auth.brand.label')}>
-        <Court dir="v" />
-        <BrandRow />
-        <div className="login-hero">
-          <div className="eyebrow">{t('auth.brand.eyebrow')}</div>
-          <p className="login-hero-h">{t('auth.brand.hero')}</p>
-          <p className="login-hero-p">{t('auth.brand.lead')}</p>
-          <p className="login-hero-note">
-            <Icon name="info" />
-            {t('auth.brand.note')}
-          </p>
-        </div>
-        <section className="login-sec" aria-labelledby="login-sec-title">
-          <div className="login-sec-head">
-            <Icon name="shield" />
-            <h2 id="login-sec-title">{t('auth.security.title')}</h2>
-            <Chip kind="accent" icon="check">
-              {t('auth.security.count')}
-            </Chip>
-          </div>
-          <SecurityList />
-        </section>
-        <div className="login-brandfoot">
-          <span>{t('auth.brand.copyright')}</span>
-          <span>{t('auth.brand.https')}</span>
-        </div>
-      </aside>
-      <main className="login-main">
-        <div className="login-topline">
-          <ThemeButton />
-        </div>
-        <div className="login-center">{children}</div>
-      </main>
+      )}
     </div>
   );
 }

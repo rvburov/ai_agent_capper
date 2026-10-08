@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
 import { apiError, json, ME_MEMBER, mockFetch } from '../../test/fetchMock';
-import { bodyOf, renderAuth } from './testing';
+import { bodyOf, renderAuth, resizableViewport } from './testing';
 
 async function fillForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText('Код приглашения'), 'cap k7qm 2xpa');
@@ -74,6 +74,27 @@ describe('регистрация по приглашению', () => {
     await user.click(await screen.findByRole('checkbox', { name: /Я сохранил\(а\)/ }));
     await user.click(screen.getByRole('button', { name: 'Готово — войти в кабинет' }));
     expect(await screen.findByText(/Приложение \/ вошел Анна Петрова/)).toBeInTheDocument();
+  });
+
+  it('смена раскладки (сужение окна, поворот планшета) не стирает введенное', async () => {
+    const viewport = resizableViewport(1366);
+    try {
+      mockFetch({});
+      renderAuth('/register');
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText('Имя'), 'Анна Петрова');
+      await user.type(screen.getByLabelText('Email'), 'anna@example.com');
+      await user.click(screen.getByRole('checkbox', { name: /Мне 18 лет/ }));
+      viewport.resize(900);
+      expect(document.querySelector('.login-m')).not.toBeNull();
+      expect(screen.getByLabelText('Имя')).toHaveValue('Анна Петрова');
+      expect(screen.getByLabelText('Email')).toHaveValue('anna@example.com');
+      expect(screen.getByRole('checkbox', { name: /Мне 18 лет/ })).toBeChecked();
+      viewport.resize(1366);
+      expect(screen.getByLabelText('Email')).toHaveValue('anna@example.com');
+    } finally {
+      viewport.restore();
+    }
   });
 
   it('код не подходит — ошибка под полем кода, текст сервера', async () => {

@@ -8,17 +8,20 @@ import type { AuditAction, AuditEntry, Role } from './types';
  * Подробности сервер отдает словарем details; здесь из него собирается строка, как в макете.
  */
 
-export const AUDIT_GROUPS = ['all', 'invite', 'access', 'people', 'money', 'settings'] as const;
+export const AUDIT_GROUPS = ['all', 'invite', 'access', 'people', 'money', 'settings', 'import'] as const;
 export type AuditGroup = (typeof AUDIT_GROUPS)[number];
 
 // Группа «Команды терминала» из макета не сделана: сервер не фильтрует журнал по автору,
-// а фильтр на странице по уже загруженным записям врал бы при постраничной загрузке
+// а фильтр на странице по уже загруженным записям врал бы при постраничной загрузке.
+// Импорт истории (его в макете нет, делается только из терминала) — своя группа на ее месте.
+// Каждое действие журнала входит в одну из групп (проверяет audit.test.ts).
 const GROUP_ACTIONS: Record<Exclude<AuditGroup, 'all'>, readonly AuditAction[]> = {
   invite: ['invite', 'invite_revoke'],
   access: ['reset_code', 'reset_code_revoke', 'reset_2fa', 'sessions_revoke'],
   people: ['block', 'unblock', 'delete', 'role_change', 'create_admin'],
   money: ['key_change', 'limit_change'],
   settings: ['currency_change', 'message'],
+  import: ['import'],
 };
 
 /** Действия группы для запроса ?action=...; для «Все действия» — без фильтра. */

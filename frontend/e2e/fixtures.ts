@@ -58,6 +58,13 @@ export async function mockApi(page: Page, me: Me | null): Promise<void> {
 /** Ошибки консоли и страницы за время теста. */
 export function collectErrors(page: Page): string[] {
   const errors: string[] = [];
+  // Нарушение CSP сайта (preview отдает ту же политику, что Caddy) — тоже ошибка. Скрипт
+  // регистрируется до перехода на страницу: команды Playwright идут по порядку
+  void page.addInitScript(() => {
+    document.addEventListener('securitypolicyviolation', (event) => {
+      console.error(`CSP: ${event.violatedDirective} ${event.blockedURI}`);
+    });
+  });
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(`console: ${message.text()}`);
   });

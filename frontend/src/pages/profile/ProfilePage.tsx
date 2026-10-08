@@ -4,7 +4,7 @@ import { Navigate, useParams } from 'react-router';
 import { useMe } from '../../api/hooks/useMe';
 import { paths, PROFILE_TABS, type ProfileTab } from '../../app/paths';
 import { Card, EmptyState, Tabs, type IconName } from '../../components';
-import { useLoginEvents } from '../../features/profile/useLoginEvents';
+import { useSuspiciousCandidates } from '../../features/profile/useLoginEvents';
 import { useSuspiciousLogin } from '../../features/profile/useSuspiciousLogin';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 import { ProfileHero } from './ProfileHero';
@@ -21,10 +21,10 @@ const ICONS: Record<ProfileTab, IconName> = {
   data: 'database',
 };
 
-// Вкладки следующих этапов (docs/PLAN.md, раздел 10): банк и стратегия, ключ Claude и данные —
-// личный кабинет этапа 4; выбор уведомлений вместе с push — этап 6
+// Вкладки следующих этапов (docs/PLAN.md, раздел 10): весь личный кабинет и центр уведомлений —
+// этап 4; push-переключатели этап 6 добавит в уже готовую вкладку «Уведомления»
 type StubTab = Exclude<ProfileTab, 'profile' | 'security'>;
-const STAGES: Record<StubTab, number> = { bank: 4, key: 4, notifications: 6, data: 4 };
+const STAGES: Record<StubTab, number> = { bank: 4, key: 4, notifications: 4, data: 4 };
 
 function isProfileTab(value: string): value is ProfileTab {
   return (PROFILE_TABS as readonly string[]).includes(value);
@@ -36,8 +36,8 @@ export function ProfilePage() {
   const { tab } = useParams();
   const { data: me } = useMe();
   const mobile = useMediaQuery(MOBILE_QUERY);
-  const events = useLoginEvents();
-  const suspicious = useSuspiciousLogin(me?.id ?? 0, events.data);
+  const candidates = useSuspiciousCandidates();
+  const suspicious = useSuspiciousLogin(me?.id ?? 0, candidates.data);
 
   if (tab !== undefined && (!isProfileTab(tab) || tab === 'profile')) {
     return <Navigate to={paths.profile()} replace />;

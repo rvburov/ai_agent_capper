@@ -123,6 +123,8 @@ describe('Администрирование: участники', () => {
       'Анализы',
       'Вход и 2FA',
     ]);
+    // столбец «⋯» назван для читалки экрана, как sr-only в макете
+    expect(within(table).getByRole('columnheader', { name: 'Действия' })).toBeInTheDocument();
     const olga = within(table).getByText('Ольга Лехтинен').closest('tr')!;
     expect(within(olga).getByText('$10 · 3 в день · $1')).toBeInTheDocument();
     expect(within(olga).getByText('$1,93')).toBeInTheDocument();
@@ -181,8 +183,39 @@ describe('Администрирование: участники', () => {
     expect(within(dialog).getByText(/Данные сохранятся/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Заблокировать' }));
     expect(await screen.findByText('Ольга Лехтинен заблокирован')).toBeInTheDocument();
-    expect(calls.some((r) => r.method === 'POST' && r.url.endsWith('/api/admin/users/2/block'))).toBe(true);
+    const post = calls.find((r) => r.method === 'POST' && r.url.endsWith('/api/admin/users/2/block'));
+    // Участника блокируют без кода 2FA: тела запроса нет
+    expect(post && (await post.clone().text())).toBe('');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('блокировка администратора: нужен код 2FA, неверный код — под полем', async () => {
+    const user = userEvent.setup();
+    let attempt = 0;
+    const { calls } = mockFetch(
+      routes({
+        'POST /api/admin/users/3/block': () =>
+          ++attempt === 1
+            ? apiError(403, 'admin.totp_invalid', 'Код 2FA не подходит: проверьте приложение и введите новый код')
+            : json({ ...MARIA, status: 'blocked' }),
+      }),
+    );
+    renderAdmin('/admin/users');
+    const menu = await openMenu(user, 'Мария Виртанен');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Заблокировать' }));
+    const dialog = screen.getByRole('dialog', { name: 'Заблокировать' });
+    const go = within(dialog).getByRole('button', { name: 'Заблокировать' });
+    const otp = within(dialog).getByLabelText('Код 2FA из вашего приложения');
+    expect(go).toBeDisabled();
+    await user.type(otp, '111111');
+    await user.click(go);
+    expect(await within(dialog).findByText(/Код 2FA не подходит/)).toBeInTheDocument();
+    expect(otp).toHaveValue('');
+    await user.type(otp, '222222');
+    await user.click(go);
+    expect(await screen.findByText('Мария Виртанен заблокирован')).toBeInTheDocument();
+    const posts = calls.filter((r) => r.method === 'POST' && r.url.endsWith('/api/admin/users/3/block'));
+    expect(await bodyOf(posts[1]!)).toEqual({ totp_code: '222222' });
   });
 
   it('смена роли: нужен код 2FA, ошибка сервера — под полем кода', async () => {
@@ -318,6 +351,46 @@ describe('Администрирование: сброс доступа', () => 
     expect(screen.queryByText('RST-ABCD-EFGH')).not.toBeInTheDocument();
   });
 
+  it('приход из меню обрабатывается один раз: обновление списка не уводит фокус', async () => {
+    const user = userEvent.setup();
+    // после сброса сервер отдает новый список (у Дмитрия 2FA выключена) — массив в кэше меняется
+    let users = USERS;
+    const { calls } = mockFetch(
+      routes({
+        'GET /api/admin/users': () => json(users),
+        'POST /api/admin/users/5/2fa-reset': () => {
+          users = USERS.map((u) => (u.id === DMITRY.id ? { ...u, totp_enabled: false } : u));
+          return new Response(null, { status: 204 });
+        },
+      }),
+    );
+    const { router } = renderAdmin('/admin/users');
+    const menu = await openMenu(user, 'Ольга Лехтинен');
+    await user.click(within(menu).getByRole('menuitem', { name: /Выдать код сброса пароля/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Выдать код' })).toHaveFocus());
+    // состояние перехода стерто: перезагрузка страницы не повторит прокрутку и фокус
+    await waitFor(() => expect(router.state.location.state).toBeNull());
+    expect(router.state.location.pathname).toBe('/admin/access');
+    expect(screen.getByRole('button', { name: /^Участник: Ольга Лехтинен/ })).toBeInTheDocument();
+
+    const usersLoads = () => calls.filter((r) => r.method === 'GET' && r.url.endsWith('/api/admin/users')).length;
+    const before = usersLoads();
+    await user.click(screen.getByRole('button', { name: /^Участник: не выбрано/, description: /2FA включена/ }));
+    await user.click(screen.getByRole('option', { name: /Дмитрий Шульц/ }));
+    const go2fa = screen.getByRole('button', { name: 'Сбросить 2FA' });
+    await user.click(go2fa);
+    const dialog = screen.getByRole('dialog', { name: 'Сбросить 2FA' });
+    await user.type(within(dialog).getByLabelText('Код 2FA из вашего приложения'), '111222');
+    await user.click(within(dialog).getByRole('button', { name: 'Сбросить 2FA' }));
+    expect(await screen.findByText(/2FA сброшена: Дмитрий Шульц/)).toBeInTheDocument();
+    await waitFor(() => expect(usersLoads()).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Выдать код' })).not.toHaveFocus();
+    // Дмитрия в списке больше нет, «Сбросить 2FA» недоступна: фокус — на выборе участника
+    expect(go2fa).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Участник: не выбрано/, description: /2FA включена/ })).toHaveFocus();
+  });
+
   it('администраторов нет в списке кода сброса; сброс 2FA — с кодом администратора', async () => {
     const user = userEvent.setup();
     const { calls } = mockFetch(
@@ -352,7 +425,9 @@ describe('Администрирование: сброс доступа', () => 
     await user.click(within(dialog).getByRole('button', { name: 'Отозвать' }));
     expect(await screen.findByText('Код сброса отозван')).toBeInTheDocument();
     expect(calls.some((r) => r.method === 'DELETE' && r.url.endsWith('/reset-codes/7'))).toBe(true);
-    expect(screen.getByText(/python -m app.admin.cli reset-code --email owner@example.com/)).toBeInTheDocument();
+    // сервера пока нет (Р19): команды — для deploy/local.sh, вариант для сервера — строкой ниже
+    expect(screen.getByText('bash deploy/local.sh cli reset-code --email owner@example.com')).toBeInTheDocument();
+    expect(screen.getByText('docker compose exec api python -m app.admin.cli')).toBeInTheDocument();
   });
 });
 
@@ -467,6 +542,8 @@ describe('Администрирование: журнал и заглушки',
       details: { email: 'owner@example.com', source: 'terminal' },
       ip: null,
     });
+    // автор тогда был администратором, а сейчас участник: пометки «(участник)» нет
+    page1[1] = auditEntry({ id: 99, action: 'invite', actor_id: 2, actor_name: 'Ольга Лехтинен', target_user_id: null, target_name: '', details: { email: 'by-olga@example.com' } });
     const { calls } = mockFetch(
       routes({
         'GET /api/admin/audit': (request) => {
@@ -481,6 +558,8 @@ describe('Администрирование: журнал и заглушки',
     expect(within(table).getByText('сервер')).toBeInTheDocument();
     expect(within(table).getByText('Создан администратор')).toBeInTheDocument();
     expect(within(table).getByText('python -m app.admin.cli create-admin')).toBeInTheDocument();
+    expect(within(table).getByText('Ольга Лехтинен', { selector: '.adm-actor' })).toBeInTheDocument();
+    expect(within(table).queryByText(/\(участник\)/)).not.toBeInTheDocument();
     expect(screen.getByText(/Показано 50 записей/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Показать еще' }));
     expect(await within(table).findByText('Последний')).toBeInTheDocument();

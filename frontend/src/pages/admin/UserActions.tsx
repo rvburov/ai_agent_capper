@@ -25,6 +25,8 @@ type DialogKind = 'card' | 'block' | 'sessions' | 'reset2fa' | 'role' | 'delete'
 interface Dialog {
   kind: DialogKind;
   user: AdminUser;
+  /** После успешного действия, когда окно уже закрыто (например, куда вернуть фокус). */
+  onDone?: () => void;
 }
 
 /** Состояние «Выдать код сброса»: вкладка «Сброс доступа» открывается с выбранным участником. */
@@ -156,7 +158,7 @@ export function useUserActions(me: Me) {
     itemsFor,
     dialogs,
     /** Открыть окно действия, например сброс 2FA из вкладки «Сброс доступа». */
-    open: (kind: DialogKind, user: AdminUser) => setDialog({ kind, user }),
+    open: (kind: DialogKind, user: AdminUser, onDone?: () => void) => setDialog({ kind, user, onDone }),
   };
 }
 
@@ -177,11 +179,14 @@ function UserDialog({ dialog, me, onClose, cardActions }: UserDialogProps) {
   const role = useChangeRole();
   const remove = useDeleteUser();
   const { user } = dialog;
+  // Блокировка администратора и завершение его сеансов — опасные действия: с кодом 2FA
+  const admin = user.role === 'admin';
   const name = personName(user);
   const person = <PersonRow user={user} meId={me.id} boxed />;
   const done = (message: string, icon: Parameters<typeof toast.show>[1]) => () => {
     onClose();
     toast.show(message, icon);
+    dialog.onDone?.();
   };
 
   switch (dialog.kind) {
@@ -194,7 +199,8 @@ function UserDialog({ dialog, me, onClose, cardActions }: UserDialogProps) {
           confirmLabel={t('admin.confirm.block.go')}
           icon="ban"
           danger
-          run={() => block.mutateAsync(user.id)}
+          otp={admin}
+          run={(code) => block.mutateAsync({ id: user.id, totpCode: admin ? code : undefined })}
           onDone={done(t('admin.confirm.block.done', { name }), { icon: 'ban' })}
           onClose={onClose}
         >
@@ -208,7 +214,8 @@ function UserDialog({ dialog, me, onClose, cardActions }: UserDialogProps) {
           title={t('admin.confirm.sessions.title')}
           confirmLabel={t('admin.confirm.sessions.go')}
           icon="logout"
-          run={() => sessions.mutateAsync(user.id)}
+          otp={admin}
+          run={(code) => sessions.mutateAsync({ id: user.id, totpCode: admin ? code : undefined })}
           onDone={done(t('admin.confirm.sessions.done', { name }), { icon: 'logout' })}
           onClose={onClose}
         >

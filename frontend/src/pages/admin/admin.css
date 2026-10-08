@@ -68,6 +68,15 @@
 .adm-users-table td:last-child { width: 1%; }
 .adm-users-wrap { border-top: 1px solid var(--line); }
 .adm-users-table .adm-person { min-width: 230px; }
+/* новое: имя бывает до 100 символов — имя и email обрезаются многоточием (полностью — в title),
+   а столбец «⋯» прилипает к правому краю, если таблица все же шире карточки */
+.adm-users-table .adm-person { max-width: 300px; }
+.adm-users-table .adm-person-name > .adm-nowrap,
+.adm-users-table .adm-person-mail { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.adm-users-table th:last-child,
+.adm-users-table td:last-child { position: sticky; right: 0; z-index: 1; background: var(--surface); }
+/* последняя ячейка — в скругленном углу карточки: фон не должен закрывать угол */
+.adm-users-table tr:last-child td:last-child { border-bottom-right-radius: calc(var(--r-lg) - 1px); }
 .adm-ucards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 720px) { .adm-ucards { grid-template-columns: minmax(0, 1fr); } }
 .card.adm-ucard { padding: 14px; gap: 12px; }
@@ -156,6 +165,8 @@
   white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg);
 }
 .adm-pre .btn { flex: none; }
+/* новое: команда для сервера в строке пояснения */
+.adm-inline-code { font-family: var(--font-mono); color: var(--fg-2); overflow-wrap: anywhere; }
 
 /* журнал */
 .adm-actor { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }

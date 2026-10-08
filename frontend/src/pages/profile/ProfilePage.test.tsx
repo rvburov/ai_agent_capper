@@ -2,7 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { meQueryKey } from '../../api/keys';
 import { createQueryClient } from '../../api/queryClient';
@@ -161,7 +161,8 @@ describe('Личный кабинет: профиль', () => {
   it('вкладки следующих этапов — заглушки', async () => {
     mockFetch(routes(ME_MEMBER));
     renderProfile('/profile/notifications');
-    expect(screen.getByText('Раздел появится на этапе 6')).toBeInTheDocument();
+    expect(screen.getByText('Раздел появится на этапе 4')).toBeInTheDocument();
+    expect(screen.getByText(/push на телефон добавится на этапе 6/)).toBeInTheDocument();
   });
 
   it('«Выйти» в сводке: выход на сервере, страница входа, кэш очищен', async () => {
@@ -263,8 +264,90 @@ describe('Личный кабинет: безопасность', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Создать новые коды' }));
     const list = await screen.findByRole('list', { name: 'Резервные коды' });
     expect(within(list).getAllByRole('listitem')).toHaveLength(8);
+    await waitFor(() => expect(list).toHaveFocus());
+
+    // Файл хранят долго: дата выпуска с годом
+    const files: Blob[] = [];
+    const urls = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    URL.createObjectURL = (blob: Blob) => {
+      files.push(blob);
+      return 'blob:codes';
+    };
+    URL.revokeObjectURL = () => undefined;
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    try {
+      await user.click(screen.getByRole('button', { name: 'Скачать .txt' }));
+    } finally {
+      Object.assign(URL, { createObjectURL: urls.create, revokeObjectURL: urls.revoke });
+      click.mockRestore();
+    }
+    const text = await files[0]?.text();
+    expect(text).toContain('Аккаунт: anna@example.com');
+    expect(text).toMatch(new RegExp(`Созданы: \\d+ \\S+ ${new Date().getFullYear()}, \\d\\d:\\d\\d`));
+    expect(text).toContain(CODES[7]);
+
+    // Коды больше не покажут: ни Esc, ни «Готово» не закрывают окно без отметки «сохранил»
+    const codesDialog = screen.getByRole('dialog', { name: 'Резервные коды' });
+    await user.keyboard('{Escape}');
+    await user.click(within(codesDialog).getByRole('button', { name: 'Закрыть' }));
+    await user.click(within(codesDialog).getByRole('button', { name: 'Готово' }));
+    expect(screen.getByRole('dialog', { name: 'Резервные коды' })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Отметьте, что сохранили коды');
+    const saved = screen.getByRole('checkbox', { name: 'Я сохранил(а) резервные коды в надежном месте' });
+    expect(saved).toHaveFocus();
+    await user.click(saved);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Готово' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('резервные коды: пока сервер их выпускает, окно не закрывается', async () => {
+    const user = userEvent.setup();
+    let answer: (response: Response) => void = () => undefined;
+    mockFetch(
+      routes(ME_MEMBER, {
+        'POST /api/me/recovery-codes': () =>
+          new Promise<Response>((resolve) => {
+            answer = resolve;
+          }),
+      }),
+    );
+    renderProfile('/profile/security');
+    await user.click(await screen.findByRole('button', { name: 'Перевыпустить резервные коды' }));
+    await user.type(screen.getByLabelText('Код из приложения-аутентификатора'), '654321{Enter}');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Отмена' })).toBeDisabled());
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('dialog', { name: 'Резервные коды' })).toBeInTheDocument();
+    answer(json({ recovery_codes: CODES }));
+    expect(await screen.findByRole('list', { name: 'Резервные коды' })).toBeInTheDocument();
+  });
+
+  it('якорь из сводки: прокрутка к журналу, когда карточки над ним загрузились', async () => {
+    let answer: (response: Response) => void = () => undefined;
+    mockFetch(
+      routes(ME_MEMBER, {
+        'GET /api/me/sessions': () =>
+          new Promise<Response>((resolve) => {
+            answer = resolve;
+          }),
+      }),
+    );
+    const scrolled: string[] = [];
+    const scroll = vi
+      .spyOn(Element.prototype, 'scrollIntoView')
+      .mockImplementation(function (this: Element) {
+        scrolled.push(this.id);
+      });
+    try {
+      renderProfile('/profile/security#profile-log');
+      await screen.findByRole('heading', { name: 'Журнал входов' });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(scrolled).toEqual([]);
+      answer(json(SESSIONS));
+      await waitFor(() => expect(scrolled).toEqual(['profile-log']));
+    } finally {
+      scroll.mockRestore();
+    }
   });
 
   it('доверенные устройства: список и «Забыть»', async () => {
@@ -280,7 +363,7 @@ describe('Личный кабинет: безопасность', () => {
 
   it('журнал входов: результат чипом, фильтр неудачных, «Это был я»', async () => {
     const user = userEvent.setup();
-    mockFetch(routes(ME_MEMBER));
+    const { calls } = mockFetch(routes(ME_MEMBER));
     renderProfile('/profile/security');
     const table = await screen.findByRole('table');
     expect(within(table).getByText('Успешно')).toBeInTheDocument();
@@ -291,6 +374,13 @@ describe('Личный кабинет: безопасность', () => {
     expect(within(screen.getByRole('table')).queryByText('Успешно')).not.toBeInTheDocument();
 
     expect(screen.getByText(/кто-то ввел верный пароль, но не прошел 2FA/)).toBeInTheDocument();
+    // Подозрительный вход ищется отдельным запросом без неверных паролей и отказов 429:
+    // их поток не вытеснит из выборки след входа с верным паролем
+    expect(
+      calls.some((r) =>
+        r.url.endsWith('/api/me/login-events?limit=200&result=ok&result=bad_totp&result=bad_recovery'),
+      ),
+    ).toBe(true);
     await user.click(screen.getByRole('button', { name: 'Это был я' }));
     expect(screen.queryByText(/кто-то ввел верный пароль/)).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Безопасность' })).toBeInTheDocument();

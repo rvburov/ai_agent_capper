@@ -14,8 +14,7 @@ import {
 } from '../../components';
 import { AUDIT_GROUPS, auditDetails, auditTarget, isTerminal, type AuditGroup } from '../../features/admin/audit';
 import { maskIp } from '../../features/admin/display';
-import type { AdminUser, AuditEntry } from '../../features/admin/types';
-import { useAdminUsers } from '../../features/admin/useAdminUsers';
+import type { AuditEntry } from '../../features/admin/types';
 import { useAudit } from '../../features/admin/useAudit';
 import { formatDateTime } from '../../lib/format';
 import { useMediaQuery } from '../../lib/useMediaQuery';
@@ -28,12 +27,9 @@ export function AuditTab() {
   const narrow = useMediaQuery(NARROW_QUERY);
   const [group, setGroup] = useState<AuditGroup>('all');
   const audit = useAudit(group);
-  const users = useAdminUsers();
   const entries = audit.data?.pages.flat() ?? [];
 
-  // Автор-участник (не администратор) помечается «(участник)», как в макете
-  const roles = new Map<number, AdminUser['role']>((users.data ?? []).map((u) => [u.id, u.role]));
-  const who = (entry: AuditEntry) => <Actor entry={entry} member={entry.actor_id !== null && roles.get(entry.actor_id) === 'member'} />;
+  const who = (entry: AuditEntry) => <Actor entry={entry} />;
   const target = (entry: AuditEntry) => auditTarget(entry) ?? <span className="muted">{t('admin.audit.wholeApp')}</span>;
   const ip = (entry: AuditEntry) => (
     <span className="adm-ip">{isTerminal(entry) ? t('admin.audit.server') : maskIp(entry.ip)}</span>
@@ -159,8 +155,13 @@ export function AuditTab() {
   );
 }
 
-/** Кто: имя администратора (участника — с пометкой) или «терминал» с иконкой. */
-function Actor({ entry, member }: { entry: AuditEntry; member: boolean }) {
+/**
+ * Кто: имя администратора или «терминал» с иконкой. Пометки макета «(участник)» нет: на этапе 1
+ * в журнал пишут только администраторы и терминал, а текущая роль человека может не совпадать
+ * с ролью в момент действия. Пометка появится, когда сервер начнет отдавать роль автора записи
+ * (этап 3: участники со своим ключом Claude).
+ */
+function Actor({ entry }: { entry: AuditEntry }) {
   const { t } = useTranslation();
   if (isTerminal(entry)) {
     return (
@@ -170,9 +171,5 @@ function Actor({ entry, member }: { entry: AuditEntry; member: boolean }) {
       </span>
     );
   }
-  return (
-    <span className="adm-actor">
-      {member ? t('admin.audit.member', { name: entry.actor_name }) : entry.actor_name}
-    </span>
-  );
+  return <span className="adm-actor">{entry.actor_name}</span>;
 }

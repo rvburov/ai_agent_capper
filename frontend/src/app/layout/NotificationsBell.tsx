@@ -21,6 +21,15 @@ import { matchesMedia, SHEET_QUERY } from '../../lib/useMediaQuery';
 import { paths } from '../paths';
 import './NotificationsBell.css';
 
+/** Место окна на компьютере: под кнопкой, правый край окна — у правого края кнопки. */
+function popPosition(button: HTMLElement): CSSProperties {
+  const r = button.getBoundingClientRect();
+  return {
+    top: Math.round(r.bottom + 8),
+    right: Math.max(12, Math.round(window.innerWidth - r.right - 8)),
+  };
+}
+
 /**
  * Колокольчик и центр уведомлений (Р3, mockup/js/app.js): счетчик непрочитанных, список
  * под кнопкой на компьютере и шторкой снизу на телефоне. Клик по уведомлению отмечает его
@@ -37,6 +46,7 @@ export function NotificationsBell() {
   const [style, setStyle] = useState<CSSProperties | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
+  const backRef = useRef<HTMLDivElement>(null);
   const popId = useId();
   const titleId = useId();
 
@@ -54,21 +64,22 @@ export function NotificationsBell() {
       close(true);
       return;
     }
-    setSheet(matchesMedia(SHEET_QUERY));
+    const asSheet = matchesMedia(SHEET_QUERY);
+    setSheet(asSheet);
+    // На компьютере место под кнопкой считаем сразу, до показа: окно появляется уже на месте и
+    // видимым, и фокус встает в него с первого раза. Скрывать окно до расстановки через
+    // visibility нельзя: скрытый элемент фокус не принимает (а при «меньше движения»
+    // visibility меняется переходом, и окно остается скрытым еще кадр)
+    setStyle(!asSheet && buttonRef.current ? popPosition(buttonRef.current) : null);
     setOpen(true);
     void query.refetch();
   }
 
-  // На компьютере — под кнопкой по правому краю, как в макете
+  // На компьютере — под кнопкой по правому краю, как в макете; при смене размера окна — заново
   useLayoutEffect(() => {
     if (!open || sheet) return;
     function place() {
-      const r = buttonRef.current?.getBoundingClientRect();
-      if (!r) return;
-      setStyle({
-        top: Math.round(r.bottom + 8),
-        right: Math.max(12, Math.round(window.innerWidth - r.right - 8)),
-      });
+      if (buttonRef.current) setStyle(popPosition(buttonRef.current));
     }
     place();
     window.addEventListener('resize', place);
@@ -76,11 +87,19 @@ export function NotificationsBell() {
   }, [open, sheet]);
 
   useEffect(() => {
+    if (open) popRef.current?.focus({ preventScroll: true });
+  }, [open]);
+
+  useEffect(() => {
     if (!open) return;
-    popRef.current?.focus({ preventScroll: true });
     const inside = (target: EventTarget | null) =>
       target instanceof Node &&
-      Boolean(popRef.current?.contains(target) || buttonRef.current?.contains(target));
+      Boolean(
+        popRef.current?.contains(target) ||
+          buttonRef.current?.contains(target) ||
+          // фон под шторкой закрывает ее сам, по клику (см. ниже)
+          backRef.current?.contains(target),
+      );
     function onPointerDown(event: PointerEvent) {
       if (!inside(event.target)) close(false);
     }
@@ -184,7 +203,11 @@ export function NotificationsBell() {
       {open &&
         createPortal(
           <>
-            {sheet && <div className="notif-back" aria-hidden="true" />}
+            {sheet && (
+              // Нажатие на фон закрывает шторку по click, а не по pointerdown: фон живет до конца
+              // нажатия, и оно не проваливается в страницу под ним. Фокус — снова на колокольчик
+              <div ref={backRef} className="notif-back" aria-hidden="true" onClick={() => close(true)} />
+            )}
             <div
               ref={popRef}
               id={popId}
@@ -192,7 +215,7 @@ export function NotificationsBell() {
               role="dialog"
               aria-labelledby={titleId}
               tabIndex={-1}
-              style={sheet ? undefined : { ...style, visibility: style ? undefined : 'hidden' }}
+              style={sheet ? undefined : (style ?? undefined)}
             >
               {sheet && <div className="dd-sheet-grip" aria-hidden="true" />}
               <div className="notif-head">

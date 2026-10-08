@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { errorMessage, isApiError } from '../../api/errors';
@@ -123,16 +123,24 @@ export function Item({ icon, iconKind, title, titleExtra, meta, side, old }: Ite
 }
 
 /** Код, который показывается один раз: крупно и с кнопкой «Скопировать». */
-export function CodeBox({ code, label }: { code: string; label: string }) {
+export function CodeBox({ code, label, reveal = false }: { code: string; label: string; reveal?: boolean }) {
   const { t } = useTranslation();
   const toast = useToast();
+  const boxRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLElement>(null);
+  // reveal: код показывается один раз — после выдачи он посередине экрана (на телефоне иначе
+  // его закрывают сообщение и нижняя панель), фокус на «Скопировать»
+  useEffect(() => {
+    if (!reveal) return;
+    boxRef.current?.scrollIntoView?.({ block: 'center' });
+    boxRef.current?.querySelector('button')?.focus({ preventScroll: true });
+  }, [reveal, code]);
   async function onCopy() {
     const ok = await copyText(code, codeRef.current);
     toast.show(ok ? t('admin.copied') : t('admin.copyFailed'), { icon: ok ? 'copy' : 'alert' });
   }
   return (
-    <div className="adm-code">
+    <div className="adm-code" ref={boxRef}>
       <code ref={codeRef} aria-label={`${label}: ${code.split('').join(' ')}`}>
         {code}
       </code>
@@ -171,7 +179,7 @@ export function OtpField({ id, value, onChange, error }: OtpFieldProps) {
 }
 
 // Ошибки кода 2FA показываем под полем кода, остальные — плашкой над кнопками
-const OTP_ERRORS = new Set(['admin.totp_required', 'admin.totp_rate_limited']);
+const OTP_ERRORS = new Set(['admin.totp_required', 'admin.totp_invalid']);
 
 export function isOtpError(error: unknown): boolean {
   return isApiError(error) && OTP_ERRORS.has(error.code);

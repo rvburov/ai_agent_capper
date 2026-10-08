@@ -3,6 +3,10 @@ import { useLocation } from 'react-router';
 
 import type { Me } from '../../api/hooks/useMe';
 import type { LoginEvent } from '../../features/profile/types';
+import { useLoginEvents } from '../../features/profile/useLoginEvents';
+import { useRecoveryCodesStatus } from '../../features/profile/useRecoveryCodes';
+import { useSessions } from '../../features/profile/useSessions';
+import { useTrustedDevices } from '../../features/profile/useTrustedDevices';
 import { LoginLogCard } from './LoginLogCard';
 import { PasswordCard } from './PasswordCard';
 import { SessionsCard } from './SessionsCard';
@@ -20,10 +24,16 @@ interface SecurityTabProps {
 /** Вкладка «Безопасность» (panelSecurity макета). */
 export function SecurityTab({ me, suspicious, onDismissSuspicious }: SecurityTabProps) {
   const { hash, key } = useLocation();
+  // Запросы сводки и карточек над журналом (кэш общий с карточками). Пока они грузятся,
+  // скелетоны короче готовых карточек, и после загрузки цель якоря уезжает вниз
+  const above = [useSessions(), useLoginEvents(), useRecoveryCodesStatus(), useTrustedDevices()];
+  const settled = above.every((query) => !query.isPending);
 
+  // Прокрутка к якорю — когда высота над целью уже не изменится (при переходе из сводки
+  // данные в кэше, и это сразу; при перезагрузке страницы — после загрузки)
   useEffect(() => {
     const id = decodeURIComponent(hash.replace(/^#/, ''));
-    if (!id) return;
+    if (!id || !settled) return;
     const frame = requestAnimationFrame(() => {
       const target = document.getElementById(id);
       if (!target) return;
@@ -32,7 +42,7 @@ export function SecurityTab({ me, suspicious, onDismissSuspicious }: SecurityTab
       if (field) document.getElementById(field)?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [hash, key]);
+  }, [hash, key, settled]);
 
   return (
     <div className="grid">

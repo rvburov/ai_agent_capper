@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
 import { apiError, json, ME_ADMIN, mockFetch } from '../../test/fetchMock';
-import { bodyOf, renderAuth } from './testing';
+import { bodyOf, renderAuth, resizableViewport } from './testing';
 
 const QR = '<svg width="148" height="148" class="segno"><path d="M2 2.5h7"/></svg>';
 const CODES = ['4f7k-2m9q', 'x8c3-vn5d', '7hpt-k2wz', 'm6qa-93rf', 'e2yd-u7jb', 'r5ns-8gxk', 'b9wl-c4tm', 'q3jv-6pzh'];
@@ -161,7 +161,7 @@ describe('вход: код 2FA и резервный код', () => {
     await user.click(await screen.findByRole('button', { name: 'Нет доступа к приложению-аутентификатору' }));
     await user.click(screen.getByRole('button', { name: 'Нет и резервных кодов?' }));
     const dialog = screen.getByRole('dialog', { name: 'Нет ни приложения, ни резервных кодов' });
-    expect(within(dialog).getByText(/app\.admin\.cli reset-2fa/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/deploy\/local\.sh cli reset-2fa/)).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -183,6 +183,7 @@ describe('вход: настройка 2FA', () => {
     expect(decodeURIComponent(qr.getAttribute('src')!)).toContain('xmlns="http://www.w3.org/2000/svg"');
     expect(screen.getByText('JK3M Q7XP L2VD 6WRA')).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Резервные коды' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/устройство не запоминаем/)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Проверить код и включить 2FA' }));
     expect(screen.getByRole('alert')).toHaveTextContent('Введите 6 цифр из приложения');
@@ -203,6 +204,59 @@ describe('вход: настройка 2FA', () => {
     await user.click(screen.getByRole('button', { name: 'Готово — войти в кабинет' }));
     expect(await screen.findByText(/Приложение \/ вошел Роман Буров/)).toBeInTheDocument();
     // секрет запрошен один раз: после входа экран не просит его снова
+    expect(calls.filter((r) => r.url.endsWith('/api/auth/2fa/setup'))).toHaveLength(1);
+  });
+
+  it('смена раскладки (поворот планшета) после подтверждения кода не убирает резервные коды', async () => {
+    const viewport = resizableViewport(1366);
+    try {
+      mockFetch({
+        'POST /api/auth/login': () => json({ status: 'totp_setup_required' }),
+        'POST /api/auth/2fa/setup': () =>
+          json({ secret: 'JK3MQ7XPL2VD6WRA', otpauth_uri: 'otpauth://totp/x', qr_svg: QR }),
+        'POST /api/auth/2fa/setup/confirm': () => json({ status: 'ok', user: ME_ADMIN, recovery_codes: CODES }),
+      });
+      renderAuth('/login');
+      const user = userEvent.setup();
+      await fillLogin(user);
+      await screen.findByRole('img', { name: 'QR-код для приложения-аутентификатора' });
+      await user.click(screen.getByRole('textbox', { name: 'Цифра 1 из 6' }));
+      await user.keyboard('246810');
+      await user.click(screen.getByRole('button', { name: 'Проверить код и включить 2FA' }));
+      await screen.findByRole('list', { name: 'Резервные коды' });
+      await user.click(screen.getByRole('checkbox', { name: /Я сохранил\(а\) резервные коды/ }));
+
+      viewport.resize(900);
+      expect(document.querySelector('.login-m')).not.toBeNull();
+      const list = screen.getByRole('list', { name: 'Резервные коды' });
+      expect(within(list).getAllByRole('listitem')).toHaveLength(8);
+      expect(screen.getByRole('checkbox', { name: /Я сохранил\(а\) резервные коды/ })).toBeChecked();
+      expect(screen.queryByRole('button', { name: 'Проверить код и включить 2FA' })).not.toBeInTheDocument();
+
+      viewport.resize(1366);
+      expect(document.querySelector('.login-page')).not.toBeNull();
+      expect(screen.getByRole('list', { name: 'Резервные коды' })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Готово — войти в кабинет' }));
+      expect(await screen.findByText(/Приложение \/ вошел Роман Буров/)).toBeInTheDocument();
+    } finally {
+      viewport.restore();
+    }
+  });
+
+  it('«Запомнить устройство» на шаге «Пароль»: настройка 2FA говорит, что устройство не запомнит', async () => {
+    const { calls } = mockFetch({
+      'POST /api/auth/login': () => json({ status: 'totp_setup_required' }),
+      'POST /api/auth/2fa/setup': () =>
+        json({ secret: 'JK3MQ7XPL2VD6WRA', otpauth_uri: 'otpauth://totp/x', qr_svg: QR }),
+    });
+    renderAuth('/login');
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Email'), 'owner@example.com');
+    await user.type(screen.getByLabelText('Пароль'), 'Secret-password-1');
+    await user.click(screen.getByRole('checkbox', { name: /Запомнить это устройство/ }));
+    await user.click(screen.getByRole('button', { name: 'Войти' }));
+    await screen.findByRole('img', { name: 'QR-код для приложения-аутентификатора' });
+    expect(screen.getByText(/При настройке 2FA устройство не запоминаем/)).toBeInTheDocument();
     expect(calls.filter((r) => r.url.endsWith('/api/auth/2fa/setup'))).toHaveLength(1);
   });
 

@@ -152,14 +152,20 @@ export function ProfileHero({ me, suspicious }: ProfileHeroProps) {
               >
                 {t('profile.hero.quickPassword')}
               </Button>
-              <Button size="sm" icon="key" to={paths.profile('key')}>
-                {t('profile.hero.quickKey')}
+              {/* Только то, что уже работает: ключ Claude, лимиты и экспорт данных — этап 4 */}
+              <Button
+                size="sm"
+                icon="device"
+                to={{ pathname: paths.profile('security'), hash: '#profile-sessions' }}
+              >
+                {t('profile.hero.quickSessions')}
               </Button>
-              <Button size="sm" icon="pause" to={paths.profile('bank')}>
-                {t('profile.hero.quickLimits')}
-              </Button>
-              <Button size="sm" icon="download" to={paths.profile('data')}>
-                {t('profile.hero.quickExport')}
+              <Button
+                size="sm"
+                icon="history"
+                to={{ pathname: paths.profile('security'), hash: '#profile-log' }}
+              >
+                {t('profile.hero.quickLog')}
               </Button>
             </div>
           </div>

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { expect, test } from '@playwright/test';
 
 import { collectErrors, horizontalOverflow, ME_ADMIN, ME_MEMBER, mockApi } from './fixtures';
@@ -146,4 +148,22 @@ test('вкладки-адреса и неизвестная страница', a
   await expect(page).toHaveURL(/\/profile$/);
   await page.goto('/no-such-page');
   await expect(page.getByText('Такой страницы нет')).toBeVisible();
+});
+
+test('CSP: preview отдает ту же политику, что Caddy, и страница ее не нарушает', async ({ page }) => {
+  const caddyfile = readFileSync(new URL('../../deploy/Caddyfile', import.meta.url), 'utf8');
+  const policy = /Content-Security-Policy\s+"([^"]+)"/.exec(caddyfile)?.[1];
+  expect(policy).toBeTruthy();
+  const errors = collectErrors(page);
+  await mockApi(page, ME_ADMIN);
+  const response = await page.goto('/');
+  expect(response?.headers()['content-security-policy']).toBe(policy);
+  await expect(page.getByRole('heading', { level: 1, name: 'Главная' })).toBeVisible();
+  // Нарушение видно в консоли: событие securitypolicyviolation (collectErrors) и текст Chromium
+  await page.evaluate(() => {
+    const probe = document.createElement('img');
+    probe.src = 'https://example.com/csp-probe.png';
+    document.body.append(probe);
+  });
+  await expect.poll(() => errors.some((e) => e.includes('CSP: img-src'))).toBe(true);
 });

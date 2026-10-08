@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { errorMessage, isApiError } from '../../api/errors';
-import { Button, Callout, Field, Modal, useToast } from '../../components';
+import { Button, Callout, Checkbox, Field, Modal, useToast } from '../../components';
 import { downloadText, recoveryCodesText } from '../../features/profile/recoveryCodesFile';
 import { useReissueRecoveryCodes } from '../../features/profile/useRecoveryCodes';
 import { formatDateTime } from '../../lib/format';
@@ -16,6 +16,8 @@ interface RecoveryCodesModalProps {
 /**
  * Перевыпуск резервных кодов (codesModal макета). Сервер хранит только хеши, поэтому
  * прежние коды показать нельзя: подтверждаем текущим кодом 2FA и показываем новые один раз.
+ * В отличие от макета, где коды можно открыть снова, окно с новыми кодами закрывается только
+ * после отметки «Я сохранил(а)» — как шаг кодов при настройке 2FA.
  */
 export function RecoveryCodesModal({ open, onClose, email }: RecoveryCodesModalProps) {
   if (!open) return null;
@@ -30,6 +32,35 @@ function RecoveryCodesDialog({ onClose, email }: Omit<RecoveryCodesModalProps, '
   const [error, setError] = useState<string | null>(null);
   const [codes, setCodes] = useState<string[] | null>(null);
   const [createdAt, setCreatedAt] = useState<Date | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [savedError, setSavedError] = useState<string | null>(null);
+  const savedRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLOListElement>(null);
+
+  // Окно с кодами монтируется заново (key="codes") и ставит фокус на первое поле — флажок
+  // под кодами. Переносим фокус на сам список, чтобы коды прочитали первыми. В следующем
+  // кадре: после эффектов окна (в StrictMode они выполняются дважды)
+  useEffect(() => {
+    if (!codes) return;
+    const frame = requestAnimationFrame(() => listRef.current?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [codes]);
+
+  // Пока сервер выпускает коды, окно не закрываем: иначе старые уже не действуют,
+  // а новые некому показать
+  function closeConfirm() {
+    if (!reissue.isPending) onClose();
+  }
+
+  // Esc, фон, крестик и «Готово» закрывают окно с кодами только после отметки «сохранил»
+  function closeCodes() {
+    if (saved) {
+      onClose();
+      return;
+    }
+    setSavedError(t('profile.codes.savedRequired'));
+    savedRef.current?.focus();
+  }
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -72,7 +103,10 @@ function RecoveryCodesDialog({ onClose, email }: Omit<RecoveryCodesModalProps, '
       recoveryCodesText({
         title: t('profile.codes.fileTitle'),
         account: t('profile.codes.fileAccount', { email }),
-        created: t('profile.codes.fileCreated', { date: formatDateTime(createdAt, { calendar: false }) }),
+        // Файл хранят годами: дата с годом, чтобы отличать выпуски
+        created: t('profile.codes.fileCreated', {
+          date: formatDateTime(createdAt, { calendar: false, year: 'always' }),
+        }),
         note: t('profile.codes.fileNote'),
         codes: list,
       }),
@@ -84,7 +118,7 @@ function RecoveryCodesDialog({ onClose, email }: Omit<RecoveryCodesModalProps, '
       <Modal
         key="codes"
         open
-        onClose={onClose}
+        onClose={closeCodes}
         title={t('profile.codes.title')}
         footer={
           <>
@@ -94,7 +128,7 @@ function RecoveryCodesDialog({ onClose, email }: Omit<RecoveryCodesModalProps, '
             <Button kind="ghost" icon="copy" onClick={() => void onCopy(codes)}>
               {t('profile.codes.copy')}
             </Button>
-            <Button kind="primary" onClick={onClose}>
+            <Button kind="primary" onClick={closeCodes}>
               {t('profile.codes.done')}
             </Button>
           </>
@@ -104,12 +138,30 @@ function RecoveryCodesDialog({ onClose, email }: Omit<RecoveryCodesModalProps, '
           {t('profile.codes.created')}
         </Callout>
         <p className="small soft">{t('profile.codes.keep')}</p>
-        <ol className="profile-codes" aria-label={t('profile.codes.listLabel')}>
+        <ol ref={listRef} className="profile-codes" tabIndex={-1} aria-label={t('profile.codes.listLabel')}>
           {codes.map((value) => (
             <li key={value}>{value}</li>
           ))}
         </ol>
         <div className="xsmall muted">{t('profile.codes.once')}</div>
+        <div className="profile-codes-saved">
+          <Checkbox
+            ref={savedRef}
+            id="profile-codes-saved"
+            checked={saved}
+            aria-invalid={savedError ? true : undefined}
+            label={t('profile.codes.saved')}
+            onChange={(value) => {
+              setSaved(value);
+              if (value) setSavedError(null);
+            }}
+          />
+          {savedError && (
+            <div className="field-error" role="alert">
+              {savedError}
+            </div>
+          )}
+        </div>
       </Modal>
     );
   }
@@ -118,11 +170,11 @@ function RecoveryCodesDialog({ onClose, email }: Omit<RecoveryCodesModalProps, '
     <Modal
       key="confirm"
       open
-      onClose={onClose}
+      onClose={closeConfirm}
       title={t('profile.codes.title')}
       footer={
         <>
-          <Button kind="ghost" onClick={onClose}>
+          <Button kind="ghost" disabled={reissue.isPending} onClick={closeConfirm}>
             {t('profile.form.cancel')}
           </Button>
           <Button kind="primary" type="submit" form="profile-codes-form" icon="refresh" loading={reissue.isPending}>

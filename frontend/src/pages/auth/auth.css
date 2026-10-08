@@ -151,6 +151,9 @@
 .login-s.waiting .login-s-n { background: var(--surface-2); color: var(--fg-3); }
 .login-s-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .login-s-body h2 { font-size: var(--fs-md); margin-top: 3px; }
+/* новое: на узком телефоне клетки кода занимают и колонку номера шага (28 px + отступ 12 px),
+   иначе на 375 px клетка 35 px — меньше зоны нажатия 40 px. Номер выше клеток, они не пересекаются */
+@media (max-width: 480px) { .login-s .login-otp { margin-left: -40px; } }
 .login-qrrow { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; min-width: 0; }
 .login-qr { --qr-bg: var(--surface); background: var(--qr-bg); padding: 4px; border-radius: 12px; border: 1px solid var(--line-strong); line-height: 0; flex: none; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .login-qr { --qr-bg: var(--fg); } }

@@ -34,6 +34,9 @@
   --overlay: rgba(16,21,17,.42);
   --dd-bg: var(--surface); --dd-border: var(--line); --dd-active: var(--surface-2);
   --dd-shadow: 0 2px 6px rgba(16,21,17,.06), 0 18px 40px -12px rgba(16,21,17,.28);
+  /* ручка выключателя и выбранный сегмент: мелкая тень «над поверхностью» */
+  --shadow-knob: 0 1px 2px rgba(0,0,0,.25);
+  --shadow-raised: 0 1px 2px rgba(0,0,0,.12);
   --brand-ball: #e6f05a;   /* мяч в знаке AI Capper */
   --on-bad: #ffffff;       /* текст на заливке --bad (счетчик колокольчика) */
 
@@ -72,6 +75,8 @@
     --overlay: rgba(0,0,0,.6);
     --dd-bg: var(--surface-2); --dd-border: var(--line-strong); --dd-active: var(--surface-3);
     --dd-shadow: 0 2px 6px rgba(0,0,0,.4), 0 18px 40px -12px rgba(0,0,0,.75);
+    --shadow-knob: 0 1px 2px rgba(0,0,0,.5);
+    --shadow-raised: 0 1px 2px rgba(0,0,0,.4);
     color-scheme: dark;
   }
 }
@@ -94,6 +99,8 @@
   --overlay: rgba(0,0,0,.6);
   --dd-bg: var(--surface-2); --dd-border: var(--line-strong); --dd-active: var(--surface-3);
   --dd-shadow: 0 2px 6px rgba(0,0,0,.4), 0 18px 40px -12px rgba(0,0,0,.75);
+  --shadow-knob: 0 1px 2px rgba(0,0,0,.5);
+  --shadow-raised: 0 1px 2px rgba(0,0,0,.4);
   color-scheme: dark;
 }
 

@@ -554,7 +554,7 @@
           "me"
         ],
         "summary": "Login Events",
-        "description": "Журнал входов за 90 дней, новые сверху.",
+        "description": "Журнал входов за 90 дней, новые сверху. result (можно несколько раз) — только\nтакие попытки: по ok, bad_totp и bad_recovery интерфейс ищет подозрительный вход,\nи тысячи неудачных паролей от чужих людей его не вытеснят.",
         "operationId": "login_events_api_me_login_events_get",
         "parameters": [
           {
@@ -567,6 +567,33 @@
               "minimum": 1,
               "default": 50,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "result",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "ok",
+                      "bad_password",
+                      "bad_totp",
+                      "bad_recovery",
+                      "rate_limited",
+                      "blocked"
+                    ],
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Result"
             }
           }
         ],
@@ -1023,6 +1050,7 @@
           "admin"
         ],
         "summary": "Block User",
+        "description": "Блокировка. Администратора — только с totp_code.",
         "operationId": "block_user_api_admin_users__user_id__block_post",
         "parameters": [
           {
@@ -1037,6 +1065,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AdminActionIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1165,6 +1210,7 @@
           "admin"
         ],
         "summary": "Revoke Sessions",
+        "description": "Завершает все сеансы. Сеансы администратора — только с totp_code.",
         "operationId": "revoke_sessions_api_admin_users__user_id__sessions_revoke_post",
         "parameters": [
           {
@@ -1179,6 +1225,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AdminActionIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -1623,6 +1686,25 @@
   },
   "components": {
     "schemas": {
+      "AdminActionIn": {
+        "properties": {
+          "totp_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{6}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totp Code"
+          }
+        },
+        "type": "object",
+        "title": "AdminActionIn",
+        "description": "Блокировка и завершение сеансов: код 2FA нужен, только если цель — администратор\n(с угнанным сеансом без телефона нельзя по одному отключить других администраторов)."
+      },
       "AdminUserDetailOut": {
         "properties": {
           "id": {

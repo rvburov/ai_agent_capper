@@ -1,26 +1,62 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// Смоук оболочки в Chromium: сборка (npm run build) + vite preview, API подменяется в тестах
-// (page.route), бэкенд не нужен. Браузер — из PLAYWRIGHT_BROWSERS_PATH (в песочнице /opt/pw-browsers).
-const PORT = 4173;
+import { BASE_URL } from './e2e/support/stack';
+
+/*
+ * Тесты в Chromium (браузер — из PLAYWRIGHT_BROWSERS_PATH, в песочнице /opt/pw-browsers).
+ * - shell: смоук оболочки, API подменяется в самих тестах (page.route).
+ * - desktop (1366 px) и mobile (375 px): сквозные сценарии e2e/flows на настоящем API.
+ * Стек поднимает scripts/e2e-stack.sh: временная база с миграциями, uvicorn, vite preview с
+ * прокси /api. Нужны PostgreSQL и Redis, как для тестов backend. Уже запущенный стек
+ * (bash scripts/e2e-stack.sh в другом терминале) переиспользуется, кроме CI.
+ */
+const MOBILE_UA = [
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko)',
+  'Chrome/141.0.0.0 Mobile Safari/537.36',
+].join(' ');
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 30_000,
+  timeout: 60_000,
+  expect: { timeout: 10_000 },
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
-  reporter: process.env.CI ? 'github' : 'list',
+  workers: process.env.CI ? 2 : undefined,
+  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: `http://localhost:${PORT}`,
+    baseURL: BASE_URL,
     locale: 'ru-RU',
     timezoneId: 'Europe/Helsinki',
     trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'shell', testMatch: 'shell.spec.ts', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'desktop',
+      testDir: './e2e/flows',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1366, height: 900 } },
+    },
+    {
+      name: 'mobile',
+      testDir: './e2e/flows',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 375, height: 812 },
+        deviceScaleFactor: 2,
+        isMobile: true,
+        hasTouch: true,
+        userAgent: MOBILE_UA,
+      },
+    },
+  ],
   webServer: {
-    command: `npm run build && npx vite preview --port ${PORT} --strictPort`,
-    url: `http://localhost:${PORT}`,
+    command: 'bash ../scripts/e2e-stack.sh up',
+    url: `${BASE_URL}/api/health`,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
+    stdout: 'pipe',
+    // SIGTERM, а не SIGKILL: скрипт успевает удалить временную базу и ключи Redis
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
   },
 });

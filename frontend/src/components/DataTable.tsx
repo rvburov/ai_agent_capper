@@ -17,6 +17,8 @@ export interface DataColumn<Row> {
   hideMobile?: boolean;
   /** Заголовок карточки на телефоне; по умолчанию — первая колонка. */
   primary?: boolean;
+  /** Подпись в заголовке только для читалки экрана (столбец кнопок, как sr-only в макете). */
+  hideLabel?: boolean;
 }
 
 export interface DataTableProps<Row> {
@@ -111,7 +113,7 @@ export function DataTable<Row>({
           <tr>
             {visible.map((c) => (
               <th key={c.key} className={c.align} style={c.width ? { width: c.width } : undefined} scope="col">
-                {c.label}
+                {c.hideLabel ? <span className="sr-only">{c.label}</span> : c.label}
               </th>
             ))}
           </tr>

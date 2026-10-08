@@ -12,6 +12,7 @@ import { Checkbox, Chip, FieldShell, Icon, Meter, describedById, type ChipKind, 
 import { maskCode, type CodePrefix } from '../../features/auth/codes';
 import { checkPassword, type PasswordLevel } from '../../features/auth/password';
 import { cx } from '../../lib/cx';
+import { terminalCommand } from '../../lib/terminal';
 
 // Мелкие части экранов входа — как в макете (mockup/js/screens/login.js).
 
@@ -98,12 +99,11 @@ export function Note({ icon, children }: { icon: IconName; children: ReactNode }
 
 /** Строка мелким текстом с командой терминала для администратора (Р6). */
 export function CliLine({ lead, command }: { lead: string; command: string }) {
-  const { t } = useTranslation();
   return (
     <p className="login-cmd">
       <Icon name="terminal" />
       <span>
-        {lead} <code>{t('auth.common.cli', { command })}</code>
+        {lead} <code>{terminalCommand(command)}</code>
       </span>
     </p>
   );

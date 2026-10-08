@@ -33,9 +33,13 @@ function useAdminMutation<V, R>(fn: (vars: V) => Promise<R>) {
 
 const path = (id: number) => ({ params: { path: { user_id: id } } });
 
+// Код 2FA нужен, только если цель — администратор; для участника тело пустое
+const actionBody = (totpCode?: string) => (totpCode ? { body: { totp_code: totpCode } } : {});
+
+/** Блокировка. Администратора — с текущим кодом 2FA (опасное действие). */
 export function useBlockUser() {
-  return useAdminMutation((id: number) =>
-    unwrap(api.POST('/api/admin/users/{user_id}/block', path(id))),
+  return useAdminMutation((vars: { id: number; totpCode?: string }) =>
+    unwrap(api.POST('/api/admin/users/{user_id}/block', { ...path(vars.id), ...actionBody(vars.totpCode) })),
   );
 }
 
@@ -45,9 +49,15 @@ export function useUnblockUser() {
   );
 }
 
+/** Завершить все сеансы. Сеансы администратора — с текущим кодом 2FA. */
 export function useRevokeSessions() {
-  return useAdminMutation((id: number) =>
-    unwrap(api.POST('/api/admin/users/{user_id}/sessions/revoke', path(id))),
+  return useAdminMutation((vars: { id: number; totpCode?: string }) =>
+    unwrap(
+      api.POST('/api/admin/users/{user_id}/sessions/revoke', {
+        ...path(vars.id),
+        ...actionBody(vars.totpCode),
+      }),
+    ),
   );
 }
 
