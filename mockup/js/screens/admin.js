@@ -1021,9 +1021,20 @@
     let closeFn = () => {};
     const fEmail = UI.field({ id: 'adm-inv-email', label: 'Email', type: 'email', placeholder: 'name@example.com', autocomplete: 'off', hint: 'Код сработает только с этим email', attrs: { spellcheck: 'false' } });
     const fRole = UI.field({ id: 'adm-inv-role', label: 'Роль', options: [{ value: 'member', label: 'Участник' }, { value: 'admin', label: 'Администратор' }], value: 'member', hint: 'Свой банк, ставки и аналитика. Раздел «Администрирование» не видит' });
+    // Новый администратор — опасное действие: как смена роли, требует свежий код 2FA
+    const otpSlot = h('div', { class: 'stack', style: 'gap:8px' });
+    let otp = null;
+    function drawOtp() {
+      UI.clear(otpSlot);
+      otp = null;
+      if (draft.role !== 'admin') return;
+      otp = otpField('adm-inv-otp');
+      UI.append(otpSlot, [howto('Приглашение администратора — опасное действие: нужен код 2FA, как при смене роли.'), otp.node]);
+    }
     fRole.querySelector('select').addEventListener('change', e => {
       draft.role = e.target.value;
       fRole.querySelector('.field-hint').textContent = draft.role === 'admin' ? 'Увидит раздел «Администрирование» и сможет управлять участниками' : 'Свой банк, ставки и аналитика. Раздел «Администрирование» не видит';
+      drawOtp();
     });
     const limSlot = h('div', { class: 'stack', style: 'gap:8px' });
     let lf = null;
@@ -1045,10 +1056,11 @@
     }
     function drawForm() {
       drawLimits();
+      drawOtp();
       UI.clear(body);
       UI.append(body, [
         h('p', { class: 'small soft' }, 'Регистрация в AI Capper — только по приглашению. Код одноразовый и действует 7 дней.'),
-        fEmail, fRole, modes, limSlot]);
+        fEmail, fRole, modes, limSlot, otpSlot]);
       UI.clear(foot);
       UI.append(foot, [
         button('Отмена', { kind: 'secondary', onClick: () => closeFn() }),
@@ -1063,6 +1075,7 @@
       else setErr(fEmail, null);
       let L = null;
       if (lf) { L = lf.read(); if (!L) ok = false; }
+      if (otp) ok = setErr(otp.node, otp.valid() ? null : 'Введите 6 цифр из приложения-аутентификатора') && ok;
       if (!ok) { const bad = body.querySelector('.invalid'); if (bad) bad.focus(); return; }
       const code = genCode('CAP'), at = now();
       const inv = { code, email, role: draft.role, aiMode: draft.aiMode, limit: L ? L.monthly : null, limits: L, created: at, expires: addHours(at, 24 * 7), status: 'active', fresh: true };
