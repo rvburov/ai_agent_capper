@@ -5,28 +5,33 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-.Python
-*.egg
 *.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 dist/
 build/
-.eggs/
-venv/
-env/
-.venv/
-pip-log.txt
 
-# Логи бота
-bot.log
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Логи
 *.log
 
-# База данных игроков — не хранить в git (личные данные)
-Tennis-Analytics/Игроки/
-Tennis-Analytics/Ставки/История-ставок.json
+# Данные старого бота — личные, в git не хранятся
+legacy/telegram-bot/Tennis-Analytics/Игроки/
+legacy/telegram-bot/Tennis-Analytics/Ставки/История-ставок.json
 
-# Системные файлы
+# Данные учебного трека и бэкапы
+lab/datasets/*.jsonl
+deploy/backup/dumps/
+
+# Системные файлы и редакторы
 .DS_Store
 Thumbs.db
 .idea/

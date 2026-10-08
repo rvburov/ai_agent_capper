@@ -1,0 +1,93 @@
+/* Дизайн-токены из согласованного макета (mockup/index.html). Цвета и размеры меняются только здесь. */
+:root {
+  --bg: #f1f4f0;
+  --surface: #fcfcfb;
+  --surface-2: #eaeee8;
+  --surface-3: #dfe5dc;
+  --line: #dde2da;
+  --line-strong: #c3cabf;
+  --fg: #101511;
+  --fg-2: #4a524c;
+  --fg-3: #737b74;
+  --accent: #14684a;
+  --accent-hover: #0f553c;
+  --accent-fg: #ffffff;
+  --accent-soft: #dcede3;
+  --accent-ink: #0d4a34;
+  --focus: #2a78d6;
+
+  --good: #0ca30c;      --good-ink: #006300;   --good-soft: #dff2dc;
+  --warn: #fab219;      --warn-ink: #7a5200;   --warn-soft: #fbefd2;
+  --serious: #ec835a;   --serious-ink: #8a3a17;--serious-soft: #fbe4da;
+  --bad: #d03b3b;       --bad-ink: #a32424;    --bad-soft: #f8dede;
+  --info-ink: #1c5cab;  --info-soft: #dde9f8;
+
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --clay: #c65a2e; --hard: #2f6fd0; --grass: #3a8f3a; --indoor: #6c5fc7;
+
+  --chart-grid: #e3e7e0;
+  --chart-axis: #c3cabf;
+  --chart-muted: #7d847e;
+  --shadow: 0 1px 2px rgba(16,21,17,.06), 0 8px 24px -12px rgba(16,21,17,.18);
+  --overlay: rgba(16,21,17,.42);
+  --dd-bg: var(--surface); --dd-border: var(--line); --dd-active: var(--surface-2);
+  --dd-shadow: 0 2px 6px rgba(16,21,17,.06), 0 18px 40px -12px rgba(16,21,17,.28);
+
+  --font-display: "Geologica", "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --fs-xs: .75rem; --fs-sm: .8125rem; --fs-md: .9375rem; --fs-lg: 1.0625rem;
+  --fs-xl: 1.375rem; --fs-2xl: 1.75rem; --fs-hero: 2.75rem;
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px;
+  --gutter: 16px;
+  --sidebar-w: 248px;
+  --topbar-h: 60px;
+  --tabbar-h: 96px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d110f; --surface: #161b18; --surface-2: #1e2420; --surface-3: #272f2a;
+    --line: #29312c; --line-strong: #3a443e;
+    --fg: #edf1ed; --fg-2: #b8c1ba; --fg-3: #8a938c;
+    --accent: #3fbf8a; --accent-hover: #5bd09f; --accent-fg: #05140d; --accent-soft: #17352a; --accent-ink: #7fdcb3;
+    --focus: #5fa0ef;
+    --good-ink: #4cc54c; --good-soft: #15301a;
+    --warn-ink: #f2c25a; --warn-soft: #33290f;
+    --serious-ink: #f0a07f; --serious-soft: #3a2218;
+    --bad-ink: #f07a7a; --bad-soft: #3a1b1b;
+    --info-ink: #8db8f2; --info-soft: #172a45;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --clay: #d9703f; --hard: #4c8ae6; --grass: #45a045; --indoor: #9085e9;
+    --chart-grid: #262d29; --chart-axis: #39433d; --chart-muted: #8a938c;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -12px rgba(0,0,0,.6);
+    --overlay: rgba(0,0,0,.6);
+    --dd-bg: var(--surface-2); --dd-border: var(--line-strong); --dd-active: var(--surface-3);
+    --dd-shadow: 0 2px 6px rgba(0,0,0,.4), 0 18px 40px -12px rgba(0,0,0,.75);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d110f; --surface: #161b18; --surface-2: #1e2420; --surface-3: #272f2a;
+  --line: #29312c; --line-strong: #3a443e;
+  --fg: #edf1ed; --fg-2: #b8c1ba; --fg-3: #8a938c;
+  --accent: #3fbf8a; --accent-hover: #5bd09f; --accent-fg: #05140d; --accent-soft: #17352a; --accent-ink: #7fdcb3;
+  --focus: #5fa0ef;
+  --good-ink: #4cc54c; --good-soft: #15301a;
+  --warn-ink: #f2c25a; --warn-soft: #33290f;
+  --serious-ink: #f0a07f; --serious-soft: #3a2218;
+  --bad-ink: #f07a7a; --bad-soft: #3a1b1b;
+  --info-ink: #8db8f2; --info-soft: #172a45;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  --clay: #d9703f; --hard: #4c8ae6; --grass: #45a045; --indoor: #9085e9;
+  --chart-grid: #262d29; --chart-axis: #39433d; --chart-muted: #8a938c;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -12px rgba(0,0,0,.6);
+  --overlay: rgba(0,0,0,.6);
+  --dd-bg: var(--surface-2); --dd-border: var(--line-strong); --dd-active: var(--surface-3);
+  --dd-shadow: 0 2px 6px rgba(0,0,0,.4), 0 18px 40px -12px rgba(0,0,0,.75);
+  color-scheme: dark;
+}
+
