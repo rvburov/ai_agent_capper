@@ -82,7 +82,7 @@ jobs:
       - run: pip install pip-audit==2.10.1
       - run: pip-audit --require-hashes --disable-pip -r backend/requirements.lock
       - run: pip-audit --require-hashes --disable-pip -r backend/requirements-dev.lock
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
       - run: npm audit --omit=dev --audit-level=high
@@ -96,7 +96,7 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -171,7 +171,7 @@ jobs:
       # Backend как в образе: точные версии с хешами, затем сам пакет без зависимостей
       - run: pip install --require-hashes -r ../backend/requirements.lock
       - run: pip install --no-deps -e ../backend
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
