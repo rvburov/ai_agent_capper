@@ -23,9 +23,11 @@
   const COLLECT = { cost: 0.05, secs: 40 };   // сбор профиля игрока, которого нет в базе
   const REFRESH = { cost: 0.01, secs: 15 };   // обновление устаревшего профиля
   const PARSE_COST = '≈$' + fmt.dec(0.004, 3);
-  // Букмекеры участника (свой список ведет каждый, Р17) — как в «Личном кабинете → Букмекеры»; Pinnacle — эталон рынка
-  const BOOKMAKERS = ['bet365', 'Unibet', 'Pinnacle', 'Другой'];
-  const DEFAULT_BK = BOOKMAKERS[0];
+  // Букмекеры: свой список у каждого (Р17), меняется в «Личном кабинете → Букмекеры» — поэтому читаем его при отрисовке.
+  // По умолчанию — первый из списка; эталон рынка для CLV — DATA.marketRef.
+  const OTHER_BK = 'Другой';
+  const bookmakers = () => [...new Set((D.user.bookmakers || []).concat(OTHER_BK))];
+  const defaultBk = () => bookmakers()[0];
   const ROUNDS = ['1/64 финала', '1/32 финала', '1/16 финала', '1/8 финала', '1/4 финала', '1/2 финала', 'Финал'];
   const SURF_WORDS = [[/крыт|indoor|зал/i, 'indoor'], [/хард|hard/i, 'hard'], [/грунт|clay/i, 'clay'], [/трав|grass/i, 'grass']];
   const TOURS = [...new Set(D.calendar.flatMap(c => c.name.split(' / ')))];
@@ -70,7 +72,7 @@
   // Образец текста: банк — в валюте программы, букмекер — из списка участника
   const example = () => [
     'Текущий банк: ' + fmt.money(S.bank),
-    'Букмекер: ' + DEFAULT_BK,
+    'Букмекер: ' + defaultBk(),
     '',
     'События:',
     'Синнер vs Руне, Шанхай, хард',
@@ -83,7 +85,7 @@
   ].join('\n');
   const template = () => [
     'Текущий банк: ' + fmt.money(S.bank),
-    'Букмекер: ' + DEFAULT_BK,
+    'Букмекер: ' + defaultBk(),
     '',
     'События:',
     'Игрок 1 vs Игрок 2, турнир, покрытие, раунд',
@@ -137,9 +139,10 @@
   // ---------- состояние (черновик) ----------
   const state = {
     tab: 'text', text: '', auto: null, parsedText: null, parsing: false, parse: null,
-    bank: S.bank, bookmaker: DEFAULT_BK, events: [], editing: new Set(), mode: 'precise',
+    bank: S.bank, bookmaker: null, events: [], editing: new Set(), mode: 'precise',
     collecting: new Set(), collected: new Set(),
   };
+  const curBk = () => state.bookmaker || defaultBk(); // null — букмекер по умолчанию из кабинета
   const freshOf = p => (state.collecting.has(p.id) ? 'collecting' : state.collected.has(p.id) ? 'fresh' : p.fresh);
   function resolve(name) {
     const n = String(name || '').trim(); if (!n) return null;
@@ -235,20 +238,24 @@
     // банк из текста совпал с учетом с точностью до копейки или цента — берем точное значение из учета;
     // нет банка или букмекера в тексте — берем из кабинета, а не из прошлого разбора
     state.bank = res.bank && !sameMoney(res.bank, S.bank) ? res.bank : S.bank;
-    state.bookmaker = res.bookmaker || DEFAULT_BK;
+    // букмекер из текста сверяем со списком без учета регистра: «BET365» — это bet365 из кабинета
+    const known = res.bookmaker && bookmakers().find(b => b.toLowerCase() === res.bookmaker.toLowerCase());
+    state.bookmaker = known || res.bookmaker || null;
     state.parse = { bank: res.bank ? state.bank : null, bankRaw: res.bankRaw, bookmaker: res.bookmaker, unknown: res.unknown };
     state.parsedText = state.text;
   }
   // Текст, который подставили мы (пример или матч из расписания), пересобирается, если сменилась валюта программы
   // или банк в учете: суммы в нем всегда в текущей валюте. Текст, который правил пользователь, не трогаем.
-  const autoKey = () => UI.currency.code + '|' + S.bank;
-  function setAutoText(build) { state.text = build(); state.auto = { build, text: state.text, key: autoKey(), bank: S.bank }; }
+  // Букмекер по умолчанию тоже входит в ключ: список меняется в личном кабинете.
+  const autoKey = () => UI.currency.code + '|' + S.bank + '|' + defaultBk();
+  function setAutoText(build) { state.text = build(); state.auto = { build, text: state.text, key: autoKey(), bank: S.bank, bk: defaultBk() }; }
   function syncAutoText() {
     const a = state.auto;
     if (!a || state.text !== a.text || a.key === autoKey()) return;
     const wasParsed = state.parsedText === state.text;
     if (state.bank === a.bank) state.bank = S.bank;
     if (state.parse && state.parse.bank === a.bank) state.parse.bank = S.bank;
+    if (state.bookmaker === a.bk) state.bookmaker = null;
     setAutoText(a.build);
     if (wasParsed) state.parsedText = state.text;
   }
@@ -285,36 +292,34 @@
     const extraSecs = missing.length * COLLECT.secs + stale.length * REFRESH.secs;
     const cost = n * mode.perEvent + extraCost, secs = n * mode.secs + extraSecs;
 
-    let reason = null;
-    if (state.tab === 'text' && state.parsing) reason = 'Дождитесь окончания разбора';
-    else if (state.tab === 'text' && !state.text.trim()) reason = 'Вставьте текст с событиями';
-    else if (state.tab === 'text' && isDirty()) reason = 'Текст изменен — нажмите «Разобрать»';
-    else if (!n) reason = 'Добавьте хотя бы одно событие';
-    else {
+    // Можно ли запускать, решает общий расчет DATA.ai.access. Сначала — то, что не зависит от событий (пауза, нет ключа,
+    // анализы на сегодня закончились), чтобы не набирать события зря; потом ошибки ввода; потом цена этого анализа.
+    const inputReason = () => {
+      if (state.tab === 'text' && state.parsing) return 'Дождитесь окончания разбора';
+      if (state.tab === 'text' && !state.text.trim()) return 'Вставьте текст с событиями';
+      if (state.tab === 'text' && isDirty()) return 'Текст изменен — нажмите «Разобрать»';
+      if (!n) return 'Добавьте хотя бы одно событие';
       const i = evs.findIndex(ev => check(ev).errors.length);
-      if (i >= 0) { const e = check(evs[i]).errors[0]; reason = 'Событие ' + (i + 1) + ': ' + e.charAt(0).toLowerCase() + e.slice(1); }
-      else { const u = players.find(p => p.p && !p.sure); if (u) reason = 'Подтвердите игрока «' + u.name + '»'; }
-    }
-    if (!reason) reason = limitReason(cost);
-    return { evs, n, players, missing, stale, mode, items, cost, secs, extraCost, extraSecs, reason };
+      if (i >= 0) { const e = check(evs[i]).errors[0]; return 'Событие ' + (i + 1) + ': ' + e.charAt(0).toLowerCase() + e.slice(1); }
+      const u = players.find(p => p.p && !p.sure);
+      return u ? 'Подтвердите игрока «' + u.name + '»' : null;
+    };
+    const blocked = D.ai.access(D.me, 0);
+    const reason = blocked || inputReason() || D.ai.access(D.me, cost);
+    return { evs, n, players, missing, stale, mode, items, cost, secs, extraCost, extraSecs, reason, blocked };
   }
 
   // ---------- лимиты ИИ (Р7, Р9, Р13) ----------
-  // Участник на ключе администратора видит свой лимит, администратор — общий лимит своего ключа.
-  // На своем ключе лимитов программы нет: расход идет со счета участника в Anthropic.
+  // Только для показа: можно ли запускать, решает DATA.ai.access. Участник на ключе администратора видит свой лимит,
+  // администратор — бюджет своего ключа. На своем ключе действует только потолок на один анализ (DATA.me.ownCap).
+  const usdL = n => fmt.usd(n, Number.isInteger(n) ? 0 : 2); // $10 и $1, но $1,50
   function aiLimit() {
     const me = D.me;
-    if (me && me.aiMode === 'own') return { own: true, last4: me.ownKey ? me.ownKey.last4 : '••••' };
-    if (me && me.limit) return { personal: true, spent: me.spent, cap: me.limit.monthly, daily: me.limit.daily, today: me.todayAnalyses, perAnalysis: me.limit.perAnalysis };
-    return { spent: D.admin.budget.spent, cap: D.admin.budget.monthly };
-  }
-  function limitReason(cost) {
-    const L = aiLimit();
-    if (L.own) return null;
-    if (L.personal && L.today >= L.daily) return 'Лимит на сегодня исчерпан: ' + L.daily + ' ' + fmt.plural(L.daily, 'анализ', 'анализа', 'анализов') + ' в день';
-    if (L.personal && cost > L.perAnalysis) return 'Дороже лимита ' + fmt.usd(L.perAnalysis, 0) + ' за анализ — уберите события или выберите режим дешевле';
-    if (L.spent + cost > L.cap) return 'Не хватает месячного лимита ИИ: осталось ' + fmt.usd(Math.max(0, L.cap - L.spent));
-    return null;
+    if (me.aiMode === 'own') return { own: true, last4: me.ownKey ? me.ownKey.last4 : null, cap: me.ownCap != null ? me.ownCap : D.admin.defaults.perAnalysis };
+    const L = D.ai.limitOf(me);
+    if (L) return { personal: true, spent: D.ai.keySpent(me), cap: L.monthly, daily: L.daily, today: me.todayAnalyses, perAnalysis: L.perAnalysis, paused: !!L.paused };
+    const B = D.ai.budget();
+    return { spent: B.spent, cap: B.monthly };
   }
 
   // ---------- стили ----------
@@ -635,7 +640,7 @@
     const a = summary();
     if (a.reason) { UI.toast(a.reason, 'alert'); return; }
     D.pendingAnalysis = {
-      createdAt: D.today, mode: a.mode.id, model: a.mode.model, bank: state.bank, bookmaker: state.bookmaker,
+      createdAt: D.today, mode: a.mode.id, model: a.mode.model, bank: state.bank, bookmaker: curBk(),
       estimate: { cost: Math.round(a.cost * 100) / 100, secs: a.secs },
       events: state.events.map(ev => {
         const r1 = resolve(ev.n1), r2 = resolve(ev.n2);
@@ -900,7 +905,7 @@
         h('div', { class: 'row' },
           chip(evWord(n), n ? 'accent' : 'bad', n ? 'check' : 'alert'),
           chip('Банк ' + fmt.money(state.bank), bankDiff || foreign ? 'warn' : 'outline', bankDiff || foreign ? 'alert' : 'wallet'),
-          chip(state.bookmaker, 'outline'))),
+          chip(curBk(), 'outline'))),
       h('span', { class: 'xsmall muted', style: 'padding-top:4px' }, 'Haiku 4.5 · ' + PARSE_COST)));
     if (bankDiff || foreign) {
       const IN = { RUB: 'рублях', USD: 'долларах', EUR: 'евро' };
@@ -990,8 +995,9 @@
       renderSide();
     });
     bankIn.addEventListener('blur', () => { if (state.bank > 0) bankIn.value = amountText(state.bank); });
-    const opts = BOOKMAKERS.includes(state.bookmaker) ? BOOKMAKERS : [state.bookmaker].concat(BOOKMAKERS);
-    const bk = UI.field({ label: 'Букмекер', id: 'new-bk', value: state.bookmaker, options: opts, hint: 'Список — ваши букмекеры из личного кабинета. CLV считаем по закрывающему кэфу Pinnacle — эталону рынка', attrs: { 'data-fk': 'bk' } });
+    const list = bookmakers(), bkNow = curBk();
+    const opts = list.includes(bkNow) ? list : [bkNow].concat(list); // букмекер из текста, которого нет в списке, тоже показываем
+    const bk = UI.field({ label: 'Букмекер', id: 'new-bk', value: bkNow, options: opts, hint: 'Список — ваши букмекеры из личного кабинета. CLV считаем по закрывающему кэфу ' + D.marketRef + ' — эталону рынка', attrs: { 'data-fk': 'bk' } });
     bk.querySelector('select').addEventListener('change', e => { state.bookmaker = e.target.value; renderSide(); });
     const fromText = state.events.some(e => e.raw1 || e.raw2);
     return h('div', { class: 'stack', style: 'gap:16px' },
@@ -1032,18 +1038,24 @@
       h('div', { class: 'new-total', 'aria-live': 'polite' }, h('span', null, 'Итого'), h('span', null, h('b', null, usd(a.cost)), h('span', { class: 'muted' }, ' · ' + fmtTime(a.secs)))));
     const L = aiLimit(), cacheNote = 'Профили и правила стратегии берутся из кэша промпта — в ' + D.ai.month.replace(/ь$/, 'е') + ' так пришло ' + D.ai.cacheShare + '% входных токенов.';
     let bud;
-    if (L.own) {
+    if (L.own && !L.last4) {
+      bud = h('div', { class: 'new-sub', style: 'gap:6px' },
+        h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Свой ключ Claude'), h('span', { class: 'warn-text' }, 'не добавлен')),
+        h('div', { class: 'xsmall muted' }, 'Без ключа анализ не запустится. ', h('a', { href: '#profile-key' }, 'Добавить ключ в личном кабинете')));
+    } else if (L.own) {
       bud = h('div', { class: 'new-sub', style: 'gap:6px' },
         h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Свой ключ Claude'), h('span', { class: 'mono' }, 'sk-ant-…' + L.last4)),
-        h('div', { class: 'xsmall muted' }, 'Анализ ≈ ' + fmt.usd(a.cost) + ' спишется с вашего счета Anthropic, лимиты программы на свой ключ не действуют. ' + cacheNote));
+        h('div', { class: 'xsmall muted' }, 'Анализ ≈ ' + fmt.usd(a.cost) + ' спишется с вашего счета Anthropic. На своем ключе действует только ваш потолок — ' + usdL(L.cap) + ' на один анализ, он меняется в ', h('a', { href: '#profile-key' }, 'личном кабинете'), '. ' + cacheNote));
     } else {
-      const after = L.spent + a.cost;
+      // пока запуск невозможен при любых событиях (пауза, анализы на сегодня закончились) — «после запуска» не показываем
+      const after = L.spent + (a.blocked ? 0 : a.cost);
+      const today = L.personal ? 'анализов сегодня ' + L.today + ' из ' + L.daily + ' · до ' + usdL(L.perAnalysis) + ' за анализ. ' : '';
       bud = h('div', { class: 'new-sub', style: 'gap:6px' },
-        h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, (L.personal ? 'Ваш лимит ИИ на ' : 'Ключ администратора на ') + D.ai.month), h('span', { class: 'num' }, h('b', null, fmt.usd(L.spent)), ' из ' + fmt.usd(L.cap, 0))),
+        h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, (L.personal ? 'Ваш лимит ИИ на ' : 'Ключ администратора на ') + D.ai.month), h('span', { class: 'num' }, h('b', null, fmt.usd(L.spent)), ' из ' + usdL(L.cap))),
         UI.meter(after, L.cap, after / L.cap > 0.9 ? 'bad' : after / L.cap > 0.7 ? 'warn' : null),
-        h('div', { class: 'xsmall muted' }, 'После запуска ≈ ' + fmt.usd(after) + (L.personal
-          ? ' · анализов сегодня ' + L.today + ' из ' + L.daily + ' · до ' + fmt.usd(L.perAnalysis, 0) + ' за анализ. '
-          : ' — общий лимит на всех, кто работает на вашем ключе. ') + cacheNote));
+        h('div', { class: 'xsmall muted' }, (a.blocked
+          ? (today ? today.charAt(0).toUpperCase() + today.slice(1) : '')
+          : 'После запуска ≈ ' + fmt.usd(after) + (L.personal ? ' · ' + today : ' — общий бюджет на всех, кто работает на вашем ключе. ')) + cacheNote));
     }
     const launchBtn = button('Запустить анализ', { kind: 'primary', size: 'lg', icon: 'spark', block: true, disabled: !!a.reason, onClick: launch, attrs: { id: 'new-launch', 'data-fk': 'launch' } });
     return UI.card({
@@ -1176,7 +1188,7 @@
       state.events = [eventFromToday(m)];
       // во вкладке «Вставить текстом» — тот же матч текстом, чтобы вкладки не расходились
       setAutoText(() => [
-        'Текущий банк: ' + fmt.money(state.bank), 'Букмекер: ' + state.bookmaker, '', 'События:',
+        'Текущий банк: ' + fmt.money(state.bank), 'Букмекер: ' + curBk(), '', 'События:',
         P[m.p1].short + ' vs ' + P[m.p2].short + ', ' + m.tournament + ', ' + (D.surfaces[m.surface] ? D.surfaces[m.surface].label.toLowerCase() : 'хард') + ', ' + m.round.replace(' финала', ''),
         'Кэфы: П1 = ' + fmt.odds(m.odds.p1) + ', П2 = ' + fmt.odds(m.odds.p2),
         'Фора по сетам: П1(-1.5) = ' + fmt.odds(m.odds.h1m) + ', П2(+1.5) = ' + fmt.odds(m.odds.h2p),

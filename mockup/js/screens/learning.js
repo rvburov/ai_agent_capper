@@ -135,7 +135,7 @@
     { label: 'Тест', period: 'с 1 июн 2026', n: HIST_TEST + OWN, color: 'var(--s3)', note: 'в т.ч. ' + OWN + ' своих' },
   ];
 
-  // Prompt-оптимизация: каждый вариант — smoke на 40 событиях (Δ лог-лосса к v3), лучший — полный прогон на отложенной выборке
+  // Подбор инструкций модели: каждый вариант — быстрая проверка на 40 событиях (Δ лог-лосса к v3), лучший — полный прогон на отложенной выборке
   const SMOKE = 40, SMOKE_COST = 1.2, FULL_COST = 6.6, EXP_BUDGET = 25;
   const POPT = [
     { i: 1, change: 'Исходные инструкции v3 (точка отсчета)', smoke: 0, full: 0.583, tok: 49, base: true },
@@ -146,7 +146,7 @@
     { i: 6, change: 'Три примера калибровки в инструкции', smoke: 0.002, tok: 38 },
     { i: 7, change: 'Короче блок про уроки', smoke: null, tok: 33 },
   ];
-  // Потрачено в этом месяце: smoke всех посчитанных вариантов + полный прогон лучшего + половина идущей итерации
+  // Потрачено в этом месяце: быстрые проверки всех посчитанных вариантов + полный прогон лучшего + половина идущей итерации
   const POPT_SPENT = POPT.filter(p => p.smoke != null).length * SMOKE_COST + FULL_COST + SMOKE_COST / 2;
 
   // ---------- состояние экрана ----------
@@ -420,11 +420,11 @@
 
   const STEPS = [
     { ic: 'ticket', t: 'Ставка', d: 'Экспресс с вероятностями Claude и своей ML-модели', who: 'вы + ИИ', whoIc: 'user' },
-    { ic: 'trophy', t: 'Результат и закрывающий кэф', d: 'Счет по сетам и кэф Pinnacle перед стартом — из него считается CLV', who: 'вы', whoIc: 'user' },
+    { ic: 'trophy', t: 'Результат и закрывающий кэф', d: 'Счет по сетам и кэф ' + D.marketRef + ' перед стартом — из него считается CLV', who: 'вы', whoIc: 'user' },
     { ic: 'search', t: 'Разбор ошибки', d: 'Claude сверяет прогноз с исходом: невезение или систематическая ошибка', who: 'Sonnet 5.5 · ≈ $0,02', whoIc: 'spark' },
     { ic: 'book', t: 'Гипотеза-урок', d: 'Короткое правило и где оно применимо', who: 'Claude', whoIc: 'spark' },
     { ic: 'flask', t: 'Проверка на истории', d: 'С ' + NEED + ' своих случаев: прогноз с уроком и без, 95% ДИ на истории и на поздних матчах', who: 'код + Batch API', whoIc: 'bolt' },
-    { ic: 'brain', t: 'В промпт или в признаки', d: 'Строкой в инструкции анализа; урок про вероятность — еще и признаком своей ML-модели', who: 'вы подтверждаете', whoIc: 'user' },
+    { ic: 'brain', t: 'В инструкции или в признаки', d: 'Строкой в инструкции анализа; урок про вероятность — еще и признаком своей ML-модели', who: 'вы подтверждаете', whoIc: 'user' },
   ];
   function cycleCard() {
     const list = h('ol', { class: 'learning-cycle', 'aria-label': 'Цикл обучения, 6 шагов' }, STEPS.map((s, i) => h('li', { class: 'learning-step' },
@@ -896,7 +896,7 @@
     const first = WF[0], last = WF[WF.length - 1];
     const wf = card({
       class: 'learning-card',
-      title: 'Проверка walk-forward',
+      title: 'Скользящая проверка по месяцам',
       subtitle: 'Brier по месяцам: модель учится только на прошлом и прогнозирует следующий месяц',
       body: [
         UI.legend([{ name: 'Своя модель', color: 'var(--s1)' }, { name: 'Рынок по закрытию', color: 'var(--s2)' }]),
@@ -964,7 +964,7 @@
       class: 'learning-card',
       title: 'Датасет снимков матчей',
       subtitle: 'Снимок — все, что было известно до начала матча, плюс исход. Будущее в снимок не попадает.',
-      actions: [button('Экспорт JSONL', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => UI.toast('Экспорт собран: train / val / test, ' + fmt.int(SNAPSHOTS) + ' строк' + (st.anon ? ', анонимизировано' : ', с именами') + '. В макете файл не скачивается', 'download') })],
+      actions: [button('Экспорт JSONL', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => UI.toast('Экспорт собран: обучающая, проверочная и тестовая части, ' + fmt.int(SNAPSHOTS) + ' строк' + (st.anon ? ', анонимизировано' : ', с именами') + '. В макете файл не скачивается', 'download') })],
       body: h('div', { class: 'learning-two' }, left, right),
     });
   }
@@ -990,9 +990,9 @@
       slot.appendChild(expCard({
         status: running ? chip('Идет', 'accent', 'refresh') : chip('На паузе', 'warn', 'pause'),
         kind: 'без дообучения',
-        title: 'Prompt-оптимизация по eval-набору',
+        title: 'Подбор инструкций модели',
         goal: 'Автоматически переписывать инструкции Claude и оставлять варианты, которые снижают лог-лосс.',
-        metric: 'Лог-лосс: smoke на ' + SMOKE + ' событиях отсеивает явно плохие варианты, лучший проходит полный прогон на ' + HOLDOUT + '. Плюс токены на анализ.',
+        metric: 'Лог-лосс: быстрая проверка на ' + SMOKE + ' событиях отсеивает явно плохие варианты, лучший проходит полный прогон на ' + HOLDOUT + '. Плюс токены на анализ.',
         budget: fmt.usd(POPT_SPENT) + ' из ' + fmt.usd(EXP_BUDGET, 0) + ' в месяц · отдельный ключ администратора, Batch API ночью',
         extra: h('div', { class: 'stack', style: 'gap:6px' },
           h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Итерация ' + POPT.length + ' из 12'), h('span', { class: 'num', style: 'font-weight:600' }, done + ' посчитано')),
@@ -1048,24 +1048,24 @@
     const list = mobile
       ? h('div', { class: 'learning-cmp-list' }, POPT.map(r => h('div', { class: 'learning-cmp-item' },
           h('div', { class: 'learning-cmp-top' }, h('b', null, r.i + '. ' + r.change), r.best && chip('кандидат v4', 'info', 'flask')),
-          h('div', { class: 'small num soft' }, 'Smoke, Δ к v3: ', smokeEl(r), ' · полный: ', fullEl(r), ' · ≈ ' + r.tok + ' тыс. токенов'))))
+          h('div', { class: 'small num soft' }, 'Быстрая проверка, Δ к v3: ', smokeEl(r), ' · полный: ', fullEl(r), ' · ≈ ' + r.tok + ' тыс. токенов'))))
       : UI.table({
           columns: [
             { label: '№', render: r => String(r.i), width: '40px' },
             { label: 'Что изменили', render: r => h('span', null, r.change, r.best && [' ', chip('кандидат v4', 'info', 'flask')]) },
-            { label: 'Smoke · ' + SMOKE + ', Δ к v3', align: 'r', render: smokeEl },
+            { label: 'Быстрая проверка · ' + SMOKE + ', Δ к v3', align: 'r', render: smokeEl },
             { label: 'Полный · ' + HOLDOUT, align: 'r', render: fullEl },
             { label: 'Токенов', align: 'r', render: r => '≈ ' + r.tok + ' тыс.' },
           ],
           rows: POPT,
         });
     UI.modal({
-      title: 'Prompt-оптимизация: журнал',
+      title: 'Подбор инструкций модели: журнал',
       wide: true,
       body: h('div', { class: 'stack' },
-        h('p', { class: 'small soft' }, 'Каждый вариант — smoke на ' + SMOKE + ' событиях (≈ ' + fmt.usd(SMOKE_COST) + '), лучший — полный прогон на ' + HOLDOUT + ' (≈ ' + fmt.usd(FULL_COST) + '). Все через Batch API, из отдельного бюджета экспериментов. Ниже лог-лосс — лучше.'),
+        h('p', { class: 'small soft' }, 'Каждый вариант — быстрая проверка на ' + SMOKE + ' событиях (≈ ' + fmt.usd(SMOKE_COST) + '), лучший — полный прогон на ' + HOLDOUT + ' (≈ ' + fmt.usd(FULL_COST) + '). Все через Batch API, из отдельного бюджета экспериментов. Ниже лог-лосс — лучше.'),
         list,
-        hint('На ' + SMOKE + ' событиях разница меньше ±0,02 — шум: smoke только отсеивает явно плохие правки. Решение по варианту — по полному прогону и правилу приема версий.')),
+        hint('На ' + SMOKE + ' событиях разница меньше ±0,02 — шум: быстрая проверка только отсеивает явно плохие правки. Решение по варианту — по полному прогону и правилу приема версий.')),
       actions: close => [button('Закрыть', { kind: 'primary', onClick: close })],
     });
     settleModal();
@@ -1074,7 +1074,7 @@
   function sftModal() {
     const steps = [
       ['Собрать примеры из снимков', 'Вход — обезличенное досье, цель p — вероятность своей ML-модели (или рынка без маржи), обоснование — шаблон из признаков. Claude не нужен, $0.'],
-      ['Анонимизировать и разделить по времени', 'Как в датасете выше: train / val / test без пересечений по датам, игроки — «A / B».'],
+      ['Анонимизировать и разделить по времени', 'Как в датасете выше: обучающая, проверочная и тестовая части без пересечений по датам, игроки — «A / B».'],
       ['Дообучить LoRA', 'r = 16 на открытой модели 0,5–3B (сверить лицензию) в Colab с T4, ≈ 2–4 часа.'],
       ['Сравнить на тесте', 'Доля валидного JSON, лог-лосс и калибровка — против учителя и той же модели без дообучения.'],
       ['Отдельным экспериментом — рассуждения Claude', 'Только после проверки актуальных условий Anthropic: они ограничивают обучение других моделей на его ответах.'],

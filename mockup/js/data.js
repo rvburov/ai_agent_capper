@@ -317,9 +317,11 @@
     return { monthly, shared, spent, forecast, left: round(Math.max(0, monthly - spent), 2), daysLeft: MONTH_DAYS - DAY, share: spent / monthly, fShare: forecast / monthly, alertAt: admin.budget.alertAt };
   }
   Object.defineProperty(admin.budget, 'spent', { enumerable: true, get: () => budget().spent });
-  // Можно ли запустить анализ стоимостью cost: null — можно, иначе причина для человека
-  function access(u, cost) {
+  // Можно ли запустить анализ стоимостью cost: null — можно, иначе причина для человека.
+  // opts.kind = 'review' — разбор (не анализ): дневной счетчик анализов не проверяется.
+  function access(u, cost, opts) {
     cost = cost || 0;
+    const review = !!(opts && opts.kind === 'review');
     if (u.status === 'blocked') return 'Аккаунт заблокирован администратором';
     if (u.aiMode === 'own') {
       if (!u.ownKey) return 'Нет ключа Claude: добавьте свой ключ в личном кабинете';
@@ -330,17 +332,21 @@
     const L = limitOf(u);
     if (L) {
       if (L.paused) return 'Анализы на паузе — решение администратора';
-      if (u.todayAnalyses >= L.daily) return 'На сегодня анализы закончились: ' + L.daily + ' в день';
+      if (!review && u.todayAnalyses >= L.daily) return 'На сегодня анализы закончились: ' + L.daily + ' в день';
       if (cost > L.perAnalysis) return 'Анализ дороже потолка ' + usdL(L.perAnalysis) + ' на один анализ';
       if (keySpent(u) + cost > L.monthly) return 'Лимит на месяц исчерпан';
     }
     if (budget().spent + cost > admin.budget.monthly) return 'Общий бюджет ключа администратора на месяц исчерпан';
     return null;
   }
-  // Анализ завершен: обновляем счетчики участника (расход и число анализов)
-  function recordRun(u, cost) {
+  // Расход ИИ без счетчика анализов (разбор ставки, разбор в «Аналитике»)
+  function recordSpend(u, cost) {
     u.spent = round(u.spent + cost, 2);
     if (u.aiMode === 'own') u.ownSpent = round((u.ownSpent || 0) + cost, 2);
+  }
+  // Анализ завершен: расход и число анализов
+  function recordRun(u, cost) {
+    recordSpend(u, cost);
     u.analyses += 1; u.todayAnalyses += 1;
   }
   // Что ждет решения администратора: просьбы вернуть ключ и участники у лимита (значок в меню, главная, обзор кабинета)
@@ -379,7 +385,7 @@
     },
     allLegs, calibration, brierRolling, roiBySurface, roiByMarket, roiByOdds, roiByTotal,
     matchesToday,
-    ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, keySpent, ownSpent, keyUsers, limitOf, budget, access, recordRun, decisions, budgetHint: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes },
+    ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, keySpent, ownSpent, keyUsers, limitOf, budget, access, recordRun, recordSpend, decisions, budgetHint: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes },
     lessons, strategyVersions,
     strategy: { minProb: 65, oddsMin: 1.13, oddsMax: 1.80, maxLegs: 3, totalMax: 3.24, stakeTable: [{ range: '1.28–1.70', pct: '2,5–3%' }, { range: '1.71–2.20', pct: '2–2,5%' }, { range: '2.21–3.24', pct: '1,5–2%' }] },
     playerName: id => (P[id] ? P[id].short : id),

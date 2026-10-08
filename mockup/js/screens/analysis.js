@@ -204,7 +204,7 @@
     ID = 'A-' + String(142 + Math.max(0, reqCount - 1)).padStart(4, '0');
     D.currentAnalysis = ID;
     MODE = MODES[REQ && REQ.mode] || MODES.precise;
-    BK = (REQ && REQ.bookmaker) || 'bet365';
+    BK = (REQ && REQ.bookmaker) || (D.user.bookmakers || [])[0] || 'bet365';
     BANK = REQ && REQ.bank > 0 ? REQ.bank : D.stats.bank;
     RUNE_NEW = D.P.rune.fresh === 'missing';
     const evs = REQ && Array.isArray(REQ.events) ? REQ.events : [];
@@ -248,6 +248,22 @@
 
   // ---------- состояние ----------
   const RUN = { startedAt: null, done: false, focusResult: false, runeMarked: false };
+  // Завершенный анализ записывается в расход один раз (DATA.ai.recordRun): тогда «анализов сегодня», расход и бюджет
+  // обновятся на других экранах. Пример по прямой ссылке (без запроса) уже учтен в данных — его не записываем.
+  // Повторный показ хода и перерисовки запись не повторяют.
+  const recorded = new WeakSet();
+  function record(req, user, cost) {
+    if (!req || recorded.has(req) || !user) return;
+    recorded.add(req);
+    D.ai.recordRun(user, Math.round(cost * 1000) / 1000);
+  }
+  // анализ идет на сервере и без открытого экрана: запись по таймеру, даже если вы ушли на другую страницу
+  function scheduleRecord() {
+    RUN.by = D.me; // кто запустил: запись идет ему, даже если демо-роль сменили во время анализа
+    if (!REQ || recorded.has(REQ)) return;
+    const req = REQ, user = RUN.by, cost = TOTAL.cost;
+    setTimeout(() => record(req, user, cost), Math.max(0, TOTAL_MS - (performance.now() - RUN.startedAt)));
+  }
   const ST = { stake: null, decision: null, betId: null, whyOpen: null, stepsOpen: false, calcOpen: false, exampleAck: false, tab: { m1: 'probs', m2: 'probs' } };
   // Новый запуск — когда с экрана «Новый анализ» пришел новый запрос; возврат из «Ставок» показывает готовый результат
   function resetRun() {
@@ -676,6 +692,7 @@
       RUN.runeMarked = true;
     }
     RUN.done = true;
+    record(REQ, RUN.by || D.me, TOTAL.cost);
     if (root.isConnected) draw(root);
   }
 
@@ -876,23 +893,33 @@
       bad.map(r => r.t.charAt(0).toLowerCase() + r.t.slice(1) + (r.d ? ' (' + r.d + ')' : '')).join('; ') + '. ',
       'В приложении ИИ подобрал бы другие рынки или не предложил бы ставку; в макете расчет показан как есть.');
   }
+  // цена перезапуска в точном режиме — так же, как оценка на экране «Новый анализ»
+  function rerunCost() {
+    const r = REQ || {};
+    const n = Array.isArray(r.events) && r.events.length ? r.events.length : MX.length;
+    return Math.round((n * MODES.precise.perEvent + (D.P.rune.fresh === 'missing' ? COLLECT_COST : 0)) * 100) / 100;
+  }
   // режим без свежих новостей — предупреждаем и даем перезапустить в точном
   function modeNote(root) {
     if (MODE.id === 'precise') return null;
+    const reason = D.ai.access(D.me, rerunCost()); // пауза, нет ключа, лимиты и бюджет — общий расчет
     const txt = MODE.id === 'eco'
       ? 'Режим «Экономный» (Haiku 4.5) — черновая оценка по сохраненным досье, без свежих новостей. Чтобы отсеять лишнее — годится, для решения о ставке — нет.'
       : 'Режим «Сбалансированный» (Sonnet 5.5) еще не проверен на eval-наборе и не ищет свежие новости. Для решения о ставке надежнее «Точный».';
     return UI.callout(MODE.id === 'eco' ? 'warn' : 'info', MODE.id === 'eco' ? 'alert' : 'info',
       txt, ' В макете вероятности примера одинаковы во всех режимах.',
-      h('div', { class: 'row analysis-mode-acts' }, button('Перезапустить в режиме «Точный»', { kind: 'secondary', size: 'sm', icon: 'refresh', onClick: () => rerunPrecise(root) })));
+      h('div', { class: 'row analysis-mode-acts' }, button('Перезапустить в режиме «Точный»', { kind: 'secondary', size: 'sm', icon: 'refresh', disabled: !!reason, onClick: () => rerunPrecise(root) }),
+        reason && h('span', { class: 'xsmall', role: 'status' }, 'Сейчас нельзя: ' + reason.charAt(0).toLowerCase() + reason.slice(1))));
   }
   function rerunPrecise(root) {
     const r = REQ || {};
     const n = Array.isArray(r.events) && r.events.length ? r.events.length : MX.length;
-    const extra = D.P.rune.fresh === 'missing' ? COLLECT_COST : 0;
-    D.pendingAnalysis = Object.assign({}, r, { mode: 'precise', model: MODES.precise.model, createdAt: TODAY, events: r.events || MX.map(m => ({ p1: m.a, p2: m.b, odds: Object.assign({}, m.info.odds) })), estimate: { cost: Math.round((n * MODES.precise.perEvent + extra) * 100) / 100, secs: n * 45 } });
+    const cost = rerunCost(), reason = D.ai.access(D.me, cost);
+    if (reason) { UI.toast(reason, 'alert'); return; }
+    D.pendingAnalysis = Object.assign({}, r, { mode: 'precise', model: MODES.precise.model, createdAt: TODAY, events: r.events || MX.map(m => ({ p1: m.a, p2: m.b, odds: Object.assign({}, m.info.odds) })), estimate: { cost, secs: n * 45 } });
     setup(D.pendingAnalysis); resetRun(); setHead();
     RUN.startedAt = performance.now() - (reduced() ? TOTAL_MS : 0);
+    scheduleRecord();
     UI.toast('Анализ #' + ID + ' запущен в режиме «Точный»', 'spark');
     if (reduced()) finish(root); else draw(root);
     window.scrollTo(0, 0);
@@ -1094,7 +1121,7 @@
       if ((D.pendingAnalysis || null) !== REQ) { setup(D.pendingAnalysis); resetRun(); }
       setHead();
       // при «уменьшении движения» анализ сразу показывается завершенным
-      if (RUN.startedAt == null) RUN.startedAt = performance.now() - (reduced() ? TOTAL_MS : 0);
+      if (RUN.startedAt == null) { RUN.startedAt = performance.now() - (reduced() ? TOTAL_MS : 0); scheduleRecord(); }
       if (!RUN.done && performance.now() - RUN.startedAt >= TOTAL_MS) finish(root);
       else draw(root);
     },
