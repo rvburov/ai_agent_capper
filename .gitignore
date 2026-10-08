@@ -23,6 +23,9 @@ node_modules/
 # Логи
 *.log
 
+# Снимок Redis, если redis-server запущен из папки репозитория
+dump.rdb
+
 # Данные старого бота — личные, в git не хранятся
 legacy/telegram-bot/Tennis-Analytics/Игроки/
 legacy/telegram-bot/Tennis-Analytics/Ставки/История-ставок.json

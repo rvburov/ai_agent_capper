@@ -1,8 +1,24 @@
-"""Сборка маршрутов. Новый раздел: файл в app/api/routes/ и строка здесь."""
+"""Сборка маршрутов /api. Новый раздел: файл в app/api/routes/ и строка здесь.
+
+Разделы этапа 1 уже подключены (auth, me, settings, admin), исполнители заполняют
+свои файлы в routes/ и этот файл не правят.
+Ответ с ошибкой у всех маршрутов один (ErrorOut), он описан в OpenAPI как 4XX.
+"""
+
+from typing import Any
 
 from fastapi import APIRouter
 
-from app.api.routes import health
+from app.api.routes import admin, auth, health, me, settings
+from app.schemas.common import ErrorOut
 
-api_router = APIRouter()
+ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    "4XX": {"model": ErrorOut, "description": "Ошибка: {error: {code, message}}"},
+}
+
+api_router = APIRouter(responses=ERROR_RESPONSES)
 api_router.include_router(health.router)
+api_router.include_router(auth.router)
+api_router.include_router(me.router)
+api_router.include_router(settings.router)
+api_router.include_router(admin.router)

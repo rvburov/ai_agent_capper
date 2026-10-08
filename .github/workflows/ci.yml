@@ -21,6 +21,34 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # Тесты создают свою базу через служебную базу postgres и применяют миграции Alembic
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: capper
+          POSTGRES_PASSWORD: capper
+          POSTGRES_DB: capper
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U capper"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CAPPER_DATABASE_URL: postgresql+asyncpg://capper:capper@localhost:5432/capper
+      CAPPER_TEST_ADMIN_DATABASE_URL: postgresql://capper:capper@localhost:5432/postgres
+      CAPPER_REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
