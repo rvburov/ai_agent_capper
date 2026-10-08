@@ -33,6 +33,19 @@ ai_agent_capper/
 
 Подробнее — в [backend/README.md](backend/README.md) и [frontend/README.md](frontend/README.md).
 
+## Запуск у себя
+
+Сервера пока нет (решение Р19 в [плане](docs/PLAN.md)), поэтому приложение запускается и проверяется на своем компьютере. Нужен [Docker Desktop](https://docs.docker.com/get-docker/) и bash (на Windows — Git Bash или WSL), свободные порты 80 и 443.
+
+```bash
+git clone https://github.com/rvburov/ai_agent_capper.git
+cd ai_agent_capper
+bash deploy/local.sh up                                # первый раз 5–10 минут
+bash deploy/local.sh admin you@example.com "Имя"       # администратор, пароль спросит
+```
+
+Затем откройте https://localhost (браузер предупредит о сертификате — это нормально для своего компьютера), войдите и настройте 2FA в приложении-аутентификаторе. Остальные команды — `bash deploy/local.sh` без параметров: импорт истории старого бота, бэкап, логи, остановка (`down`, данные сохраняются) и полная очистка (`wipe`). Пароли и ключи скрипт создает сам в `deploy/.env.local`, в git они не попадают.
+
 ## Быстрый старт для разработки
 
 ```bash
