@@ -101,6 +101,13 @@ class TotpConfirmIn(BaseModel):
     totp_code: TotpCodeStr
 
 
+class AdminActionIn(BaseModel):
+    """Блокировка и завершение сеансов: код 2FA нужен, только если цель — администратор
+    (с угнанным сеансом без телефона нельзя по одному отключить других администраторов)."""
+
+    totp_code: TotpCodeStr | None = None
+
+
 class UserDeleteIn(BaseModel):
     """Удаление участника (Р15): email участника для подтверждения и код 2FA."""
 

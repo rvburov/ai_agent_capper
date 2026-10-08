@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     login_pending_minutes: int = 5
     invite_days: int = 7
     reset_code_hours: int = 24
+    # Сколько хешей пароля Argon2 (64 МиБ каждый) считается одновременно. Обычно число
+    # vCPU сервера; остальные проверки пароля ждут очереди (app/core/security/passwords.py)
+    password_hash_slots: int = 2
 
     # Адреса и сети прокси (Caddy) через запятую, которым приложение верит в
     # X-Forwarded-For и X-Forwarded-Proto (ProxyHeadersMiddleware в create_app)

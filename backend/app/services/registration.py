@@ -78,6 +78,8 @@ async def register(
     # заблокированной все это время незачем
     if await _find_invite(db, code_hash, email, lock=False) is None:
         raise AppError(400, "auth.invite_invalid")
+    # Соединение с БД возвращается в пул на время HIBP и хеширования
+    await db.rollback()
     await check_new_password(password)
     password_hash = await hash_password_async(password)
 
@@ -177,6 +179,8 @@ async def reset_password(
     code_hash = hash_code(code, RESET_PREFIX)
     if await _find_reset(db, code_hash, email, lock=False) is None:
         raise AppError(400, "auth.reset_invalid")
+    # Соединение с БД возвращается в пул на время HIBP и хеширования
+    await db.rollback()
     await check_new_password(new_password)
     password_hash = await hash_password_async(new_password)
 

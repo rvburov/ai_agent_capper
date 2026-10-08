@@ -24,6 +24,8 @@ def create_engine(url: str | None = None, *, echo: bool = False) -> AsyncEngine:
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,
+        # Параметры запросов (хеши паролей, email, IP) не попадают в текст ошибок и в логи
+        hide_parameters=True,
     )
 
 

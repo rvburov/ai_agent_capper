@@ -4,7 +4,7 @@ import httpx
 import pytest
 from argon2 import PasswordHasher
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.core.security import passwords
 from app.core.security.passwords import (
@@ -43,6 +43,29 @@ async def test_async_helpers() -> None:
     assert await passwords.verify_password_async(hashed, "async password 1")
     assert not await passwords.verify_password_async(hashed, "async password 2")
     await passwords.verify_dummy_async("whatever")
+
+
+async def test_hash_slots_limit_parallel_hashes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Одновременно считается не больше password_hash_slots хешей (по 64 МиБ). Нет места
+    дольше HASH_WAIT_SECONDS — 503 common.busy, а не растущая очередь в памяти."""
+    hashed = passwords.hash_password("slot password 1")
+    monkeypatch.setattr(passwords, "HASH_WAIT_SECONDS", 0.2)
+    slots = passwords._semaphore()
+    taken = 0
+    while not slots.locked():
+        await slots.acquire()
+        taken += 1
+    try:
+        assert taken == get_settings().password_hash_slots
+        with pytest.raises(AppError) as exc:
+            await passwords.verify_password_async(hashed, "slot password 1")
+        assert exc.value.status_code == 503 and exc.value.code == "common.busy"
+        with pytest.raises(AppError):
+            await passwords.verify_dummy_async("slot password 1")
+    finally:
+        for _ in range(taken):
+            slots.release()
+    assert await passwords.verify_password_async(hashed, "slot password 1")
 
 
 @pytest.mark.parametrize(

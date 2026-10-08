@@ -4,14 +4,14 @@
 
 ## Запуск для разработки
 
-Нужны Python 3.12 или новее, PostgreSQL 16 и Redis 7.
+Нужны Python 3.12 или новее, PostgreSQL 18 и Redis 8 — те же версии, что на сервере (`deploy/docker-compose.yml`) и в CI.
 
 PostgreSQL и Redis проще всего поднять в Docker:
 
 ```bash
 docker run -d --name capper-postgres -p 5432:5432 \
-  -e POSTGRES_USER=capper -e POSTGRES_PASSWORD=capper -e POSTGRES_DB=capper postgres:16
-docker run -d --name capper-redis -p 6379:6379 redis:7
+  -e POSTGRES_USER=capper -e POSTGRES_PASSWORD=capper -e POSTGRES_DB=capper postgres:18
+docker run -d --name capper-redis -p 6379:6379 redis:8
 ```
 
 Если PostgreSQL свой, нужна роль `capper` с правом `CREATEDB` (тесты создают временные базы) и база `capper`, которой она владеет.
@@ -23,6 +23,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install --require-hashes -r requirements-dev.lock   # те же версии, что в CI
 pip install --no-deps -e .
 alembic upgrade head               # схема БД
+python -m app.admin.cli create-admin --email you@example.com --name "Имя"   # первый администратор
 uvicorn app.main:app --reload      # документация API: http://localhost:8000/api/docs
 ```
 
@@ -48,7 +49,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-server-header
 | `requirements.lock` | все, что нужно приложению | образ Docker, проверка схемы API в CI frontend |
 | `requirements-dev.lock` | то же плюс pytest, ruff, mypy, версии общих пакетов те же | CI backend, разработка |
 
-Ставится всегда в два шага: `pip install --require-hashes -r <lock-файл>`, затем сам пакет без зависимостей `pip install --no-deps -e .`. С хешами pip не поставит другую версию или подмененный файл, а набор пакетов на сервере, в CI и у разработчика один и тот же. В CI после установки идет `pip check`: он упадет, если lock-файл отстал от `pyproject.toml` (нового пакета нет или версия ниже границы).
+Ставится всегда в два шага: `pip install --require-hashes -r <lock-файл>`, затем сам пакет без зависимостей `pip install --no-deps -e .`. С хешами pip не поставит другую версию или подмененный файл, а набор пакетов на сервере, в CI и у разработчика один и тот же. В CI после установки идет `pip check`, для каждого lock-файла свой: job backend ставит `requirements-dev.lock`, job frontend — `requirements.lock`. Он упадет, если lock-файл отстал от `pyproject.toml` (нового пакета нет или версия ниже границы). `pip check` сверяет то, что стоит в окружении, с метаданными пакета, а их обновляет только `pip install --no-deps -e .`: без него правка `pyproject.toml` не видна.
 
 Lock-файлы собирает [uv](https://docs.astral.sh/uv/) 0.11 или новее (`pip install uv`). Сборка общая для Linux, macOS и Windows (`--universal`), хеши — для файлов всех платформ.
 
@@ -57,10 +58,10 @@ Lock-файлы собирает [uv](https://docs.astral.sh/uv/) 0.11 или н
 ```bash
 uv pip compile pyproject.toml --universal --generate-hashes -o requirements.lock
 uv pip compile pyproject.toml --extra dev --universal --generate-hashes -c requirements.lock -o requirements-dev.lock
-pip install --require-hashes -r requirements-dev.lock && pip check
+pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e . && pip check
 ```
 
-Уже записанные версии uv не меняет, только дописывает новое.
+Уже записанные версии uv не меняет, только дописывает новое. Третья команда проверяет `requirements-dev.lock`. `requirements.lock` проверяет CI (job frontend ставит только его) или чистое окружение: `python -m venv /tmp/lock-check`, в нем те же два шага с `requirements.lock` и `pip check`.
 
 **Обновить версии.** В первую команду добавить `--upgrade-package <пакет>` (один пакет) или `--upgrade` (все), вторую запустить как есть: она возьмет новые версии из `requirements.lock`. Инструменты разработки (`ruff`, `mypy`, `pytest`) обновляются флагом `--upgrade-package` во второй команде. После обновления pydantic или FastAPI — `npm run gen:api` во `frontend/`: от них зависит схема OpenAPI, и CI сверяет `openapi.json` и `src/api/schema.d.ts` с кодом. Изменения проверяются полным прогоном (раздел «Проверки») и коммитятся вместе: `pyproject.toml`, оба lock-файла и, если менялись, файлы схемы.
 
@@ -87,6 +88,17 @@ pytest
 Тесты создают свою базу `capper_test_<pid>_<случайное>` через служебную базу `postgres` (`CAPPER_TEST_ADMIN_DATABASE_URL`, по умолчанию `postgresql://capper:capper@localhost:5432/postgres`) и подключаются к ней на том же сервере с той же учетной записью. Они применяют к базе миграции и удаляют ее в конце. Базу прогона, который убили (SIGTERM, SIGKILL), удаляет следующий запуск. Ключи Redis — со своим префиксом. Поэтому тесты можно запускать одновременно в нескольких терминалах. Фикстуры описаны в `tests/conftest.py`, типы для тестов — в `tests/support.py`.
 
 Асинхронные тесты — `pytest-asyncio` в режиме `auto`: достаточно `async def test_...`.
+
+## Команды терминала и воркер
+
+```bash
+python -m app.admin.cli --help          # create-admin, reset-code, reset-2fa, set-role, unblock, set-admin-key
+python -m app.admin.cli reset-code --email member@example.com
+python -m app.workers.main              # фоновые задачи arq и расписание (нужен Redis)
+python -m app.db.migrate                # alembic upgrade head, как сервис migrate в compose
+```
+
+Команды терминала пишут в журнал действий с пометкой «терминал» и работают на чистой базе после `alembic upgrade head`. В Docker-стеке те же команды — `bash deploy/local.sh cli <команда> ...` на своем компьютере и `docker compose exec api python -m app.admin.cli ...` на сервере (`deploy/README.md`).
 
 ## Схема API для фронтенда
 
@@ -118,13 +130,15 @@ backend/
 │   ├── api/           HTTP-слой: router.py собирает routes/<раздел>.py
 │   ├── schemas/       схемы Pydantic: что API принимает и отдает
 │   ├── services/      бизнес-логика: сеансы, банк, ставки, лимиты ИИ, приглашения, уведомления
-│   ├── db/            base.py, session.py, models/ — модели SQLAlchemy по разделам
+│   ├── db/            base.py, session.py, migrate.py (сервис migrate), models/ — модели
+│   │                  SQLAlchemy по разделам
 │   ├── agent/         конвейер Claude: разбор текста, новости, анализ, учет стоимости
 │   ├── prompts/       промпты в markdown с номером версии
 │   ├── ml/            Эло, базовая модель, калибровка, метрики, бэктест
 │   ├── ingest/        загрузчики данных: архив Сакманна, tennis-data.co.uk, история старого бота
 │   ├── workers/       фоновые задачи arq и расписание
-│   ├── admin/         команды терминала (cli.py) и логика кабинета администратора
+│   ├── admin/         команды терминала (cli.py); логика кабинета администратора — в services/
+│   │                  (admin_users, access_codes, admin_confirm, admin_key)
 │   └── locales/       тексты сервера (ошибки, уведомления, журнал), ru.json
 └── tests/             тесты pytest: conftest.py (фикстуры), support.py (типы и помощники)
 ```

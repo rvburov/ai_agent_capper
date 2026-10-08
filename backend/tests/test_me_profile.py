@@ -149,6 +149,12 @@ async def test_patch_me_touches_only_own_profile(
     assert (await bob.get("/api/me")).json()["tz"] == "Europe/Helsinki"
 
 
+async def test_recovery_codes_status_requires_session(client: httpx2.AsyncClient) -> None:
+    response = await client.get("/api/me/recovery-codes")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "auth.not_authenticated"
+
+
 async def test_recovery_codes_status(
     make_client: ClientFactory,
     make_user: UserFactory,

@@ -18,6 +18,7 @@ from app.db.models import (
     AiLimit,
     Analysis,
     LoginEvent,
+    Notification,
     RecoveryCode,
     TrustedDevice,
     User,
@@ -226,13 +227,18 @@ async def test_block_last_active_admin_is_refused(make_user: UserFactory, db: As
 
 
 async def test_two_admins_blocking_each_other_leave_one_admin(
-    make_client: ClientFactory, make_user: UserFactory, login: LoginFn, db: AsyncSession
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    totp_code: TotpCodeFn,
+    db: AsyncSession,
 ) -> None:
     first = await admin_signed_in(make_client, make_user, login)
     second = await admin_signed_in(make_client, make_user, login)
+    first_code, second_code = await totp_code(first.user), await totp_code(second.user)
     responses = await asyncio.gather(
-        first.client.post(f"/api/admin/users/{second.id}/block"),
-        second.client.post(f"/api/admin/users/{first.id}/block"),
+        first.client.post(f"/api/admin/users/{second.id}/block", json={"totp_code": first_code}),
+        second.client.post(f"/api/admin/users/{first.id}/block", json={"totp_code": second_code}),
     )
     codes = sorted(r.status_code for r in responses)
     assert codes in ([200, 401], [200, 409])
@@ -260,7 +266,8 @@ async def test_role_change_requires_totp(
     wrong = "000000" if good != "000000" else "111111"
     response = await admin.client.post(url, json={"role": "admin", "totp_code": wrong})
     assert response.status_code == 403
-    assert error_code(response) == "admin.totp_required"
+    assert error_code(response) == "admin.totp_invalid"
+    assert response.json()["error"]["attempts_left"] == admin_confirm.CONFIRM_MAX_FAILURES - 1
     missing = await admin.client.post(url, json={"role": "admin"})
     assert missing.status_code == 422
     assert (await _user(db, member.id)).role == "member"
@@ -303,21 +310,69 @@ async def test_cannot_demote_last_admin(
     assert response.json()["role"] == "member"
 
 
-async def test_totp_confirm_rate_limited(
+async def test_wrong_totp_codes_end_admin_session(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    totp_code: TotpCodeFn,
+    db: AsyncSession,
+) -> None:
+    """Подбор кода с угнанного сеанса: пятый неверный код подряд завершает сеанс,
+    владельцу — уведомление. Другой сеанс того же администратора работает."""
+    admin = await admin_signed_in(make_client, make_user, login)
+    other = await login(await make_client("10.0.0.8"), admin.user)
+    member = await make_user()
+    url = f"/api/admin/users/{member.id}/role"
+    good = await totp_code(admin.user)
+    wrong = "000000" if good != "000000" else "111111"
+    limit = admin_confirm.CONFIRM_MAX_FAILURES
+    for i in range(1, limit):
+        response = await admin.client.post(url, json={"role": "admin", "totp_code": wrong})
+        assert response.status_code == 403
+        assert error_code(response) == "admin.totp_invalid"
+        assert response.json()["error"]["attempts_left"] == limit - i
+    response = await admin.client.post(url, json={"role": "admin", "totp_code": wrong})
+    assert response.status_code == 401
+    assert error_code(response) == "auth.too_many_codes"
+    assert (await admin.client.get("/api/me")).status_code == 401
+    assert (await _user(db, member.id)).role == "member"
+    notes = list(
+        await db.scalars(
+            select(Notification).where(
+                Notification.user_id == admin.id, Notification.kind == "login_failures"
+            )
+        )
+    )
+    assert [n.params.get("variant") for n in notes] == ["admin_confirm"]
+    assert notes[0].params["ip"] == ADMIN_IP
+
+    # Счетчик у сеанса свой: другой сеанс администратора подтверждает действие
+    response = await other.post(
+        url, json={"role": "admin", "totp_code": await totp_code(admin.user)}
+    )
+    assert response.status_code == 200, response.text
+
+
+async def test_parallel_wrong_totp_codes_checked_at_most_limit(
     make_client: ClientFactory, make_user: UserFactory, login: LoginFn, totp_code: TotpCodeFn
 ) -> None:
+    """Параллельные запросы не проверят больше CONFIRM_MAX_FAILURES кодов: лишние
+    завершают сеанс без проверки кода."""
     admin = await admin_signed_in(make_client, make_user, login)
     member = await make_user()
     url = f"/api/admin/users/{member.id}/role"
     good = await totp_code(admin.user)
     wrong = "000000" if good != "000000" else "111111"
-    for _ in range(admin_confirm.TOTP_CONFIRM_LIMIT):
-        response = await admin.client.post(url, json={"role": "admin", "totp_code": wrong})
-        assert response.status_code == 403
-    response = await admin.client.post(url, json={"role": "admin", "totp_code": good})
-    assert response.status_code == 429
-    assert error_code(response) == "admin.totp_rate_limited"
-    assert response.json()["error"]["retry_after"] > 0
+    responses = await asyncio.gather(
+        *(
+            admin.client.post(url, json={"role": "admin", "totp_code": wrong})
+            for _ in range(admin_confirm.CONFIRM_MAX_FAILURES + 3)
+        )
+    )
+    codes = [error_code(r) for r in responses]
+    assert codes.count("admin.totp_invalid") <= admin_confirm.CONFIRM_MAX_FAILURES - 1
+    assert "auth.too_many_codes" in codes
+    assert (await admin.client.get("/api/me")).status_code == 401
 
 
 async def test_correct_totp_does_not_count_as_failure(
@@ -326,7 +381,13 @@ async def test_correct_totp_does_not_count_as_failure(
     admin = await admin_signed_in(make_client, make_user, login)
     member = await make_user()
     url = f"/api/admin/users/{member.id}/role"
-    for i in range(admin_confirm.TOTP_CONFIRM_LIMIT + 2):
+    good = await totp_code(admin.user)
+    wrong = "000000" if good != "000000" else "111111"
+    # Верный код обнуляет счетчик неверных: ошибки не копятся между действиями
+    for _ in range(admin_confirm.CONFIRM_MAX_FAILURES - 1):
+        response = await admin.client.post(url, json={"role": "admin", "totp_code": wrong})
+        assert response.status_code == 403
+    for i in range(admin_confirm.CONFIRM_MAX_FAILURES + 2):
         role = "admin" if i % 2 == 0 else "member"
         response = await admin.client.post(
             url, json={"role": role, "totp_code": await totp_code(admin.user)}
@@ -352,6 +413,39 @@ async def test_revoke_sessions(
     [entry] = await audit_entries(db, "sessions_revoke")
     assert entry.details == {"sessions_revoked": 2}
     assert entry.target_user_id == member.id
+
+
+async def test_block_and_end_sessions_of_admin_require_totp(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    totp_code: TotpCodeFn,
+    db: AsyncSession,
+) -> None:
+    """С угнанным сеансом без телефона нельзя по одному отключить других администраторов:
+    блокировка администратора и завершение его сеансов — с кодом 2FA."""
+    admin = await admin_signed_in(make_client, make_user, login)
+    other = await signed_in(make_client, make_user, login, role="admin")
+    sessions_url = f"/api/admin/users/{other.id}/sessions/revoke"
+    block_url = f"/api/admin/users/{other.id}/block"
+
+    for url in (sessions_url, block_url):
+        response = await admin.client.post(url)
+        assert response.status_code == 403
+        assert error_code(response) == "admin.totp_required"
+        response = await admin.client.post(url, json={"totp_code": None})
+        assert error_code(response) == "admin.totp_required"
+    assert await _sessions_open(db, other.id) == 1
+    assert (await _user(db, other.id)).status == "active"
+
+    response = await admin.client.post(
+        sessions_url, json={"totp_code": await totp_code(admin.user)}
+    )
+    assert response.status_code == 204
+    assert await _sessions_open(db, other.id) == 0
+    response = await admin.client.post(block_url, json={"totp_code": await totp_code(admin.user)})
+    assert response.status_code == 200
+    assert response.json()["status"] == "blocked"
 
 
 # --- сброс 2FA ---
@@ -388,7 +482,7 @@ async def test_reset_two_factor_for_member(
     wrong = "000000" if good != "000000" else "111111"
     response = await admin.client.post(url, json={"totp_code": wrong})
     assert response.status_code == 403
-    assert error_code(response) == "admin.totp_required"
+    assert error_code(response) == "admin.totp_invalid"
     assert (await _user(db, member.id)).totp_enabled is True
 
     response = await admin.client.post(url, json={"totp_code": good})

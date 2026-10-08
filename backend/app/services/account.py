@@ -110,15 +110,21 @@ async def forget_device(db: AsyncSession, *, user_id: int, device_id: int) -> No
 
 
 async def list_login_events(
-    db: AsyncSession, user_id: int, *, limit: int, now: datetime | None = None
+    db: AsyncSession,
+    user_id: int,
+    *,
+    limit: int,
+    results: Sequence[str] | None = None,
+    now: datetime | None = None,
 ) -> Sequence[LoginEvent]:
-    """Попытки входа пользователя за 90 дней, новые сверху."""
+    """Попытки входа пользователя за 90 дней, новые сверху. results — только с таким
+    результатом (None — все)."""
     since = (now or sessions.utcnow()) - timedelta(days=LOGIN_EVENTS_DAYS)
+    stmt = select(LoginEvent).where(LoginEvent.user_id == user_id, LoginEvent.at > since)
+    if results:
+        stmt = stmt.where(LoginEvent.result.in_(results))
     rows = await db.execute(
-        select(LoginEvent)
-        .where(LoginEvent.user_id == user_id, LoginEvent.at > since)
-        .order_by(LoginEvent.at.desc(), LoginEvent.id.desc())
-        .limit(min(limit, MAX_LIST_LIMIT))
+        stmt.order_by(LoginEvent.at.desc(), LoginEvent.id.desc()).limit(min(limit, MAX_LIST_LIMIT))
     )
     return rows.scalars().all()
 
@@ -168,7 +174,7 @@ async def reissue_recovery_codes(
             raise AppError(400, "auth.invalid_code")
         await notify_failures(
             db,
-            user,
+            user_id=user.id,
             reason="recovery_codes",
             ip=client.ip,
             device=device_label(client.user_agent) or t("devices.unknown"),

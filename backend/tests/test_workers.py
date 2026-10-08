@@ -3,14 +3,17 @@
 и проверка здоровья для healthcheck."""
 
 import asyncio
+import inspect
 import os
 import sys
 from datetime import UTC, datetime, timedelta
 
 import arq.connections
 import arq.constants
+import arq.cron
 import arq.jobs
 import arq.worker
+from arq.jobs import Job, JobStatus
 from arq.worker import async_check_health, create_worker
 from redis.asyncio import Redis
 from sqlalchemy import func, select
@@ -227,6 +230,35 @@ def test_arq_keys_use_redis_prefix(settings: Settings) -> None:
         for name, value in vars(arq.constants).items()
         if isinstance(value, str) and value.startswith("arq:")
     ]
+    # Очередь по умолчанию в параметрах функций arq Python вычислил при импорте arq: она
+    # тоже с префиксом, и новых параметров с ключами без префикса не появилось
+    queue_defaults = _arq_key_defaults()
+    assert set(queue_defaults) >= {
+        "arq.jobs.Job.__init__(_queue_name)",
+        "arq.connections.ArqRedis.__init__(default_queue_name)",
+        "arq.connections.create_pool(default_queue_name)",
+        "arq.worker.Worker.__init__(queue_name)",
+    }
+    assert set(queue_defaults.values()) == {f"{prefix}arq:queue"}
+
+
+def _arq_key_defaults() -> dict[str, str]:
+    """Строковые значения по умолчанию с «arq:» у параметров функций и методов arq."""
+    found: dict[str, str] = {}
+    for module in (arq.connections, arq.jobs, arq.worker, arq.cron):
+        for obj in vars(module).values():
+            if getattr(obj, "__module__", None) != module.__name__:
+                continue
+            if inspect.isclass(obj):
+                funcs = [item for item in vars(obj).values() if inspect.isfunction(item)]
+            else:
+                funcs = [obj] if inspect.isfunction(obj) else []
+            for function in funcs:
+                for param in inspect.signature(function).parameters.values():
+                    if isinstance(param.default, str) and "arq:" in param.default:
+                        name = f"{module.__name__}.{function.__qualname__}({param.name})"
+                        found[name] = param.default
+    return found
 
 
 async def _check_health_cli() -> int:
@@ -260,14 +292,17 @@ async def test_worker_runs_queued_job_and_reports_health(
     try:
         job = await pool.enqueue_job("cleanup_auth_records", _job_id=f"test-{new_token()}")
         assert job is not None
-        # Задача ждет в очереди с префиксом приложения
+        # Задача ждет в очереди с префиксом приложения; Job по id (как будет искать статус
+        # анализа API) видит ее там без явного имени очереди
         assert await redis.zscore(WorkerSettings.queue_name, job.job_id) is not None
+        assert await Job(job.job_id, pool).status() == JobStatus.queued
         await worker.main()
         assert await job.result(timeout=10, poll_delay=0.05) == {
             "sessions": 0,
             "trusted_devices": 0,
             "login_events": 1,
         }
+        assert await Job(job.job_id, pool).status() == JobStatus.complete
         # Воркер отметился в Redis: healthcheck контейнера проходит
         assert await _check_health_cli() == 0
         assert (

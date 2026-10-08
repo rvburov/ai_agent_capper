@@ -14,6 +14,7 @@ from app.core.cookies import clear_cookie, set_cookie
 from app.core.deps import CurrentAuth, CurrentUser, DbSession, RedisClient
 from app.schemas.me import (
     LoginEventOut,
+    LoginResult,
     MeOut,
     NotificationOut,
     NotificationsOut,
@@ -105,10 +106,15 @@ async def end_other_sessions(auth: CurrentAuth, db: DbSession) -> Response:
 
 @router.get("/login-events")
 async def login_events(
-    user: CurrentUser, db: DbSession, limit: ListLimit = 50
+    user: CurrentUser,
+    db: DbSession,
+    limit: ListLimit = 50,
+    result: Annotated[list[LoginResult] | None, Query()] = None,
 ) -> list[LoginEventOut]:
-    """Журнал входов за 90 дней, новые сверху."""
-    rows = await account_service.list_login_events(db, user.id, limit=limit)
+    """Журнал входов за 90 дней, новые сверху. result (можно несколько раз) — только
+    такие попытки: по ok, bad_totp и bad_recovery интерфейс ищет подозрительный вход,
+    и тысячи неудачных паролей от чужих людей его не вытеснят."""
+    rows = await account_service.list_login_events(db, user.id, limit=limit, results=result)
     return [LoginEventOut.from_row(row) for row in rows]
 
 

@@ -126,3 +126,24 @@ def test_models_dataclasses_and_objects_are_scrubbed() -> None:
 def test_uvicorn_color_message_is_dropped() -> None:
     event = {"event": "Started server process [1]", "color_message": "\x1b[36m%d\x1b[0m"}
     assert "color_message" not in drop_color_message(None, "info", event)
+
+
+def test_sql_parameters_in_db_errors_are_hidden() -> None:
+    """Текст ошибки SQLAlchemy: параметры запроса (хеш пароля, email) в лог не попадают.
+    Движок прячет их сам (hide_parameters), фильтр логов — вторая линия защиты."""
+    from sqlalchemy.exc import DBAPIError
+
+    from app.db.session import create_engine
+
+    argon = "$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHQ$aGFzaGhhc2hoYXNo"
+    error = DBAPIError(
+        "UPDATE users SET password_hash=$1 WHERE users.id = $2",
+        (argon, 7),
+        Exception("timeout"),
+    )
+    event = {"event": "request.failed", "exception": str(error), "note": f"hash {argon} x"}
+    rendered = json.dumps(redact_secrets(None, "error", event), ensure_ascii=False)
+    assert "argon2id$v=19" not in rendered
+    assert "UPDATE users SET password_hash" in rendered
+    assert f"[parameters: {REDACTED}]" in rendered
+    assert create_engine("postgresql+asyncpg://u:p@localhost/db").sync_engine.hide_parameters

@@ -19,6 +19,7 @@ deploy/backup/crontab) и до утра в Европе.
 import argparse
 from collections.abc import Sequence
 from datetime import UTC
+from types import FunctionType
 from typing import Any
 
 import arq.connections
@@ -55,17 +56,48 @@ _ARQ_KEY_NAMES = (
 )
 _ARQ_MODULES = (arq.constants, arq.connections, arq.jobs, arq.worker)
 _ARQ_DEFAULT_KEYS = {name: str(getattr(arq.constants, name)) for name in _ARQ_KEY_NAMES}
+# Параметры, у которых очередь по умолчанию — значение константы на момент импорта arq
+# (Python вычисляет его при определении функции): Job(job_id, pool) без них искал бы
+# задачу в очереди без префикса и для ждущей задачи отвечал not_found
+_ARQ_QUEUE_PARAMS: tuple[tuple[object, str], ...] = (
+    (arq.jobs.Job.__init__, "_queue_name"),
+    (arq.connections.ArqRedis.__init__, "default_queue_name"),
+    (arq.connections.create_pool, "default_queue_name"),
+    (arq.worker.Worker.__init__, "queue_name"),
+)
+
+
+def _set_param_default(func: object, param: str, value: str) -> None:
+    """Новое значение параметра по умолчанию: именованный после * — в __kwdefaults__,
+    обычный — в __defaults__ (они выровнены по последним параметрам)."""
+    if not isinstance(func, FunctionType):
+        raise TypeError(f"{func!r}: ожидается функция")
+    kwdefaults = func.__kwdefaults__ or {}
+    if param in kwdefaults:
+        func.__kwdefaults__ = {**kwdefaults, param: value}
+        return
+    names = func.__code__.co_varnames[: func.__code__.co_argcount]
+    defaults = func.__defaults__ or ()
+    index = names.index(param) - (len(names) - len(defaults)) if param in names else -1
+    if index < 0:
+        raise ValueError(f"{func.__qualname__}: нет параметра {param} со значением по умолчанию")
+    func.__defaults__ = (*defaults[:index], value, *defaults[index + 1 :])
 
 
 def apply_redis_prefix(prefix: str) -> None:
     """Ключи arq с префиксом приложения: capper:arq:job:<id>, capper:arq:result:<id> и т. д.
-    Действует на весь процесс (воркер или API); повторный вызов с тем же префиксом ничего
-    не меняет. Проверка, что ни один ключ не ушел без префикса, — tests/test_workers.py:
-    после обновления arq она покажет, если в нем появились новые ключи."""
+    Меняются константы модулей и очередь по умолчанию в параметрах Job, ArqRedis,
+    create_pool и Worker. Действует на весь процесс (воркер или API); повторный вызов с тем
+    же префиксом ничего не меняет. Проверка, что ни один ключ не ушел без префикса, —
+    tests/test_workers.py: после обновления arq она покажет, если в нем появились новые
+    ключи или параметры."""
     for module in _ARQ_MODULES:
         for name, default in _ARQ_DEFAULT_KEYS.items():
             if hasattr(module, name):
                 setattr(module, name, prefix + default)
+    queue_name = prefix + _ARQ_DEFAULT_KEYS["default_queue_name"]
+    for func, param in _ARQ_QUEUE_PARAMS:
+        _set_param_default(func, param, queue_name)
 
 
 def make_queue_name(settings: Settings) -> str:
@@ -79,8 +111,8 @@ apply_redis_prefix(get_settings().redis_prefix)
 
 async def create_queue_pool(settings: Settings | None = None) -> ArqRedis:
     """Соединение для постановки задач: та же очередь и те же ключи, что у воркера.
-    Job(job_id, pool) для уже поставленной задачи — с _queue_name=make_queue_name(settings):
-    иначе arq ищет ее в очереди без префикса."""
+    Статус уже поставленной задачи — Job(job_id, pool): очередь по умолчанию у Job тоже
+    с префиксом (apply_redis_prefix)."""
     settings = settings or get_settings()
     apply_redis_prefix(settings.redis_prefix)
     return await create_pool(

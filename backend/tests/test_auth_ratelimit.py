@@ -2,10 +2,14 @@
 лимит неудач 2FA аккаунта, уведомление владельцу и журнал входов."""
 
 import httpx2
+import pytest
+from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import AppError
 from app.db.models import LoginEvent, Notification
+from app.services import auth
 from tests.helpers_auth import code_step, full_login, make_invite, make_reset_code, password_step
 from tests.support import ClientFactory, TotpCodeFn, UserFactory
 
@@ -86,6 +90,57 @@ async def test_unknown_email_behaves_the_same(
     assert events == [("bad_password", "password")] * 5 + [("rate_limited", "password")]
     total = await db.execute(select(func.count()).select_from(Notification))
     assert total.scalar_one() == 0
+
+
+async def test_rejections_write_one_journal_row_per_pause(
+    make_client: ClientFactory, make_user: UserFactory, db: AsyncSession
+) -> None:
+    """Зная только email, журнал владельца отказами 429 не заполнить: на паузу пары —
+    одна строка rate_limited, остальные отказы только считаются."""
+    member = await make_user()
+    attacker = await make_client("10.0.0.67")
+    for _ in range(5):
+        assert (await password_step(attacker, member, password=WRONG)).status_code == 401
+    # 14 отказов: общий лимит IP (20 в минуту) еще не наступил, отказывает пауза пары
+    for _ in range(14):
+        _assert_locked(await password_step(attacker, member, password=WRONG))
+    events = await _events(db, member.id)
+    assert events == [("bad_password", "password")] * 5 + [("rate_limited", "password")]
+
+    # Общий лимит IP: тоже одна строка на окно
+    flood = await make_client("10.0.0.68")
+    for n in range(20):
+        await flood.post("/api/auth/login", json={"email": f"u{n}@example.com", "password": WRONG})
+    for _ in range(10):
+        _assert_locked(await password_step(flood, member, password=WRONG))
+    events = await _events(db, member.id)
+    assert events.count(("rate_limited", "password")) == 2
+
+
+async def test_login_releases_db_connection_while_hashing(
+    make_user: UserFactory, db: AsyncSession, redis: Redis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Пока считается хеш пароля (и ждет места), соединение с БД не занято: поток
+    входов с выдуманными email не исчерпает пул."""
+    seen: list[bool] = []
+
+    async def fake_verify(*_args: object) -> bool:
+        seen.append(db.in_transaction())
+        return False
+
+    monkeypatch.setattr(auth, "verify_password_async", fake_verify)
+    monkeypatch.setattr(auth, "verify_dummy_async", fake_verify)
+    member = await make_user()
+    for email in (member.email, "nobody@example.com"):
+        with pytest.raises(AppError):
+            await auth.login_with_password(
+                db,
+                redis,
+                email=email,
+                password=WRONG,
+                client=auth.ClientInfo(ip="10.0.0.69", user_agent=None),
+            )
+    assert seen == [False, False]
 
 
 async def test_general_ip_limit(make_client: ClientFactory, make_user: UserFactory) -> None:

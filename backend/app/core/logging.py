@@ -58,6 +58,10 @@ _INLINE_SECRETS = (
     re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._\-]+"),
     # Пароль в адресе подключения: postgresql://user:pass@host
     re.compile(r"(://[^:/@\s]+:)[^@\s]+(@)"),
+    # Параметры SQL в тексте ошибки SQLAlchemy: хеши паролей, email, IP. Движок создается
+    # с hide_parameters=True, это вторая линия защиты
+    re.compile(r"(\[parameters: ).*?(\])(?=\n|$)", re.DOTALL),
+    re.compile(r"\$argon2(?:id|i|d)\$[^\s'\",)\]]+"),
 )
 
 
@@ -73,7 +77,9 @@ def is_sensitive_field(name: str) -> bool:
 def _scrub_text(value: str) -> str:
     value = _INLINE_SECRETS[0].sub("sk-ant-" + REDACTED, value)
     value = _INLINE_SECRETS[1].sub(r"\1" + REDACTED, value)
-    return _INLINE_SECRETS[2].sub(r"\1" + REDACTED + r"\2", value)
+    value = _INLINE_SECRETS[2].sub(r"\1" + REDACTED + r"\2", value)
+    value = _INLINE_SECRETS[3].sub(r"\1" + REDACTED + r"\2", value)
+    return _INLINE_SECRETS[4].sub("$argon2id$" + REDACTED, value)
 
 
 def _scrub(value: Any, depth: int = 0) -> Any:

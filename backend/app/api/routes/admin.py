@@ -4,16 +4,26 @@
 поэтому любой маршрут здесь без сеанса отвечает 401, участнику — 403 (это проверяет
 параметризованный тест по всем маршрутам роутера). Р14: ставок, банка и стратегии
 участников здесь нет.
-Опасные действия (роль, сброс 2FA, удаление, приглашение администратора) требуют в теле
-totp_code — текущий код 2FA администратора.
+Опасные действия (роль, сброс 2FA, удаление, приглашение администратора, блокировка
+администратора и завершение его сеансов) требуют в теле totp_code — текущий код 2FA
+администратора. Пятый неверный код подряд завершает сеанс (app/services/admin_confirm.py).
 """
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query
 
-from app.core.deps import AdminUser, ClientIp, DbSession, RedisClient, require_admin
+from app.api.routes.auth import RequestClient
+from app.core.deps import (
+    AdminUser,
+    ClientIp,
+    CurrentSession,
+    DbSession,
+    RedisClient,
+    require_admin,
+)
 from app.schemas.admin import (
+    AdminActionIn,
     AdminUserDetailOut,
     AdminUserOut,
     AuditAction,
@@ -38,6 +48,15 @@ router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(requir
 RowId = Annotated[int, Path(ge=1, le=2**63 - 1)]
 
 
+def get_confirm(redis: RedisClient, session: CurrentSession, client: RequestClient) -> TotpConfirm:
+    """Контекст подтверждения кодом 2FA: сеанс администратора и откуда пришел запрос.
+    Сам код маршрут добавляет из тела запроса (with_code)."""
+    return TotpConfirm(redis=redis, session_id=session.id, client=client)
+
+
+Confirm = Annotated[TotpConfirm, Depends(get_confirm)]
+
+
 # --- участники ---
 
 
@@ -54,8 +73,19 @@ async def get_user(db: DbSession, user_id: RowId) -> AdminUserDetailOut:
 
 
 @router.post("/users/{user_id}/block")
-async def block_user(db: DbSession, admin: AdminUser, ip: ClientIp, user_id: RowId) -> AdminUserOut:
-    return await admin_users.block_user(db, user_id, actor=admin, ip=ip)
+async def block_user(
+    db: DbSession,
+    admin: AdminUser,
+    ip: ClientIp,
+    confirm: Confirm,
+    user_id: RowId,
+    body: AdminActionIn | None = None,
+) -> AdminUserOut:
+    """Блокировка. Администратора — только с totp_code."""
+    code = body.totp_code if body is not None else None
+    return await admin_users.block_user(
+        db, user_id, actor=admin, ip=ip, confirm=confirm.with_code(code)
+    )
 
 
 @router.post("/users/{user_id}/unblock")
@@ -68,9 +98,9 @@ async def unblock_user(
 @router.post("/users/{user_id}/role")
 async def change_role(
     db: DbSession,
-    redis: RedisClient,
     admin: AdminUser,
     ip: ClientIp,
+    confirm: Confirm,
     user_id: RowId,
     body: RoleChangeIn,
 ) -> AdminUserOut:
@@ -80,35 +110,46 @@ async def change_role(
         body.role,
         actor=admin,
         ip=ip,
-        confirm=TotpConfirm(redis=redis, code=body.totp_code),
+        confirm=confirm.with_code(body.totp_code),
     )
 
 
 @router.post("/users/{user_id}/sessions/revoke", status_code=204)
-async def revoke_sessions(db: DbSession, admin: AdminUser, ip: ClientIp, user_id: RowId) -> None:
-    await admin_users.revoke_sessions(db, user_id, actor=admin, ip=ip)
+async def revoke_sessions(
+    db: DbSession,
+    admin: AdminUser,
+    ip: ClientIp,
+    confirm: Confirm,
+    user_id: RowId,
+    body: AdminActionIn | None = None,
+) -> None:
+    """Завершает все сеансы. Сеансы администратора — только с totp_code."""
+    code = body.totp_code if body is not None else None
+    await admin_users.revoke_sessions(
+        db, user_id, actor=admin, ip=ip, confirm=confirm.with_code(code)
+    )
 
 
 @router.post("/users/{user_id}/2fa-reset", status_code=204)
 async def reset_two_factor(
     db: DbSession,
-    redis: RedisClient,
     admin: AdminUser,
     ip: ClientIp,
+    confirm: Confirm,
     user_id: RowId,
     body: TotpConfirmIn,
 ) -> None:
     await admin_users.reset_two_factor(
-        db, user_id, actor=admin, ip=ip, confirm=TotpConfirm(redis=redis, code=body.totp_code)
+        db, user_id, actor=admin, ip=ip, confirm=confirm.with_code(body.totp_code)
     )
 
 
 @router.delete("/users/{user_id}", status_code=204)
 async def delete_user(
     db: DbSession,
-    redis: RedisClient,
     admin: AdminUser,
     ip: ClientIp,
+    confirm: Confirm,
     user_id: RowId,
     body: UserDeleteIn,
 ) -> None:
@@ -118,7 +159,7 @@ async def delete_user(
         confirm_email=body.confirm_email,
         actor=admin,
         ip=ip,
-        confirm=TotpConfirm(redis=redis, code=body.totp_code),
+        confirm=confirm.with_code(body.totp_code),
     )
 
 
@@ -132,14 +173,13 @@ async def list_invites(db: DbSession, status: CodeStatus | None = None) -> list[
 
 @router.post("/invites", status_code=201)
 async def create_invite(
-    db: DbSession, redis: RedisClient, admin: AdminUser, ip: ClientIp, body: InviteIn
+    db: DbSession, admin: AdminUser, ip: ClientIp, confirm: Confirm, body: InviteIn
 ) -> InviteCreatedOut:
     """Код CAP-XXXX-XXXX на 7 дней. Показывается один раз, в базе только хеш.
     Приглашение с ролью admin — только с totp_code."""
-    confirm = None
-    if body.totp_code is not None:
-        confirm = TotpConfirm(redis=redis, code=body.totp_code)
-    return await access_codes.create_invite(db, body, actor=admin, ip=ip, confirm=confirm)
+    return await access_codes.create_invite(
+        db, body, actor=admin, ip=ip, confirm=confirm.with_code(body.totp_code)
+    )
 
 
 @router.delete("/invites/{invite_id}", status_code=204)

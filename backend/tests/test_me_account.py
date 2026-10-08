@@ -39,6 +39,12 @@ async def test_login_events_journal(
     assert set(events[0]) == {"at", "ip", "device_label", "result", "method"}
 
     assert len((await browser.get("/api/me/login-events?limit=1")).json()) == 1
+    # Только выбранные результаты: по ним интерфейс ищет подозрительный вход
+    only = await browser.get(
+        "/api/me/login-events", params=[("result", "ok"), ("result", "bad_totp")]
+    )
+    assert [e["result"] for e in only.json()] == ["ok"]
+    assert (await browser.get("/api/me/login-events?result=nope")).status_code == 422
     assert (await browser.get("/api/me/login-events?limit=0")).status_code == 422
     assert (await browser.get("/api/me/login-events?limit=1000")).status_code == 422
 

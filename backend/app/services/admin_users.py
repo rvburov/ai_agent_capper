@@ -6,10 +6,10 @@
 
 actor — администратор из кабинета; None — команда терминала (журнал пишет
 source=terminal, код 2FA не нужен: доступ к серверу уже подтверждает владельца).
-Опасные действия из кабинета (смена роли, сброс 2FA, удаление) подтверждаются текущим
-кодом 2FA администратора (app/services/admin_confirm.py). Действия идут по одному
-(lock_admin_actions), поэтому проверка «последний активный администратор» не обходится
-параллельными запросами.
+Опасные действия из кабинета (смена роли, сброс 2FA, удаление, блокировка администратора
+и завершение его сеансов) подтверждаются текущим кодом 2FA администратора
+(app/services/admin_confirm.py). Действия идут по одному (lock_admin_actions), поэтому
+проверка «последний активный администратор» не обходится параллельными запросами.
 Функции-действия фиксируют транзакцию сами: действие и запись в журнал — одним commit.
 """
 
@@ -275,10 +275,16 @@ async def create_admin(
 
 
 async def block_user(
-    db: AsyncSession, user_id: int, *, actor: User | None, ip: str | None
+    db: AsyncSession,
+    user_id: int,
+    *,
+    actor: User | None,
+    ip: str | None,
+    confirm: TotpConfirm | None = None,
 ) -> AdminUserOut:
     """Блокировка: вход закрыт, сеансы завершены, действующие коды сброса отозваны.
-    Нельзя себя и последнего активного администратора."""
+    Нельзя себя и последнего активного администратора. Администратора из кабинета —
+    только с кодом 2FA: блокировка снимает права так же, как смена роли."""
     await lock_admin_actions(db)
     target = await _load_target(db, user_id)
     if actor is not None and target.id == actor.id:
@@ -286,6 +292,8 @@ async def block_user(
     if target.status == "blocked":
         return await user_out(db, target)
     await _ensure_not_last_admin(db, target)
+    if actor is not None and target.role == "admin":
+        await check_totp(db, actor, confirm)
     now = utcnow()
     target.status = "blocked"
     target.blocked_at = now
@@ -354,11 +362,19 @@ async def change_role(
 
 
 async def revoke_sessions(
-    db: AsyncSession, user_id: int, *, actor: User | None, ip: str | None
+    db: AsyncSession,
+    user_id: int,
+    *,
+    actor: User | None,
+    ip: str | None,
+    confirm: TotpConfirm | None = None,
 ) -> int:
-    """Завершает все сеансы пользователя. Возвращает их число."""
+    """Завершает все сеансы пользователя. Возвращает их число. Сеансы администратора
+    из кабинета — только с кодом 2FA."""
     await lock_admin_actions(db)
     target = await _load_target(db, user_id)
+    if actor is not None and target.role == "admin":
+        await check_totp(db, actor, confirm)
     count = await revoke_user_sessions(db, target.id)
     await write_audit(
         db,

@@ -181,7 +181,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m app.admin.cli", description=t("cli.description")
     )
-    commands = parser.add_subparsers(dest="command", required=True, metavar="<команда>")
+    commands = parser.add_subparsers(
+        dest="command", required=True, metavar=t("cli.command_metavar")
+    )
 
     def command(name: str, help_key: str) -> argparse.ArgumentParser:
         help_text = t(f"cli.help.{help_key}")

@@ -7,8 +7,8 @@ setup — новый секрет 2FA, зашифрованный AES-GCM. От�
 пароля обрывали незавершенный вход, начатый со старым паролем.
 
 Защита от подбора — app.core.ratelimit (порядок вызовов описан там). Каждая попытка
-пишется в login_events. Сервис возвращает токены для cookie в LoginOutcome, ставит
-cookie маршрут.
+пишется в login_events, отказы 429 — одной строкой на паузу или окно лимита. Сервис
+возвращает токены для cookie в LoginOutcome, ставит cookie маршрут.
 """
 
 import base64
@@ -49,8 +49,9 @@ LoginStatus = Literal["ok", "totp_required", "totp_setup_required"]
 Stage = Literal["totp", "setup"]
 CodeMethod = Literal["totp", "recovery"]
 # Повод уведомления login_failures: пауза пары (email, IP), закрытый шаг 2FA аккаунта,
-# неверные коды при перевыпуске резервных кодов в личном кабинете
-FailureReason = Literal["pair", "two_factor", "recovery_codes"]
+# неверные коды при перевыпуске резервных кодов в личном кабинете и при подтверждении
+# действий в кабинете администратора
+FailureReason = Literal["pair", "two_factor", "recovery_codes", "admin_confirm"]
 SECURITY_LINK = "/profile/security"
 
 
@@ -232,18 +233,38 @@ async def _pending_user(
 
 async def _reject_rate_limited(
     db: AsyncSession,
+    redis: Redis,
     *,
     user_id: int | None,
     client: ClientInfo,
     method: str,
     retry_after: int,
+    limit: tuple[str, ...],
     code: str = "auth.rate_limited",
 ) -> NoReturn:
-    await record_login_event(
-        db, user_id=user_id, client=client, result="rate_limited", method=method
-    )
-    await db.commit()
+    """429 без проверки пароля и кода. В login_events — одна строка rate_limited на
+    паузу или окно лимита (limit — какого именно), а не на каждый отказ: иначе тот, кто
+    знает только email, заполнил бы журнал владельца отказами и вытеснил из него следы
+    настоящей атаки."""
+    key = redis_key("rl", "logged", *limit)
+    if await redis.set(key, "1", ex=max(retry_after, 1), nx=True):
+        await record_login_event(
+            db, user_id=user_id, client=client, result="rate_limited", method=method
+        )
+        await db.commit()
     raise AppError(429, code, retry_after=retry_after)
+
+
+def _ip_limit(ip: str) -> tuple[str, ...]:
+    return ("ip", ratelimit.LOGIN_IP_RULE.scope, ratelimit.rate_limit_subject(ip))
+
+
+def _pair_limit(email: str, ip: str) -> tuple[str, ...]:
+    return ("pair", ratelimit.account_hash(email), ratelimit.rate_limit_subject(ip))
+
+
+def _account_2fa_limit(email: str) -> tuple[str, ...]:
+    return ("2fa", ratelimit.account_hash(email))
 
 
 @dataclass(frozen=True)
@@ -265,12 +286,24 @@ async def _begin_code_attempt(
     wait = await ratelimit.hit_ip_limit(redis, client.ip, ratelimit.LOGIN_IP_RULE)
     if wait:
         await _reject_rate_limited(
-            db, user_id=user.id, client=client, method=method, retry_after=wait
+            db,
+            redis,
+            user_id=user.id,
+            client=client,
+            method=method,
+            retry_after=wait,
+            limit=_ip_limit(client.ip),
         )
     pair = await ratelimit.begin_attempt(redis, user.email, client.ip)
     if pair.retry_after:
         await _reject_rate_limited(
-            db, user_id=user.id, client=client, method=method, retry_after=pair.retry_after
+            db,
+            redis,
+            user_id=user.id,
+            client=client,
+            method=method,
+            retry_after=pair.retry_after,
+            limit=_pair_limit(user.email, client.ip),
         )
     account = await ratelimit.begin_2fa_attempt(redis, user.email)
     if account.retry_after:
@@ -279,17 +312,19 @@ async def _begin_code_attempt(
         await drop_pending_login(redis, login_token)
         await _reject_rate_limited(
             db,
+            redis,
             user_id=user.id,
             client=client,
             method=method,
             retry_after=account.retry_after,
+            limit=_account_2fa_limit(user.email),
             code="auth.two_factor_locked",
         )
     return _CodeAttempts(pair=pair, account=account)
 
 
 async def notify_failures(
-    db: AsyncSession, user: User, *, reason: FailureReason, **params: str | int
+    db: AsyncSession, *, user_id: int, reason: FailureReason, **params: str | int
 ) -> None:
     """Уведомление login_failures владельцу аккаунта. Пауза пары — основной текст вида
     (notifications.login_failures.title/body), у других поводов свой текст:
@@ -297,7 +332,7 @@ async def notify_failures(
     variant = None if reason == "pair" else reason
     await notify(
         db,
-        user_id=user.id,
+        user_id=user_id,
         kind="login_failures",
         variant=variant,
         link=SECURITY_LINK,
@@ -312,7 +347,7 @@ async def notify_pair_lock(db: AsyncSession, redis: Redis, user: User, ip: str) 
     if await ratelimit.allow_failure_notice(redis, user.id):
         await notify_failures(
             db,
-            user,
+            user_id=user.id,
             reason="pair",
             ip=ip,
             count=ratelimit.MAX_FAILURES,
@@ -327,7 +362,7 @@ async def notify_two_factor_lock(db: AsyncSession, redis: Redis, user: User, ip:
     await ratelimit.allow_failure_notice(redis, user.id)  # следующая пауза пары — без уведомления
     rule = ratelimit.ACCOUNT_2FA_RULE
     await notify_failures(
-        db, user, reason="two_factor", ip=ip, count=rule.limit, minutes=rule.lock // 60
+        db, user_id=user.id, reason="two_factor", ip=ip, count=rule.limit, minutes=rule.lock // 60
     )
 
 
@@ -471,14 +506,30 @@ async def login_with_password(
     wait = await ratelimit.hit_ip_limit(redis, client.ip, ratelimit.LOGIN_IP_RULE)
     if wait:
         await _reject_rate_limited(
-            db, user_id=user_id, client=client, method="password", retry_after=wait
+            db,
+            redis,
+            user_id=user_id,
+            client=client,
+            method="password",
+            retry_after=wait,
+            limit=_ip_limit(client.ip),
         )
     attempt = await ratelimit.begin_attempt(redis, email, client.ip)
     if attempt.retry_after:
         await _reject_rate_limited(
-            db, user_id=user_id, client=client, method="password", retry_after=attempt.retry_after
+            db,
+            redis,
+            user_id=user_id,
+            client=client,
+            method="password",
+            retry_after=attempt.retry_after,
+            limit=_pair_limit(email, client.ip),
         )
 
+    # Транзакция чтения завершается, и соединение возвращается в пул, пока считается
+    # хеш пароля (с ожиданием места до 10 с): иначе поток входов с выдуманными email
+    # займет весь пул соединений. expire_on_commit=False: user остается прочитанным
+    await db.commit()
     if user is None or not user.password_hash:
         await verify_dummy_async(password)
         password_ok = False

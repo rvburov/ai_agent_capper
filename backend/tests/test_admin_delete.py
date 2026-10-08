@@ -404,7 +404,7 @@ async def test_delete_refusals(
         json={"confirm_email": "olga@example.com", "totp_code": wrong},
     )
     assert bad_code.status_code == 403
-    assert error_code(bad_code) == "admin.totp_required"
+    assert error_code(bad_code) == "admin.totp_invalid"
 
     self_delete = await _delete(admin, admin.id, admin.user.email, totp_code)
     assert self_delete.status_code == 400

@@ -6,9 +6,20 @@
 
 Хеширование занимает около 0,1 с процессора, поэтому в обработчиках запросов
 используются *_async версии: они уходят в поток и не блокируют цикл событий.
+
+Каждый хеш берет 64 МиБ памяти, поэтому одновременно считается не больше
+CAPPER_PASSWORD_HASH_SLOTS хешей (по умолчанию 2, по числу vCPU сервера). Остальные
+запросы ждут свободного места до HASH_WAIT_SECONDS, затем получают 503 common.busy:
+поток входов с выдуманными email не съест память сервера. Ждать места нужно без
+соединения с БД (сервис входа завершает транзакцию до проверки пароля), иначе такой
+поток займет весь пул соединений.
 """
 
+import asyncio
 import hashlib
+import weakref
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import cache
 
 import anyio
@@ -27,6 +38,39 @@ PASSWORD_MAX_LENGTH = 128
 HIBP_RANGE_URL = "https://api.pwnedpasswords.com/range/{prefix}"
 
 _hasher = PasswordHasher.from_parameters(profiles.RFC_9106_LOW_MEMORY)
+
+HASH_WAIT_SECONDS = 10.0
+BUSY_RETRY_AFTER_SECONDS = 5
+
+# Семафор свой у каждого цикла событий: asyncio.Semaphore привязывается к циклу
+_slots: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _semaphore() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    semaphore = _slots.get(loop)
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(max(get_settings().password_hash_slots, 1))
+        _slots[loop] = semaphore
+    return semaphore
+
+
+@asynccontextmanager
+async def _hash_slot() -> AsyncIterator[None]:
+    """Место для одного хеша Argon2. Нет места за HASH_WAIT_SECONDS — 503 common.busy."""
+    semaphore = _semaphore()
+    try:
+        async with asyncio.timeout(HASH_WAIT_SECONDS):
+            await semaphore.acquire()
+    except TimeoutError:
+        log.warning("passwords.hash_slots_busy")
+        raise AppError(503, "common.busy", retry_after=BUSY_RETRY_AFTER_SECONDS) from None
+    try:
+        yield
+    finally:
+        semaphore.release()
 
 
 def hash_password(password: str) -> str:
@@ -57,11 +101,15 @@ def _dummy_hash() -> str:
 
 
 async def hash_password_async(password: str) -> str:
-    return await anyio.to_thread.run_sync(hash_password, password)
+    async with _hash_slot():
+        return await anyio.to_thread.run_sync(hash_password, password)
 
 
 async def verify_password_async(password_hash: str | None, password: str) -> bool:
-    return await anyio.to_thread.run_sync(verify_password, password_hash, password)
+    if not password_hash:
+        return False
+    async with _hash_slot():
+        return await anyio.to_thread.run_sync(verify_password, password_hash, password)
 
 
 async def verify_dummy_async(password: str) -> None:
@@ -70,7 +118,9 @@ async def verify_dummy_async(password: str) -> None:
     Ответ занимает столько же времени, сколько для существующего аккаунта,
     и по времени нельзя узнать, есть ли такой email.
     """
-    await anyio.to_thread.run_sync(verify_password, _dummy_hash(), password)
+    dummy = _dummy_hash()
+    async with _hash_slot():
+        await anyio.to_thread.run_sync(verify_password, dummy, password)
 
 
 def validate_password_policy(password: str) -> None:

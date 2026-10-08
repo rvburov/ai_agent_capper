@@ -217,3 +217,46 @@ async def test_migration_roundtrip_and_no_drift(settings: Settings) -> None:
             sorted(actual[kind] - expected[kind]),
             sorted(expected[kind] - actual[kind]),
         )
+
+
+def _migrate_service(url: str) -> subprocess.CompletedProcess[str]:
+    """python -m app.db.migrate отдельным процессом, как сервис migrate в compose."""
+    env = {**os.environ, "CAPPER_DATABASE_URL": url}
+    return subprocess.run(
+        [sys.executable, "-m", "app.db.migrate"],
+        cwd=BACKEND_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+async def test_migrate_service_creates_schema_and_skips_newer_database(
+    settings: Settings,
+) -> None:
+    """Сервис migrate: на пустой базе создает схему (docker compose up с нуля), повторный
+    запуск ничего не делает, а базу со схемой новее кода (после отката deploy.sh) не
+    трогает и не мешает запуску api."""
+    async with _temp_database(settings, "svc") as url:
+        first = await asyncio.to_thread(_migrate_service, url)
+        assert first.returncode == 0, first.stderr[-2000:]
+        engine = create_engine(url)
+        try:
+            async with engine.connect() as conn:
+                assert await conn.run_sync(_table_names) >= EXPECTED_TABLES
+                head = await conn.scalar(text("SELECT version_num FROM alembic_version"))
+            again = await asyncio.to_thread(_migrate_service, url)
+            assert again.returncode == 0, again.stderr[-2000:]
+
+            async with engine.begin() as conn:
+                await conn.execute(text("UPDATE alembic_version SET version_num = '9999_future'"))
+            newer = await asyncio.to_thread(_migrate_service, url)
+            assert newer.returncode == 0, newer.stderr[-2000:]
+            assert "9999_future" in newer.stderr
+            async with engine.connect() as conn:
+                kept = await conn.scalar(text("SELECT version_num FROM alembic_version"))
+            assert kept == "9999_future" and head != kept
+        finally:
+            await engine.dispose()

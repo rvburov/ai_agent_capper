@@ -71,7 +71,8 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["app", "tests"]
+# Миграции — по путям, а не пакетом: папка alembic не должна заслонять библиотеку alembic
+files = ["app", "tests", "alembic/env.py", "alembic/versions"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]

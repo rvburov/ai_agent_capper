@@ -135,7 +135,7 @@ async def test_admin_invite_requires_totp(
         url, json={"email": "boss@example.com", "role": "admin", "totp_code": wrong}
     )
     assert bad.status_code == 403
-    assert error_code(bad) == "admin.totp_required"
+    assert error_code(bad) == "admin.totp_invalid"
     malformed = await admin.client.post(
         url, json={"email": "boss@example.com", "role": "admin", "totp_code": "12ab"}
     )
