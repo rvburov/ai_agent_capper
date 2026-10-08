@@ -1,13 +1,16 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
-// В разработке запросы /api уходят на FastAPI (uvicorn на порту 8000).
+// В разработке запросы /api уходят на FastAPI: по умолчанию uvicorn на порту 8000,
+// другой адрес — переменной CAPPER_API_URL (например, для сквозных тестов). vite preview берет тот же прокси.
+const apiUrl = process.env.CAPPER_API_URL ?? 'http://localhost:8000';
+
 // Тесты (vitest) — в jsdom, файлы *.test.ts(x) рядом с кодом.
 export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/api': apiUrl,
     },
   },
   test: {
