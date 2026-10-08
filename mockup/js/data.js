@@ -237,8 +237,8 @@
   const analysesN = aiRuns.filter(r => r.type === 'analysis').length;
   const analysesToday = aiRuns.filter(r => r.type === 'analysis' && r.at.startsWith(TODAY)).length;
   const personas = {
-    admin: { id: 'u1', name: 'Роман Буров', first: 'Роман', email: 'roman@example.com', initials: 'РБ', tz: 'Europe/Helsinki', role: 'admin', roleLabel: 'Администратор', since: '2026-06-28', aiMode: 'admin' },
-    member: { id: 'u2', name: 'Ольга Лехтинен', first: 'Ольга', email: 'olga@example.com', initials: 'ОЛ', tz: 'Europe/Helsinki', role: 'member', roleLabel: 'Участник', since: '2026-06-30', aiMode: 'admin' },
+    admin: { id: 'u1', name: 'Роман Буров', first: 'Роман', email: 'roman@example.com', initials: 'РБ', tz: 'Europe/Helsinki', role: 'admin', roleLabel: 'Администратор', since: '2026-06-28', aiMode: 'admin', bookmakers: ['bet365', 'Unibet', 'Pinnacle'] },
+    member: { id: 'u2', name: 'Ольга Лехтинен', first: 'Ольга', email: 'olga@example.com', initials: 'ОЛ', tz: 'Europe/Helsinki', role: 'member', roleLabel: 'Участник', since: '2026-06-30', aiMode: 'admin', bookmakers: ['bet365', 'Unibet', 'Pinnacle'] },
   };
   // Лимиты на ключе администратора (Р13: по умолчанию $10 в месяц, 3 анализа в день, не больше $1 за анализ)
   const LIMIT_DEFAULT = { monthly: 10, daily: 3, perAnalysis: 1 };
@@ -246,7 +246,7 @@
     { id: 'u1', name: 'Роман Буров', email: 'roman@example.com', role: 'admin', status: 'active', aiMode: 'admin', limit: null, spent: personalSpent, analyses: analysesN, todayAnalyses: analysesToday, lastLogin: '2026-10-07T08:41', twoFa: true, since: '2026-06-28', you: true, consent: true },
     { id: 'u2', name: 'Ольга Лехтинен', email: 'olga@example.com', role: 'member', status: 'active', aiMode: 'admin', limit: Object.assign({}, LIMIT_DEFAULT), spent: personalSpent, analyses: analysesN, todayAnalyses: analysesToday, lastLogin: '2026-10-07T07:55', twoFa: true, since: '2026-06-30', consent: true },
     { id: 'u3', name: 'Алексей Ковалев', email: 'alexey@example.com', role: 'member', status: 'active', aiMode: 'admin', limit: { monthly: 8, daily: 5, perAnalysis: 1 }, spent: 7.28, analyses: 33, todayAnalyses: 4, lastLogin: '2026-10-07T09:12', twoFa: true, since: '2026-07-15', consent: true },
-    { id: 'u4', name: 'Дмитрий Шульц', email: 'dmitry@example.com', role: 'member', status: 'active', aiMode: 'own', ownKey: { last4: '7Qx2', verified: '2026-09-02T18:30' }, limit: null, spent: 3.40, analyses: 15, todayAnalyses: 0, lastLogin: '2026-10-05T20:03', twoFa: true, since: '2026-08-20', consent: false, returnRequested: '2026-10-06T21:15' },
+    { id: 'u4', name: 'Дмитрий Шульц', email: 'dmitry@example.com', role: 'member', status: 'active', aiMode: 'own', ownKey: { last4: '7Qx2', verified: '2026-09-02T18:30' }, ownCap: 1, limit: null, spent: 3.40, ownSpent: 3.40, analyses: 15, todayAnalyses: 0, lastLogin: '2026-10-05T20:03', twoFa: true, since: '2026-08-20', consent: false, returnRequested: '2026-10-06T21:15' },
     { id: 'u5', name: 'Игорь Нестеров', email: 'igor@example.com', role: 'member', status: 'blocked', aiMode: 'admin', limit: Object.assign({}, LIMIT_DEFAULT), spent: 0, analyses: 0, todayAnalyses: 0, lastLogin: '2026-09-18T12:40', twoFa: false, since: '2026-09-10', blockedAt: '2026-09-20T10:05', consent: false },
   ];
   const adminKeyUsers = users.filter(u => u.aiMode === 'admin' && u.status !== 'deleted');
@@ -266,6 +266,7 @@
     // Журнал действий администратора и команд терминала (admin_audit_log)
     audit: [
       { at: '2026-10-07T09:20', actor: 'Роман Буров', action: 'reset_code', target: 'Алексей Ковалев', details: 'Код сброса пароля, 24 часа', ip: '95.216.•.•' },
+      { at: '2026-10-07T08:00', actor: 'Роман Буров', action: 'message', target: 'Все участники', details: 'В субботу с 10:00 до 10:30 (Хельсинки) сервер обновляется, анализы будут недоступны.', ip: '95.216.•.•' },
       { at: '2026-10-06T19:40', actor: 'Роман Буров', action: 'invite', target: 'maria@example.com', details: 'Участник, ключ администратора, $10 в месяц', ip: '95.216.•.•' },
       { at: '2026-10-01T10:12', actor: 'Роман Буров', action: 'key_change', target: null, details: 'Ключ администратора заменен: sk-ant-…m9Tq, проверен', ip: '95.216.•.•' },
       { at: '2026-09-20T10:05', actor: 'Роман Буров', action: 'block', target: 'Игорь Нестеров', details: 'Заблокирован, сеансы завершены', ip: '95.216.•.•' },
@@ -281,7 +282,7 @@
   const notifications = {
     admin: [
       { id: 'n1', kind: 'limit_80', icon: 'coins', tone: 'warn', title: 'Алексей Ковалев израсходовал 91% лимита', body: '$7,28 из $8 за октябрь. На 100% его анализы на вашем ключе остановятся.', at: '2026-10-07T09:31', link: '#admin-limits', read: false },
-      { id: 'n2', kind: 'ai_mode_request', icon: 'key', tone: 'info', title: 'Дмитрий Шульц просит вернуть ключ администратора', body: 'Сейчас работает на своем ключе. Вернуть можно только с вашего разрешения.', at: '2026-10-06T21:15', link: '#admin-users', read: false },
+      { id: 'n2', kind: 'ai_mode_request', icon: 'key', tone: 'info', title: 'Дмитрий Шульц просит вернуть ключ администратора', body: 'Сейчас работает на своем ключе. Вернуть можно только с вашего разрешения.', at: '2026-10-06T21:15', link: '#admin', read: false },
       { id: 'n3', kind: 'data_stale', icon: 'clock', tone: 'warn', title: 'Данные Фрица устарели', body: 'Обновлены 4 октября. Матч сегодня в 16:30 — обновите перед анализом.', at: '2026-10-07T07:00', link: '#player-fritz', read: false },
       { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: lastSettled.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + lastSettled.id + ' рассчитана', bet: lastSettled.id, at: lastSettled.date + 'T21:40', link: '#bets', read: true },
       { id: 'n5', kind: 'new_device', icon: 'device', tone: 'info', title: 'Вход с нового устройства', body: 'Safari, iPhone · Хельсинки. Если это не вы — завершите сеанс в личном кабинете.', at: '2026-10-05T19:12', link: '#profile-security', read: true },
@@ -294,10 +295,80 @@
     ],
   };
 
+  // ---------- Расход ИИ, бюджет ключа администратора и лимиты: один расчет для всех экранов ----------
+  // u.spent — расход участника за месяц на всех ключах, u.ownSpent — из него на своем ключе (вне бюджета администратора).
+  const MONTH_DAYS = 31, DAY = +TODAY.slice(8, 10);
+  const pace = v => v / DAY * MONTH_DAYS; // прогноз на месяц по темпу 1–7 октября
+  const people = () => users.filter(u => u.status !== 'deleted');
+  const keySpent = u => Math.max(0, round(u.spent - (u.ownSpent || 0), 2));
+  const usdL = n => UI.fmt.usd(n, Number.isInteger(n) ? 0 : 2); // $10, $1, но $1,50
+  const ownSpent = u => round(u.ownSpent || 0, 2);
+  const keyUsers = () => people().filter(u => u.aiMode === 'admin' || keySpent(u) > 0);
+  const limitOf = u => (u.aiMode === 'admin' && u.role !== 'admin') ? (u.limit || Object.assign({}, admin.defaults)) : null;
+  function budget() {
+    const monthly = admin.budget.monthly, shared = sharedSpent;
+    const spent = round(keyUsers().reduce((a, u) => a + keySpent(u), 0) + shared, 2);
+    // На 100% личного лимита анализы участника останавливаются, поэтому прогноз не выше лимита
+    const forecast = round(keyUsers().reduce((a, u) => {
+      const v = keySpent(u), L = limitOf(u);
+      if (u.aiMode !== 'admin' || u.status !== 'active' || (L && L.paused)) return a + v;
+      return a + (L ? Math.min(L.monthly, pace(v)) : pace(v));
+    }, 0) + pace(shared), 2);
+    return { monthly, shared, spent, forecast, left: round(Math.max(0, monthly - spent), 2), daysLeft: MONTH_DAYS - DAY, share: spent / monthly, fShare: forecast / monthly, alertAt: admin.budget.alertAt };
+  }
+  Object.defineProperty(admin.budget, 'spent', { enumerable: true, get: () => budget().spent });
+  // Можно ли запустить анализ стоимостью cost: null — можно, иначе причина для человека
+  function access(u, cost) {
+    cost = cost || 0;
+    if (u.status === 'blocked') return 'Аккаунт заблокирован администратором';
+    if (u.aiMode === 'own') {
+      if (!u.ownKey) return 'Нет ключа Claude: добавьте свой ключ в личном кабинете';
+      const cap = u.ownCap != null ? u.ownCap : admin.defaults.perAnalysis;
+      if (cost > cap) return 'Анализ дороже вашего потолка ' + usdL(cap) + ' на один анализ';
+      return null;
+    }
+    const L = limitOf(u);
+    if (L) {
+      if (L.paused) return 'Анализы на паузе — решение администратора';
+      if (u.todayAnalyses >= L.daily) return 'На сегодня анализы закончились: ' + L.daily + ' в день';
+      if (cost > L.perAnalysis) return 'Анализ дороже потолка ' + usdL(L.perAnalysis) + ' на один анализ';
+      if (keySpent(u) + cost > L.monthly) return 'Лимит на месяц исчерпан';
+    }
+    if (budget().spent + cost > admin.budget.monthly) return 'Общий бюджет ключа администратора на месяц исчерпан';
+    return null;
+  }
+  // Анализ завершен: обновляем счетчики участника (расход и число анализов)
+  function recordRun(u, cost) {
+    u.spent = round(u.spent + cost, 2);
+    if (u.aiMode === 'own') u.ownSpent = round((u.ownSpent || 0) + cost, 2);
+    u.analyses += 1; u.todayAnalyses += 1;
+  }
+  // Что ждет решения администратора: просьбы вернуть ключ и участники у лимита (значок в меню, главная, обзор кабинета)
+  function decisions() {
+    const out = [];
+    people().forEach(u => { if (u.returnRequested && u.aiMode === 'own') out.push({ kind: 'return', user: u, at: u.returnRequested }); });
+    people().forEach(u => {
+      const L = limitOf(u);
+      if (L && u.status === 'active' && keySpent(u) / L.monthly >= admin.budget.alertAt / 100) out.push({ kind: 'limit', user: u, ratio: keySpent(u) / L.monthly });
+    });
+    return out;
+  }
+  // Часовые пояса участников (США, Финляндия, Германия); смещения — на октябрь, с летним временем
+  const timezones = [
+    { value: 'Europe/Helsinki', label: 'Хельсинки (UTC+3)', city: 'Хельсинки' },
+    { value: 'Europe/Berlin', label: 'Берлин (UTC+2)', city: 'Берлин' },
+    { value: 'America/New_York', label: 'Нью-Йорк (UTC−4)', city: 'Нью-Йорку' },
+    { value: 'America/Chicago', label: 'Чикаго (UTC−5)', city: 'Чикаго' },
+    { value: 'America/Denver', label: 'Денвер (UTC−6)', city: 'Денверу' },
+    { value: 'America/Los_Angeles', label: 'Лос-Анджелес (UTC−7)', city: 'Лос-Анджелесу' },
+  ];
+
   window.DATA = {
     today: TODAY,
     demo: true,
-    personas, users, admin, notifications, LIMIT_DEFAULT,
+    personas, users, admin, notifications, LIMIT_DEFAULT, timezones, marketRef: 'Pinnacle',
+    // tzCity: «время по Хельсинки» — город в дательном падеже
+    tzCity: tz => (timezones.find(t => t.value === tz) || timezones[0]).city,
     surfaces, players, P, calendar, markets,
     bets, bankHistory,
     stats: {
@@ -308,7 +379,7 @@
     },
     allLegs, calibration, brierRolling, roiBySurface, roiByMarket, roiByOdds, roiByTotal,
     matchesToday,
-    ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, budget: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes },
+    ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, keySpent, ownSpent, keyUsers, limitOf, budget, access, recordRun, decisions, budgetHint: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes },
     lessons, strategyVersions,
     strategy: { minProb: 65, oddsMin: 1.13, oddsMax: 1.80, maxLegs: 3, totalMax: 3.24, stakeTable: [{ range: '1.28–1.70', pct: '2,5–3%' }, { range: '1.71–2.20', pct: '2–2,5%' }, { range: '2.21–3.24', pct: '1,5–2%' }] },
     playerName: id => (P[id] ? P[id].short : id),
@@ -317,5 +388,7 @@
   // Текущий пользователь зависит от демо-роли (UI.auth.role задает app.js)
   const role = () => (window.UI && UI.auth && UI.auth.role) || 'admin';
   Object.defineProperty(window.DATA, 'user', { enumerable: true, get: () => personas[role()] });
+  try { JSON.parse(localStorage.getItem('capper.currencyLog') || '[]').forEach(e => admin.audit.unshift(e)); } catch (e) { /* хранилище недоступно */ }
+  admin.audit.sort((a, b) => (a.at < b.at ? 1 : -1));
   Object.defineProperty(window.DATA, 'me', { enumerable: true, get: () => users.find(u => u.id === personas[role()].id) });
 })();

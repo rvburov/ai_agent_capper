@@ -20,9 +20,7 @@
     ] },
   ];
   // Сколько дел ждет администратора: просьбы вернуть ключ и участники у лимита
-  function adminAttention() {
-    return DATA.users.filter(u => u.returnRequested || (u.limit && u.status === 'active' && u.spent / u.limit.monthly >= DATA.admin.budget.alertAt / 100)).length;
-  }
+  function adminAttention() { return DATA.ai.decisions().length; }
   const TABS = [
     { id: 'dashboard', label: 'Главная', icon: 'home' },
     { id: 'bets', label: 'Ставки', icon: 'ticket' },

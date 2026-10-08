@@ -55,16 +55,29 @@
     EUR: { code: 'EUR', sym: '€', label: 'Евро', rate: 1 / 100.6, dec: 2 },
   };
   let curCode = 'RUB';
-  try { const c = localStorage.getItem('capper.currency'); if (CURRENCIES[c]) curCode = c; } catch (e) { /* ок */ }
+  try {
+    const c = localStorage.getItem('capper.currency'); if (CURRENCIES[c]) curCode = c;
+    // курс, который администратор ввел при смене валюты (единиц валюты за 1 рубль демо-данных)
+    const r = JSON.parse(localStorage.getItem('capper.rates') || '{}');
+    Object.keys(r).forEach(k => { if (CURRENCIES[k] && r[k] > 0) CURRENCIES[k].rate = r[k]; });
+  } catch (e) { /* хранилище недоступно — курсы по умолчанию */ }
   const currency = {
     list: CURRENCIES,
     get code() { return curCode; },
     get sym() { return CURRENCIES[curCode].sym; },
     get label() { return CURRENCIES[curCode].label; },
-    set(code) {
+    // rate — курс, введенный администратором: единиц новой валюты за 1 рубль демо-данных
+    // logEntry — запись журнала о смене, она переживает перезагрузку вместе с валютой
+    set(code, rate, logEntry) {
       if (!CURRENCIES[code]) return;
       curCode = code;
-      try { localStorage.setItem('capper.currency', code); } catch (e) { /* ок */ }
+      if (rate > 0) CURRENCIES[code].rate = rate;
+      try {
+        localStorage.setItem('capper.currency', code);
+        const r = JSON.parse(localStorage.getItem('capper.rates') || '{}'); if (rate > 0) r[code] = rate;
+        localStorage.setItem('capper.rates', JSON.stringify(r));
+        if (logEntry) { const log = JSON.parse(localStorage.getItem('capper.currencyLog') || '[]'); log.push(logEntry); localStorage.setItem('capper.currencyLog', JSON.stringify(log)); }
+      } catch (e) { /* ок */ }
     },
   };
   const curNf = () => CURRENCIES[curCode].dec ? nf2 : nf0;
