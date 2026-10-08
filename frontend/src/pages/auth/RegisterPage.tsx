@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { paths } from '../../app/paths';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
@@ -18,6 +18,7 @@ import { SetupStep } from './steps/SetupStep';
 export function RegisterPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const finishLogin = useFinishLogin();
   const [email, setEmail] = useState<string | null>(null);
@@ -32,7 +33,8 @@ export function RegisterPage() {
     <AuthLayout>
       {email === null ? (
         <InviteStep
-          focus={false}
+          // со страницы входа — фокус на код приглашения; открыли по адресу — без фокуса
+          focus={location.key !== 'default'}
           onRegistered={(value) => {
             setEmail(value);
             toast.show(t('auth.register.created'), { icon: 'check' });

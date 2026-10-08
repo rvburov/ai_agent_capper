@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
@@ -10,8 +10,12 @@ import { useToast } from '../../components';
 
 /**
  * Выход из меню пользователя: POST /api/auth/logout → страница входа, кэш TanStack очищен,
- * тост «Вы вышли из аккаунта». Кэш чистим после перехода: экраны приложения уже размонтированы
- * и не запросят данные заново.
+ * тост «Вы вышли из аккаунта». Хук живет в оболочке приложения.
+ *
+ * Кэш чистим, когда оболочка уже убрана со страницы, а не сразу после navigate(): маршрутизатор
+ * меняет экран в переходе (startTransition), и до его завершения экраны приложения еще на месте.
+ * Очищенный кэш при любой их перерисовке (тост) заставил бы useMe снова спросить /api/me — лишний
+ * запрос с ответом 401.
  */
 export function useLogout(): { logout: () => void; pending: boolean } {
   const { t } = useTranslation();
@@ -20,17 +24,25 @@ export function useLogout(): { logout: () => void; pending: boolean } {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { mutate } = request;
+  const loggedOut = useRef(false);
+
+  useEffect(
+    () => () => {
+      if (loggedOut.current) queryClient.clear();
+    },
+    [queryClient],
+  );
 
   const logout = useCallback(() => {
     mutate(undefined, {
-      onSuccess: async () => {
-        await navigate(paths.login, { replace: true });
-        queryClient.clear();
+      onSuccess: () => {
+        loggedOut.current = true;
         toast.show(t('shell.loggedOut'), { icon: 'logout' });
+        void navigate(paths.login, { replace: true });
       },
       onError: (error) => toast.show(errorMessage(error), { icon: 'alert' }),
     });
-  }, [mutate, navigate, queryClient, toast, t]);
+  }, [mutate, navigate, toast, t]);
 
   return { logout, pending: request.isPending };
 }

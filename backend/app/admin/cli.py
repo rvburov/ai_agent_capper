@@ -96,6 +96,11 @@ async def _create_admin(args: argparse.Namespace) -> None:
     email = _normalize_email(args.email)
     # Пустое имя в кабинете значит «команда терминала», поэтому имя не бывает пустым
     name = ((args.name or "").strip() or email.split("@", 1)[0])[:_NAME_MAX_LENGTH]
+    # Занятый email — до ввода пароля и запроса в базу утечек (HIBP идет по сети):
+    # ошибка видна сразу. Окончательная проверка — в create_admin под блокировкой
+    async with get_session() as db:
+        if await admin_users.find_user_by_email(db, email) is not None:
+            raise CliError("email_taken", email=email)
     password = _read_password(args.password_stdin)
     await check_new_password(password)
     password_hash = await hash_password_async(password)

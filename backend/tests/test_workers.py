@@ -1,24 +1,34 @@
 """Воркер arq: ночная очистка сеансов, доверенных устройств и журнала входов, настройки
-воркера, запуск задачи через настоящую очередь и проверка здоровья для healthcheck."""
+воркера, запуск задачи через настоящую очередь, ключи arq с префиксом CAPPER_REDIS_PREFIX
+и проверка здоровья для healthcheck."""
 
 import asyncio
 import os
 import sys
 from datetime import UTC, datetime, timedelta
 
-from arq import create_pool
+import arq.connections
+import arq.constants
+import arq.jobs
+import arq.worker
 from arq.worker import async_check_health, create_worker
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.security.tokens import hash_token, new_token
 from app.db.models import AccessCode, LoginEvent, TrustedDevice, UserSession
 from app.db.session import create_sessionmaker
 from app.services.sessions import create_session, get_active_session
 from app.workers.jobs import LOGIN_EVENTS_RETENTION, cleanup_auth_data, cleanup_auth_records
-from app.workers.main import CLEANUP_HOUR_UTC, CLEANUP_MINUTE, WorkerSettings
+from app.workers.main import (
+    CLEANUP_HOUR_UTC,
+    CLEANUP_MINUTE,
+    WorkerSettings,
+    apply_redis_prefix,
+    create_queue_pool,
+)
 from tests.support import BACKEND_DIR, UserFactory
 
 NOW = datetime(2026, 10, 8, 3, 15, tzinfo=UTC)
@@ -188,6 +198,37 @@ def test_worker_settings(settings: Settings) -> None:
     )
 
 
+def test_arq_keys_use_redis_prefix(settings: Settings) -> None:
+    """Все ключи arq в каждом модуле, который их держит, — с префиксом приложения;
+    повторный вызов не удваивает префикс."""
+    prefix = settings.redis_prefix
+    expected = {
+        "default_queue_name": f"{prefix}arq:queue",
+        "job_key_prefix": f"{prefix}arq:job:",
+        "in_progress_key_prefix": f"{prefix}arq:in-progress:",
+        "result_key_prefix": f"{prefix}arq:result:",
+        "retry_key_prefix": f"{prefix}arq:retry:",
+        "abort_jobs_ss": f"{prefix}arq:abort",
+    }
+    apply_redis_prefix(prefix)
+    for module in (arq.constants, arq.connections, arq.jobs, arq.worker):
+        for name, value in expected.items():
+            if hasattr(module, name):
+                assert getattr(module, name) == value, (module.__name__, name)
+    # В arq.constants есть все имена: новых ключей без префикса там не появилось
+    keys = {
+        name
+        for name, value in vars(arq.constants).items()
+        if isinstance(value, str) and value.startswith(prefix)
+    }
+    assert keys == set(expected)
+    assert not [
+        name
+        for name, value in vars(arq.constants).items()
+        if isinstance(value, str) and value.startswith("arq:")
+    ]
+
+
 async def _check_health_cli() -> int:
     """python -m app.workers.main --check отдельным процессом, как healthcheck контейнера.
     Настройки (база и префикс Redis этого сеанса тестов) — из окружения."""
@@ -213,14 +254,14 @@ async def test_worker_runs_queued_job_and_reports_health(
     # Воркер не запущен: отметки здоровья нет
     assert await _check_health_cli() == 1
 
-    pool = await create_pool(
-        WorkerSettings.redis_settings, default_queue_name=WorkerSettings.queue_name
-    )
+    pool = await create_queue_pool()
+    assert pool.default_queue_name == WorkerSettings.queue_name
     worker = create_worker(WorkerSettings, burst=True, handle_signals=False, poll_delay=0.05)
-    job = None
     try:
-        job = await pool.enqueue_job("cleanup_auth_records")
+        job = await pool.enqueue_job("cleanup_auth_records", _job_id=f"test-{new_token()}")
         assert job is not None
+        # Задача ждет в очереди с префиксом приложения
+        assert await redis.zscore(WorkerSettings.queue_name, job.job_id) is not None
         await worker.main()
         assert await job.result(timeout=10, poll_delay=0.05) == {
             "sessions": 0,
@@ -235,11 +276,14 @@ async def test_worker_runs_queued_job_and_reports_health(
             )
             == 0
         )
+        # Ключи этой задачи во всем Redis: остался только результат, и он с префиксом
+        # сеанса тестов (задача, повторы и отметка «в работе» удалены воркером)
+        prefix = get_settings().redis_prefix
+        job_keys = {key async for key in redis.scan_iter(match=f"*{job.job_id}*")}
+        assert job_keys == {f"{prefix}arq:result:{job.job_id}"}
+        assert await redis.exists(f"{prefix}arq:queue:health-check") == 1
     finally:
         await worker.close()
-        if job is not None:
-            # Ключи задач arq без префикса приложения: убираем за собой
-            await pool.delete(f"arq:job:{job.job_id}", f"arq:result:{job.job_id}")
         await pool.aclose()
 
     assert (await db.execute(select(func.count()).select_from(LoginEvent))).scalar_one() == 0

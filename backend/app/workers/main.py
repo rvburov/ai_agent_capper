@@ -7,8 +7,10 @@
 
 Своя точка входа вместо команды arq: логи идут через structlog с фильтром секретов
 (app.core.logging), как у API. Настройки — те же CAPPER_*: Redis из CAPPER_REDIS_URL,
-очередь с префиксом CAPPER_REDIS_PREFIX (так тесты и разные окружения в одном Redis
-не берут чужие задачи), база из CAPPER_DATABASE_URL.
+база из CAPPER_DATABASE_URL. Очередь и все ключи arq (задачи, результаты, повторы,
+отметка здоровья) — с префиксом CAPPER_REDIS_PREFIX: так тесты и разные окружения в
+одном Redis не берут чужие задачи и не видят чужих результатов. Ставить задачи в
+очередь — только через create_queue_pool() отсюда.
 
 Время в расписании — UTC. Ночная очистка в 03:15 UTC: после бэкапа (01:30 UTC,
 deploy/backup/crontab) и до утра в Европе.
@@ -19,8 +21,12 @@ from collections.abc import Sequence
 from datetime import UTC
 from typing import Any
 
-from arq import cron
-from arq.connections import RedisSettings
+import arq.connections
+import arq.constants
+import arq.jobs
+import arq.worker
+from arq import create_pool, cron
+from arq.connections import ArqRedis, RedisSettings
 from arq.cron import CronJob
 from arq.typing import StartupShutdown, WorkerCoroutine
 from arq.worker import Function, check_health, run_worker
@@ -37,9 +43,50 @@ CLEANUP_HOUR_UTC = 3
 CLEANUP_MINUTE = 15
 
 
+# Имена ключей arq. В arq 0.28 они — константы модулей (arq.constants), настройки
+# префикса нет; модули импортируют их к себе по имени, поэтому меняются копии в каждом
+_ARQ_KEY_NAMES = (
+    "default_queue_name",
+    "job_key_prefix",
+    "in_progress_key_prefix",
+    "result_key_prefix",
+    "retry_key_prefix",
+    "abort_jobs_ss",
+)
+_ARQ_MODULES = (arq.constants, arq.connections, arq.jobs, arq.worker)
+_ARQ_DEFAULT_KEYS = {name: str(getattr(arq.constants, name)) for name in _ARQ_KEY_NAMES}
+
+
+def apply_redis_prefix(prefix: str) -> None:
+    """Ключи arq с префиксом приложения: capper:arq:job:<id>, capper:arq:result:<id> и т. д.
+    Действует на весь процесс (воркер или API); повторный вызов с тем же префиксом ничего
+    не меняет. Проверка, что ни один ключ не ушел без префикса, — tests/test_workers.py:
+    после обновления arq она покажет, если в нем появились новые ключи."""
+    for module in _ARQ_MODULES:
+        for name, default in _ARQ_DEFAULT_KEYS.items():
+            if hasattr(module, name):
+                setattr(module, name, prefix + default)
+
+
 def make_queue_name(settings: Settings) -> str:
     """Очередь arq с префиксом приложения: capper:arq:queue."""
-    return f"{settings.redis_prefix}arq:queue"
+    return f"{settings.redis_prefix}{_ARQ_DEFAULT_KEYS['default_queue_name']}"
+
+
+# При импорте: WorkerSettings ниже, check_health и create_queue_pool работают уже с префиксом
+apply_redis_prefix(get_settings().redis_prefix)
+
+
+async def create_queue_pool(settings: Settings | None = None) -> ArqRedis:
+    """Соединение для постановки задач: та же очередь и те же ключи, что у воркера.
+    Job(job_id, pool) для уже поставленной задачи — с _queue_name=make_queue_name(settings):
+    иначе arq ищет ее в очереди без префикса."""
+    settings = settings or get_settings()
+    apply_redis_prefix(settings.redis_prefix)
+    return await create_pool(
+        RedisSettings.from_dsn(settings.redis_url),
+        default_queue_name=make_queue_name(settings),
+    )
 
 
 async def startup(ctx: dict[Any, Any]) -> None:

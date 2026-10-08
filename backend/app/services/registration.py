@@ -87,7 +87,9 @@ async def register(
         raise AppError(400, "auth.invite_invalid")
     now = sessions.utcnow()
     user = User(
-        email=email,
+        # Email — из приглашения, как его ввел администратор, а не как набрал участник
+        # (регистр, пробелы): в списке участников и в журнале тот же адрес, что в приглашении
+        email=invite.email or email,
         display_name=display_name.strip(),
         password_hash=password_hash,
         role=invite.role or "member",

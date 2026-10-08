@@ -273,7 +273,7 @@ export function InviteStep({ focus, onRegistered }: InviteStepProps) {
       </Button>
       <div className="login-alt">
         <span className="muted">{t('auth.register.haveAccount')}</span>
-        <Link className="login-link" to={paths.login}>
+        <Link className="login-link" to={paths.login} state={{ email: email.trim() }}>
           {t('auth.register.signIn')}
         </Link>
       </div>

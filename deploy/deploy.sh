@@ -6,10 +6,14 @@
 #   --no-pull     не обновлять базовые образы (если Docker Hub недоступен или ограничил скачивание)
 #   --no-backup   не снимать копию базы перед миграциями
 #
-# Шаги: код из origin/master (git fetch + reset) → сборка образов → PostgreSQL, Redis и
-# бэкап → копия базы (manual/) → миграции одноразовым контейнером → перезапуск сервисов →
-# проверка здоровья через Caddy с повторами. Миграции идут до перезапуска: если они
-# упали, работает прежняя версия. При сбое — логи и код ошибки 1.
+# Шаги: код из origin/master (git fetch + reset) → образы работающей версии получают тег
+# previous → сборка образов → PostgreSQL, Redis и бэкап → копия базы (manual/) → миграции
+# одноразовым контейнером → перезапуск сервисов → проверка здоровья через Caddy с
+# повторами. Миграции идут до перезапуска: если они упали, работает прежняя версия.
+# Сбой после начала сборки (сборка, миграции, здоровье) — откат: тег latest снова на
+# образах previous, код — коммит прежней версии, сервисы поднимаются на них, проверка
+# здоровья; затем логи и код ошибки 1. Миграции вниз не откатываются (deploy/README.md,
+# раздел 9).
 #
 # Ключ GitHub Actions на сервере ограничен этой командой (authorized_keys:
 # command="bash .../deploy.sh --ssh",restrict): тогда SSH_ORIGINAL_COMMAND —
@@ -19,6 +23,14 @@ set -Eeuo pipefail
 
 BRANCH=master
 HEALTH_ATTEMPTS=30
+# Сервис → образ. Перед сборкой образ, на котором работает сервис, получает тег previous;
+# worker работает на том же образе, что api
+SERVICE_IMAGES=(api:capper-backend caddy:capper-web backup:capper-backup)
+# Заполняются по ходу деплоя: домен, откуда код (git или папка как есть), прежняя версия
+DOMAIN=""
+CODE_FROM_GIT=0
+ROLLBACK_READY=0
+PREV_VERSION=""
 
 log() {
   printf '%s [deploy] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
@@ -50,13 +62,14 @@ env_value() {
 }
 
 check_health() {
-  # Проверка через Caddy по домену, как ходит браузер: TLS, прокси /api, API, база, Redis
+  # Проверка через Caddy по домену, как ходит браузер: TLS, прокси /api, API, база, Redis.
+  # Пустая версия — подойдет любая (у прежнего образа ее могло не быть)
   local domain="$1" version="$2" attempt body tls_opts=()
   [ "$domain" = localhost ] && tls_opts=(--insecure)
   for ((attempt = 1; attempt <= HEALTH_ATTEMPTS; attempt++)); do
     if body="$(curl --silent --show-error --fail --max-time 5 --noproxy '*' "${tls_opts[@]}" \
       --resolve "$domain:443:127.0.0.1" "https://$domain/api/health" 2>&1)"; then
-      if [[ "$body" == *"\"version\":\"$version\""* ]]; then
+      if [ -z "$version" ] || [[ "$body" == *"\"version\":\"$version\""* ]]; then
         log "здоров: $body"
         return 0
       fi
@@ -67,6 +80,78 @@ check_health() {
     sleep 4
   done
   return 1
+}
+
+image_version() {
+  # CAPPER_VERSION из образа backend: хеш коммита, из которого он собран
+  docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2> /dev/null \
+    | sed -n 's/^CAPPER_VERSION=//p' | head -n 1
+}
+
+remember_images() {
+  # Образы, на которых сервисы работают сейчас, получают тег previous: на них откат.
+  # Контейнера нет (сервис остановлен через down) — берется текущий тег latest
+  local pair service image container id
+  ROLLBACK_READY=1
+  for pair in "${SERVICE_IMAGES[@]}"; do
+    service="${pair%%:*}"
+    image="${pair#*:}"
+    id=""
+    container="$(compose ps --all --quiet "$service" 2> /dev/null | head -n 1 || true)"
+    if [ -n "$container" ]; then
+      id="$(docker inspect --format '{{.Image}}' "$container" 2> /dev/null || true)"
+    fi
+    [ -n "$id" ] || id="$(docker image inspect --format '{{.Id}}' "$image:latest" 2> /dev/null || true)"
+    if [ -z "$id" ]; then
+      ROLLBACK_READY=0
+      continue
+    fi
+    docker tag "$id" "$image:previous"
+  done
+  if [ "$ROLLBACK_READY" = 1 ]; then
+    PREV_VERSION="$(image_version capper-backend:previous)"
+    log "образы прежней версии ${PREV_VERSION:-(версия неизвестна)} сохранены с тегом previous"
+  else
+    log "прежних образов нет (первый деплой): при сбое откатывать некуда"
+  fi
+}
+
+rollback() {
+  # Возврат на прежнюю версию: образы previous снова latest, код — ее коммит (вместе с
+  # docker-compose.yml), сервисы поднимаются на них. Схема базы остается новой:
+  # миграции вниз не откатываются (deploy/README.md, раздел 9)
+  local pair commit
+  if [ "$ROLLBACK_READY" != 1 ]; then
+    log "откат невозможен: прежних образов нет"
+    return 1
+  fi
+  log "откат на прежнюю версию ${PREV_VERSION:-(версия неизвестна)}"
+  for pair in "${SERVICE_IMAGES[@]}"; do
+    docker tag "${pair#*:}:previous" "${pair#*:}:latest" || return 1
+  done
+  if [ "$CODE_FROM_GIT" = 1 ] && [[ "$PREV_VERSION" =~ ^[0-9a-f]{7,40}$ ]] \
+    && commit="$(git rev-parse --verify --quiet "$PREV_VERSION^{commit}")"; then
+    git reset --hard --quiet "$commit"
+  else
+    log "ВНИМАНИЕ: код в папке не возвращен (нет коммита прежней версии или --no-fetch):" \
+      "образы прежние, docker-compose.yml — из папки"
+  fi
+  if compose up -d --no-build --remove-orphans \
+    && compose up -d --no-build --wait --wait-timeout 180 api worker caddy \
+    && check_health "$DOMAIN" "$PREV_VERSION"; then
+    log "откат выполнен: работает ${PREV_VERSION:-прежняя версия}"
+    return 0
+  fi
+  show_failure
+  log "ОШИБКА: откат не помог, сайт может не работать. Логи выше; дальше — deploy/README.md," \
+    "раздел 10"
+  return 1
+}
+
+fail() {
+  # Сбой после начала сборки: откат на прежние образы, затем выход с ошибкой
+  rollback || true
+  die "$@"
 }
 
 main() {
@@ -98,6 +183,10 @@ main() {
 
   cd "$(dirname "$(readlink -f "$0")")/.."
   [ -f deploy/.env ] || die "нет deploy/.env: скопируйте deploy/.env.example и заполните"
+  # Код из git (а не правки в папке): при откате его можно вернуть на прежний коммит
+  if [ "$fetch" = 1 ] || [ "${CAPPER_DEPLOY_REEXEC:-}" = 1 ]; then
+    CODE_FROM_GIT=1
+  fi
 
   exec 9> /tmp/capper-deploy.lock
   flock -n 9 || die "деплой уже идет"
@@ -130,29 +219,31 @@ main() {
     fi
   fi
 
-  local version domain
+  local version
   version="$(git rev-parse --short=12 HEAD)"
   export CAPPER_VERSION="$version"
   log "разворачиваю $version: $(git log -1 --format=%s)"
 
   cd deploy
-  domain="$(env_value CAPPER_DOMAIN)"
-  [ -n "$domain" ] || die "в deploy/.env не задан CAPPER_DOMAIN"
+  DOMAIN="$(env_value CAPPER_DOMAIN)"
+  [ -n "$DOMAIN" ] || die "в deploy/.env не задан CAPPER_DOMAIN"
+
+  remember_images
 
   log "сборка образов"
   local build_args=()
   [ "$pull" = 1 ] && build_args+=(--pull)
-  compose build "${build_args[@]}" || die "сборка образов не удалась, работает прежняя версия"
+  compose build "${build_args[@]}" || fail "сборка образов не удалась"
   if [ "$pull" = 1 ]; then
-    compose pull --quiet postgres redis || die "не удалось скачать образы postgres и redis" \
+    compose pull --quiet postgres redis || fail "не удалось скачать образы postgres и redis" \
       "(Docker Hub недоступен? повторите с --no-pull)"
   fi
 
   log "PostgreSQL, Redis и бэкап"
-  compose up -d --wait postgres redis || die "PostgreSQL или Redis не запустились"
+  compose up -d --wait postgres redis || fail "PostgreSQL или Redis не запустились"
   # Контейнер backup — сразу с новыми образом и настройками: копию перед миграциями
   # снимает уже он. Его здоровья не ждем: прошлый сбой бэкапа не должен мешать деплою
-  compose up -d --no-deps backup || die "контейнер backup не запустился"
+  compose up -d --no-deps backup || fail "контейнер backup не запустился"
 
   if [ "$backup" = 1 ] && [ -z "$(env_value BACKUP_AGE_RECIPIENTS)" ]; then
     log "ВНИМАНИЕ: бэкапы не настроены (BACKUP_AGE_RECIPIENTS в deploy/.env)," \
@@ -160,26 +251,26 @@ main() {
   elif [ "$backup" = 1 ]; then
     log "копия базы перед миграциями"
     compose exec -T backup backup.sh --manual \
-      || die "копия базы не создана, деплой остановлен (без копии: --no-backup)"
+      || fail "копия базы не создана, деплой остановлен (без копии: --no-backup)"
   fi
 
   log "миграции"
   if ! compose run --rm --no-deps api alembic upgrade head; then
     show_failure
-    die "миграции не применились, работает прежняя версия"
+    fail "миграции не применились"
   fi
 
   log "перезапуск сервисов"
   if ! compose up -d --remove-orphans \
     || ! compose up -d --wait --wait-timeout 180 api worker caddy; then
     show_failure
-    die "сервисы не стали здоровыми за 3 минуты"
+    fail "сервисы не стали здоровыми за 3 минуты"
   fi
 
-  log "проверка https://$domain/api/health"
-  if ! check_health "$domain" "$version"; then
+  log "проверка https://$DOMAIN/api/health"
+  if ! check_health "$DOMAIN" "$version"; then
     show_failure
-    die "приложение не отвечает через Caddy. Проверьте DNS домена и сертификат:" \
+    fail "приложение не отвечает через Caddy. Проверьте DNS домена и сертификат:" \
       "docker compose logs caddy"
   fi
 

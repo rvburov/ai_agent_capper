@@ -1,9 +1,17 @@
 // Компоненты интерфейса из макета (mockup/js/ui.js). Экраны берут их отсюда.
+export {
+  ActionMenu,
+  ActionMenuList,
+  type ActionMenuEntry,
+  type ActionMenuItem,
+  type ActionMenuProps,
+} from './ActionMenu';
 export { Button, type ButtonKind, type ButtonProps, type ButtonSize } from './Button';
 export { Callout, type CalloutKind, type CalloutProps } from './Callout';
 export { Card, type CardProps } from './Card';
 export { Checkbox, type CheckboxProps } from './Checkbox';
 export { Chip, type ChipKind, type ChipProps } from './Chip';
+export { ChoiceCards, type ChoiceCardOption, type ChoiceCardsProps } from './ChoiceCards';
 export { DataTable, type DataColumn, type DataTableProps } from './DataTable';
 export { Dropdown, SEARCH_THRESHOLD, type DropdownOption, type DropdownProps } from './Dropdown';
 export { EmptyState, type EmptyStateProps } from './EmptyState';

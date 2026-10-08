@@ -95,6 +95,11 @@ export function TwoFactorCard({ me }: { me: Me }) {
   );
 }
 
+// Это устройство — первым, как «Этот сеанс» в списке сеансов; остальные — в порядке сервера
+function currentFirst(list: readonly TrustedDevice[]): TrustedDevice[] {
+  return [...list].sort((a, b) => Number(b.current) - Number(a.current));
+}
+
 /** Доверенные устройства: здесь вход не спрашивает код 2FA. «Забыть» — снова спросит. */
 function TrustedDevices() {
   const { t } = useTranslation();
@@ -131,7 +136,7 @@ function TrustedDevices() {
       {devices.data && count === 0 && <p className="xsmall muted">{t('profile.twofa.devicesEmpty')}</p>}
       {devices.data && count > 0 && (
         <div className="profile-list">
-          {devices.data.map((device) => {
+          {currentFirst(devices.data).map((device) => {
             const name = deviceName(device.device_label, unknown);
             return (
               <ProfileItem
@@ -152,10 +157,16 @@ function TrustedDevices() {
                       <span key="ip" className="profile-ip">
                         {maskIp(device.ip)}
                       </span>,
-                      device.last_used_at
-                        ? t('profile.twofa.deviceUsed', { when: lowerFirst(formatDateTime(device.last_used_at)) })
-                        : null,
-                      t('profile.twofa.deviceUntil', { date: formatDate(device.expires_at) }),
+                      device.last_used_at ? (
+                        <span key="used" className="profile-nowrap">
+                          {t('profile.twofa.deviceUsed', {
+                            when: lowerFirst(formatDateTime(device.last_used_at)),
+                          })}
+                        </span>
+                      ) : null,
+                      <span key="until" className="profile-nowrap">
+                        {t('profile.twofa.deviceUntil', { date: formatDate(device.expires_at) })}
+                      </span>,
                     ]}
                   />
                 }

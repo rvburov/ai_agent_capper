@@ -137,9 +137,11 @@ export function SessionsCard() {
                       <span key="ip" className="profile-ip">
                         {maskIp(session.ip)}
                       </span>,
-                      session.current
-                        ? t('profile.sessions.activeNow')
-                        : lowerFirst(formatDateTime(session.last_seen_at)),
+                      <span key="seen" className="profile-nowrap">
+                        {session.current
+                          ? t('profile.sessions.activeNow')
+                          : lowerFirst(formatDateTime(session.last_seen_at))}
+                      </span>,
                     ]}
                   />
                 }

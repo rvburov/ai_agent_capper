@@ -54,7 +54,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -e ".[dev]"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+      # Зависимости — точные версии с хешами из lock-файла, затем сам пакет без зависимостей.
+      # pip check: lock-файл не отстал от pyproject.toml (нет пакета или версия ниже границы)
+      - run: pip install --require-hashes -r requirements-dev.lock
+      - run: pip install --no-deps -e .
+      - run: pip check
       - run: ruff check . && ruff format --check .
       - run: mypy
       - run: pytest
@@ -78,7 +84,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -e ../backend
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      # Те же версии, что в образе backend: от pydantic и FastAPI зависит схема
+      - run: pip install --require-hashes -r ../backend/requirements.lock
+      - run: pip install --no-deps -e ../backend
       - run: npm run gen:api
       - name: Типы API актуальны
         run: |

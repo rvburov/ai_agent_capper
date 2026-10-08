@@ -1,14 +1,11 @@
-import { useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router';
 
-import { errorMessage } from '../../api/errors';
-import { useLogout } from '../../api/hooks/useLogout';
 import type { Me } from '../../api/hooks/useMe';
 import { paths } from '../../app/paths';
 import { initials } from '../../app/layout/initials';
-import { Button, Chip, Icon, Meter, Skeleton, useToast } from '../../components';
+import { Button, Chip, Icon, Meter, Skeleton } from '../../components';
+import { useLogout } from '../../features/auth/useLogout';
 import { deviceName } from '../../features/profile/devices';
 import { lastSuccessfulLogin } from '../../features/profile/loginLog';
 import type { LoginEvent } from '../../features/profile/types';
@@ -232,31 +229,12 @@ export function ProfileHero({ me, suspicious }: ProfileHeroProps) {
   );
 }
 
-/** «Выйти» в сводке (на компьютере): как пункт меню пользователя. */
+/** «Выйти» в сводке (на компьютере): тот же выход, что в меню пользователя. */
 function HeroLogout() {
   const { t } = useTranslation();
-  const logout = useLogout();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const toast = useToast();
+  const { logout, pending } = useLogout();
   return (
-    <Button
-      kind="ghost"
-      size="sm"
-      icon="logout"
-      loading={logout.isPending}
-      onClick={() =>
-        logout.mutate(undefined, {
-          onSuccess: async () => {
-            await navigate(paths.login, { replace: true });
-            // данные прежнего входа в памяти не остаются
-            queryClient.removeQueries();
-            toast.show(t('shell.loggedOut'), { icon: 'logout' });
-          },
-          onError: (error) => toast.show(errorMessage(error), { icon: 'alert' }),
-        })
-      }
-    >
+    <Button kind="ghost" size="sm" icon="logout" loading={pending} onClick={logout}>
       {t('profile.hero.logout')}
     </Button>
   );

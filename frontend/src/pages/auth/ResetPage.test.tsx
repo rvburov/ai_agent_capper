@@ -28,6 +28,20 @@ describe('сброс пароля кодом от администратора',
     await user.click(screen.getByRole('link', { name: 'Войти с новым паролем' }));
     expect(router.state.location.pathname).toBe('/login');
     expect(screen.getByLabelText('Email')).toHaveValue('anna@example.com');
+    // переход между экранами входа — смена шага: фокус сразу на пароль
+    expect(screen.getByLabelText('Пароль')).toHaveFocus();
+  });
+
+  it('открыли по адресу — без фокуса; со страницы входа — фокус на первое пустое поле', async () => {
+    mockFetch({});
+    const { router } = renderAuth('/login');
+    expect(document.body).toHaveFocus();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Email'), 'anna@example.com');
+    await user.click(screen.getByRole('link', { name: 'Забыли пароль?' }));
+    expect(router.state.location.pathname).toBe('/reset');
+    expect(screen.getByLabelText('Email аккаунта')).toHaveValue('anna@example.com');
+    expect(screen.getByLabelText('Код сброса')).toHaveFocus();
   });
 
   it('пароли не совпадают и неполный код — до сервера', async () => {

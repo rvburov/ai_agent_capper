@@ -55,6 +55,8 @@
 .profile-panel .input[readonly] { background: var(--surface-2); color: var(--fg-2); }
 .profile-section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .profile-status { font-size: var(--fs-sm); color: var(--fg-3); }
+/* как в макете: там у списка пар остается отступ браузера сверху и снизу (1em) */
+.profile-panel .kv { margin-block: 1em; }
 /* новое: длинное значение пары переносится, а не наезжает на подпись (в макете на 375 px наезжало) */
 .profile-panel .kv { grid-template-columns: minmax(min-content, auto) minmax(0, 1fr); }
 .profile-panel .kv dd { overflow-wrap: anywhere; }

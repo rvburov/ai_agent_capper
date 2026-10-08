@@ -99,6 +99,37 @@ async def test_create_admin_from_stdin(
     assert count == 1
 
 
+async def test_create_admin_checks_email_before_password_and_hibp(
+    make_user: UserFactory,
+    override_settings: SettingsOverride,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Занятый email — ошибка сразу: пароль не спрашивается, HIBP (запрос по сети)
+    не вызывается."""
+    await make_user(role="admin", email="owner@example.com")
+    override_settings(hibp_enabled=True)
+    calls: list[str] = []
+
+    def ask(prompt: str = "") -> str:
+        calls.append("getpass")
+        return PASSWORD
+
+    async def hibp(password: str) -> None:
+        calls.append("check_new_password")
+
+    monkeypatch.setattr(getpass, "getpass", ask)
+    monkeypatch.setattr(cli, "check_new_password", hibp)
+    assert await run("create-admin", "--email", "Owner@Example.com") == 1
+    err = capsys.readouterr().err
+    assert "owner@example.com" in err and "уже есть" in err
+    assert calls == []
+
+    # Свободный email: пароль дважды, затем проверка пароля
+    assert await run("create-admin", "--email", "second@example.com") == 0
+    assert calls == ["getpass", "getpass", "check_new_password"]
+
+
 async def test_create_admin_interactive_and_bad_input(
     db: AsyncSession,
     stdin: Callable[[str], None],

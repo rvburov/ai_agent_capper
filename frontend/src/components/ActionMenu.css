@@ -1,0 +1,30 @@
+/* Меню действий строки — как .adm-menu в макете (mockup/js/screens/admin.js). */
+.btn.action-menu-btn { color: var(--fg-2); }
+.btn.action-menu-btn svg { stroke-width: 3.2; width: 20px; height: 20px; }
+
+.action-menu {
+  position: fixed; z-index: 70; min-width: 260px; max-width: min(340px, calc(100vw - 24px));
+  background: var(--dd-bg); color: var(--fg); border: 1px solid var(--dd-border); border-radius: var(--r-lg);
+  box-shadow: var(--dd-shadow); padding: 6px; animation: dd-in .14s ease-out;
+}
+.action-menu-head { padding: 6px 10px 8px; font-size: var(--fs-xs); color: var(--fg-3); font-weight: 600; }
+.action-menu-list { display: flex; flex-direction: column; }
+.action-menu-item {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 10px; border: 0; background: none;
+  border-radius: var(--r-sm); color: var(--fg); text-align: left; cursor: pointer; font: inherit;
+  font-size: var(--fs-md); line-height: 1.3;
+}
+.action-menu-item svg { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--fg-2); }
+.action-menu-item:hover:not([disabled]), .action-menu-item:focus-visible { background: var(--dd-active); outline: none; }
+.action-menu-item.danger, .action-menu-item.danger svg { color: var(--bad-ink); }
+.action-menu-item[disabled] { cursor: not-allowed; color: var(--fg-3); }
+.action-menu-item[disabled] svg { color: var(--fg-3); opacity: .7; }
+.action-menu-item small { display: block; font-size: var(--fs-xs); color: var(--fg-3); margin-top: 1px; }
+.action-menu-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+
+/* шторка на телефоне: пункты крупнее, зона нажатия не меньше 48 px */
+.action-sheet { margin: -6px -8px; }
+.action-sheet .action-menu-item { min-height: 48px; padding: 12px; align-items: center; }
+.action-sheet .action-menu-item small { margin-top: 2px; }
+/* на телефоне и планшете любой пункт не ниже зоны нажатия, в том числе в списке внутри окна */
+@media (max-width: 960px) { .action-menu-item { min-height: var(--tap); align-items: center; } }

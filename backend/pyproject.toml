@@ -3,12 +3,14 @@ name = "ai-capper-backend"
 version = "0.1.0"
 description = "AI Capper: серверная часть (FastAPI)"
 requires-python = ">=3.12"
+# Здесь — нижние границы. Точные версии с хешами, по которым ставят CI и Dockerfile, —
+# requirements.lock и requirements-dev.lock: после правки списков их пересобирают (README,
+# раздел «Зависимости»). От версий pydantic и FastAPI зависит схема OpenAPI
+# (frontend/openapi.json, CI сверяет ее с кодом): их поднимаем вместе с npm run gen:api
 dependencies = [
   "fastapi>=0.143",
   "uvicorn[standard]>=0.54",
-  # От версии pydantic зависит схема OpenAPI (frontend/openapi.json, CI сверяет ее с кодом):
-  # новую минорную версию поднимаем вместе с npm run gen:api
-  "pydantic>=2.13.5,<2.14",
+  "pydantic>=2.13.5",
   "pydantic-settings>=2.15",
   "sqlalchemy[asyncio]>=2.1.4",
   "asyncpg>=0.32",

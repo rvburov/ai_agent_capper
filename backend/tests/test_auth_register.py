@@ -56,16 +56,17 @@ async def test_invite_register_setup_and_login(
         db, email="maria@example.com", ai_mode="own", limit_monthly_usd=Decimal("5")
     )
     client = await make_client()
-    # Код вводится без учета регистра и дефисов, email — без учета регистра
+    # Код вводится без учета регистра и дефисов, email — без учета регистра и пробелов
     entered = code.lower().replace("-", "")
-    registered = await client.post("/api/auth/register", json=_body(entered, "Maria@Example.com"))
+    registered = await client.post("/api/auth/register", json=_body(entered, " Maria@Example.COM "))
     assert registered.status_code == 200, registered.text
     assert registered.json() == {"status": "totp_setup_required", "user": None}
     assert set_cookie_header(registered, "login") is not None
     assert cookie_value(client, "session") is None
 
     user = (await db.execute(select(User))).scalar_one()
-    assert user.email == "Maria@Example.com"
+    # Сохраняется email из приглашения (как его ввел администратор), а не как набрал участник
+    assert user.email == "maria@example.com"
     assert user.display_name == "Мария"
     assert (user.role, user.ai_mode, user.status) == ("member", "own", "active")
     assert user.tz == "Europe/Berlin"
@@ -93,7 +94,7 @@ async def test_invite_register_setup_and_login(
     secret = data["secret"]
     uri = unquote(data["otpauth_uri"])
     assert uri.startswith("otpauth://totp/") and "issuer=AI Capper" in uri
-    assert "Maria@Example.com" in uri and secret in uri
+    assert "maria@example.com" in uri and secret in uri
     assert data["qr_svg"].lstrip().startswith("<svg")
     # Повторный вызов в том же незавершенном входе — тот же секрет
     assert (await client.post("/api/auth/2fa/setup")).json()["secret"] == secret
@@ -115,7 +116,7 @@ async def test_invite_register_setup_and_login(
     assert set_cookie_header(done, "session") is not None
     me = await client.get("/api/me")
     assert me.status_code == 200
-    assert me.json()["email"] == "Maria@Example.com"
+    assert me.json()["email"] == "maria@example.com"
 
     # В БД только хеши резервных кодов, секрет 2FA зашифрован
     stored = (await db.execute(select(RecoveryCode.code_hash))).scalars().all()
@@ -155,6 +156,18 @@ async def test_admin_invite_and_default_limits(
     limit = await db.get(AiLimit, user.id)
     assert limit is not None
     assert (limit.monthly_usd, limit.daily_analyses) == (Decimal("7.00"), 5)
+
+
+async def test_registered_email_is_taken_from_invite(
+    client: httpx2.AsyncClient, db: AsyncSession
+) -> None:
+    """В users.email — строка из приглашения как есть, а не ввод участника и не его
+    нижний регистр: так в списке участников и в журнале один и тот же адрес."""
+    code = await make_invite(db, email="Olga.Petrova@Capper.test")
+    response = await client.post("/api/auth/register", json=_body(code, "OLGA.PETROVA@capper.TEST"))
+    assert response.status_code == 200, response.text
+    user = (await db.execute(select(User))).scalar_one()
+    assert user.email == "Olga.Petrova@Capper.test"
 
 
 @pytest.mark.parametrize(

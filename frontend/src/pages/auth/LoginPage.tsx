@@ -19,16 +19,18 @@ import { TwoFactorStep } from './steps/TwoFactorStep';
 
 /** Что может прийти на /login через состояние перехода. */
 interface LoginLocationState {
-  /** Email с экрана «Пароль изменен» или «Забыли пароль?». */
+  /** Email с экранов регистрации и сброса пароля («Пароль изменен», «Вернуться ко входу»). */
   email?: unknown;
   /** Сеанс закончился, пока приложение было открыто (RequireAuth). */
   sessionEnded?: unknown;
 }
 
-function readState(state: unknown): { email: string; sessionEnded: boolean } {
+function readState(state: unknown): { email: string; fromAuth: boolean; sessionEnded: boolean } {
   const value = (typeof state === 'object' && state !== null ? state : {}) as LoginLocationState;
   return {
     email: typeof value.email === 'string' ? value.email : '',
+    // email в состоянии передают только экраны регистрации и сброса пароля
+    fromAuth: typeof value.email === 'string',
     sessionEnded: value.sessionEnded === true,
   };
 }
@@ -52,7 +54,9 @@ export function LoginPage() {
   const initial = readState(location.state);
 
   const [step, setStep] = useState<Step>('login');
-  const [moved, setMoved] = useState(false);
+  // Пришли с экрана регистрации или сброса пароля — это смена шага, как в макете: фокус на первое
+  // пустое поле. При открытии страницы по адресу и после выхода фокус не ставим
+  const [moved, setMoved] = useState(initial.fromAuth);
   const [email, setEmail] = useState(initial.email);
   const [remember, setRemember] = useState(false);
   const [loginError, setLoginError] = useState<ErrorBox>(null);

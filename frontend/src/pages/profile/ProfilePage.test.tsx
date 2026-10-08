@@ -163,6 +163,19 @@ describe('Личный кабинет: профиль', () => {
     renderProfile('/profile/notifications');
     expect(screen.getByText('Раздел появится на этапе 6')).toBeInTheDocument();
   });
+
+  it('«Выйти» в сводке: выход на сервере, страница входа, кэш очищен', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch(
+      routes(ME_MEMBER, { 'POST /api/auth/logout': () => new Response(null, { status: 204 }) }),
+    );
+    const { router, client } = renderProfile('/profile');
+    const hero = screen.getByRole('region', { name: 'Сводка аккаунта' });
+    await user.click(within(hero).getByRole('button', { name: 'Выйти' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/login'));
+    expect(calls.some((r) => r.method === 'POST' && r.url.endsWith('/api/auth/logout'))).toBe(true);
+    expect(client.getQueryData(meQueryKey)).toBeUndefined();
+  });
 });
 
 describe('Личный кабинет: безопасность', () => {

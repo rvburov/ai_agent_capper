@@ -1,12 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { api, unwrap } from '../../api/client';
 import type { Me } from '../../api/hooks/useMe';
 import { paths } from '../../app/paths';
 import { Button, Card, KeyValue, Skeleton } from '../../components';
-import { accountKeys } from '../../features/profile/keys';
+import { useAdminPeopleSummary } from '../../features/profile/useAdminPeopleSummary';
 
 /** «Доступ к аккаунту»: роль, способ входа; администратору — сколько участников и приглашений. */
 export function AccessCard({ me }: { me: Me }) {
@@ -51,18 +49,10 @@ export function AccessCard({ me }: { me: Me }) {
 /** «3 человека · 1 приглашение ждет» — только администратору (данные кабинета администратора). */
 function PeopleSummary({ me }: { me: Me }) {
   const { t } = useTranslation();
-  const users = useQuery({
-    queryKey: accountKeys.adminPeople,
-    queryFn: () => unwrap(api.GET('/api/admin/users')),
-  });
-  const invites = useQuery({
-    queryKey: accountKeys.adminInvites,
-    queryFn: () => unwrap(api.GET('/api/admin/invites', { params: { query: { status: 'active' } } })),
-  });
-  if (users.isError) return '—';
-  if (!users.data) return <Skeleton width={110} />;
-  const others = users.data.filter((u) => u.id !== me.id && u.status !== 'deleted').length;
-  const waiting = invites.data?.length ?? 0;
+  const summary = useAdminPeopleSummary(me.id);
+  if (summary.isError) return '—';
+  if (!summary.data) return <Skeleton width={110} />;
+  const { others, waiting } = summary.data;
   const text = [
     t('profile.access.peopleCount', { count: others }),
     waiting > 0 ? t('profile.access.invitesWaiting', { count: waiting }) : null,

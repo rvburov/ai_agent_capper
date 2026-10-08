@@ -10,13 +10,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
-# Зависимости отдельным слоем: он пересобирается только при правке pyproject.toml
+# Зависимости отдельным слоем: он пересобирается только при правке requirements.lock.
+# Точные версии с хешами (те же версии, что в CI): чужой или подмененный файл пакета pip
+# не поставит. Сам пакет не ставится: код лежит в /app и запускается оттуда
 FROM base AS deps
 WORKDIR /build
-COPY pyproject.toml ./
-RUN python -c "import tomllib; deps = tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']; print('\n'.join(deps))" > requirements.txt \
- && python -m venv /opt/venv \
- && /opt/venv/bin/pip install -r requirements.txt
+COPY requirements.lock ./
+RUN python -m venv /opt/venv \
+ && /opt/venv/bin/pip install --require-hashes -r requirements.lock \
+ && /opt/venv/bin/pip check
 
 FROM base
 RUN groupadd --gid 10001 capper \

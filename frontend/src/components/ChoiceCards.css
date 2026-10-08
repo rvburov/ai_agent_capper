@@ -1,0 +1,22 @@
+/* Выбор карточками — как .adm-choices в макете (mockup/js/screens/admin.js). */
+.choices {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+  margin: 0; padding: 0; border: 0; min-width: 0;
+}
+.choices.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.choices legend {
+  font-size: var(--fs-sm); font-weight: 500; color: var(--fg-2); padding: 0; margin-bottom: -4px;
+  float: left; width: 100%; grid-column: 1 / -1;
+}
+.choice {
+  position: relative; display: flex; gap: 10px; align-items: flex-start; padding: 12px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-md); cursor: pointer;
+  background: var(--surface); color: var(--fg); font: inherit; text-align: left; min-width: 0;
+}
+.choice input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.choice:hover { border-color: var(--fg-3); }
+.choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.choice b { display: block; font-weight: 600; }
+.choice small { display: block; color: var(--fg-2); font-size: var(--fs-xs); margin-top: 2px; line-height: 1.4; }
+@media (max-width: 720px) { .choices, .choices.three { grid-template-columns: minmax(0, 1fr); } }

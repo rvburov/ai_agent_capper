@@ -24,7 +24,13 @@ export function ResetPage() {
   return (
     <AuthLayout>
       {doneEmail === null ? (
-        <ResetStep initialEmail={stateEmail(location.state)} focus={false} onDone={setDoneEmail} />
+        // Переход сюда со страницы входа («Забыли пароль?») — смена шага, как в макете: фокус на
+        // первое пустое поле. При открытии страницы по адресу фокус не ставим (клавиатура телефона)
+        <ResetStep
+          initialEmail={stateEmail(location.state)}
+          focus={location.key !== 'default'}
+          onDone={setDoneEmail}
+        />
       ) : (
         <ResetDoneStep email={doneEmail} focus />
       )}
