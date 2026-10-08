@@ -329,7 +329,7 @@
     @media (max-width: 960px) { .adm-pill { min-height: 40px; padding: 4px 14px; } }
     .adm-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; border: 0; min-width: 0; }
     .adm-choices.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .adm-choices legend { font-size: var(--fs-sm); font-weight: 500; color: var(--fg-2); padding: 0; margin-bottom: 6px; float: left; width: 100%; }
+    .adm-choices legend { font-size: var(--fs-sm); font-weight: 500; color: var(--fg-2); padding: 0; margin-bottom: -4px; float: left; width: 100%; grid-column: 1 / -1; }
     .adm-choice { position: relative; display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--r-md); cursor: pointer; background: var(--surface); color: var(--fg); font: inherit; text-align: left; min-width: 0; }
     .adm-choice input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
     .adm-choice:has(input:checked), .adm-choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }

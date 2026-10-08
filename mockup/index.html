@@ -241,8 +241,11 @@ button.demo-pill:hover { filter: brightness(.97); }
 @media (max-width: 960px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar-col { display: none; }
-  .topbar { padding-inline: var(--gutter); min-height: 56px; }
-  .topbar-title h1 { font-size: var(--fs-lg); }
+  .topbar { padding-inline: var(--gutter); min-height: 56px; gap: 8px; }
+  .topbar-actions { gap: 6px; }
+  .topbar .bank-pill { padding-inline: 10px; }
+  .topbar-title h1 { font-size: 1rem; letter-spacing: -.015em; }
+  .topbar .topbar-home { display: none !important; }
   .topbar .hide-mobile { display: none !important; }
   .view { padding-inline: var(--gutter); padding-block: 16px calc(var(--tabbar-h) + 32px); gap: 16px; }
   .tabbar {

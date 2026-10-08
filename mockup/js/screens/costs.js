@@ -773,7 +773,7 @@
       h('p', { class: 'costs-hero-note' }, 'Прогноз учитывает личные лимиты: дойдя до своего, участник остановится. На ' + ALERT + '% бюджета (' + usdL(B.monthly * ALERT / 100) + ') придет уведомление, на 100% анализы на ключе администратора остановятся до вашего решения.'),
       h('div', { class: 'costs-hero-foot' },
         h('div', { class: 'costs-hero-actions' },
-          button('Бюджет и лимиты', { kind: 'secondary', size: 'sm', icon: 'sliders', href: '#admin-limits' }),
+          button('Лимиты участников', { kind: 'secondary', size: 'sm', icon: 'sliders', href: '#admin-limits' }),
           consoleBtn()),
         h('p', { class: 'costs-hero-note' }, icon('shield'), h('span', null, 'Вторая страховка — лимит трат в консоли Anthropic: он остановит расход по ключу, даже если приложение ошибется.'))));
   }

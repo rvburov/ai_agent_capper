@@ -303,7 +303,8 @@
   const keySpent = u => Math.max(0, round(u.spent - (u.ownSpent || 0), 2));
   const usdL = n => UI.fmt.usd(n, Number.isInteger(n) ? 0 : 2); // $10, $1, но $1,50
   const ownSpent = u => round(u.ownSpent || 0, 2);
-  const keyUsers = () => people().filter(u => u.aiMode === 'admin' || keySpent(u) > 0);
+  // удаленный участник остается в бюджете месяца: его расход уже был
+  const keyUsers = () => users.filter(u => (u.status !== 'deleted' && u.aiMode === 'admin') || keySpent(u) > 0);
   const limitOf = u => (u.aiMode === 'admin' && u.role !== 'admin') ? (u.limit || Object.assign({}, admin.defaults)) : null;
   // Прогноз расхода человека на месяц: на 100% личного лимита анализы останавливаются, на паузе расход не растет
   const forecastOf = u => {

@@ -159,7 +159,7 @@
     UI.modal({
       title: 'Смотреть макет как',
       body: close => { closeM = close; return h('div', { class: 'stack', style: 'gap:10px' },
-        opt('admin', 'Администратор', DATA.personas.admin.name, 'Видит кабинет администратора: участники, приглашения, ключ Claude, бюджет и лимиты, журнал.'),
+        opt('admin', 'Администратор', DATA.personas.admin.name, 'Видит раздел «Администрирование»: участники, приглашения, ключ Claude, бюджет и лимиты, журнал.'),
         opt('member', 'Участник', DATA.personas.member.name, 'Свой банк и ставки, свой лимит на ИИ или свой ключ Claude. Кабинета администратора нет.'),
         h('p', { class: 'xsmall muted', style: 'margin:0' }, 'В настоящем приложении роль задает администратор. Переключатель есть только в макете.')); },
     });
@@ -237,7 +237,7 @@
         h('button', { class: 'nav-link', type: 'button', style: 'border:0;background:none;cursor:pointer;width:100%;text-align:left', on: { click: () => UI.auth.logout() } }, icon('logout'), 'Выйти')));
 
     const topbar = h('header', { class: 'topbar' },
-      h('a', { class: 'hide-desktop', href: '#dashboard', 'aria-label': 'На главную', style: 'display:flex' }, brandMark()),
+      h('a', { class: 'hide-desktop topbar-home', href: '#dashboard', 'aria-label': 'На главную', style: 'display:flex' }, brandMark()),
       h('div', { class: 'topbar-title' }),
       h('div', { class: 'topbar-actions' },
         h('button', { class: 'demo-pill demo-role hide-mobile', type: 'button', title: 'Все цифры в макете вымышлены. Нажмите, чтобы посмотреть интерфейс другой роли', on: { click: roleSwitchModal } }, 'Макет · ' + roleLabel(), icon('chevronDown')),
@@ -296,7 +296,7 @@
     if (def.adminOnly && state.role !== 'admin') {
       // Сервер на такой запрос отвечает 403; в макете показываем, что видит участник
       view.appendChild(UI.card({ title: 'Раздел только для администратора', body: [
-        h('p', { class: 'soft' }, 'Участник не видит кабинет администратора: ни в меню, ни по прямой ссылке.'),
+        h('p', { class: 'soft' }, 'Участник не видит раздел «Администрирование»: ни в меню, ни по прямой ссылке.'),
         h('div', { class: 'row' }, button('На главную', { kind: 'primary', href: '#dashboard' }), button('Демо: смотреть как администратор', { kind: 'secondary', onClick: () => UI.auth.setRole('admin') })),
       ] }));
       return;
