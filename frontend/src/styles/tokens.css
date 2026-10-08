@@ -1,4 +1,5 @@
-/* Дизайн-токены из согласованного макета (mockup/index.html). Цвета и размеры меняются только здесь. */
+/* Дизайн-токены из согласованного макета (mockup/index.html). Цвета и размеры меняются только здесь.
+   Темы: без data-theme — как в системе (prefers-color-scheme), data-theme="light" | "dark" — выбор пользователя. */
 :root {
   --bg: #f1f4f0;
   --surface: #fcfcfb;
@@ -33,6 +34,8 @@
   --overlay: rgba(16,21,17,.42);
   --dd-bg: var(--surface); --dd-border: var(--line); --dd-active: var(--surface-2);
   --dd-shadow: 0 2px 6px rgba(16,21,17,.06), 0 18px 40px -12px rgba(16,21,17,.28);
+  --brand-ball: #e6f05a;   /* мяч в знаке AI Capper */
+  --on-bad: #ffffff;       /* текст на заливке --bad (счетчик колокольчика) */
 
   --font-display: "Geologica", "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -42,9 +45,12 @@
   --fs-xl: 1.375rem; --fs-2xl: 1.75rem; --fs-hero: 2.75rem;
   --r-sm: 6px; --r-md: 10px; --r-lg: 14px;
   --gutter: 16px;
-  --sidebar-w: 248px;
+  --sidebar-w: 272px;
   --topbar-h: 60px;
   --tabbar-h: 96px;
+  --tap: 40px;             /* минимальная зона нажатия */
+  --content-max: 1360px;   /* ширина рабочей области */
+  color-scheme: light;     /* системные элементы (флажки, прокрутка) — в цвет выбранной темы */
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {

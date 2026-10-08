@@ -87,6 +87,40 @@ async def get_active_session(
     return row[0], row[1]
 
 
+async def list_active_sessions(
+    db: AsyncSession, user_id: int, *, now: datetime | None = None
+) -> list[UserSession]:
+    """Действующие сеансы пользователя (те же условия, что у get_active_session),
+    последние по активности сверху."""
+    now = now or utcnow()
+    idle_since = now - timedelta(days=get_settings().session_idle_days)
+    rows = await db.execute(
+        select(UserSession)
+        .where(
+            UserSession.user_id == user_id,
+            UserSession.revoked_at.is_(None),
+            UserSession.expires_at > now,
+            UserSession.last_seen_at > idle_since,
+        )
+        .order_by(UserSession.last_seen_at.desc(), UserSession.id.desc())
+    )
+    return list(rows.scalars())
+
+
+async def revoke_session_by_token(
+    db: AsyncSession, token: str | None, *, now: datetime | None = None
+) -> bool:
+    """Отзывает сеанс по токену из cookie (выход, повторный вход в том же браузере)."""
+    if not token:
+        return False
+    result = await db.execute(
+        update(UserSession)
+        .where(UserSession.id_hash == hash_token(token), UserSession.revoked_at.is_(None))
+        .values(revoked_at=now or utcnow())
+    )
+    return bool(getattr(result, "rowcount", 0))
+
+
 async def touch_session(
     db: AsyncSession, session: UserSession, *, now: datetime | None = None
 ) -> bool:

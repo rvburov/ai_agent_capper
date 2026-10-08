@@ -37,11 +37,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging(json_logs=settings.env == "prod", level=settings.log_level)
+    # В prod страницы документации нет: Swagger UI грузит скрипты с CDN, их не пропускает
+    # CSP Caddy (script-src 'self'). Схему для фронтенда дает app.openapi_export без сервера
+    docs = settings.env != "prod"
     app = FastAPI(
         title="AI Capper API",
         version=settings.version,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url="/api/docs" if docs else None,
+        openapi_url="/api/openapi.json" if docs else None,
         redoc_url=None,
         lifespan=lifespan,
     )

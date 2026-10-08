@@ -1,0 +1,212 @@
+# AI Capper на сервере: веб-сервер Caddy со статикой, API, воркер, PostgreSQL, Redis и бэкапы.
+# Команды — из папки deploy/ (тогда docker compose сам читает deploy/.env):
+#   cd /opt/ai_agent_capper/deploy
+#   bash deploy.sh                                   сборка, миграции, перезапуск, проверка
+#   docker compose run --rm api alembic upgrade head миграции вручную
+#   docker compose exec api python -m app.admin.cli create-admin --email ...
+#   docker compose ps / logs -f api / exec backup backup.sh
+# Подробности — deploy/README.md. Секреты только в deploy/.env (в git не попадает).
+#
+# Миграции не запускаются при старте api: их применяет отдельный шаг (deploy.sh или
+# команда выше) до перезапуска. Если миграция упала, старая версия продолжает работать.
+#
+# Сети: edge — Caddy и API (только отсюда API верит X-Forwarded-For), backend — API,
+# воркер, PostgreSQL, Redis, бэкап. PostgreSQL и Redis наружу не открыты.
+# В edge включен IPv6: тогда docker пробрасывает IPv6-соединения в Caddy через ip6tables
+# с настоящим адресом клиента. В сети только с IPv4 их принимал бы docker-proxy, и у всех
+# клиентов по IPv6 был бы один адрес — шлюз сети, а лимиты попыток входа стали бы общими.
+
+name: capper
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: 10m
+    max-file: "5"
+
+x-backend-env: &backend-env
+  CAPPER_ENV: prod
+  CAPPER_LOG_LEVEL: ${CAPPER_LOG_LEVEL:-INFO}
+  CAPPER_DATABASE_URL: postgresql+asyncpg://capper:${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env}@postgres:5432/capper
+  CAPPER_REDIS_URL: redis://redis:6379/0
+  CAPPER_REDIS_PREFIX: "capper:"
+  CAPPER_SECRET_KEY: ${CAPPER_SECRET_KEY:?задайте CAPPER_SECRET_KEY в deploy/.env}
+  CAPPER_MASTER_KEYS: ${CAPPER_MASTER_KEYS:?задайте CAPPER_MASTER_KEYS в deploy/.env}
+  CAPPER_PUBLIC_ORIGIN: https://${CAPPER_DOMAIN:?задайте CAPPER_DOMAIN в deploy/.env}
+  CAPPER_TRUSTED_PROXIES: ${CAPPER_EDGE_SUBNET:-10.203.0.0/24},${CAPPER_EDGE_SUBNET6:-fd00:ca9e:203::/64}
+
+x-backend: &backend
+  build:
+    context: ../backend
+    args:
+      CAPPER_VERSION: ${CAPPER_VERSION:-dev}
+  image: capper-backend:latest
+  restart: unless-stopped
+  environment: *backend-env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging: *logging
+
+services:
+  caddy:
+    build:
+      context: ../frontend
+      additional_contexts:
+        deploy: .
+    image: capper-web:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      CAPPER_DOMAIN: ${CAPPER_DOMAIN:?задайте CAPPER_DOMAIN в deploy/.env}
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    depends_on: [api]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  api:
+    <<: *backend
+    # IP клиента — из X-Forwarded-For, но только от адресов сети edge (там лишь Caddy, а
+    # шлюз сети — сам сервер). Caddy не верит этому заголовку от клиента и пишет его сам
+    command:
+      - uvicorn
+      - app.main:app
+      - --host=0.0.0.0
+      - --port=8000
+      - --no-server-header
+      - --proxy-headers
+      - --forwarded-allow-ips=${CAPPER_EDGE_SUBNET:-10.203.0.0/24},${CAPPER_EDGE_SUBNET6:-fd00:ca9e:203::/64}
+    networks: [edge, backend]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)
+      interval: 15s
+      timeout: 6s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
+
+  worker:
+    <<: *backend
+    command: [python, -m, app.workers.main]
+    networks: [backend]
+    healthcheck:
+      # Воркер отмечается в Redis раз в минуту (app/workers/main.py)
+      test: [CMD, python, -m, app.workers.main, --check]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+      start_interval: 3s
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: capper
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env}
+      POSTGRES_DB: capper
+    # С версии 18 данные лежат в /var/lib/postgresql/18/docker: том подключается
+    # к /var/lib/postgresql (так переход на 19 через pg_upgrade не потребует нового тома)
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    shm_size: 256mb
+    networks: [backend]
+    healthcheck:
+      # По TCP: на время первичной настройки базы сервер слушает только сокет
+      test: [CMD-SHELL, pg_isready --host=127.0.0.1 --username=capper --dbname=capper]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+      start_interval: 1s
+    logging: *logging
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # AOF: очередь задач и лимиты попыток входа переживают перезапуск
+    command: [redis-server, --appendonly, "yes", --appendfsync, everysec]
+    volumes:
+      - redis-data:/data
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, redis-cli ping | grep -q PONG]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *logging
+
+  backup:
+    build: ./backup
+    image: capper-backup:latest
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: capper
+      PGPASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env}
+      PGDATABASE: capper
+      BACKUP_AGE_RECIPIENTS: ${BACKUP_AGE_RECIPIENTS:-}
+      BACKUP_AGE_IDENTITY: ${BACKUP_AGE_IDENTITY:-}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-6}
+      BACKUP_KEEP_MANUAL: ${BACKUP_KEEP_MANUAL:-5}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-}
+      BACKUP_S3_PROVIDER: ${BACKUP_S3_PROVIDER:-Other}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-capper}
+      BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+    volumes:
+      # Папка на диске сервера, а не том docker: docker compose down -v ее не сотрет
+      - ${BACKUP_LOCAL_DIR:-./backup/dumps}:/backups
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, /usr/local/bin/healthcheck.sh]
+      interval: 5m
+      timeout: 30s
+      retries: 1
+      start_period: 1m
+      start_interval: 5s
+    logging: *logging
+
+networks:
+  edge:
+    # false — только если в ядре сервера нет IPv6 (docker compose up сообщает
+    # "Cannot read IPv6 setup"); тогда и DNS-запись AAAA не заводить
+    enable_ipv6: ${CAPPER_EDGE_IPV6:-true}
+    ipam:
+      config:
+        - subnet: ${CAPPER_EDGE_SUBNET:-10.203.0.0/24}
+        - subnet: ${CAPPER_EDGE_SUBNET6:-fd00:ca9e:203::/64}
+  backend: {}
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:

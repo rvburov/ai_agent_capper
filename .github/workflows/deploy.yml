@@ -1,0 +1,80 @@
+name: Деплой
+
+# Разворачивает master на сервере после успешных «Проверок» (push в master) или вручную.
+# Секреты репозитория (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST          адрес сервера (IP или домен)
+#   DEPLOY_USER          пользователь деплоя на сервере (deploy)
+#   DEPLOY_SSH_KEY       секретная часть отдельного ключа ed25519 только для деплоя
+#   DEPLOY_KNOWN_HOSTS   строка "<IP>,<домен> ssh-ed25519 AAAA..." (печатает server-setup.sh);
+#                        в ней должен быть адрес из DEPLOY_HOST
+# Пока секретов нет, деплой пишет «сервер еще не настроен» и завершается успешно.
+# На сервере этот ключ может только запустить deploy.sh (deploy/README.md).
+
+on:
+  workflow_run:
+    workflows: ["Проверки"]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Деплои идут по одному, начатый не прерывается
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Сервер
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Проверить настройку сервера
+        id: config
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ] || [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ]; then
+            echo "Сервер еще не настроен: нет секретов DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS. Деплой пропущен." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Развернуть
+        if: steps.config.outputs.ready == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          # Ровно тот коммит, который прошел проверки (при ручном запуске — текущий master)
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -o pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "deploy $DEPLOY_SHA" 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+          # Коммит старше развернутого deploy.sh пропускает (перезапуск старых «Проверок»)
+          if grep -q 'деплой пропущен' "$RUNNER_TEMP/deploy.log"; then
+            echo "Коммит $DEPLOY_SHA не развернут: на сервере уже более новый" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Развернут коммит $DEPLOY_SHA" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Удалить ключ
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

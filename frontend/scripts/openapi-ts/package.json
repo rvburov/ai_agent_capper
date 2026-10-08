@@ -1,0 +1,9 @@
+{
+  "name": "ai-capper-openapi-ts",
+  "private": true,
+  "description": "Генератор типов API отдельно от приложения: openapi-typescript работает только с TypeScript 5, а приложение собирается TypeScript 7",
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

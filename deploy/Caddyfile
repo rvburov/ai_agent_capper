@@ -1,0 +1,70 @@
+# Caddy: HTTPS, статика интерфейса, /api/* на FastAPI, заголовки безопасности
+# (PLAN.md, раздел 7). Файл встраивается в образ веб-сервера (frontend/Dockerfile).
+#
+# Домен — CAPPER_DOMAIN из deploy/.env. Сертификат Let's Encrypt Caddy выпускает и
+# продлевает сам, нужны DNS-запись A на сервер и открытые порты 80 и 443.
+# CAPPER_DOMAIN=localhost — локальный сертификат от CA самого Caddy: так весь стек
+# проверяется без домена (curl -k https://localhost/api/health).
+{
+	# В контейнере некуда устанавливать локальный CA Caddy, предупреждение не нужно
+	skip_install_trust
+}
+
+{$CAPPER_DOMAIN} {
+	# Сжатие текста. Поток событий (SSE прогресса анализа) не сжимается: иначе
+	# события копились бы в буфере сжатия
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/plain*
+			header Content-Type text/javascript*
+			header Content-Type application/javascript*
+			header Content-Type application/json*
+			header Content-Type application/manifest+json*
+			header Content-Type image/svg+xml*
+		}
+	}
+
+	# defer: заголовки ставятся последними и заменяют те же заголовки от API, без дублей
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		-Server
+		defer
+	}
+
+	handle /api/* {
+		request_body {
+			max_size 5MB
+		}
+		# X-Forwarded-For Caddy ставит сам и не верит такому заголовку от клиента.
+		# API берет из него IP клиента только от адресов сети edge (docker-compose.yml)
+		reverse_proxy api:8000 {
+			# События SSE уходят в браузер сразу, без буферизации
+			flush_interval -1
+		}
+	}
+
+	# Файлы сборки Vite с хешем в имени не меняются: кэш на год
+	handle /assets/* {
+		root * /srv
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# Остальное — приложение на одной странице: неизвестный путь отдает index.html,
+	# маршрут разбирает React. index.html каждый раз сверяется с сервером
+	handle {
+		root * /srv
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

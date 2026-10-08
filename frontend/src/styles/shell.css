@@ -1,0 +1,133 @@
+/* Оболочка приложения: боковая панель на компьютере, нижние вкладки на телефоне, шапка.
+   Как в макете (mockup/index.html, раздел shell; mockup/js/app.js). */
+
+.shell { min-height: 100vh; min-height: 100dvh; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
+.sidebar-col { background: var(--surface); border-right: 1px solid var(--line); min-width: 0; }
+.sidebar {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px; padding: 18px 12px;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 18px; text-decoration: none; color: var(--fg); }
+.brand-mark { width: 34px; height: 34px; flex: none; }
+.brand-name { font-family: var(--font-display); font-weight: 700; font-size: 1.0625rem; letter-spacing: -.01em; line-height: 1.1; }
+.brand-sub { font-size: var(--fs-xs); color: var(--fg-3); }
+.nav-group-label { padding: 14px 12px 6px; }
+.nav-link {
+  display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: var(--r-md); min-height: var(--tap);
+  color: var(--fg-2); text-decoration: none; font-weight: 500; font-size: var(--fs-md);
+}
+.nav-link svg { width: 20px; height: 20px; flex: none; }
+.nav-link:hover { background: var(--surface-2); color: var(--fg); }
+.nav-link[aria-current="page"] { background: var(--accent-soft); color: var(--accent-ink); }
+.nav-link .nav-badge { margin-left: auto; }
+button.nav-link { width: 100%; border: 0; background: none; cursor: pointer; text-align: left; font: inherit; font-weight: 500; }
+.nav-link.danger { color: var(--bad-ink); }
+.sidebar-foot { margin-top: auto; padding-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+
+.skip-link { position: absolute; left: 12px; top: -60px; z-index: 200; padding: 8px 14px; border-radius: var(--r-md); background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
+.skip-link:focus { top: 12px; }
+
+.main { min-width: 0; display: flex; flex-direction: column; }
+.topbar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+  min-height: var(--topbar-h); display: flex; align-items: center; gap: 12px;
+  padding-inline: 28px; padding-block: 10px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px); -webkit-backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.topbar-title { min-width: 0; flex: 1; }
+.topbar-title h1 { font-size: var(--fs-xl); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar-title .crumbs { font-size: var(--fs-xs); color: var(--fg-3); }
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.avatar {
+  width: var(--tap); height: var(--tap); border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: var(--accent); color: var(--accent-fg); font-weight: 600; font-family: var(--font-display);
+  border: 0; cursor: pointer; text-decoration: none; font-size: var(--fs-md);
+}
+.avatar[aria-expanded="true"] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* колокольчик */
+.bell-btn { position: relative; justify-content: center; color: var(--fg); }
+.bell-btn svg { width: 21px; height: 21px; }
+.bell-badge {
+  position: absolute; top: 1px; right: 0; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px;
+  background: var(--bad); color: var(--on-bad); font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
+  box-shadow: 0 0 0 2px var(--bg); pointer-events: none;
+}
+
+/* меню пользователя (новое: в макете аватар вел сразу в личный кабинет) */
+.menu-pop {
+  position: fixed; z-index: 101; width: min(320px, calc(100vw - 24px));
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--dd-bg); color: var(--fg); border: 1px solid var(--dd-border);
+  border-radius: var(--r-lg); box-shadow: var(--dd-shadow); animation: dd-in .14s ease-out;
+}
+.menu-pop:focus { outline: none; }
+.menu-head { display: flex; align-items: center; gap: 12px; padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; min-width: 0; }
+.menu-head .avatar { cursor: default; }
+.menu-head-text { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.menu-head-text .chip { margin-top: 6px; }
+.menu-head-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.menu-head-email { font-size: var(--fs-xs); color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--tap); padding: 8px 10px;
+  border: 0; border-radius: var(--r-sm); background: none; color: var(--fg); text-align: left; cursor: pointer;
+  font: inherit; text-decoration: none;
+}
+.menu-item svg { width: 18px; height: 18px; flex: none; color: var(--fg-2); }
+.menu-item:hover, .menu-item:focus-visible { background: var(--dd-active); outline: none; }
+.menu-item.danger, .menu-item.danger svg { color: var(--bad-ink); }
+.menu-section { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 4px 0; }
+.menu-section .segmented { align-self: flex-start; background: var(--dd-active); }
+
+.view {
+  width: 100%; max-width: var(--content-max); margin: 0 auto; padding-inline: 28px; padding-block: 24px 48px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.view:focus { outline: none; }
+
+.tabbar { display: none; }
+
+@media (max-width: 960px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .sidebar-col { display: none; }
+  .topbar { padding-inline: var(--gutter); min-height: 56px; gap: 8px; }
+  .topbar-actions { gap: 6px; }
+  .topbar-title h1 { font-size: 1rem; letter-spacing: -.015em; }
+  .topbar .hide-mobile { display: none !important; }
+  .view { padding-inline: var(--gutter); padding-block: 16px calc(var(--tabbar-h) + 32px); gap: 16px; }
+  .tabbar {
+    min-height: var(--tabbar-h);
+    display: grid; grid-template-columns: repeat(5, 1fr); align-items: end;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--line);
+  }
+  .tab {
+    display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; min-height: 48px;
+    font-size: 11px; font-weight: 500; color: var(--fg-3); text-decoration: none; background: none; border: 0; cursor: pointer;
+    font-family: inherit;
+  }
+  .tab svg { width: 22px; height: 22px; }
+  .tab[aria-current="page"] { color: var(--accent-ink); }
+  .tab-primary { position: relative; top: -10px; }
+  .tab-primary .tab-plus {
+    width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--accent); color: var(--accent-fg); box-shadow: var(--shadow);
+  }
+  .tab-primary .tab-plus svg { width: 26px; height: 26px; }
+  /* то, что прокручивается в поле зрения (фокус с клавиатуры), не уходит под нижнюю панель */
+  html { scroll-padding-bottom: calc(var(--tabbar-h) + 16px); }
+}
+
+/* полноэкранные состояния: проверка сеанса, ошибка загрузки */
+.full-state { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: var(--gutter); color: var(--fg-2); }
+.full-state .card { width: min(440px, 100%); }
+
+/* экраны без оболочки: вход, регистрация, сброс пароля */
+.auth-page { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px var(--gutter); }
+.auth-box { width: min(440px, 100%); display: flex; flex-direction: column; gap: 20px; }
+.auth-box .brand { padding: 0; }

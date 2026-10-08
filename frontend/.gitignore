@@ -1,0 +1,5 @@
+# Отчеты Playwright и vitest
+test-results/
+playwright-report/
+blob-report/
+coverage/

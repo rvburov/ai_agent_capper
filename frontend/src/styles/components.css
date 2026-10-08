@@ -1,0 +1,302 @@
+/* Стили компонентов src/components: те же классы и вид, что в макете (mockup/index.html).
+   Новое относительно макета отмечено комментарием. */
+
+/* ---------- карточка ---------- */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); min-width: 0; display: flex; flex-direction: column; }
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 18px 0; flex-wrap: wrap; }
+.card-head-text { min-width: 0; }
+.card-head h3 { font-size: var(--fs-md); }
+.card-sub { font-size: var(--fs-sm); color: var(--fg-3); margin-top: 2px; }
+.card-body { padding: 14px 18px 18px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.card-body.flush { padding: 10px 0 0; }
+.card-foot { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 720px) {
+  .card-head { padding: 14px 14px 0; }
+  .card-body { padding: 12px 14px 14px; }
+  .card-foot { padding: 12px 14px; }
+}
+
+/* ---------- показатель ---------- */
+.stat { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; min-width: 0; }
+.stat-label { font-size: var(--fs-sm); color: var(--fg-2); display: flex; align-items: center; gap: 6px; }
+.stat-label svg { width: 16px; height: 16px; flex: none; }
+.stat-value { font-family: var(--font-display); font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
+.stat-value.hero { font-size: var(--fs-hero); }
+.stat-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; flex-wrap: wrap; }
+.delta { font-size: var(--fs-sm); font-weight: 600; display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.delta svg { width: 14px; height: 14px; }
+.delta.up-good, .delta.down-good { color: var(--good-ink); }
+.delta.up-bad, .delta.down-bad { color: var(--bad-ink); }
+.delta.flat { color: var(--fg-3); }
+.stat-hint { font-size: var(--fs-xs); color: var(--fg-3); }
+
+/* ---------- метки ---------- */
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px;
+  font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; background: var(--surface-2); color: var(--fg-2);
+  border: 1px solid transparent;
+}
+.chip svg { width: 13px; height: 13px; }
+.chip.good { background: var(--good-soft); color: var(--good-ink); }
+.chip.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.chip.serious { background: var(--serious-soft); color: var(--serious-ink); }
+.chip.bad { background: var(--bad-soft); color: var(--bad-ink); }
+.chip.info { background: var(--info-soft); color: var(--info-ink); }
+.chip.accent { background: var(--accent-soft); color: var(--accent-ink); }
+.chip.outline { background: transparent; border-color: var(--line-strong); color: var(--fg-2); }
+.chip .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+/* ---------- кнопки ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px;
+  border-radius: var(--r-md); border: 1px solid transparent; font-weight: 600; font-size: var(--fs-md);
+  cursor: pointer; white-space: nowrap; text-decoration: none; transition: background .15s, border-color .15s;
+}
+.btn svg { width: 18px; height: 18px; flex: none; }
+.btn.primary { background: var(--accent); color: var(--accent-fg); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.secondary { background: var(--surface); color: var(--fg); border-color: var(--line-strong); }
+.btn.secondary:hover { background: var(--surface-2); }
+.btn.ghost { background: transparent; color: var(--fg-2); }
+.btn.ghost:hover { background: var(--surface-2); color: var(--fg); }
+.btn.danger { background: var(--bad-soft); color: var(--bad-ink); }
+.btn.danger:hover { background: color-mix(in srgb, var(--bad-soft) 70%, var(--bad) 30%); }
+.btn.sm { height: 32px; padding: 0 12px; font-size: var(--fs-sm); border-radius: var(--r-sm); }
+.btn.lg { height: 48px; padding: 0 22px; font-size: var(--fs-lg); }
+.btn.block { width: 100%; }
+.btn.icon-only { width: 40px; padding: 0; }
+.btn.sm.icon-only { width: 32px; }
+.btn[disabled], .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.btn[aria-busy="true"] { cursor: progress; }
+/* на телефоне — цели касания не меньше 40px (после базовых размеров, чтобы перекрывать их) */
+@media (max-width: 960px) {
+  .btn.sm { height: var(--tap); }
+  .btn.sm.icon-only { width: var(--tap); }
+  .segmented button { min-height: var(--tap); }
+}
+
+/* ---------- поля ---------- */
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field-label { font-size: var(--fs-sm); font-weight: 500; color: var(--fg-2); display: flex; justify-content: space-between; gap: 8px; }
+.field-hint { font-size: var(--fs-xs); color: var(--fg-3); }
+.field-error { font-size: var(--fs-xs); color: var(--bad-ink); font-weight: 500; }
+.input-wrap { position: relative; display: flex; align-items: center; min-width: 0; }
+.input, .select, .textarea {
+  width: 100%; min-width: 0; height: 42px; padding: 0 12px; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--line-strong); color: var(--fg);
+}
+.textarea { height: auto; padding: 10px 12px; resize: vertical; line-height: 1.55; }
+.input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
+.input.invalid, .textarea.invalid, .select.invalid { border-color: var(--bad); }
+.input-suffix { position: absolute; right: 12px; color: var(--fg-3); font-size: var(--fs-sm); pointer-events: none; }
+.input-wrap .input.has-suffix { padding-right: 44px; }
+/* новое: кнопка внутри поля (показать пароль) — зона нажатия 40px */
+.input-wrap .input.has-action { padding-right: 46px; }
+.input-action {
+  position: absolute; right: 1px; top: 50%; transform: translateY(-50%);
+  width: var(--tap); height: var(--tap); display: grid; place-items: center;
+  border: 0; border-radius: var(--r-md); background: none; color: var(--fg-3); cursor: pointer;
+}
+.input-action:hover { color: var(--fg); }
+.input-action svg { width: 18px; height: 18px; }
+
+.check { display: flex; align-items: flex-start; gap: 10px; font-size: var(--fs-md); cursor: pointer; min-height: 24px; }
+.check input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); flex: none; }
+.check-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+
+/* ---------- переключатель ---------- */
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; min-width: 0; }
+.toggle-text { min-width: 0; }
+.toggle-label { font-weight: 500; }
+.switch { position: relative; display: inline-block; vertical-align: middle; width: 40px; height: 24px; flex: none; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--surface-3); transition: background .15s; pointer-events: none; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(16px); }
+.switch input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+.switch input:disabled { cursor: not-allowed; }
+.switch input:disabled + span { opacity: .5; }
+/* на телефоне зона нажатия флажка и выключателя — не меньше 40px. Блок стоит после базовых
+   правил .check и .switch input, иначе они перекрывают его (в макете так и вышло) */
+@media (max-width: 960px) {
+  .check { min-height: var(--tap); padding-block: 8px; margin-block: -8px; }
+  .switch input { inset: -8px -4px; }
+}
+
+/* ---------- сегменты и вкладки ---------- */
+.segmented { display: inline-flex; padding: 3px; gap: 2px; background: var(--surface-2); border-radius: var(--r-md); max-width: 100%; overflow-x: auto; }
+.segmented button { border: 0; background: transparent; padding: 6px 12px; border-radius: 7px; font-size: var(--fs-sm); font-weight: 500; color: var(--fg-2); cursor: pointer; white-space: nowrap; }
+.segmented button[aria-pressed="true"] { background: var(--surface); color: var(--fg); font-weight: 600; box-shadow: 0 0 0 1px var(--line-strong), 0 1px 2px rgba(0,0,0,.12); }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs > button, .tabs > a {
+  display: inline-flex; align-items: center; gap: 8px; min-height: var(--tap);
+  border: 0; background: none; padding: 10px 12px; font-weight: 500; color: var(--fg-3); cursor: pointer;
+  white-space: nowrap; border-bottom: 2px solid transparent; margin-bottom: -1px; text-decoration: none;
+}
+.tabs > button svg, .tabs > a svg { width: 18px; height: 18px; flex: none; }
+.tabs > button:hover, .tabs > a:hover { color: var(--fg-2); }
+.tabs > [aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+/* на телефоне вкладки — только подписи, как в макете */
+@media (max-width: 960px) { .tabs > button svg, .tabs > a svg { display: none; } }
+
+/* ---------- таблица ---------- */
+.table-wrap { overflow-x: auto; min-width: 0; position: relative; }
+.table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.table th { text-align: left; font-weight: 600; color: var(--fg-3); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.table td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; font-variant-numeric: tabular-nums; }
+.table tr:last-child td { border-bottom: 0; }
+.table td.r, .table th.r { text-align: right; }
+.table td.c, .table th.c { text-align: center; }
+.table tbody tr.clickable { cursor: pointer; }
+.table tbody tr.clickable:hover td { background: var(--surface-2); }
+.table th:first-child, .table td:first-child { padding-left: 18px; }
+.table th:last-child, .table td:last-child { padding-right: 18px; }
+/* новое: таблица на телефоне — список карточек (как карточки ставок в макете) */
+.dt-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.dt-card {
+  width: 100%; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; min-width: 0;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  color: var(--fg); font: inherit; text-align: left;
+}
+button.dt-card { cursor: pointer; }
+.card-body.flush > .dt-cards { padding: 0 14px 14px; }
+button.dt-card:active { background: var(--surface-2); }
+.dt-card-title { font-weight: 600; min-width: 0; }
+.dt-card .kv { padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* ---------- полоса, подсказка, пусто, пары ---------- */
+.meter { height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.meter > i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.meter.warn > i { background: var(--warn); }
+.meter.bad > i { background: var(--bad); }
+
+.callout { display: flex; gap: 12px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); font-size: var(--fs-sm); color: var(--fg-2); }
+.callout svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.callout-body { min-width: 0; }
+.callout.info { background: var(--info-soft); color: var(--info-ink); }
+.callout.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.callout.bad { background: var(--bad-soft); color: var(--bad-ink); }
+.callout.good { background: var(--good-soft); color: var(--good-ink); }
+.callout.accent { background: var(--accent-soft); color: var(--accent-ink); }
+
+.empty { padding: 28px; text-align: center; color: var(--fg-3); font-size: var(--fs-sm); }
+/* новое: пустое состояние с иконкой, заголовком и действием */
+.empty.rich { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 24px; }
+.empty-icon { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-2); }
+.empty-icon svg { width: 24px; height: 24px; }
+.empty-title { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: 600; color: var(--fg); }
+.empty-text { max-width: 52ch; color: var(--fg-2); font-size: var(--fs-md); }
+.empty-action { margin-top: 6px; }
+
+.kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; font-size: var(--fs-sm); margin: 0; }
+.kv dt { color: var(--fg-2); }
+.kv dd { margin: 0; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* ---------- загрузка (новое: в макете данных не ждали) ---------- */
+.skeleton {
+  display: block; border-radius: var(--r-sm);
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%; animation: shimmer 1.4s linear infinite;
+}
+.skeleton-lines { display: flex; flex-direction: column; gap: 8px; }
+.spinner {
+  display: inline-block; flex: none; width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 22%, transparent); border-top-color: currentColor;
+  animation: spin .8s linear infinite; vertical-align: middle;
+}
+.spinner.sm { width: 16px; height: 16px; }
+.spinner.lg { width: 32px; height: 32px; border-width: 3px; }
+
+/* ---------- выпадающий список (один на все приложение) ---------- */
+.dd-trigger {
+  display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer;
+  font: inherit; color: var(--fg); -webkit-tap-highlight-color: transparent;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+button.dd-trigger.select { padding: 0 12px 0 14px; }
+.dd-trigger:hover:not([disabled]) { border-color: var(--fg-3); }
+.dd-trigger:focus-visible, .dd-trigger[aria-expanded="true"] { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
+.dd-trigger.select:focus:not(:focus-visible):not([aria-expanded="true"]) { border-color: var(--line-strong); box-shadow: none; }
+.dd-trigger.invalid { border-color: var(--bad); }
+.dd-trigger[disabled] { opacity: .55; cursor: not-allowed; }
+.dd-value { flex: 1; min-width: 0; display: grid; }
+.dd-value > span { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; visibility: hidden; }
+.dd-value > span.is-current { visibility: visible; }
+.dd-value > span.is-placeholder { color: var(--fg-3); }
+.dd-chev { flex: none; width: 28px; height: 28px; margin-right: -4px; display: grid; place-items: center; border-radius: 8px; color: var(--fg-3); transition: transform .18s ease, color .15s, background .15s; }
+.dd-chev svg { width: 18px; height: 18px; }
+.dd-trigger:hover:not([disabled]) .dd-chev { color: var(--fg-2); background: var(--surface-2); }
+.dd-trigger[aria-expanded="true"] .dd-chev { transform: rotate(180deg); color: var(--accent-ink); }
+
+.dd-pop {
+  position: fixed; z-index: 100; max-width: min(420px, calc(100vw - 24px));
+  background: var(--dd-bg); color: var(--fg); border: 1px solid var(--dd-border); border-radius: var(--r-lg);
+  box-shadow: var(--dd-shadow); display: flex; flex-direction: column; overflow: hidden;
+  animation: dd-in .14s ease-out;
+}
+.dd-pop.above { animation-name: dd-in-up; }
+.dd-list { padding: 6px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.dd-list:focus { outline: none; }
+.dd-opt {
+  display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 8px 10px 8px 12px; border-radius: var(--r-sm);
+  cursor: pointer; font-size: var(--fs-md); line-height: 1.3; color: var(--fg); user-select: none;
+}
+.dd-opt + .dd-opt { margin-top: 2px; }
+.dd-opt-label { flex: 1; min-width: 0; }
+.dd-opt-label mark { background: none; color: var(--accent-ink); font-weight: 600; }
+.dd-opt-check { flex: none; width: 18px; height: 18px; color: var(--accent-ink); visibility: hidden; }
+.dd-opt.is-active { background: var(--dd-active); }
+.dd-opt.is-selected { font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); }
+.dd-opt.is-selected.is-active { background: color-mix(in srgb, var(--accent-soft) 70%, var(--dd-active)); }
+.dd-opt.is-selected .dd-opt-check { visibility: visible; }
+.dd-opt[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.dd-empty { padding: 10px 12px; font-size: var(--fs-sm); color: var(--fg-3); }
+/* новое: поиск в длинном списке */
+.dd-search { flex: none; padding: 6px 6px 0; }
+.dd-search .input { height: 38px; }
+.dd-search .input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+@media (max-width: 720px) { .dd-pop .dd-opt { min-height: 44px; } }
+
+/* телефон: список выезжает шторкой снизу */
+.dd-layer { display: contents; }
+.dd-sheet-back { position: fixed; inset: 0; z-index: 100; background: var(--overlay); animation: fade .15s ease-out; }
+.dd-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 101; max-height: min(70vh, 560px);
+  display: flex; flex-direction: column; background: var(--surface); color: var(--fg);
+  border-radius: 18px 18px 0 0; box-shadow: var(--shadow); padding-bottom: env(safe-area-inset-bottom, 0px);
+  animation: rise .2s ease-out;
+}
+.dd-sheet-grip { width: 40px; height: 4px; border-radius: 4px; background: var(--line-strong); margin: 8px auto 2px; flex: none; }
+.dd-sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 6px 12px 8px 20px; flex: none; }
+.dd-sheet-head .btn { flex: none; }
+.dd-sheet-title { min-width: 0; padding-top: 8px; font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); }
+.dd-sheet .dd-search { padding: 0 14px 6px; }
+.dd-sheet .dd-list { padding: 4px 10px 14px; }
+.dd-sheet .dd-opt { min-height: 50px; padding: 12px 14px; font-size: var(--fs-lg); border-radius: var(--r-md); }
+
+/* ---------- модальное окно ---------- */
+.modal-backdrop { position: fixed; inset: 0; z-index: 60; background: var(--overlay); display: grid; place-items: center; padding: 16px; animation: fade .15s ease-out; }
+.modal { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow); display: flex; flex-direction: column; }
+.modal.wide { width: min(760px, 100%); }
+.modal:focus { outline: none; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px 0; }
+.modal-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+.modal-foot { padding: 14px 20px 18px; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--line); }
+@media (max-width: 720px) {
+  .modal-backdrop { place-items: end center; padding: 0; }
+  .modal, .modal.wide { width: 100%; max-height: 92vh; border-radius: var(--r-lg) var(--r-lg) 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); animation: rise .2s ease-out; }
+  .modal-foot .btn { flex: 1; }
+}
+
+/* ---------- всплывающие сообщения ---------- */
+.toast-host { position: fixed; z-index: 80; left: 50%; transform: translateX(-50%); bottom: 24px; display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100% - 32px)); pointer-events: none; }
+@media (max-width: 960px) {
+  .toast-host { bottom: calc(var(--tabbar-h) + 16px + env(safe-area-inset-bottom, 0px)); }
+  /* поверх открытой шторки тост показываем сверху, чтобы он не закрывал ее пункты */
+  body:has(.modal-backdrop) .toast-host { top: calc(16px + env(safe-area-inset-top, 0px)); bottom: auto; }
+}
+.toast { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--r-md); background: var(--fg); color: var(--bg); font-size: var(--fs-sm); box-shadow: var(--shadow); animation: rise .2s ease-out; }
+.toast svg { width: 18px; height: 18px; flex: none; }

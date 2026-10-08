@@ -6,7 +6,9 @@ requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.143",
   "uvicorn[standard]>=0.54",
-  "pydantic>=2.13.5",
+  # От версии pydantic зависит схема OpenAPI (frontend/openapi.json, CI сверяет ее с кодом):
+  # новую минорную версию поднимаем вместе с npm run gen:api
+  "pydantic>=2.13.5,<2.14",
   "pydantic-settings>=2.15",
   "sqlalchemy[asyncio]>=2.1.4",
   "asyncpg>=0.32",
@@ -86,3 +88,10 @@ asyncio_mode = "auto"
 # один цикл событий на весь сеанс тестов: движок БД и клиент Redis общие
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
+filterwarnings = [
+  # незакрытые соединения и файлы — ошибка теста, а не тихое предупреждение
+  "error::ResourceWarning",
+  "error::pytest.PytestUnraisableExceptionWarning",
+  # arq 0.28 закрывает Redis устаревшим close(); исправить можно только в самом arq
+  "ignore:Call to deprecated close:DeprecationWarning:arq.worker",
+]

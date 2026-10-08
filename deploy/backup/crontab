@@ -1,0 +1,7 @@
+# Расписание контейнера backup (busybox crond), время UTC. Вывод — в лог контейнера:
+#   docker compose logs backup
+# min hour day month weekday command
+# Ночной бэкап: 01:30 UTC (04:30 в Хельсинки летом, 03:30 зимой)
+30 1 * * * /usr/local/bin/backup.sh > /proc/1/fd/1 2>&1
+# Проверка восстановления: 1-го числа каждого месяца, после ночного бэкапа
+30 2 1 * * /usr/local/bin/restore-check.sh > /proc/1/fd/1 2>&1

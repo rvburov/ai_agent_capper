@@ -18,6 +18,7 @@ from app.core.ratelimit import (
     rate_limit_subject,
     register_2fa_failure,
     register_failure,
+    release_2fa_attempt,
     release_attempt,
     reset_failures,
 )
@@ -167,6 +168,18 @@ async def test_2fa_failures_are_counted_per_account(redis: Redis) -> None:
     await reset_failures(redis, EMAIL, "10.1.0.1")
     assert (await begin_2fa_attempt(redis, EMAIL)).retry_after > 0
     assert (await begin_2fa_attempt(redis, "someone@example.com")).retry_after == 0
+
+
+async def test_correct_2fa_code_is_not_counted(redis: Redis) -> None:
+    # Больше десяти верных кодов за час не закрывают шаг 2FA
+    for _ in range(ACCOUNT_2FA_RULE.limit + 2):
+        attempt = await begin_2fa_attempt(redis, EMAIL)
+        assert attempt.retry_after == 0
+        assert attempt.number == 1
+        await release_2fa_attempt(redis, EMAIL)
+    # Отмена не опускает счетчик ниже нуля
+    await release_2fa_attempt(redis, EMAIL)
+    assert (await begin_2fa_attempt(redis, EMAIL)).number == 1
 
 
 async def test_ip_limit_for_login(redis: Redis) -> None:

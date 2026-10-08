@@ -50,7 +50,9 @@ IPv6 в ключах сворачивается в сеть /64 (rate_limit_subj
         if (result.just_locked or result_2fa.just_locked) and await allow_failure_notice(...):
             -> уведомление login_failures
         if result_2fa.just_locked: -> удалить login:pending
-    ...код верный: await reset_failures(redis, email, ip)
+    ...код верный:
+        await reset_failures(redis, email, ip)
+        await release_2fa_attempt(redis, email)
 
 Время ожидания везде в секундах (retry_after), 0 — ограничения нет.
 """
@@ -231,6 +233,13 @@ async def register_2fa_failure(redis: Redis, email: str, attempt: Attempt) -> Fa
     """Неверный код 2FA или резервный код. Десятая неудача за час закрывает шаг 2FA
     аккаунта на час (just_locked — повод для уведомления login_failures)."""
     return await _fail(redis, ACCOUNT_2FA_RULE, _account_2fa_keys(email), attempt)
+
+
+async def release_2fa_attempt(redis: Redis, email: str) -> None:
+    """Код 2FA верный: зарезервированная попытка не считается в лимит неудач аккаунта.
+    Иначе одиннадцатый успешный вход за час получил бы 429."""
+    fail_key, _ = _account_2fa_keys(email)
+    await _eval(redis, _RELEASE_ATTEMPT_LUA, [fail_key], [])
 
 
 async def hit_ip_limit(redis: Redis, ip: str, rule: RateRule) -> int:
