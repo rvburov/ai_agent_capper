@@ -48,15 +48,29 @@ bash deploy/local.sh admin you@example.com "Имя"       # администра
 
 ## Быстрый старт для разработки
 
+Нужны Python 3.12+, Node 22, PostgreSQL 18 и Redis 8 (их проще поднять в Docker, команды — в [backend/README.md](backend/README.md)).
+
 ```bash
 git clone https://github.com/rvburov/ai_agent_capper.git
 cd ai_agent_capper
+# Один раз для новой копии (правила CLAUDE.md)
+git config user.name "Roman Burov"
+git config user.email "romanburov89@gmail.com"
+git config commit.gpgsign false
 git config core.hooksPath .githooks      # проверки правил из CLAUDE.md
 cp .env.example .env
 
+# PostgreSQL и Redis на localhost
+docker run -d --name capper-postgres -p 5432:5432 \
+  -e POSTGRES_USER=capper -e POSTGRES_PASSWORD=capper -e POSTGRES_DB=capper postgres:18
+docker run -d --name capper-redis -p 6379:6379 redis:8
+
 # backend: http://localhost:8000/api/docs
 cd backend && python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]" && uvicorn app.main:app --reload
+pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
+alembic upgrade head                                   # схема базы
+python -m app.admin.cli create-admin --email you@example.com --name "Имя"   # пароль спросит
+uvicorn app.main:app --reload
 
 # frontend (в другом терминале): http://localhost:5173
 cd frontend && npm install && npm run dev
