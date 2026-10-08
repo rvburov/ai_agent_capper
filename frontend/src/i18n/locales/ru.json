@@ -400,7 +400,6 @@
     "copy": "Скопировать",
     "copied": "Код скопирован",
     "copyFailed": "Браузер не дал скопировать: код выделен, скопируйте его сами",
-    "usdLimit": "{{amount}} в месяц",
     "limitText_one": "{{monthly}} в месяц · {{count}}\u00a0анализ в день · {{per}} на анализ",
     "limitText_few": "{{monthly}} в месяц · {{count}}\u00a0анализа в день · {{per}} на анализ",
     "limitText_many": "{{monthly}} в месяц · {{count}}\u00a0анализов в день · {{per}} на анализ",
