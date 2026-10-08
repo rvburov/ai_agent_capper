@@ -47,15 +47,20 @@ export function utcOffset(timeZone: string, at: Date = new Date()): string | nul
     const name = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'shortOffset' })
       .formatToParts(at)
       .find((part) => part.type === 'timeZoneName')?.value;
-    if (name === undefined) return null;
-    const match = /^GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?$/.exec(name);
-    if (!match) return null;
-    const [, sign, hours, minutes] = match;
-    if (!sign || !hours) return '';
-    return `${sign === '-' ? MINUS : '+'}${Number(hours)}${minutes ? `:${minutes}` : ''}`;
+    return name === undefined ? null : parseShortOffset(name);
   } catch {
     return null;
   }
+}
+
+/** «GMT+5:30» → «+5:30», «GMT−4» → «−4», нулевое смещение → пустая строка, иное → null.
+ *  Нулевое смещение одни версии ICU пишут «GMT», другие «GMT+0». */
+export function parseShortOffset(name: string): string | null {
+  const match = /^GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?$/.exec(name);
+  if (!match) return null;
+  const [, sign, hours, minutes] = match;
+  if (!sign || !hours || (Number(hours) === 0 && !minutes)) return '';
+  return `${sign === '-' ? MINUS : '+'}${Number(hours)}${minutes ? `:${minutes}` : ''}`;
 }
 
 function cityOf(timeZone: string): TimeZoneCity | null {

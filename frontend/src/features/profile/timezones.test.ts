@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import i18n from '../../i18n';
-import { timeZoneDative, timeZoneLabel, timeZoneName, timeZoneOptions, utcOffset } from './timezones';
+import {
+  parseShortOffset,
+  timeZoneDative,
+  timeZoneLabel,
+  timeZoneName,
+  timeZoneOptions,
+  utcOffset,
+} from './timezones';
 
 const t = i18n.t.bind(i18n);
 const OCTOBER = new Date('2026-10-08T12:00:00Z');
@@ -16,6 +23,14 @@ describe('часовые пояса', () => {
     expect(utcOffset('Asia/Kolkata', OCTOBER)).toBe('+5:30');
     expect(utcOffset('UTC', OCTOBER)).toBe('');
     expect(utcOffset('Not/AZone', OCTOBER)).toBeNull();
+  });
+
+  it('нулевое смещение не зависит от версии ICU: «GMT» и «GMT+0»', () => {
+    expect(parseShortOffset('GMT')).toBe('');
+    expect(parseShortOffset('GMT+0')).toBe('');
+    expect(parseShortOffset('GMT-3')).toBe(`${MINUS}3`);
+    expect(parseShortOffset('GMT+5:30')).toBe('+5:30');
+    expect(parseShortOffset('PST')).toBeNull();
   });
 
   it('подписи как в макете', () => {
