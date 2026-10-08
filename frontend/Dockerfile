@@ -8,7 +8,7 @@
 # Сборка без compose, из корня репозитория:
 #   docker build --build-context deploy=deploy -f frontend/Dockerfile frontend
 
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
