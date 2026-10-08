@@ -1,9 +1,13 @@
 // Общая подготовка тестов vitest (jsdom): матчеры jest-dom и то, чего нет в jsdom.
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
 
 import '../i18n';
+
+// findBy* и waitFor ждут появления на экране до 5 с, а не 1 с по умолчанию: в CI все файлы
+// тестов идут параллельно на 4 ядрах, и ответ формы иногда отрисовывается дольше секунды
+configure({ asyncUtilTimeout: 5000 });
 
 // matchMedia: по умолчанию «компьютер»; тест может выставить телефон через setViewportWidth
 let viewportWidth = 1366;

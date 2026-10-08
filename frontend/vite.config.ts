@@ -43,6 +43,8 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     restoreMocks: true,
+    // С запасом под ожидание findBy* (5 с) на медленной машине CI
+    testTimeout: 20_000,
     unstubGlobals: true,
   },
 });
