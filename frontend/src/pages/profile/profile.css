@@ -1,0 +1,138 @@
+/* Личный кабинет: те же классы и вид, что в макете (mockup/js/screens/profile.js, UI.css('profile')).
+   Новое относительно макета отмечено комментарием. */
+
+.profile-anchor { scroll-margin-top: calc(var(--topbar-h) + 16px); }
+
+/* ---------- сводка аккаунта ---------- */
+.card.profile-hero { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 20px; padding: 20px; }
+.profile-hero-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.profile-id { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.profile-id > .btn { align-self: flex-start; }
+.profile-id-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.profile-avatar {
+  width: 72px; height: 72px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: var(--accent); color: var(--accent-fg); font-family: var(--font-display); font-weight: 600;
+  font-size: 1.625rem; letter-spacing: .02em; box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.profile-name { font-size: var(--fs-2xl); overflow-wrap: anywhere; }
+.profile-email { color: var(--fg-2); overflow-wrap: anywhere; }
+.profile-chips { gap: 6px; margin-top: 4px; }
+.profile-facts {
+  margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px;
+  background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden;
+}
+.profile-facts > div { background: var(--surface); padding: 10px 12px; min-width: 0; }
+.profile-facts dt { font-size: var(--fs-xs); color: var(--fg-3); }
+.profile-facts dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.profile-facts dd small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); }
+.profile-quick { display: flex; flex-direction: column; gap: 8px; }
+@media (min-width: 961px) { .profile-hero-main { justify-content: space-between; } }
+.profile-guard { background: var(--surface-2); border-radius: var(--r-md); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.profile-guard h3 { font-size: var(--fs-md); }
+.profile-guard .meter { background: var(--surface-3); }
+.profile-guard-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.profile-guard-list li { display: flex; align-items: center; gap: 10px; font-size: var(--fs-sm); min-width: 0; }
+.profile-guard-text { min-width: 0; flex: 1; }
+.profile-guard-ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.profile-guard-ic svg { width: 13px; height: 13px; }
+.profile-guard-ic.ok { background: var(--good-soft); color: var(--good-ink); }
+.profile-guard-ic.todo { background: var(--warn-soft); color: var(--warn-ink); }
+.profile-guard-alert {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm);
+  background: var(--warn-soft); color: var(--warn-ink); font-size: var(--fs-sm);
+}
+.profile-guard-alert > svg { width: 16px; height: 16px; flex: none; }
+.profile-guard-alert .btn.ghost { margin-left: auto; color: var(--warn-ink); flex: none; }
+
+/* ---------- вкладки ---------- */
+.tabs.profile-tabs > a { gap: 7px; }
+.tabs.profile-tabs > a svg { width: 16px; height: 16px; }
+.profile-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
+.profile-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; outline: none; }
+.profile-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.profile-form { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.profile-form > .card-foot { margin-top: auto; }
+.profile-panel .input[readonly] { background: var(--surface-2); color: var(--fg-2); }
+.profile-section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.profile-status { font-size: var(--fs-sm); color: var(--fg-3); }
+/* новое: длинное значение пары переносится, а не наезжает на подпись (в макете на 375 px наезжало) */
+.profile-panel .kv { grid-template-columns: minmax(min-content, auto) minmax(0, 1fr); }
+.profile-panel .kv dd { overflow-wrap: anywhere; }
+
+/* ---------- списки: сеансы, способы входа, устройства ---------- */
+.profile-list { display: flex; flex-direction: column; min-width: 0; }
+.profile-item {
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid var(--line); min-width: 0;
+}
+.profile-item:first-child { padding-top: 2px; }
+.profile-item:last-child { border-bottom: 0; padding-bottom: 2px; }
+.profile-item-ic {
+  width: 40px; height: 40px; border-radius: var(--r-md); background: var(--surface-2); color: var(--fg-2);
+  display: grid; place-items: center;
+}
+.profile-item-ic svg { width: 20px; height: 20px; }
+.profile-item-ic.good { background: var(--good-soft); color: var(--good-ink); }
+.profile-item-ic.accent { background: var(--accent-soft); color: var(--accent-ink); }
+.profile-item-body { min-width: 0; }
+.profile-item-title { font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; overflow-wrap: anywhere; }
+.profile-item-meta { font-size: var(--fs-sm); color: var(--fg-3); overflow-wrap: anywhere; }
+.profile-item-side { display: flex; align-items: center; gap: 8px; justify-content: flex-end; flex-wrap: wrap; min-width: 0; }
+.profile-item.below { grid-template-columns: 40px minmax(0, 1fr); align-items: start; }
+.profile-item.below .profile-item-side { grid-column: 2; justify-content: flex-start; }
+.profile-sessions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.profile-sessions .profile-item { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px; }
+.profile-sessions .profile-item:first-child,
+.profile-sessions .profile-item:last-child { padding: 12px; border-bottom: 1px solid var(--line); }
+.profile-ip { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-3); }
+
+.profile-confirm { display: flex; flex-direction: column; gap: 10px; }
+.profile-strength { display: flex; flex-direction: column; gap: 6px; }
+.profile-strength .row-between { font-size: var(--fs-sm); color: var(--fg-2); }
+.profile-reqs { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--fs-xs); color: var(--fg-3); }
+.profile-reqs li { display: inline-flex; align-items: center; gap: 4px; }
+.profile-reqs li.ok { color: var(--good-ink); }
+.profile-reqs svg { width: 13px; height: 13px; flex: none; }
+
+.profile-codes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.profile-codes li {
+  font-family: var(--font-mono); font-size: var(--fs-lg); padding: 10px 12px; border-radius: var(--r-sm);
+  background: var(--surface-2); text-align: center; letter-spacing: .06em; user-select: all;
+}
+
+.profile-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.profile-log li { display: flex; flex-direction: column; gap: 2px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-sm); min-width: 0; }
+.profile-log li:first-child { padding-top: 0; }
+.profile-log li:last-child { border-bottom: 0; padding-bottom: 0; }
+.profile-log-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.profile-log-when { font-weight: 600; font-variant-numeric: tabular-nums; }
+.profile-nowrap { white-space: nowrap; }
+/* таблица журнала во всю ширину карточки, как в макете */
+.profile-log-table { margin: 0 -18px; }
+
+.profile-note { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-sm); color: var(--fg-2); margin: 0; }
+.profile-note > svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--fg-3); }
+
+/* новое: заглушка вкладки следующего этапа и ошибка загрузки внутри карточки */
+.profile-stub { padding: 8px 0; }
+.profile-load-error { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+
+@media (max-width: 960px) {
+  .card.profile-hero { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 16px; }
+  .profile-avatar { width: 56px; height: 56px; font-size: 1.25rem; box-shadow: 0 0 0 3px var(--accent-soft); }
+  .profile-name { font-size: var(--fs-xl); }
+  .tabs.profile-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; border-bottom: 0; overflow: visible; }
+  .tabs.profile-tabs > a {
+    justify-content: center; padding: 9px 4px; border: 1px solid var(--line); border-radius: var(--r-md); margin: 0;
+    background: var(--surface); color: var(--fg-2); font-size: var(--fs-sm); white-space: normal; text-align: center; min-width: 0;
+  }
+  .tabs.profile-tabs > a[aria-selected="true"] { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); }
+}
+@media (max-width: 720px) {
+  /* новое: ссылка в строке «Участники» — зона нажатия 40 px, строка при этом не растет */
+  .profile-kv-link { display: inline-block; padding-block: 12px; margin-block: -12px; }
+  .profile-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .profile-facts > div:first-child { grid-column: span 2; }
+  .profile-item.wrap-mobile { grid-template-columns: 40px minmax(0, 1fr); }
+  .profile-item.wrap-mobile .profile-item-side { grid-column: 2; justify-content: flex-start; }
+}

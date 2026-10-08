@@ -214,6 +214,18 @@ export function formatDate(
     : i18n.t('format.date', { day: p.day, month: monthShort(p.month) });
 }
 
+/** Полная дата с годом: «30 июня 2026» (дата регистрации, выпуска кодов). */
+export function formatDateLong(
+  value: DateInput | null | undefined,
+  options: Pick<DateFormatOptions, 'timeZone'> = {},
+): string {
+  const date = toDate(value);
+  if (!date) return DASH;
+  const p = partsIn(date, options.timeZone ?? displayTimeZone);
+  const months: readonly string[] = i18n.t('format.monthsGenitive', { returnObjects: true });
+  return i18n.t('format.dateYear', { day: p.day, month: months[p.month - 1] ?? p.month, year: p.year });
+}
+
 /** «Сегодня, 14:05», «Вчера, 09:30», «8 окт, 14:05». calendar: false — без «Сегодня». */
 export function formatDateTime(
   value: DateInput | null | undefined,

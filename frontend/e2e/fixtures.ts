@@ -31,6 +31,11 @@ export async function mockApi(page: Page, me: Me | null): Promise<void> {
       }
       return;
     }
+    // колокольчик в шапке спрашивает уведомления сам
+    if (url.pathname === '/api/me/notifications') {
+      await route.fulfill({ json: { items: [], unread: 0 } });
+      return;
+    }
     if (url.pathname === '/api/auth/csrf') {
       await route.fulfill({
         json: { csrf_token: 'e2e' },

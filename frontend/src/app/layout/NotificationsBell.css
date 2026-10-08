@@ -1,0 +1,40 @@
+/* Центр уведомлений — как в макете (mockup/index.html, «колокольчик и центр уведомлений»).
+   Кнопка и счетчик — в shell.css (.bell-btn, .bell-badge). Новое: список — ul/li с кнопками. */
+
+.notif-back { position: fixed; inset: 0; z-index: 100; background: var(--overlay); animation: fade .15s ease-out; }
+.notif-pop {
+  position: fixed; z-index: 101; width: min(400px, calc(100vw - 24px)); max-height: min(560px, calc(100vh - 90px));
+  display: flex; flex-direction: column; background: var(--dd-bg); color: var(--fg); border: 1px solid var(--dd-border);
+  border-radius: var(--r-lg); box-shadow: var(--dd-shadow); animation: dd-in .14s ease-out;
+}
+.notif-pop:focus { outline: none; }
+.notif-pop.sheet {
+  left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: min(80vh, 640px); border: 0;
+  border-radius: 18px 18px 0 0; background: var(--surface); padding-bottom: env(safe-area-inset-bottom, 0px); animation: rise .2s ease-out;
+}
+.notif-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 10px 8px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.notif-head-title { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); }
+.notif-list { overflow-y: auto; overscroll-behavior: contain; padding: 6px; flex: 1; }
+.notif-list-items { list-style: none; margin: 0; padding: 0; }
+.notif-list-items > li + li { margin-top: 2px; }
+.notif-item {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 10px; border: 0; border-radius: var(--r-md);
+  background: none; color: var(--fg); text-align: left; cursor: pointer; font: inherit;
+}
+.notif-item:hover, .notif-item:focus-visible { background: var(--dd-active); }
+.notif-item.unread .notif-title { font-weight: 600; }
+.notif-ic { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); color: var(--fg-2); }
+.notif-ic svg { width: 18px; height: 18px; }
+.notif-ic.good { background: var(--good-soft); color: var(--good-ink); }
+.notif-ic.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.notif-ic.bad { background: var(--bad-soft); color: var(--bad-ink); }
+.notif-ic.info { background: var(--info-soft); color: var(--info-ink); }
+.notif-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.notif-title { font-size: var(--fs-md); line-height: 1.35; }
+.notif-body { font-size: var(--fs-sm); color: var(--fg-2); line-height: 1.4; overflow-wrap: anywhere; }
+.notif-time { font-size: var(--fs-xs); color: var(--fg-3); }
+.notif-dot { width: 8px; height: 8px; margin-top: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.notif-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px 12px; border-top: 1px solid var(--line); flex: none; flex-wrap: wrap; }
+.notif-foot a { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-ink); font-weight: 600; font-size: var(--fs-sm); text-decoration: none; min-height: var(--tap); }
+.notif-foot a svg { width: 16px; height: 16px; }
+.notif-pop.sheet .notif-item { padding: 12px; }

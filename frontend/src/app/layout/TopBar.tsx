@@ -1,9 +1,10 @@
 import { useTranslation } from 'react-i18next';
 
 import type { Me } from '../../api/hooks/useMe';
-import { Button, IconButton, useToast } from '../../components';
+import { Button, IconButton } from '../../components';
 import { paths } from '../paths';
 import { useTheme } from '../theme/themeContext';
+import { NotificationsBell } from './NotificationsBell';
 import { UserMenu } from './UserMenu';
 
 interface TopBarProps {
@@ -21,7 +22,6 @@ interface TopBarProps {
 export function TopBar({ title, crumbs, me, onLogout }: TopBarProps) {
   const { t } = useTranslation();
   const { resolved, toggle } = useTheme();
-  const toast = useToast();
   const dark = resolved === 'dark';
   return (
     <header className="topbar">
@@ -39,13 +39,7 @@ export function TopBar({ title, crumbs, me, onLogout }: TopBarProps) {
           className="hide-mobile"
           onClick={toggle}
         />
-        {/* Центр уведомлений — этап 4; пока кнопка только сообщает об этом */}
-        <IconButton
-          icon="bell"
-          label={t('shell.notifications')}
-          className="bell-btn"
-          onClick={() => toast.show(t('shell.notificationsSoon'), { icon: 'bell' })}
-        />
+        <NotificationsBell />
         <UserMenu me={me} onLogout={onLogout} />
       </div>
     </header>

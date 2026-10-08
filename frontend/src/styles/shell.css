@@ -127,7 +127,4 @@ button.nav-link { width: 100%; border: 0; background: none; cursor: pointer; tex
 .full-state { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: var(--gutter); color: var(--fg-2); }
 .full-state .card { width: min(440px, 100%); }
 
-/* экраны без оболочки: вход, регистрация, сброс пароля */
-.auth-page { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px var(--gutter); }
-.auth-box { width: min(440px, 100%); display: flex; flex-direction: column; gap: 20px; }
-.auth-box .brand { padding: 0; }
+/* экраны без оболочки (вход, регистрация, сброс пароля) — src/pages/auth/auth.css */

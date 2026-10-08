@@ -46,10 +46,12 @@ frontend/
 └── src/
     ├── main.tsx              точка входа: шрифты, стили, <App />
     ├── app/                  провайдеры, маршруты (router.tsx), адреса (paths.ts)
-    │   ├── layout/           оболочка: AppShell, боковая панель, шапка, нижние вкладки, «Еще», меню пользователя
+    │   ├── layout/           оболочка: AppShell, боковая панель, шапка, нижние вкладки, «Еще», меню пользователя,
+    │   │                     колокольчик (NotificationsBell)
     │   ├── guards/           RequireAuth (нет сеанса → /login?next=...), RequireAdmin
     │   └── theme/            светлая, темная, как в системе; выбор в localStorage
-    ├── pages/                экраны, по папке на экран; пока заглушки с этапом из docs/PLAN.md
+    ├── pages/                экраны, по папке на экран (auth — вход, регистрация, сброс); разделы следующих этапов — заглушки
+    ├── features/             хуки запросов и логика разделов без разметки: auth (шаги входа), notifications
     ├── components/           компоненты из макета: Button, Card, Dropdown (один на все приложение),
     │                         Modal, Toast, DataTable, Field и др.; графики появятся в components/charts/
     ├── api/                  клиент openapi-fetch (CSRF, ошибки → ApiError), TanStack Query, хуки

@@ -1,13 +1,9 @@
-import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Outlet, ScrollRestoration, useNavigate } from 'react-router';
+import { Outlet, ScrollRestoration } from 'react-router';
 
-import { errorMessage } from '../../api/errors';
-import { useLogout } from '../../api/hooks/useLogout';
 import { useMe } from '../../api/hooks/useMe';
-import { useToast } from '../../components';
-import { paths } from '../paths';
+import { useLogout } from '../../features/auth/useLogout';
 import { useRouteMeta } from '../routeMeta';
 import { useDocumentTitle } from '../useDocumentTitle';
 import { MoreSheet } from './MoreSheet';
@@ -24,10 +20,8 @@ export function AppShell() {
   const { t } = useTranslation();
   const { data: me } = useMe();
   const meta = useRouteMeta();
-  const toast = useToast();
-  const logout = useLogout();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
+  // Выход: запрос, переход на /login, очистка кэша и тост — в одном хуке
+  const { logout: onLogout } = useLogout();
   const [moreOpen, setMoreOpen] = useState(false);
 
   const title = meta ? t(`pages.${meta.title}`) : t('app.name');
@@ -36,18 +30,6 @@ export function AppShell() {
 
   if (!me) return null;
   const isAdmin = me.role === 'admin';
-
-  function onLogout() {
-    logout.mutate(undefined, {
-      onSuccess: async () => {
-        await navigate(paths.login, { replace: true });
-        // данные прежнего входа в памяти не остаются
-        queryClient.removeQueries();
-        toast.show(t('shell.loggedOut'), { icon: 'logout' });
-      },
-      onError: (error) => toast.show(errorMessage(error), { icon: 'alert' }),
-    });
-  }
 
   return (
     <div className="shell">

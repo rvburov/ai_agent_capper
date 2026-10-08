@@ -16,7 +16,15 @@ export function RequireAuth({ children }: { children?: ReactNode }) {
   const location = useLocation();
 
   if (me.isError && isUnauthorized(me.error)) {
-    return <Navigate to={loginPath(location.pathname + location.search + location.hash)} replace />;
+    // Пользователь уже был загружен — сеанс закончился при открытом приложении (выход на другом
+    // устройстве, блокировка): экран входа скажет об этом
+    return (
+      <Navigate
+        to={loginPath(location.pathname + location.search + location.hash)}
+        replace
+        state={me.data ? { sessionEnded: true } : undefined}
+      />
+    );
   }
   if (!me.data) {
     if (me.isError) {

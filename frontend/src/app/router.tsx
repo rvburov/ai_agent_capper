@@ -1,7 +1,9 @@
 import { createBrowserRouter, type RouteObject } from 'react-router';
 
 import { AdminPage } from '../pages/admin/AdminPage';
-import { AuthStubPage } from '../pages/auth/AuthStubPage';
+import { LoginPage } from '../pages/auth/LoginPage';
+import { RegisterPage } from '../pages/auth/RegisterPage';
+import { ResetPage } from '../pages/auth/ResetPage';
 import { NotFoundPage } from '../pages/not-found/NotFoundPage';
 import { ProfilePage } from '../pages/profile/ProfilePage';
 import { StubPage } from '../pages/stub/StubPage';
@@ -18,9 +20,9 @@ function meta(value: RouteMeta): RouteMeta {
 }
 
 export const routes: RouteObject[] = [
-  { path: '/login', element: <AuthStubPage screen="login" />, errorElement: <RouteError /> },
-  { path: '/register', element: <AuthStubPage screen="register" />, errorElement: <RouteError /> },
-  { path: '/reset', element: <AuthStubPage screen="reset" />, errorElement: <RouteError /> },
+  { path: '/login', element: <LoginPage />, errorElement: <RouteError /> },
+  { path: '/register', element: <RegisterPage />, errorElement: <RouteError /> },
+  { path: '/reset', element: <ResetPage />, errorElement: <RouteError /> },
   {
     path: '/',
     element: (

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   formatDate,
+  formatDateLong,
   formatDateTime,
   formatMoney,
   formatNumber,
@@ -109,6 +110,12 @@ describe('даты в часовом поясе пользователя', () =>
     expect(formatDate('2026-10-08T12:00:00Z', { timeZone: MSK, now: NOW, year: 'always' })).toBe(
       '8 окт 2026',
     );
+  });
+
+  it('formatDateLong: полная дата с годом, месяц в родительном падеже', () => {
+    expect(formatDateLong('2026-06-30T12:00:00Z', { timeZone: MSK })).toBe('30 июня 2026');
+    expect(formatDateLong('2026-05-03T22:30:00Z', { timeZone: MSK })).toBe('4 мая 2026');
+    expect(formatDateLong(null)).toBe('—');
   });
 
   it('день считается в поясе пользователя, а не в UTC', () => {
