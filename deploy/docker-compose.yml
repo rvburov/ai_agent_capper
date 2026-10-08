@@ -2,13 +2,16 @@
 # Команды — из папки deploy/ (тогда docker compose сам читает deploy/.env):
 #   cd /opt/ai_agent_capper/deploy
 #   bash deploy.sh                                   сборка, миграции, перезапуск, проверка
+#   docker compose up -d --build                     то же без копии базы и отката
 #   docker compose run --rm api alembic upgrade head миграции вручную
 #   docker compose exec api python -m app.admin.cli create-admin --email ...
 #   docker compose ps / logs -f api / exec backup backup.sh
 # Подробности — deploy/README.md. Секреты только в deploy/.env (в git не попадает).
 #
-# Миграции не запускаются при старте api: их применяет отдельный шаг (deploy.sh или
-# команда выше) до перезапуска. Если миграция упала, старая версия продолжает работать.
+# Миграции применяет одноразовый сервис migrate (python -m app.db.migrate) до запуска api
+# и worker: обычный docker compose up поднимает стек с нуля. deploy.sh применяет их еще
+# раньше, отдельным шагом до перезапуска: если миграция упала, старая версия продолжает
+# работать, а migrate потом ничего не делает.
 #
 # Сети: edge — Caddy и API (только отсюда API верит X-Forwarded-For), backend — API,
 # воркер, PostgreSQL, Redis, бэкап. PostgreSQL и Redis наружу не открыты.
@@ -43,7 +46,7 @@ x-backend: &backend
   image: capper-backend:latest
   restart: unless-stopped
   environment: *backend-env
-  depends_on:
+  depends_on: &backend-deps
     postgres:
       condition: service_healthy
     redis:
@@ -79,8 +82,25 @@ services:
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
+  # Миграции базы до запуска api и worker (app/db/migrate.py). Схема новее кода (после
+  # отката deploy.sh) — шаг пропускается с предупреждением, вниз миграции не откатываются
+  migrate:
+    <<: *backend
+    command: [python, -m, app.db.migrate]
+    restart: "no"
+    networks: [backend]
+
   api:
     <<: *backend
+    depends_on: &after-migrate
+      <<: *backend-deps
+      migrate:
+        condition: service_completed_successfully
+    # Хеш пароля (Argon2) берет 64 МиБ, одновременно их считается не больше
+    # CAPPER_PASSWORD_HASH_SLOTS (2). Лимиты не дают API занять весь сервер на 2 vCPU и 4 ГБ,
+    # где рядом PostgreSQL, Redis, воркер и Caddy
+    mem_limit: ${CAPPER_API_MEM_LIMIT:-1g}
+    cpus: ${CAPPER_API_CPUS:-1.5}
     # IP клиента — из X-Forwarded-For, но только от адресов сети edge (там лишь Caddy, а
     # шлюз сети — сам сервер). Caddy не верит этому заголовку от клиента и пишет его сам
     command:
@@ -106,6 +126,7 @@ services:
 
   worker:
     <<: *backend
+    depends_on: *after-migrate
     command: [python, -m, app.workers.main]
     networks: [backend]
     healthcheck:

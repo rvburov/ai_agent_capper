@@ -1,0 +1,26 @@
+# Обновления зависимостей (PLAN.md, раздел 7). Lock-файлы backend собирает uv
+# (backend/README.md, «Зависимости»): Dependabot для pip предлагает правку, а lock-файлы
+# после него пересобираются командами из README, если он не сделал это сам
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directories:
+      - /backend
+      - /frontend
+      - /deploy/backup
+    schedule:
+      interval: weekly

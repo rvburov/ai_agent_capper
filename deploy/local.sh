@@ -7,6 +7,8 @@
 #   bash deploy/local.sh import EMAIL ФАЙЛ [ПАПКА_ИГРОКОВ] [--dry-run]
 #                                           импорт истории старого бота
 #   bash deploy/local.sh backup             ночной бэкап вручную и проверка восстановления
+#   bash deploy/local.sh restore latest | --list | <вид>/<файл>
+#                                           восстановить рабочую базу из копии
 #   bash deploy/local.sh status | logs [СЕРВИС]
 #   bash deploy/local.sh down               остановить, данные сохраняются
 #   bash deploy/local.sh wipe               остановить и удалить все данные
@@ -99,7 +101,7 @@ cmd_up() {
   say "База и Redis"
   dc up -d --wait postgres redis
   say "Миграции базы"
-  dc run --rm api alembic upgrade head
+  dc run --rm --no-deps api alembic upgrade head
   say "Запуск всех сервисов"
   dc up -d
   wait_health
@@ -141,6 +143,23 @@ cmd_backup() {
   dc exec backup restore-check.sh
 }
 
+cmd_restore() {
+  [[ $# -ge 1 ]] || die "какую копию? bash deploy/local.sh restore --list | latest | <вид>/<файл>"
+  if [[ "$1" == --list ]]; then
+    dc exec backup restore.sh --list
+    return
+  fi
+  say "Останавливаю api и воркер"
+  dc stop api worker
+  local status=0
+  dc exec backup restore.sh "$@" || status=$?
+  # Миграции применит сервис migrate (копия могла быть снята до новых миграций)
+  say "Миграции и запуск"
+  dc up -d
+  wait_health
+  [[ "$status" == 0 ]] || die "восстановление не выполнено (код $status), причина — в выводе restore.sh выше"
+}
+
 cmd_wipe() {
   read -r -p "Удалить все данные локальной копии (базу, Redis, бэкапы)? Введите да: " answer
   [[ "$answer" == "да" ]] || die "отменено"
@@ -155,9 +174,10 @@ case "${1:-}" in
   cli) shift; dc exec api python -m app.admin.cli "$@" ;;
   import) shift; cmd_import "$@" ;;
   backup) cmd_backup ;;
+  restore) shift; cmd_restore "$@" ;;
   status) dc ps ;;
   logs) shift; dc logs -f --tail 200 "$@" ;;
   down) dc down ;;
   wipe) cmd_wipe ;;
-  *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

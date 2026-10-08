@@ -13,7 +13,8 @@
 # Сбой после начала сборки (сборка, миграции, здоровье) — откат: тег latest снова на
 # образах previous, код — коммит прежней версии, сервисы поднимаются на них, проверка
 # здоровья; затем логи и код ошибки 1. Миграции вниз не откатываются (deploy/README.md,
-# раздел 9).
+# раздел 9). Поэтому после отката схема базы бывает новее кода: при деплое прежнего
+# коммита миграции тогда пропускаются, если ревизия базы и миграции кода есть в master.
 #
 # Ключ GitHub Actions на сервере ограничен этой командой (authorized_keys:
 # command="bash .../deploy.sh --ssh",restrict): тогда SSH_ORIGINAL_COMMAND —
@@ -88,9 +89,66 @@ image_version() {
     | sed -n 's/^CAPPER_VERSION=//p' | head -n 1
 }
 
+db_revisions() {
+  # Ревизии Alembic в базе. Пусто — таблицы еще нет (первый деплой) или база не ответила:
+  # тогда ошибку покажет сам alembic upgrade head
+  compose exec -T postgres psql --username=capper --dbname=capper --no-align --tuples-only \
+    --command 'SELECT version_num FROM alembic_version' 2> /dev/null || true
+}
+
+code_revisions() {
+  # Все ревизии миграций в новом образе, то есть в коде разворачиваемой версии
+  compose run --rm --no-deps -T api python -c 'from alembic.config import Config
+from alembic.script import ScriptDirectory
+script = ScriptDirectory.from_config(Config("alembic.ini"))
+print(*(revision.revision for revision in script.walk_revisions()))'
+}
+
+master_revisions() {
+  # Все ревизии миграций в последнем коммите master (файлы backend/alembic/versions)
+  git -C .. grep -h -o -E "^revision(: *str)? *= *[\"'][A-Za-z0-9_]+[\"']" "origin/$BRANCH" \
+    -- backend/alembic/versions | sed -E "s/.*[\"']([A-Za-z0-9_]+)[\"']$/\1/"
+}
+
+missing_from() {
+  # Слова из $1, которых нет среди слов $2 (через пробел или с новой строки)
+  local word words=" ${2//$'\n'/ } "
+  for word in $1; do
+    [[ "$words" == *" $word "* ]] || printf '%s ' "$word"
+  done
+}
+
+migrate() {
+  # alembic upgrade head. Если в базе ревизия, которой код не знает, upgrade падает
+  # («Can't locate revision»): так бывает при деплое прежнего коммита после отката, когда
+  # схему уже обновил более новый коммит. Тогда миграции пропускаются, а прежний код
+  # работает на новой схеме (deploy/README.md, раздел 9) — но только если и ревизия базы,
+  # и все миграции кода есть в master: иначе файл миграции удален или код не из master
+  local db_revs code_revs master_revs ahead
+  db_revs="$(db_revisions)"
+  if [ -n "$db_revs" ] && code_revs="$(code_revisions)" && [ -n "$code_revs" ]; then
+    ahead="$(missing_from "$db_revs" "$code_revs")"
+  fi
+  if [ -z "${ahead:-}" ]; then
+    compose run --rm --no-deps api alembic upgrade head
+    return
+  fi
+  master_revs="$(master_revisions || true)"
+  if [ -n "$(missing_from "$ahead $code_revs" "$master_revs")" ]; then
+    log "в базе ревизия ${ahead% }: ее нет в этом коде, а в $BRANCH нет ее самой или миграций" \
+      "этого кода (удален файл миграции?). Схему вернуть копией из manual/ или downgrade:" \
+      "deploy/README.md, раздел 9"
+    return 1
+  fi
+  log "схема базы новее кода: ревизия ${ahead% } из более нового коммита $BRANCH." \
+    "Миграции пропущены, вниз они не откатываются (deploy/README.md, раздел 9)"
+}
+
 remember_images() {
   # Образы, на которых сервисы работают сейчас, получают тег previous: на них откат.
-  # Контейнера нет (сервис остановлен через down) — берется текущий тег latest
+  # Контейнера нет (сервис остановлен через down) — берется текущий тег latest. Образа
+  # контейнера может уже не быть: с хранилищем образов containerd он удаляется, когда
+  # ручная сборка (docker compose build) забрала у него последний тег
   local pair service image container id
   ROLLBACK_READY=1
   for pair in "${SERVICE_IMAGES[@]}"; do
@@ -102,17 +160,16 @@ remember_images() {
       id="$(docker inspect --format '{{.Image}}' "$container" 2> /dev/null || true)"
     fi
     [ -n "$id" ] || id="$(docker image inspect --format '{{.Id}}' "$image:latest" 2> /dev/null || true)"
-    if [ -z "$id" ]; then
+    if [ -z "$id" ] || ! docker tag "$id" "$image:previous" 2> /dev/null; then
       ROLLBACK_READY=0
       continue
     fi
-    docker tag "$id" "$image:previous"
   done
   if [ "$ROLLBACK_READY" = 1 ]; then
     PREV_VERSION="$(image_version capper-backend:previous)"
     log "образы прежней версии ${PREV_VERSION:-(версия неизвестна)} сохранены с тегом previous"
   else
-    log "прежних образов нет (первый деплой): при сбое откатывать некуда"
+    log "прежних образов нет (первый деплой или ручная сборка): при сбое откатывать некуда"
   fi
 }
 
@@ -255,7 +312,7 @@ main() {
   fi
 
   log "миграции"
-  if ! compose run --rm --no-deps api alembic upgrade head; then
+  if ! migrate; then
     show_failure
     fail "миграции не применились"
   fi
