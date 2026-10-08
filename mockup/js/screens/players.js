@@ -656,7 +656,7 @@
         source('database', 'Архив матчей ATP', 'Рейтинг, счет, подача и прием. Структурированные данные без ИИ и без токенов — импорт каждую ночь. Эло считаем сами по этим матчам.'),
         source('globe', 'Веб-поиск Claude', 'Новости, травмы, усталость, мотивация. У каждой записи ссылка на источник. Неподтвержденные слухи помечаются и не влияют на расчет.'),
         source('brain', 'Оценки Claude 1–10', 'Стиль, физика, техника, психология. Собираются из разборов матчей и интервью раз в 30 дней. Это мнение, а не измерение — вес в модели небольшой.'),
-        source('coins', 'Сколько стоит', 'Обновление профиля ночным пакетом ≈ ' + usd(COST.batch) + ' (Batch API, −50%), сразу ≈ ' + fmt.usd(COST.now) + '. Сбор нового игрока ≈ ' + fmt.usd(COST.collect) + '.')),
+        source('coins', 'Сколько стоит', 'Обновление профиля ночным пакетом ≈ ' + usd(COST.batch) + ' (Batch API, −50%), сразу ≈ ' + fmt.usd(COST.now) + '. Сбор нового игрока ≈ ' + fmt.usd(COST.collect) + '. База игроков общая: ночные пакеты оплачивает администратор, а сбор и обновление по вашей кнопке идут в ваш расход на ИИ.')),
     });
     function source(ic, title, text) { return h('div', { class: 'players-source' }, h('span', { class: 'players-source-ic' }, icon(ic)), h('div', { style: 'min-width:0' }, h('h4', null, title), h('p', null, text))); }
 
@@ -670,7 +670,7 @@
         UI.stat({ class: 'col-3 half-mobile', icon: 'users', label: 'Игроков в базе', value: String(c.all - c.missing), hint: c.missing ? 'еще ' + c.missing + ' без профиля' : 'все профили собраны' }),
         UI.stat({ class: 'col-3 half-mobile', icon: 'check', label: 'Данные свежие', value: String(c.fresh), hint: 'обновлены за 24 ч' }),
         UI.stat({ class: 'col-3 half-mobile', icon: 'clock', label: 'Нужно обновить', value: String(c.stale), hint: queued ? queued + ' в очереди' : 'старше 24 ч' }),
-        UI.stat({ class: 'col-3 half-mobile', icon: 'coins', label: 'Расход на данные', value: fmt.usd(refreshCost), hint: 'октябрь · Batch API −50%' }));
+        UI.stat({ class: 'col-3 half-mobile', icon: 'coins', label: 'Расход на данные', value: fmt.usd(refreshCost), hint: 'октябрь · платит администратор' }));
     }
 
     function drawToday() {

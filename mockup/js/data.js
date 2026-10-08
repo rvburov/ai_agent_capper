@@ -234,6 +234,8 @@
   const sumCost = rs => round(rs.reduce((a, r) => a + r.cost, 0), 2);
   const personalSpent = sumCost(aiRuns.filter(r => r.type !== 'refresh')); // анализы, разборы, разбор текста
   const sharedSpent = sumCost(aiRuns.filter(r => r.type === 'refresh'));  // общие фоновые задачи, платит администратор
+  const analysesN = aiRuns.filter(r => r.type === 'analysis').length;
+  const analysesToday = aiRuns.filter(r => r.type === 'analysis' && r.at.startsWith(TODAY)).length;
   const personas = {
     admin: { id: 'u1', name: 'Роман Буров', first: 'Роман', email: 'roman@example.com', initials: 'РБ', tz: 'Europe/Helsinki', role: 'admin', roleLabel: 'Администратор', since: '2026-06-28', aiMode: 'admin' },
     member: { id: 'u2', name: 'Ольга Лехтинен', first: 'Ольга', email: 'olga@example.com', initials: 'ОЛ', tz: 'Europe/Helsinki', role: 'member', roleLabel: 'Участник', since: '2026-06-30', aiMode: 'admin' },
@@ -241,8 +243,8 @@
   // Лимиты на ключе администратора (Р13: по умолчанию $10 в месяц, 3 анализа в день, не больше $1 за анализ)
   const LIMIT_DEFAULT = { monthly: 10, daily: 3, perAnalysis: 1 };
   const users = [
-    { id: 'u1', name: 'Роман Буров', email: 'roman@example.com', role: 'admin', status: 'active', aiMode: 'admin', limit: null, spent: round(personalSpent + 0.88, 2), analyses: 14, todayAnalyses: 1, lastLogin: '2026-10-07T08:41', twoFa: true, since: '2026-06-28', you: true },
-    { id: 'u2', name: 'Ольга Лехтинен', email: 'olga@example.com', role: 'member', status: 'active', aiMode: 'admin', limit: Object.assign({}, LIMIT_DEFAULT), spent: personalSpent, analyses: 9, todayAnalyses: 1, lastLogin: '2026-10-07T07:55', twoFa: true, since: '2026-06-30', consent: true },
+    { id: 'u1', name: 'Роман Буров', email: 'roman@example.com', role: 'admin', status: 'active', aiMode: 'admin', limit: null, spent: personalSpent, analyses: analysesN, todayAnalyses: analysesToday, lastLogin: '2026-10-07T08:41', twoFa: true, since: '2026-06-28', you: true },
+    { id: 'u2', name: 'Ольга Лехтинен', email: 'olga@example.com', role: 'member', status: 'active', aiMode: 'admin', limit: Object.assign({}, LIMIT_DEFAULT), spent: personalSpent, analyses: analysesN, todayAnalyses: analysesToday, lastLogin: '2026-10-07T07:55', twoFa: true, since: '2026-06-30', consent: true },
     { id: 'u3', name: 'Алексей Ковалев', email: 'alexey@example.com', role: 'member', status: 'active', aiMode: 'admin', limit: { monthly: 8, daily: 5, perAnalysis: 1 }, spent: 7.28, analyses: 33, todayAnalyses: 4, lastLogin: '2026-10-07T09:12', twoFa: true, since: '2026-07-15', consent: true },
     { id: 'u4', name: 'Дмитрий Шульц', email: 'dmitry@example.com', role: 'member', status: 'active', aiMode: 'own', ownKey: { last4: '7Qx2', verified: '2026-09-02T18:30' }, limit: null, spent: 3.40, analyses: 15, todayAnalyses: 0, lastLogin: '2026-10-05T20:03', twoFa: true, since: '2026-08-20', consent: false, returnRequested: '2026-10-06T21:15' },
     { id: 'u5', name: 'Игорь Нестеров', email: 'igor@example.com', role: 'member', status: 'blocked', aiMode: 'admin', limit: Object.assign({}, LIMIT_DEFAULT), spent: 0, analyses: 0, todayAnalyses: 0, lastLogin: '2026-09-18T12:40', twoFa: false, since: '2026-09-10', blockedAt: '2026-09-20T10:05', consent: false },

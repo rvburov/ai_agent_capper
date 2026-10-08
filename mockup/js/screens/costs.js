@@ -1,5 +1,6 @@
-/* ИИ и расходы: бюджет Claude API, токены и кэш, стоимость каждого запуска, рычаги экономии и настройки.
-   Фактические цифры — из DATA.ai (запуски 1–7 окт). Прогнозы и «до/после» помечены как оценки. */
+/* ИИ и расходы: вверху — лимит участника на ключе администратора или бюджет ключа администратора (по роли),
+   ниже — собственные запуски: токены и кэш, стоимость каждого запуска, рычаги экономии и настройки.
+   Фактические цифры — из DATA.ai, DATA.me и DATA.admin (запуски 1–7 окт). Прогнозы и «до/после» помечены как оценки. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
@@ -351,7 +352,6 @@
     .costs-rules-ic.info { background: var(--info-soft); color: var(--info-ink); }
     .costs-rules-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); color: var(--fg-2); }
     .costs-rules-body b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
-    .costs-ro-note { font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
     .costs-main { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 16px; align-items: start; }
     .costs-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
     @media (max-width: 1180px) {
@@ -814,6 +814,7 @@
         kvCell('Сегодня', me.todayAnalyses + ' из ' + L.daily, fmt.plural(L.daily, 'анализ', 'анализа', 'анализов') + ' в день'),
         kvCell('На один анализ', 'до ' + usd(L.perAnalysis, 0), 'потолок')),
       enough != null ? h('p', { class: 'costs-hero-note' }, icon('info'), h('span', null, 'Остатка хватит примерно на ' + enough + ' ' + fmt.plural(enough, 'анализ', 'анализа', 'анализов') + ' по средней цене ' + usd(an.avgCost) + '. ' + (V.limit.daily ? 'Но не больше ' + V.limit.daily + ' в день.' : ''))) : null,
+      h('p', { class: 'costs-hero-note' }, icon('layers'), h('span', null, 'Ночное обновление профилей (' + usd(sharedSpent()) + ' в октябре) — общая фоновая задача: ее оплачивает администратор, в ваш лимит она не входит.')),
       h('div', { class: 'costs-hero-foot' },
         h('div', { class: 'costs-hero-actions' },
           h('span', { class: 'costs-hero-note' }, icon('lock'), h('span', null, 'Лимит меняет администратор.')),
@@ -857,7 +858,6 @@
       { ic: 'pause', tone: 'bad', t: '100% — ' + usd(L.monthly), s: 'Анализы на ключе администратора остановятся до его решения.' },
       { ic: 'calendar', tone: 'info', t: L.daily + ' ' + fmt.plural(L.daily, 'анализ', 'анализа', 'анализов') + ' в день', s: 'Сегодня ' + me.todayAnalyses + ' из ' + L.daily + '. Счетчик обнуляется в полночь по вашему времени.' },
       { ic: 'coins', tone: 'info', t: 'Не больше ' + usd(L.perAnalysis, 0) + ' за анализ', s: 'Дороже — анализ остановится без ставки. Самый дорогой у вас в октябре — ' + usd(maxRun) + '.' },
-      { ic: 'layers', tone: '', t: 'Общие фоновые задачи', s: shared },
     ];
     return card({
       class: 'costs-card costs-side',
@@ -1146,7 +1146,7 @@
     const tasks = ['parse', 'analysis', 'postmortem', 'refresh'].map(id => {
       const m = saved.models[id], eff = supportsEffort(m) ? 'effort: ' + EFFORT_LABEL[saved.effort[id]].toLowerCase() : 'effort не поддерживается';
       const shared = SHARED.includes(id);
-      return { title: TASK_LABEL[id], sub: m + ' · ' + eff, value: shared ? h('span', { class: 'costs-ro-note' }, 'платит администратор') : '≈ ' + usd(perRun(id, saved), 3) };
+      return { title: TASK_LABEL[id], sub: m + ' · ' + eff + (shared ? ' · общая задача, платит администратор' : ''), value: shared ? null : '≈ ' + usd(perRun(id, saved), 3) };
     });
     const onOff = on => on ? chip('Включено', 'good', 'check') : chip('Выключено', 'warn', 'alert');
     const tricks = [
