@@ -47,10 +47,36 @@
   const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
   const MINUS = '−';
   function sign(n, s) { return (n > 0 ? '+' : n < 0 ? MINUS : '') + s; }
+  // Валюта программы одна на всех (решение Р17): рубли, доллары или евро, выбирает администратор.
+  // Демо-данные хранятся в рублях; при показе суммы пересчитываются по курсу, который администратор ввел при смене.
+  const CURRENCIES = {
+    RUB: { code: 'RUB', sym: '₽', label: 'Рубли', rate: 1, dec: 0 },
+    USD: { code: 'USD', sym: '$', label: 'Доллары США', rate: 1 / 92.4, dec: 2 },
+    EUR: { code: 'EUR', sym: '€', label: 'Евро', rate: 1 / 100.6, dec: 2 },
+  };
+  let curCode = 'RUB';
+  try { const c = localStorage.getItem('capper.currency'); if (CURRENCIES[c]) curCode = c; } catch (e) { /* ок */ }
+  const currency = {
+    list: CURRENCIES,
+    get code() { return curCode; },
+    get sym() { return CURRENCIES[curCode].sym; },
+    get label() { return CURRENCIES[curCode].label; },
+    set(code) {
+      if (!CURRENCIES[code]) return;
+      curCode = code;
+      try { localStorage.setItem('capper.currency', code); } catch (e) { /* ок */ }
+    },
+  };
+  const curNf = () => CURRENCIES[curCode].dec ? nf2 : nf0;
+  const conv = n => n * CURRENCIES[curCode].rate; // рубли демо-данных → валюта программы
   const fmt = {
     int: n => nf0.format(Math.round(n)).replace('-', MINUS),
-    money: n => nf0.format(Math.round(n)).replace('-', MINUS) + ' ₽',
-    signedMoney: n => sign(n, nf0.format(Math.abs(Math.round(n)))) + ' ₽',
+    // Суммы ставок, банка и прибыли — только через money/signedMoney/moneyNum/cur
+    money: n => curNf().format(conv(n)).replace('-', MINUS) + ' ' + CURRENCIES[curCode].sym,
+    signedMoney: n => sign(n, curNf().format(Math.abs(conv(n)))) + ' ' + CURRENCIES[curCode].sym,
+    moneyNum: n => { const d = CURRENCIES[curCode].dec; return Math.round(conv(n) * 10 ** d) / 10 ** d; }, // число в валюте программы (для полей ввода)
+    fromMoney: x => x / CURRENCIES[curCode].rate, // число из поля ввода → рубли демо-данных
+    cur: () => CURRENCIES[curCode].sym,
     usd: (n, d = 2) => '$' + (d === 2 ? nf2 : d === 1 ? nf1 : nf0).format(n),
     pct: (n, d = 1) => (d === 0 ? nf0 : d === 2 ? nf2 : nf1).format(n).replace('-', MINUS) + '%',
     signedPct: (n, d = 1) => sign(n, (d === 0 ? nf0 : d === 2 ? nf2 : nf1).format(Math.abs(n))) + '%',
@@ -129,6 +155,14 @@
     bell: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4',
     wallet: 'M4 7a2 2 0 0 1 2-2h12v4M4 7v11a2 2 0 0 0 2 2h14V9H6a2 2 0 0 1-2-2zM16 14.5h.01',
     history: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
+    userPlus: 'M15 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M8.5 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19 8v6M16 11h6',
+    ban: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM5.6 5.6l12.8 12.8',
+    mail: 'M4 6h16v12H4zM4 7l8 6 8-6',
+    terminal: 'M4 5h16v14H4zM7.5 9.5 10 12l-2.5 2.5M12.5 15h4',
+    sliders: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
+    megaphone: 'M3 10.5v3a1 1 0 0 0 1 1h2.5L12 18V6L6.5 9.5H4a1 1 0 0 0-1 1zM15.5 9a3.5 3.5 0 0 1 0 6M18.5 6.5a7 7 0 0 1 0 11',
+    admin: 'M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6zM12 8.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM8.8 16a3.6 3.6 0 0 1 6.4 0',
+    currency: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM14.8 9.2A3 3 0 0 0 12 7.5c-1.7 0-3 .9-3 2.2 0 3 6 1.6 6 4.6 0 1.3-1.3 2.2-3 2.2a3 3 0 0 1-2.8-1.7M12 6v1.5M12 16.5V18',
     link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
   };
   function icon(name, attrs) {
@@ -763,5 +797,5 @@
   }).observe(document.body, { childList: true, subtree: true });
   window.addEventListener('hashchange', () => closeDropdown(false));
 
-  window.UI = { h, append, clear, fmt, icon, ICONS, button, card, stat, chip, dotChip, surfaceChip, statusChip, freshnessChip, formDots, table, tabs, segmented, field, toggle, callout, meter, kv, empty, oddsBox, toast, modal, lineChart, columnChart, hbars, calibrationChart, sparkline, legend, withTable, showTip, hideTip, register, screens, go, css, isMobile, enhanceSelects, closeDropdown };
+  window.UI = { h, append, clear, fmt, currency, icon, ICONS, button, card, stat, chip, dotChip, surfaceChip, statusChip, freshnessChip, formDots, table, tabs, segmented, field, toggle, callout, meter, kv, empty, oddsBox, toast, modal, lineChart, columnChart, hbars, calibrationChart, sparkline, legend, withTable, showTip, hideTip, register, screens, go, css, isMobile, enhanceSelects, closeDropdown };
 })();

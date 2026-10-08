@@ -173,6 +173,66 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--accent); color: var(--accent-fg); font-weight: 600; font-family: var(--font-display);
   border: 0; cursor: pointer; text-decoration: none;
 }
+/* демо-роль: плашка «Макет · администратор» переключает вид */
+button.demo-pill { border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-family: inherit; min-height: 26px; }
+button.demo-pill svg { width: 14px; height: 14px; }
+button.demo-pill:hover { filter: brightness(.97); }
+.role-opt {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left; padding: 14px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; font: inherit;
+}
+.role-opt:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.role-opt.is-current { border-color: var(--accent); background: var(--accent-soft); }
+.role-opt-ic { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); color: var(--accent-ink); }
+.role-opt-ic svg { width: 20px; height: 20px; }
+.role-opt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+
+/* колокольчик и центр уведомлений */
+.bell-btn { position: relative; justify-content: center; color: var(--fg); }
+.bell-btn svg { width: 21px; height: 21px; }
+.bell-badge {
+  position: absolute; top: 1px; right: 0; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px;
+  background: var(--bad); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
+  box-shadow: 0 0 0 2px var(--bg); pointer-events: none;
+}
+.bell-badge[hidden] { display: none; }
+.notif-back { position: fixed; inset: 0; z-index: 100; background: var(--overlay); animation: fade .15s ease-out; }
+.notif-pop {
+  position: fixed; z-index: 101; width: min(400px, calc(100vw - 24px)); max-height: min(560px, calc(100vh - 90px));
+  display: flex; flex-direction: column; background: var(--dd-bg); color: var(--fg); border: 1px solid var(--dd-border);
+  border-radius: var(--r-lg); box-shadow: var(--dd-shadow); animation: dd-in .14s ease-out;
+}
+.notif-pop:focus { outline: none; }
+.notif-pop.sheet {
+  left: 0; right: 0; bottom: 0; top: auto !important; width: auto; max-height: min(80vh, 640px); border: 0;
+  border-radius: 18px 18px 0 0; background: var(--surface); padding-bottom: env(safe-area-inset-bottom, 0px); animation: rise .2s ease-out;
+}
+.notif-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 10px 8px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.notif-head-title { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); }
+.notif-list { overflow-y: auto; overscroll-behavior: contain; padding: 6px; flex: 1; }
+.notif-item {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 10px; border: 0; border-radius: var(--r-md);
+  background: none; color: var(--fg); text-align: left; cursor: pointer; font: inherit;
+}
+.notif-item + .notif-item { margin-top: 2px; }
+.notif-item:hover, .notif-item:focus-visible { background: var(--dd-active); }
+.notif-item.unread .notif-title { font-weight: 600; }
+.notif-ic { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); color: var(--fg-2); }
+.notif-ic svg { width: 18px; height: 18px; }
+.notif-ic.good { background: var(--good-soft); color: var(--good-ink); }
+.notif-ic.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.notif-ic.bad { background: var(--bad-soft); color: var(--bad-ink); }
+.notif-ic.info { background: var(--info-soft); color: var(--info-ink); }
+.notif-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.notif-title { font-size: var(--fs-md); line-height: 1.35; }
+.notif-body { font-size: var(--fs-sm); color: var(--fg-2); line-height: 1.4; }
+.notif-time { font-size: var(--fs-xs); color: var(--fg-3); }
+.notif-dot { width: 8px; height: 8px; margin-top: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.notif-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px 12px; border-top: 1px solid var(--line); flex: none; }
+.notif-foot a { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-ink); font-weight: 600; font-size: var(--fs-sm); text-decoration: none; min-height: 32px; }
+.notif-foot a svg { width: 16px; height: 16px; }
+.notif-pop.sheet .notif-item { padding: 12px; }
+
 .view { width: 100%; max-width: 1360px; margin: 0 auto; padding-inline: 28px; padding-block: 24px 48px; display: flex; flex-direction: column; gap: 20px; }
 
 .tabbar { display: none; }
@@ -501,4 +561,5 @@ button.dd-trigger.select { padding: 0 12px 0 14px; } /* отступы один�
 <script src="js/screens/learning.js"></script>
 <script src="js/screens/costs.js"></script>
 <script src="js/screens/profile.js"></script>
+<script src="js/screens/admin.js"></script>
 <script src="js/app.js"></script>

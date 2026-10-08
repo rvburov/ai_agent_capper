@@ -93,7 +93,7 @@
       bank += profit;
       // CLV экспресса — из неокругленных произведений кэфов, как при вводе результата на экране «Ставки»
       const clv = round((legs.reduce((a, l) => a * l.odds, 1) / legs.reduce((a, l) => a * l.closing, 1) - 1) * 100, 1);
-      bets.push({ id, date, tournament: t.name, surface: t.surface, legs, total, stake, status, profit, bankAfter: bank, clv, bookmaker: pick(['Fonbet', 'Лига Ставок', 'Winline', 'Fonbet']) });
+      bets.push({ id, date, tournament: t.name, surface: t.surface, legs, total, stake, status, profit, bankAfter: bank, clv, bookmaker: pick(['bet365', 'Unibet', 'Pinnacle', 'bet365']) });
       bankHistory.push({ date, bank });
       id++;
     }
@@ -130,7 +130,7 @@
   openLegs.forEach((legs, k) => {
     const total = round(legs.reduce((a, l) => a * l.odds, 1), 2);
     const stake = Math.round(bank * stakePct(total) / 100 / 10) * 10;
-    bets.push({ id, date: TODAY, tournament: 'Шанхай', surface: 'hard', legs: legs.map(l => Object.assign({ closing: null, result: 'open' }, l)), total, stake, status: 'open', profit: 0, bankAfter: null, clv: null, bookmaker: 'Winline' });
+    bets.push({ id, date: TODAY, tournament: 'Шанхай', surface: 'hard', legs: legs.map(l => Object.assign({ closing: null, result: 'open' }, l)), total, stake, status: 'open', profit: 0, bankAfter: null, clv: null, bookmaker: 'bet365' });
     id++;
   });
 
@@ -227,10 +227,75 @@
     { id: 'v4', name: 'v4 · промпт на английском, сжатое досье', date: '2026-10-05', logloss: 0.581, brier: 0.200, roi: 5.2, clv: 2.1, n: 220, status: 'candidate' },
   ];
 
+
+  // ---------- Участники, доступ и уведомления (решения Р1–Р20 в docs/PLAN.md) ----------
+  // Демо-вход под двумя ролями: администратор (владелец) и участник. Ставки, банк и запуски ИИ
+  // у обоих демо-пользователей одни и те же: в макете показываем вид интерфейса, а не разные истории.
+  const sumCost = rs => round(rs.reduce((a, r) => a + r.cost, 0), 2);
+  const personalSpent = sumCost(aiRuns.filter(r => r.type !== 'refresh')); // анализы, разборы, разбор текста
+  const sharedSpent = sumCost(aiRuns.filter(r => r.type === 'refresh'));  // общие фоновые задачи, платит администратор
+  const personas = {
+    admin: { id: 'u1', name: 'Роман Буров', first: 'Роман', email: 'roman@example.com', initials: 'РБ', tz: 'Europe/Helsinki', role: 'admin', roleLabel: 'Администратор', since: '2026-06-28', aiMode: 'admin' },
+    member: { id: 'u2', name: 'Ольга Лехтинен', first: 'Ольга', email: 'olga@example.com', initials: 'ОЛ', tz: 'Europe/Helsinki', role: 'member', roleLabel: 'Участник', since: '2026-06-30', aiMode: 'admin' },
+  };
+  // Лимиты на ключе администратора (Р13: по умолчанию $10 в месяц, 3 анализа в день, не больше $1 за анализ)
+  const LIMIT_DEFAULT = { monthly: 10, daily: 3, perAnalysis: 1 };
+  const users = [
+    { id: 'u1', name: 'Роман Буров', email: 'roman@example.com', role: 'admin', status: 'active', aiMode: 'admin', limit: null, spent: round(personalSpent + 0.88, 2), analyses: 14, todayAnalyses: 1, lastLogin: '2026-10-07T08:41', twoFa: true, since: '2026-06-28', you: true },
+    { id: 'u2', name: 'Ольга Лехтинен', email: 'olga@example.com', role: 'member', status: 'active', aiMode: 'admin', limit: Object.assign({}, LIMIT_DEFAULT), spent: personalSpent, analyses: 9, todayAnalyses: 1, lastLogin: '2026-10-07T07:55', twoFa: true, since: '2026-06-30', consent: true },
+    { id: 'u3', name: 'Алексей Ковалев', email: 'alexey@example.com', role: 'member', status: 'active', aiMode: 'admin', limit: { monthly: 8, daily: 5, perAnalysis: 1 }, spent: 7.28, analyses: 33, todayAnalyses: 4, lastLogin: '2026-10-07T09:12', twoFa: true, since: '2026-07-15', consent: true },
+    { id: 'u4', name: 'Дмитрий Шульц', email: 'dmitry@example.com', role: 'member', status: 'active', aiMode: 'own', ownKey: { last4: '7Qx2', verified: '2026-09-02T18:30' }, limit: null, spent: 3.40, analyses: 15, todayAnalyses: 0, lastLogin: '2026-10-05T20:03', twoFa: true, since: '2026-08-20', consent: false, returnRequested: '2026-10-06T21:15' },
+    { id: 'u5', name: 'Игорь Нестеров', email: 'igor@example.com', role: 'member', status: 'blocked', aiMode: 'admin', limit: Object.assign({}, LIMIT_DEFAULT), spent: 0, analyses: 0, todayAnalyses: 0, lastLogin: '2026-09-18T12:40', twoFa: false, since: '2026-09-10', blockedAt: '2026-09-20T10:05', consent: false },
+  ];
+  const adminKeyUsers = users.filter(u => u.aiMode === 'admin' && u.status !== 'deleted');
+  const admin = {
+    key: { last4: 'm9Tq', verified: '2026-10-01T10:12', status: 'ok' },
+    budget: { monthly: 60, spent: round(adminKeyUsers.reduce((a, u) => a + u.spent, 0) + sharedSpent, 2), shared: sharedSpent, alertAt: 80 },
+    defaults: Object.assign({}, LIMIT_DEFAULT),
+    invites: [
+      { code: 'CAP-K7QM-2XPA', email: 'maria@example.com', role: 'member', aiMode: 'admin', limit: 10, created: '2026-10-06T19:40', expires: '2026-10-13T19:40', status: 'active' },
+      { code: 'CAP-R4TD-9WEK', email: 'dmitry@example.com', role: 'member', aiMode: 'own', limit: null, created: '2026-08-18T11:02', expires: '2026-08-25T11:02', status: 'used', usedAt: '2026-08-20T09:14' },
+      { code: 'CAP-H2NB-6YLC', email: 'alexey@example.com', role: 'member', aiMode: 'admin', limit: 10, created: '2026-07-14T16:20', expires: '2026-07-21T16:20', status: 'used', usedAt: '2026-07-15T08:01' },
+      { code: 'CAP-P8VF-3JSA', email: 'sergey@example.com', role: 'member', aiMode: 'admin', limit: 10, created: '2026-09-01T12:00', expires: '2026-09-08T12:00', status: 'expired' },
+    ],
+    resetCodes: [
+      { code: 'RST-Z5HC-8MRT', user: 'u3', created: '2026-10-07T09:20', expires: '2026-10-08T09:20', status: 'active' },
+    ],
+    // Журнал действий администратора и команд терминала (admin_audit_log)
+    audit: [
+      { at: '2026-10-07T09:20', actor: 'Роман Буров', action: 'reset_code', target: 'Алексей Ковалев', details: 'Код сброса пароля, 24 часа', ip: '95.216.•.•' },
+      { at: '2026-10-06T19:40', actor: 'Роман Буров', action: 'invite', target: 'maria@example.com', details: 'Участник, ключ администратора, $10 в месяц', ip: '95.216.•.•' },
+      { at: '2026-10-01T10:12', actor: 'Роман Буров', action: 'key_change', target: null, details: 'Ключ администратора заменен: sk-ant-…m9Tq, проверен', ip: '95.216.•.•' },
+      { at: '2026-09-20T10:05', actor: 'Роман Буров', action: 'block', target: 'Игорь Нестеров', details: 'Заблокирован, сеансы завершены', ip: '95.216.•.•' },
+      { at: '2026-09-02T18:30', actor: 'Дмитрий Шульц', action: 'ai_mode', target: 'Дмитрий Шульц', details: 'Перешел на свой ключ sk-ant-…7Qx2', ip: '84.146.•.•' },
+      { at: '2026-08-01T12:31', actor: 'Роман Буров', action: 'limit_change', target: 'Алексей Ковалев', details: 'Лимит $10 → $8 в месяц, анализов в день 3 → 5', ip: '95.216.•.•' },
+      { at: '2026-07-14T16:20', actor: 'Роман Буров', action: 'invite', target: 'alexey@example.com', details: 'Участник, ключ администратора, $10 в месяц', ip: '95.216.•.•' },
+      { at: '2026-06-29T09:02', actor: 'Роман Буров', action: 'set_currency', target: null, details: 'Валюта программы: рубли', ip: '95.216.•.•' },
+      { at: '2026-06-28T21:47', actor: 'терминал', action: 'create_admin', target: 'Роман Буров', details: 'python -m app.admin.cli create-admin', ip: 'сервер' },
+    ],
+  };
+  // Центр уведомлений: у каждой роли свой список. Суммы в тексте подставляются при показе (валюта программы).
+  const lastSettled = settled[settled.length - 1];
+  const notifications = {
+    admin: [
+      { id: 'n1', kind: 'limit_80', icon: 'coins', tone: 'warn', title: 'Алексей Ковалев израсходовал 91% лимита', body: '$7,28 из $8 за октябрь. На 100% его анализы на вашем ключе остановятся.', at: '2026-10-07T09:31', link: '#admin-limits', read: false },
+      { id: 'n2', kind: 'ai_mode_request', icon: 'key', tone: 'info', title: 'Дмитрий Шульц просит вернуть ключ администратора', body: 'Сейчас работает на своем ключе. Вернуть можно только с вашего разрешения.', at: '2026-10-06T21:15', link: '#admin-users', read: false },
+      { id: 'n3', kind: 'data_stale', icon: 'clock', tone: 'warn', title: 'Данные Фрица устарели', body: 'Обновлены 4 октября. Матч сегодня в 16:30 — обновите перед анализом.', at: '2026-10-07T07:00', link: '#player-fritz', read: false },
+      { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: lastSettled.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + lastSettled.id + ' рассчитана', bet: lastSettled.id, at: lastSettled.date + 'T21:40', link: '#bets', read: true },
+      { id: 'n5', kind: 'new_device', icon: 'device', tone: 'info', title: 'Вход с нового устройства', body: 'Safari, iPhone · Хельсинки. Если это не вы — завершите сеанс в личном кабинете.', at: '2026-10-05T19:12', link: '#profile-security', read: true },
+    ],
+    member: [
+      { id: 'n1', kind: 'admin_message', icon: 'megaphone', tone: 'info', title: 'Сообщение администратора', body: 'В субботу с 10:00 до 10:30 (Хельсинки) сервер обновляется, анализы будут недоступны.', at: '2026-10-07T08:00', read: false },
+      { id: 'n3', kind: 'data_stale', icon: 'clock', tone: 'warn', title: 'Данные Фрица устарели', body: 'Обновлены 4 октября. Матч сегодня в 16:30 — обновите перед анализом.', at: '2026-10-07T07:00', link: '#player-fritz', read: false },
+      { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: lastSettled.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + lastSettled.id + ' рассчитана', bet: lastSettled.id, at: lastSettled.date + 'T21:40', link: '#bets', read: true },
+      { id: 'n5', kind: 'new_device', icon: 'device', tone: 'info', title: 'Вход с нового устройства', body: 'Chrome, Windows · Хельсинки. Если это не вы — завершите сеанс в личном кабинете.', at: '2026-10-03T18:02', link: '#profile-security', read: true },
+    ],
+  };
+
   window.DATA = {
     today: TODAY,
     demo: true,
-    user: { name: 'Роман Буров', first: 'Роман', email: 'roman@example.com', initials: 'РБ', tz: 'Europe/Moscow', currency: '₽', role: 'Владелец', since: '2026-06-28' },
+    personas, users, admin, notifications, LIMIT_DEFAULT,
     surfaces, players, P, calendar, markets,
     bets, bankHistory,
     stats: {
@@ -241,10 +306,14 @@
     },
     allLegs, calibration, brierRolling, roiBySurface, roiByMarket, roiByOdds, roiByTotal,
     matchesToday,
-    ai: { runs: aiRuns, spent: aiSpent, budget: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes },
+    ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, budget: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes },
     lessons, strategyVersions,
     strategy: { minProb: 65, oddsMin: 1.13, oddsMax: 1.80, maxLegs: 3, totalMax: 3.24, stakeTable: [{ range: '1.28–1.70', pct: '2,5–3%' }, { range: '1.71–2.20', pct: '2–2,5%' }, { range: '2.21–3.24', pct: '1,5–2%' }] },
     playerName: id => (P[id] ? P[id].short : id),
     match: (l) => (P[l.p1] ? P[l.p1].short : l.p1) + ' — ' + (P[l.p2] ? P[l.p2].short : l.p2),
   };
+  // Текущий пользователь зависит от демо-роли (UI.auth.role задает app.js)
+  const role = () => (window.UI && UI.auth && UI.auth.role) || 'admin';
+  Object.defineProperty(window.DATA, 'user', { enumerable: true, get: () => personas[role()] });
+  Object.defineProperty(window.DATA, 'me', { enumerable: true, get: () => users.find(u => u.id === personas[role()].id) });
 })();
