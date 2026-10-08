@@ -1,6 +1,8 @@
 /* ИИ и расходы: вверху — лимит участника на ключе администратора или бюджет ключа администратора (по роли),
    ниже — собственные запуски: токены и кэш, стоимость каждого запуска, рычаги экономии и настройки.
-   Фактические цифры — из DATA.ai, DATA.me и DATA.admin (запуски 1–7 окт). Прогнозы и «до/после» помечены как оценки. */
+   Бюджет ключа, расход по людям и лимиты — только из общего расчета DATA.ai (budget, keySpent, ownSpent,
+   keyUsers, limitOf): так цифры совпадают с главной и «Администрированием». Запуски — DATA.ai.runs (1–7 окт).
+   Прогнозы и «до/после» помечены как оценки. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
@@ -14,7 +16,8 @@
   };
   const SEARCH = 0.01;          // $10 за 1000 веб-поисков
   const SEARCH_TOKENS = 4000;   // примерно столько входных токенов добавляют результаты одного поиска
-  const DAYS = 7, MONTH_DAYS = 31, PER_MONTH = MONTH_DAYS / DAYS;
+  // DAYS — дней в журнале запусков (1–7 окт, сегодня включительно)
+  const DAYS = +D.today.slice(8, 10), MONTH_DAYS = 31, PER_MONTH = MONTH_DAYS / DAYS;
   // Старый бот (legacy/telegram-bot/bot.py, выключен): Sonnet 4.6, до 20 циклов tool use, без кэша — оценка на один анализ
   // по docs/TOKEN_ECONOMY.md §3.2 (12 итераций, ≈580 тыс. входа, ≈18 тыс. выхода; разброс $1–4,5).
   // Поиск — DuckDuckGo Instant Answer (bot.py:158–194), он бесплатный.
@@ -24,10 +27,11 @@
   // с кэшем внутри цикла ≈84% входа читается из кэша — это ≈$1,3 вместо ≈$3,7.
   const NO_DOSSIER = { input: 750000, output: 35000, cacheShare: 0.84 };
 
-  // Effort (глубина размышлений): множитель к выходным токенам относительно уровня, на котором
+  // Глубина размышлений (параметр effort в API): множитель к выходным токенам относительно уровня, на котором
   // сняты фактические запуски (DEFAULTS.effort). Оценка: §4.5 — −20…50% выхода на low.
   const EFFORT_K = { low: 0.55, medium: 1, high: 1.5 };
   const EFFORT_LABEL = { low: 'Низкая', medium: 'Средняя', high: 'Высокая' };
+  const effortWord = e => (EFFORT_LABEL[e] || EFFORT_LABEL.medium).toLowerCase();
   const EFFORT_LEVELS = { analysis: ['low', 'medium', 'high'], refresh: ['low', 'medium'], postmortem: ['low', 'medium'], parse: ['low', 'medium'] };
   const supportsEffort = model => model !== 'Haiku 4.5';
 
@@ -44,6 +48,7 @@
   const nf = d => nfCache[d] || (nfCache[d] = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }));
   const usd = (n, d = 2) => (n < 0 ? '−' : '') + '$' + nf(d).format(Math.abs(n));
   const usdM = n => usd(n, n >= 100 ? 0 : 1);
+  const usdL = n => usd(n, Number.isInteger(n) ? 0 : 2); // лимиты и потолки: $10, $1, но $1,50
   const pct = (x, d = 0) => nf(d).format(x * 100) + '%';
   const sum = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
   const clone = o => JSON.parse(JSON.stringify(o));
@@ -58,14 +63,28 @@
   const isShared = r => SHARED.includes(r.type);
   const days = [];
   for (let d = 1; d <= DAYS; d++) days.push('2026-10-0' + d);
-  // Прогноз на месяц по темпу 1–7 окт — та же формула, что на главной
+  // Темп 1–7 окт на весь месяц: для оценки «с этими настройками» по собственным запускам зрителя
   const monthPace = v => v / DAYS * MONTH_DAYS;
+  // Прогноз одного человека — по тем же правилам, что прогноз в DATA.ai.budget(): темп 1–7 окт,
+  // не выше личного лимита (на 100% анализы останавливаются), на паузе расход не растет
+  function personalForecast(u, v) {
+    const L = A.limitOf(u);
+    if (L && L.paused) return v;
+    return L ? Math.min(L.monthly, monthPace(v)) : monthPace(v);
+  }
+  // Потолок на один анализ на своем ключе задает сам участник (личный кабинет), по умолчанию — как у всех
+  const ownCapOf = u => (u.ownCap != null ? u.ownCap : D.admin.defaults.perAnalysis);
   // V — зритель; RUNS, BASE, TOT, SPENT, FORECAST, byDay — агрегаты по его запускам (пересчитываются при отрисовке)
   let V, SCOPE_RUNS, RUNS, BASE, TOT, SPENT, CACHE_SHARE, FORECAST, byDay, cacheSavedWeek, SCOPE_TYPES;
+  let ALERT = 80; // % лимита или бюджета, при котором приходит уведомление (меняет администратор)
   function setScope() {
     const me = D.me || {};
     const admin = !!(UI.auth && UI.auth.isAdmin);
-    V = { admin, me, own: !admin && me.aiMode === 'own', limit: me.limit || D.LIMIT_DEFAULT };
+    const own = !admin && me.aiMode === 'own';
+    // limit — личный лимит на ключе администратора (DATA.ai.limitOf); у администратора и на своем ключе его нет
+    const limit = A.limitOf(me) || Object.assign({}, D.admin.defaults);
+    V = { admin, me, own, limit, cap: own ? ownCapOf(me) : limit.perAnalysis };
+    ALERT = D.admin.budget.alertAt || 80;
     SCOPE_RUNS = admin ? A.runs : A.runs.filter(r => !isShared(r));
     RUNS = SCOPE_RUNS.slice().sort((a, b) => b.at.localeCompare(a.at));
     BASE = {};
@@ -94,20 +113,9 @@
     cacheSavedWeek = sum(SCOPE_RUNS, r => r.cached * (PRICE[r.model].in - PRICE[r.model].cache) / 1e6 * (r.batch ? 0.5 : 1));
     if (!V.admin && SHARED.includes(runFilter)) runFilter = 'all';
   }
-  // Общие фоновые задачи за 1–7 окт (их оплачивает ключ администратора)
+  // Общие фоновые задачи за 1–7 окт (их оплачивает ключ администратора) — та же сумма, что в DATA.ai.budget().shared
   const SHARED_RUNS = A.runs.filter(isShared);
-  const sharedSpent = () => (D.ai.sharedSpent != null ? D.ai.sharedSpent : sum(SHARED_RUNS, r => r.cost));
-
-  // Бюджет ключа администратора: кто на нем, сколько потратил и прогноз на месяц.
-  // Прогноз учитывает личные лимиты: на 100% анализы участника на ключе администратора останавливаются.
-  function keyBudget() {
-    const B = D.admin.budget;
-    const onKey = D.users.filter(u => u.aiMode === 'admin' && u.status !== 'deleted');
-    const k = MONTH_DAYS / DAYS;
-    const forecast = sum(onKey, u => u.status !== 'active' ? u.spent : u.limit ? Math.min(u.limit.monthly, u.spent * k) : u.spent * k) + B.shared * k;
-    const own = D.users.filter(u => u.aiMode === 'own' && u.status !== 'deleted');
-    return { B, onKey, own, forecast };
-  }
+  const sharedSpent = () => A.budget().shared;
 
   // ---------- что связано с каждым запуском (для окна деталей) ----------
   const META = {};
@@ -151,14 +159,14 @@
   })();
 
   // ---------- настройки и оценка расходов ----------
-  // Лимиты — по docs/TOKEN_ECONOMY.md §6: анализ — мягкий порог $0,50 и жесткий $1,00 (совпадает с потолком
-  // на анализ из Р13); поиски — не больше 6 на запуск (2–3 на игрока) и 15 в день.
-  // limitMonth — личный ориентир администратора для его запусков: подсказка, анализы не останавливает.
-  // Настоящие лимиты — бюджет ключа администратора и лимиты участников (DATA.admin, DATA.users), Р9 и Р13.
+  // Здесь только мягкий порог по docs/TOKEN_ECONOMY.md §6: предупредить, если анализ дороже $0,50.
+  // Жесткий потолок на анализ — в лимитах участников (Администрирование) и в потолке своего ключа (личный кабинет);
+  // деньги ограничивают только лимит участника и бюджет ключа администратора (Р9, Р13).
+  // Поиски — не больше 6 на запуск (2–3 на игрока) и 15 в день.
   const DEFAULTS = {
     models: { parse: 'Haiku 4.5', analysis: 'Opus 5.5', postmortem: 'Sonnet 5.5', refresh: 'Sonnet 5.5' },
     effort: { parse: 'low', analysis: 'medium', postmortem: 'low', refresh: 'low' },
-    limitMonth: A.budget, limitSoft: 0.5, limitHard: 1, searchLimit: 6, searchDay: 15,
+    limitSoft: 0.5, searchLimit: 6, searchDay: 15,
     cache: true, batch: true, newsCache: true, dossier: true, eval: true,
   };
   let saved = clone(DEFAULTS);
@@ -166,7 +174,7 @@
   let runFilter = 'all', showAllRuns = false;
   const candidateState = {}; // результаты проверки кандидатов: { sonnet: 'accepted'|'rejected', effort: … }
 
-  // Множитель выхода от effort: относительно уровня, на котором сняты фактические запуски
+  // Множитель выхода от глубины размышлений: относительно уровня, на котором сняты фактические запуски
   function effortK(type, set) {
     if (!supportsEffort(set.models[type]) || !supportsEffort(DEFAULTS.models[type])) return 1;
     const e = (set.effort && set.effort[type]) || DEFAULTS.effort[type];
@@ -206,15 +214,15 @@
     { id: 'batch', title: 'Batch API для фоновых задач', how: 'Ночное обновление профилей идет пакетом: ответ приходит в течение суток, зато вдвое дешевле.',
       isOn: s => s.batch, set: (s, on) => withSet(s, { batch: on }) },
     // Рычаги без переключателя: уже встроены в схему v2, их вклад входит в фактическую цену анализа
-    { id: 'prompt', fixed: true, title: 'Сжатые инструкции: 5–7 тыс. символов вместо 22 тыс.', how: 'Шесть файлов старого бота свели к сути стратегии: работа с файлами, правила экспресса и шаблон ответа ушли в код и JSON-схему. System prompt короче на 60–70%.',
+    { id: 'prompt', fixed: true, title: 'Сжатые инструкции: 5–7 тыс. символов вместо 22 тыс.', how: 'Шесть файлов старого бота свели к сути стратегии: работа с файлами, правила экспресса и шаблон ответа ушли в код и JSON-схему. Инструкции модели короче на 60–70%.',
       saveNote: 'входит в цену анализа' },
     { id: 'json', fixed: true, title: 'Ответ JSON по схеме вместо длинного текста', how: 'Вероятности, факторы и короткое обоснование — полями JSON; текст для экрана собирает приложение. Видимый выход короче на 40–60%, ставку не нужно угадывать по тексту.',
       saveNote: 'входит в цену анализа' },
-    { id: 'effort', candidate: true, title: 'Effort анализа: medium → low', how: 'Меньше размышлений — меньше выходных токенов Opus 5.5, а это ≈ 60% цены анализа. Риск реальный: на трудных матчах может упасть качество, поэтому только через eval-набор.',
+    { id: 'effort', candidate: true, title: 'Глубина размышлений анализа: средняя → низкая', how: 'Меньше размышлений — меньше выходных токенов Opus 5.5, а это ≈ 60% цены анализа. Риск реальный: на трудных матчах может упасть качество, поэтому только через eval-набор.',
       perRunNote: true,
       check: () => ({ type: 'analysis', kind: 'effort', from: saved.effort.analysis, to: 'low' }),
       apply: () => { saved.effort.analysis = 'low'; draft.effort.analysis = 'low'; },
-      rejectedNote: 'Лог-лосс вышел за допуск — оставили medium',
+      rejectedNote: 'Лог-лосс вышел за допуск — оставили среднюю глубину',
       isOn: s => s.effort.analysis === 'low', set: (s, on) => withSet(s, { effort: { analysis: on ? 'low' : 'medium' } }) },
     { id: 'sonnet', candidate: true, title: 'Анализ матчей на Sonnet 5.5', how: 'Вдвое дешевле Opus 5.5 по входу и выходу. Включим, только если на eval-наборе лог-лосс и Brier не хуже с допуском.',
       check: () => ({ type: 'analysis', kind: 'model', from: saved.models.analysis, to: 'Sonnet 5.5' }),
@@ -223,7 +231,7 @@
       isOn: s => s.models.analysis === 'Sonnet 5.5', set: (s, on) => withSet(s, { models: { analysis: on ? 'Sonnet 5.5' : 'Opus 5.5' } }) },
   ];
   const leverSaving = (lv, s) => lv.fixed ? 0 : estRaw(lv.set(s, false)) - estRaw(lv.set(s, true));
-  const ALL_OFF = { models: { parse: 'Opus 5.5', analysis: 'Opus 5.5', postmortem: 'Opus 5.5', refresh: 'Opus 5.5' }, effort: clone(DEFAULTS.effort), limitMonth: 15, limitSoft: 0.5, limitHard: 1, searchLimit: 0, searchDay: 0, cache: false, batch: false, newsCache: false, dossier: false, eval: true };
+  const ALL_OFF = { models: { parse: 'Opus 5.5', analysis: 'Opus 5.5', postmortem: 'Opus 5.5', refresh: 'Opus 5.5' }, effort: clone(DEFAULTS.effort), limitSoft: 0.5, searchLimit: 0, searchDay: 0, cache: false, batch: false, newsCache: false, dossier: false, eval: true };
 
   // Допуск правила «не хуже» (TOKEN_ECONOMY §2.4): верхняя граница 95% ДИ разницы
   const TOL = { logloss: 0.01, brier: 0.005 };
@@ -238,7 +246,9 @@
   };
   // Изменение для проверки: { type, kind: 'model'|'effort', from, to }
   const applyChange = (set, c) => withSet(set, c.kind === 'effort' ? { effort: { [c.type]: c.to } } : { models: { [c.type]: c.to } });
-  const changeLabel = c => (c.kind === 'effort' ? 'effort ' : '') + c.from + ' → ' + c.to;
+  const changeLabel = c => c.kind === 'effort' ? 'глубина размышлений: ' + effortWord(c.from) + ' → ' + effortWord(c.to) : c.from + ' → ' + c.to;
+  // Что оставляем, если смену не приняли: «Opus 5.5» или «среднюю глубину»
+  const keepLabel = c => c.kind === 'effort' ? { low: 'низкую', medium: 'среднюю', high: 'высокую' }[c.from] + ' глубину' : c.from;
   function evalCost(c) {
     const per = perRun(c.type, applyChange(saved, c)) - BASE[c.type].avgSearch * SEARCH; // проверка идет на снимках входа, без поиска
     return EVAL[c.type].size / EVAL[c.type].perRun * per * 0.5;                          // через Batch API
@@ -266,7 +276,7 @@
           rows: [metricRow('Лог-лосс', LL, 0.011, 0.004, 0.018, TOL.logloss), metricRow('Brier', BR, 0.004, 0.001, 0.007, TOL.brier), eceRow(3.1, 1.8, 0.3, 3.3)],
           why: 'Sonnet 5.5 завышает шансы фаворитов на 3–5 п.п. в матчах с тай-брейками. Верхняя граница интервала выше допуска — экономия не стоит потери качества.' };
       }
-      // Effort: демо-метрики каждого уровня относительно medium (v3) и полуширина 95% ДИ парной разницы
+      // Глубина размышлений: демо-метрики каждого уровня относительно средней (v3) и полуширина 95% ДИ парной разницы
       const E = { low: { ll: 0.003, br: 0.001, ece: 0.3 }, medium: { ll: 0, br: 0, ece: 0 }, high: { ll: -0.002, br: -0.001, ece: -0.2 } };
       const HW = { ll: 0.005, br: 0.002, ece: 1.2 };
       const a = E[c.from] || E.medium, b = E[c.to] || E.medium;
@@ -280,7 +290,7 @@
       const ece = eceRow(3.1 + a.ece, b.ece - a.ece, b.ece - a.ece - HW.ece, b.ece - a.ece + HW.ece);
       if (back) ece.verdict = 'same';
       const rows = [mr('Лог-лосс', LL, 'll', TOL.logloss), mr('Brier', BR, 'br', TOL.brier), ece];
-      if (back) return { ok: true, rows, why: 'Возврат к проверенной настройке medium: ее метрики известны.' };
+      if (back) return { ok: true, rows, why: 'Возврат к проверенной средней глубине: ее метрики известны.' };
       if (cheaper) {
         const ok = rows.every(r => r.verdict !== 'over');
         return { ok, rows, why: ok ? 'Разница в пределах допуска — это «не хуже», а не «то же самое». После включения подтверждаем теневым прогоном на реальных анализах; на трудном хвосте (≈40 событий) интервал слишком широкий для отдельного вывода.' : 'Верхняя граница интервала выше допуска — экономия не стоит потери качества.' };
@@ -530,8 +540,11 @@
   function payer(r) {
     if (isShared(r)) return 'Ключ администратора — общая фоновая задача, в лимиты участников не входит';
     if (V.admin) return 'Ваш ключ (ключ администратора) — ваш запуск, входит в бюджет ключа';
-    if (V.own) return 'Ваш ключ — с вашего счета Anthropic';
-    return 'Ключ администратора — входит в ваш лимит (' + usd(V.limit.monthly, 0) + ' в месяц)';
+    if (V.own) {
+      const since = V.me.ownKey && V.me.ownKey.verified;
+      return since && r.at < since ? 'Ключ администратора — запуск до вашего перехода на свой ключ' : 'Ваш ключ — с вашего счета Anthropic';
+    }
+    return 'Ключ администратора — входит в ваш лимит (' + usdL(V.limit.monthly) + ' в месяц)';
   }
   function runModal(r) {
     const t = typeOf(r.type), p = PRICE[r.model], m = META[r.id] || {};
@@ -578,8 +591,8 @@
           ['Кто платит', payer(r)],
           ['Связано', m.href ? h('a', { href: m.href, on: { click: close } }, m.ref) : (m.ref || '—')],
           ['Что сделал', m.what || t.what],
-          ['Версия промпта', h('span', { class: 'mono' }, m.prompt || '—')],
-          ['Effort', m.effort ? h('span', { class: 'mono' }, m.effort) : 'не задается: Haiku 4.5 его не поддерживает'],
+          ['Версия инструкций', h('span', { class: 'mono' }, m.prompt || '—')],
+          ['Глубина размышлений', m.effort ? EFFORT_LABEL[m.effort] : 'не задается: Haiku 4.5 ее не поддерживает'],
           ['Из кэша читается', m.prefix || 'Не кэшируется: у Haiku 4.5 минимальный префикс для кэша — 4096 токенов, а запрос короче'],
           ['ID модели', h('span', { class: 'mono' }, p.id)],
         ].map(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
@@ -677,7 +690,7 @@
       results.forEach(res => {
         const before = perRun(res.type, saved), after = perRun(res.type, applyChange(saved, res));
         const priceRow = { name: 'Цена одного запуска', now: usd(before, 3), next: usd(after, 3), delta: (after > before ? '+' : '−') + usd(Math.abs(after - before), 3), verdict: null };
-        const newLabel = res.kind === 'effort' ? 'effort ' + res.to : res.to;
+        const newLabel = res.kind === 'effort' ? 'Глубина: ' + effortWord(res.to) : res.to;
         UI.append(bodyEl, [h('section', { class: 'stack', style: 'gap:10px' },
           h('div', { class: 'row-between' }, h('h4', { style: 'min-width:0' }, typeOf(res.type).label + ': ' + changeLabel(res)),
             res.ok ? chip('Принято', 'good', 'check') : chip('Не принято', 'bad', 'x')),
@@ -696,18 +709,17 @@
       const rejected = results.filter(r => !r.ok);
       if (results.some(r => r.type === 'analysis')) UI.append(bodyEl, howto('Разница = новая − текущая на тех же 220 событиях; для лог-лосса и Brier меньше — лучше. ДИ — 95% бутстрэп-интервал. ROI для решения не используется: на 220 событиях это шум.'));
       UI.append(bodyEl, [rejected.length
-        ? UI.callout('warn', 'shield', 'Не принято по правилу «не хуже»: оставляем ' + rejected.map(r => (r.kind === 'effort' ? 'effort ' : '') + r.from + ' для задачи «' + typeOf(r.type).label.toLowerCase() + '»').join(', ') + '.')
+        ? UI.callout('warn', 'shield', 'Не принято по правилу «не хуже»: оставляем ' + rejected.map(r => keepLabel(r) + ' для задачи «' + typeOf(r.type).label.toLowerCase() + '»').join(', ') + '.')
         : UI.callout('good', 'check', 'Качество не хуже с учетом допуска — смену можно применить.')]);
       UI.clear(footEl);
       UI.append(footEl, rejected.length
-        ? [button('Подробнее в «Обучении модели»', { kind: 'ghost', href: '#learning', attrs: { on: { click: () => ui.close() } } }), button(results.some(r => r.ok) ? 'Применить принятое' : 'Оставить ' + (rejected[0].kind === 'effort' ? 'effort ' : '') + rejected[0].from, { kind: 'primary', onClick: () => { ui.close(); done(results); } })]
+        ? [button('Подробнее в «Обучении модели»', { kind: 'ghost', href: '#learning', attrs: { on: { click: () => ui.close() } } }), button(results.some(r => r.ok) ? 'Применить принятое' : 'Оставить ' + keepLabel(rejected[0]), { kind: 'primary', onClick: () => { ui.close(); done(results); } })]
         : [button('Отмена', { kind: 'secondary', onClick: () => { results = null; ui.close(); } }), button('Применить', { kind: 'primary', icon: 'check', onClick: () => { ui.close(); done(results); } })]);
     }
     intro();
   }
 
   // ---------- блоки экрана ----------
-  const ALERT = (D.admin && D.admin.budget && D.admin.budget.alertAt) || 80; // % лимита, при котором приходит уведомление
   const CONSOLE_LIMITS = 'https://platform.claude.com/settings/limits';
   const kvCell = (k, v, note) => h('div', null, h('dt', null, k), h('dd', null, v, note ? h('small', null, note) : null));
   const consoleBtn = (kind) => button('Лимит в консоли Anthropic', { kind: kind || 'ghost', size: 'sm', icon: 'shield', iconRight: 'link', href: CONSOLE_LIMITS, attrs: { target: '_blank', rel: 'noopener noreferrer' } });
@@ -732,7 +744,7 @@
     const share = spent / limit, fShare = forecast / limit;
     const kind = budgetKind(Math.max(share, fShare > 1 ? 0.95 : 0));
     return h('div', { class: 'stack', style: 'gap:8px' },
-      h('div', { class: ['costs-bar', kind !== 'good' && kind], role: 'meter', 'aria-label': what + ': ' + usd(spent) + ' из ' + usd(limit, 0) + ', прогноз на месяц ' + usd(forecast), 'aria-valuenow': spent, 'aria-valuemin': 0, 'aria-valuemax': limit },
+      h('div', { class: ['costs-bar', kind !== 'good' && kind], role: 'meter', 'aria-label': what + ': ' + usd(spent) + ' из ' + usdL(limit) + ', прогноз на месяц ' + usd(forecast), 'aria-valuenow': spent, 'aria-valuemin': 0, 'aria-valuemax': limit },
         h('i', { class: 'proj', style: { width: Math.min(100, fShare * 100) + '%' } }),
         h('i', { class: 'spent', style: { width: Math.min(100, share * 100) + '%' } }),
         h('i', { class: 'tick', style: { left: ALERT + '%' }, title: ALERT + '% — уведомление' })),
@@ -742,24 +754,23 @@
         h('span', null, h('i', { class: 'tick' }), ALERT + '% — уведомление')));
   }
 
-  // Администратор: бюджет ключа администратора (все, кто на ключе, плюс общие фоновые задачи)
+  // Администратор: бюджет ключа администратора — общий расчет DATA.ai.budget(): все, кто тратит ключ, и общие фоновые задачи
   function adminHero() {
-    const { B, forecast } = keyBudget();
-    const share = B.spent / B.monthly, left = Math.max(0, B.monthly - B.spent);
+    const B = A.budget();
     return h('section', { class: 'card stat costs-hero', 'aria-label': 'Бюджет ключа администратора' },
       h('div', { class: 'costs-hero-top' },
         h('div', { class: 'stat-label' }, icon('key', { width: 16, height: 16 }), 'Бюджет ключа администратора · октябрь'),
         h('div', { class: 'costs-hero-value' },
           h('span', { class: 'stat-value hero' }, usd(B.spent)),
-          h('span', { class: 'of' }, 'из ' + usd(B.monthly, 0)),
-          chip(pct(share) + ' бюджета', budgetKind(share), share > 0.7 ? 'alert' : 'check')),
+          h('span', { class: 'of' }, 'из ' + usdL(B.monthly)),
+          chip(pct(B.share) + ' бюджета', budgetKind(B.share), B.share > 0.7 ? 'alert' : 'check')),
         h('div', { class: 'costs-hero-sub' }, 'Все, кто на вашем ключе, и общие фоновые задачи')),
-      budgetBar(B.spent, B.monthly, forecast, 'Бюджет ключа администратора'),
+      budgetBar(B.spent, B.monthly, B.forecast, 'Бюджет ключа администратора'),
       h('dl', { class: 'costs-kv' },
-        kvCell('Осталось', usd(left), 'до 31 окт'),
+        kvCell('Осталось', usd(B.left), 'до 31 окт'),
         kvCell('В день', usd(B.spent / DAYS), 'в среднем'),
-        kvCell('Можно в день', usd(left / (MONTH_DAYS - DAYS)), 'чтобы уложиться')),
-      h('p', { class: 'costs-hero-note' }, 'Прогноз учитывает личные лимиты: дойдя до своего, участник остановится. На ' + ALERT + '% бюджета (' + usd(B.monthly * ALERT / 100, 0) + ') придет уведомление, на 100% анализы на ключе администратора остановятся до вашего решения.'),
+        kvCell('Можно в день', usd(B.left / B.daysLeft), 'чтобы уложиться')),
+      h('p', { class: 'costs-hero-note' }, 'Прогноз учитывает личные лимиты: дойдя до своего, участник остановится. На ' + ALERT + '% бюджета (' + usdL(B.monthly * ALERT / 100) + ') придет уведомление, на 100% анализы на ключе администратора остановятся до вашего решения.'),
       h('div', { class: 'costs-hero-foot' },
         h('div', { class: 'costs-hero-actions' },
           button('Бюджет и лимиты', { kind: 'secondary', size: 'sm', icon: 'sliders', href: '#admin-limits' }),
@@ -767,53 +778,66 @@
         h('p', { class: 'costs-hero-note' }, icon('shield'), h('span', null, 'Вторая страховка — лимит трат в консоли Anthropic: он остановит расход по ключу, даже если приложение ошибется.'))));
   }
 
-  // Администратор: кто тратит бюджет — коротко, подробно в «Администрировании»
+  // Администратор: кто тратит бюджет — коротко, подробно в «Администрировании».
+  // Строки — DATA.ai.keySpent по DATA.ai.keyUsers() плюс общие задачи; их сумма равна «Итого» = DATA.ai.budget().spent.
   function adminWhoCard() {
-    const { B, onKey, own } = keyBudget();
-    const people = onKey.slice().sort((a, b) => b.spent - a.spent);
-    const top = people.slice(0, 3), rest = people.slice(3);
+    const B = A.budget(), ks = A.keySpent;
+    const spenders = A.keyUsers().filter(u => ks(u) > 0).sort((a, b) => ks(b) - ks(a));
+    const top = spenders.slice(0, 3), rest = spenders.slice(3);
     const li = (title, sub, value, cls) => h('li', { class: cls }, h('span', { class: 't' }, title), sub ? h('span', { class: 's' }, sub) : null, h('span', { class: 'v' }, value));
     const userSub = u => {
-      if (!u.limit) return 'без личного лимита';
-      const s = u.spent / u.limit.monthly;
-      const txt = 'лимит ' + usd(u.limit.monthly, 0) + ' · израсходовано ' + pct(s);
-      return s >= ALERT / 100 ? h('span', { class: 'warn-text' }, txt) : txt;
+      if (u.aiMode === 'own') return 'до перехода на свой ключ';
+      const L = A.limitOf(u);
+      if (!L) return 'без личного лимита';
+      const s = ks(u) / L.monthly;
+      const txt = 'лимит ' + usdL(L.monthly) + ' · израсходовано ' + pct(s) + (u.status === 'blocked' ? ' · заблокирован' : L.paused ? ' · на паузе' : '');
+      return s >= ALERT / 100 || L.paused ? h('span', { class: 'warn-text' }, txt) : txt;
     };
-    const rows = top.map(u => li(h('span', { class: 'costs-who-name' }, u.name, u.you ? chip('вы', 'outline') : null), userSub(u), usd(u.spent)));
-    if (sum(rest, u => u.spent) > 0) rows.push(li('Еще ' + rest.length + ' ' + fmt.plural(rest.length, 'человек', 'человека', 'человек'), 'на ключе администратора', usd(sum(rest, u => u.spent))));
-    rows.push(li('Общие фоновые задачи', 'обновление профилей (Batch)', usd(B.shared)));
+    const rows = top.map(u => li(h('span', { class: 'costs-who-name' }, u.name, u === V.me ? chip('вы', 'outline') : null), userSub(u), usd(ks(u))));
+    if (rest.length) rows.push(li('Еще ' + rest.length + ' ' + fmt.plural(rest.length, 'человек', 'человека', 'человек'), 'на ключе администратора', usd(sum(rest, ks))));
+    rows.push(li('Общие фоновые задачи', 'ночное обновление профилей (Batch)', usd(B.shared)));
     rows.push(li('Итого', null, usd(B.spent), 'total'));
+    // Свои ключи: их расход в бюджет не входит (DATA.ai.ownSpent)
+    const people = D.users.filter(u => u.status !== 'deleted');
+    const onOwn = people.filter(u => u.aiMode === 'own');
+    const back = people.filter(u => u.aiMode !== 'own' && A.ownSpent(u) > 0);
+    const notes = [];
+    if (onOwn.length) notes.push(onOwn.map(u => u.name).join(', ') + (onOwn.length > 1 ? ' — на своих ключах: этот расход оплачивают сами участники' : ' — на своем ключе: этот расход оплачивает сам участник') + ', в бюджет он не входит' + (onOwn.some(u => ks(u) > 0) ? '; потраченное до перехода осталось в бюджете.' : '.'));
+    back.forEach(u => notes.push(u.name + ' — снова на вашем ключе: ' + usd(A.ownSpent(u)) + ', потраченные на своем ключе, в бюджет не входят.'));
     return card({
       class: 'costs-card costs-side',
       title: 'Кто тратит бюджет',
       subtitle: 'Октябрь, в долларах. Видны только расходы на ИИ — ставки и банк участников закрыты.',
       body: [
         h('ul', { class: 'costs-mlist costs-who' }, rows),
-        own.length ? howto(own.map(u => u.name).join(', ') + (own.length > 1 ? ' — на своих ключах' : ' — на своем ключе') + ': расход идет с ' + (own.length > 1 ? 'их счетов' : 'его счета') + ' и в бюджет не входит.') : null,
+        notes.length ? howto(notes.join(' ')) : null,
       ],
       foot: [button('Подробно — в Администрировании', { kind: 'ghost', size: 'sm', iconRight: 'arrowRight', href: '#admin-usage' })],
     });
   }
 
-  // Участник на ключе администратора: личный лимит (Р7, Р13)
+  const PAUSED = 'Анализы на паузе — решение администратора';
+
+  // Участник на ключе администратора: личный лимит (Р7, Р13) — DATA.ai.limitOf и DATA.ai.keySpent
   function memberHero() {
-    const me = V.me, L = V.limit, spent = me.spent;
+    const me = V.me, L = V.limit, spent = A.keySpent(me);
     const share = spent / L.monthly, left = Math.max(0, L.monthly - spent);
-    const an = BASE.analysis, enough = an.n ? Math.floor(left / an.avgCost) : null;
+    const an = BASE.analysis, enough = an.n && !L.paused ? Math.floor(left / an.avgCost) : null;
     return h('section', { class: 'card stat costs-hero', 'aria-label': 'Ваш лимит на ключе администратора' },
       h('div', { class: 'costs-hero-top' },
         h('div', { class: 'stat-label' }, icon('key', { width: 16, height: 16 }), 'Ваш лимит на ключе администратора · октябрь'),
         h('div', { class: 'costs-hero-value' },
           h('span', { class: 'stat-value hero' }, usd(spent)),
-          h('span', { class: 'of' }, 'из ' + usd(L.monthly, 0)),
+          h('span', { class: 'of' }, 'из ' + usdL(L.monthly)),
           chip(pct(share) + ' лимита', budgetKind(share), share > 0.7 ? 'alert' : 'check')),
         h('div', { class: 'costs-hero-sub' }, 'Платит администратор, вы ничего не вводите')),
-      budgetBar(spent, L.monthly, monthPace(spent), 'Ваш лимит'),
+      L.paused ? UI.callout('warn', 'pause', h('b', null, PAUSED), h('span', null, '. Новые анализы не запускаются, пока администратор не снимет паузу. Ставки, банк и разборы работают как обычно.')) : null,
+      budgetBar(spent, L.monthly, personalForecast(me, spent), 'Ваш лимит'),
       h('dl', { class: 'costs-kv' },
         kvCell('Осталось', usd(left), 'до 31 окт'),
         kvCell('Сегодня', me.todayAnalyses + ' из ' + L.daily, fmt.plural(L.daily, 'анализ', 'анализа', 'анализов') + ' в день'),
-        kvCell('На один анализ', 'до ' + usd(L.perAnalysis, 0), 'потолок')),
-      enough != null ? h('p', { class: 'costs-hero-note' }, icon('info'), h('span', null, 'Остатка хватит примерно на ' + enough + ' ' + fmt.plural(enough, 'анализ', 'анализа', 'анализов') + ' по средней цене ' + usd(an.avgCost) + '. ' + (V.limit.daily ? 'Но не больше ' + V.limit.daily + ' в день.' : ''))) : null,
+        kvCell('На один анализ', 'до ' + usdL(L.perAnalysis), 'потолок')),
+      enough != null ? h('p', { class: 'costs-hero-note' }, icon('info'), h('span', null, 'Остатка хватит примерно на ' + enough + ' ' + fmt.plural(enough, 'анализ', 'анализа', 'анализов') + ' по средней цене ' + usd(an.avgCost) + '. ' + (L.daily ? 'Но не больше ' + L.daily + ' в день.' : ''))) : null,
       h('p', { class: 'costs-hero-note' }, icon('layers'), h('span', null, 'Ночное обновление профилей (' + usd(sharedSpent()) + ' в октябре) — общая фоновая задача: ее оплачивает администратор, в ваш лимит она не входит.')),
       h('div', { class: 'costs-hero-foot' },
         h('div', { class: 'costs-hero-actions' },
@@ -821,25 +845,30 @@
           button('Перейти на свой ключ', { kind: 'secondary', size: 'sm', icon: 'key', iconRight: 'arrowRight', href: '#profile-key' }))));
   }
 
-  // Участник на своем ключе: расход с его счета, лимит ставит он сам в консоли Anthropic
+  // Участник на своем ключе: расход с его счета (DATA.ai.ownSpent); потраченное до перехода — на ключе администратора
+  // (DATA.ai.keySpent). Лимит на месяц участник ставит сам в консоли Anthropic, потолок на анализ — в личном кабинете.
   function ownHero() {
     const me = V.me, k = me.ownKey || {};
+    const own = A.ownSpent(me), before = A.keySpent(me);
     return h('section', { class: 'card stat costs-hero', 'aria-label': 'Свой ключ Claude' },
       h('div', { class: 'costs-hero-top' },
         h('div', { class: 'stat-label' }, icon('key', { width: 16, height: 16 }), 'Свой ключ Claude · октябрь'),
         h('div', { class: 'costs-hero-value' },
-          h('span', { class: 'stat-value hero' }, usd(me.spent)),
+          h('span', { class: 'stat-value hero' }, usd(own)),
           h('span', { class: 'of' }, 'с вашего счета'),
           chip('sk-ant-…' + (k.last4 || '••••'), 'outline', 'key')),
         h('div', { class: 'costs-hero-sub' }, 'Лимит администратора к вам не относится')),
       h('dl', { class: 'costs-kv' },
-        kvCell('Прогноз', '≈ ' + usd(monthPace(me.spent)), 'на 31 окт'),
+        before > 0
+          ? kvCell('До перехода', usd(before), 'на ключе администратора')
+          : kvCell('Прогноз', '≈ ' + usd(personalForecast(me, own)), 'на 31 окт'),
         kvCell('Ключ проверен', k.verified ? fmt.date(k.verified) : '—', k.verified ? k.verified.slice(11, 16) : null),
-        kvCell('На один анализ', 'до ' + usd(V.limit.perAnalysis, 0), 'потолок')),
+        kvCell('На один анализ', 'до ' + usdL(V.cap), 'ваш потолок')),
+      before > 0 ? h('p', { class: 'costs-hero-note' }, icon('info'), h('span', null, 'Потраченные до перехода ' + usd(before) + ' остались в бюджете ключа администратора. С вашего счета — только то, что после перехода.')) : null,
       h('div', { class: 'costs-hero-foot' },
         h('div', { class: 'costs-hero-actions' },
           consoleBtn('secondary'),
-          button('Ключ в личном кабинете', { kind: 'ghost', size: 'sm', iconRight: 'arrowRight', href: '#profile-key' }))));
+          button('Ключ и потолок в личном кабинете', { kind: 'ghost', size: 'sm', iconRight: 'arrowRight', href: '#profile-key' }))));
   }
 
   // Участник: что будет у лимита и что в него не входит
@@ -850,15 +879,16 @@
     const shared = 'Ночное обновление профилей (' + usd(sharedSpent()) + ' в октябре) оплачивает администратор — в ваш ' + (V.own ? 'счет' : 'лимит') + ' не входит.';
     const items = V.own ? [
       { ic: 'shield', tone: 'info', t: 'Лимит на месяц — в консоли Anthropic', s: 'Ставите сами: так расход точно не выйдет за ваш предел.' },
-      { ic: 'coins', tone: 'info', t: 'Не больше ' + usd(L.perAnalysis, 0) + ' за анализ', s: 'Дороже — анализ остановится без ставки.' },
+      { ic: 'coins', tone: 'info', t: 'Не больше ' + usdL(V.cap) + ' за анализ', s: 'Ваш потолок: дороже — анализ остановится без ставки. Меняется в личном кабинете, «Ключ Claude».' },
       { ic: 'layers', tone: '', t: 'Общие фоновые задачи', s: shared },
       { ic: 'key', tone: '', t: 'Обратно на ключ администратора', s: 'Только с разрешения администратора: просьба уйдет ему из личного кабинета.' },
     ] : [
-      { ic: 'bell', tone: 'warn', t: ALERT + '% — ' + usd(L.monthly * ALERT / 100), s: 'Уведомление вам и администратору.' },
-      { ic: 'pause', tone: 'bad', t: '100% — ' + usd(L.monthly), s: 'Анализы на ключе администратора остановятся до его решения.' },
+      L.paused ? { ic: 'pause', tone: 'bad', t: PAUSED, s: 'Пока пауза не снята, новые анализы на ключе администратора не запускаются.' } : null,
+      { ic: 'bell', tone: 'warn', t: ALERT + '% — ' + usdL(L.monthly * ALERT / 100), s: 'Уведомление вам и администратору.' },
+      { ic: 'pause', tone: 'bad', t: '100% — ' + usdL(L.monthly), s: 'Анализы на ключе администратора остановятся до его решения.' },
       { ic: 'calendar', tone: 'info', t: L.daily + ' ' + fmt.plural(L.daily, 'анализ', 'анализа', 'анализов') + ' в день', s: 'Сегодня ' + me.todayAnalyses + ' из ' + L.daily + '. Счетчик обнуляется в полночь по вашему времени.' },
-      { ic: 'coins', tone: 'info', t: 'Не больше ' + usd(L.perAnalysis, 0) + ' за анализ', s: 'Дороже — анализ остановится без ставки. Самый дорогой у вас в октябре — ' + usd(maxRun) + '.' },
-    ];
+      { ic: 'coins', tone: 'info', t: 'Не больше ' + usdL(L.perAnalysis) + ' за анализ', s: 'Дороже — анализ остановится без ставки. Самый дорогой у вас в октябре — ' + usd(maxRun) + '.' },
+    ].filter(Boolean);
     return card({
       class: 'costs-card costs-side',
       title: V.own ? 'Как работает свой ключ' : 'Как работает лимит',
@@ -892,10 +922,11 @@
   }
 
   function dailyCard(mobile) {
-    // Темп: у участника — под его лимит, у администратора — под личный ориентир; на своем ключе темпа нет
-    const target = V.admin ? saved.limitMonth : V.own ? null : V.limit.monthly;
+    // Темп: у участника — под его лимит на ключе администратора, у администратора — под бюджет ключа
+    // (DATA.ai.budget()); на своем ключе темпа нет — лимит участник ставит сам в консоли Anthropic
+    const B = A.budget();
+    const target = V.admin ? B.monthly : V.own ? null : V.limit.monthly;
     const budgetPace = target ? target / MONTH_DAYS : Infinity;
-    const paceName = V.admin ? 'ориентир' : 'лимит';
     const items = byDay.map(d => {
       const groups = TYPES.map(t => ({ t, rs: d.runs.filter(r => r.type === t.id) })).filter(g => g.rs.length);
       const today = d.day === D.today;
@@ -906,7 +937,10 @@
       };
     });
     const over = byDay.filter(d => d.cost > budgetPace).length;
-    const paceText = target ? (over ? ' Дней выше темпа под ' + paceName + ': ' + over + '.' : ' Ни один день не превысил темп под ' + paceName + '.') : '';
+    // Администратор видит здесь только свои запуски и общие задачи, поэтому сравниваем с темпом всего ключа, а не по дням
+    const paceText = V.admin
+      ? ' Весь ключ администратора тратит в среднем ' + usd(B.spent / DAYS) + ' в день при темпе бюджета ' + usd(budgetPace) + '; из них ваши запуски и общие задачи — ' + usd(SPENT / DAYS) + '.'
+      : target ? (over ? ' Дней выше темпа под лимит: ' + over + '.' : ' Ни один день не превысил темп под лимит.') : '';
     const max = byDay.reduce((a, d) => d.cost > a.cost ? d : a, byDay[0]);
     const maxRuns = TYPES.map(t => ({ t, n: max.runs.filter(r => r.type === t.id).length })).filter(x => x.n);
     const chart = UI.columnChart({ items, height: mobile ? 180 : 210, valueFormat: v => usd(v), labelEvery: 1, seriesName: 'Расход за день', ariaLabel: 'Расходы Claude API по дням, 1–7 октября' });
@@ -914,7 +948,7 @@
       class: 'costs-card costs-o-1',
       title: 'Расходы по дням',
       subtitle: '1–7 октября, в долларах' + (V.admin ? '' : ' · ваши запуски'),
-      actions: target ? [chip('Темп под ' + paceName + ' — ' + usd(budgetPace) + ' в день', 'outline')] : null,
+      actions: target ? [chip((V.admin ? 'Темп бюджета ключа — ' : 'Темп под лимит — ') + usd(budgetPace) + ' в день', 'outline')] : null,
       body: [
         UI.withTable(chart, () => h('div', { class: 'costs-tablebox' }, UI.table({
           columns: [
@@ -943,7 +977,7 @@
             h('span', { class: 'costs-type-name' }, x.t.label, modelChip(SCOPE_RUNS.find(r => r.type === x.t.id).model), x.t.id === 'refresh' && batchChip()),
             h('span', { class: 'costs-type-meta' }, x.b.n + ' ' + fmt.plural(x.b.n, 'запуск', 'запуска', 'запусков') + ' · в среднем ' + fmt.tokens(x.b.avgIn) + ' вход / ' + fmt.tokens(x.b.avgOut) + ' выход · ' + (x.b.cached ? 'кэш ' + pct(x.b.cacheShare) : 'без кэша')),
             h('span', { class: 'costs-type-cost' }, h('span', null, h('b', null, usd(x.b.avgCost, 3)), h('small', null, 'за запуск')), icon('chevronRight')))))),
-        howto('Длина полосы — сумма за неделю, справа — доля в расходах. Нажмите на задачу, чтобы увидеть ее запуски.' + (V.admin ? '' : ' Обновления профилей здесь нет: это общая фоновая задача, ее оплачивает администратор.')),
+        howto('Длина полосы — сумма за неделю, справа — доля в расходах. Нажмите на задачу, чтобы увидеть ее запуски.' + (V.admin ? '' : ' Сбор и обновление профилей перед анализом входят в цену анализа. Ночного обновления базы здесь нет: его оплачивает администратор.')),
       ],
     });
   }
@@ -956,7 +990,7 @@
     const list = LEVERS.filter(lv => canEdit || lv.id !== 'batch').map(lv => ({ lv, on: lv.fixed || lv.isOn(saved), save: leverSaving(lv, saved) }))
       .sort((a, b) => group(a.lv) - group(b.lv) || b.save - a.save);
     let rankN = 0;
-    const current = forecastFor(saved), without = forecastFor(withSet(ALL_OFF, { limitMonth: saved.limitMonth }));
+    const current = forecastFor(saved), without = forecastFor(ALL_OFF);
     const runCheck = lv => {
       const c = lv.check();
       evalModal([c], res => {
@@ -1039,7 +1073,7 @@
             h('div', { class: 'old' }, h('span', { class: 'sr-only' }, 'Старый бот: '), r[1]),
             h('div', { class: 'new' }, h('span', { class: 'sr-only' }, 'Новая схема: '), r[2], h('small', null, r[3])),
           ])),
-        howto('Цифры старого бота — оценка из TOKEN_ECONOMY.md §3.2 по bot.py: ≈12 циклов tool use из 20 возможных, каждый пересылает всю историю, кэша нет, Sonnet 4.6 по $3 / $15 за 1M; разброс $1–4,5; поиск DuckDuckGo бесплатный. Бот выключен, его логов расхода нет — поэтому оценка.'),
+        howto('Цифры старого бота — оценка из TOKEN_ECONOMY.md §3.2 по bot.py: ≈12 циклов с вызовом инструментов из 20 возможных, каждый пересылает всю историю, кэша нет, Sonnet 4.6 по $3 / $15 за 1M; разброс $1–4,5; поиск DuckDuckGo бесплатный. Бот выключен, его логов расхода нет — поэтому оценка.'),
       ],
     });
   }
@@ -1144,7 +1178,7 @@
     const L = V.limit;
     const TASK_LABEL = { parse: 'Разбор текста событий', analysis: 'Анализ матчей', postmortem: 'Разбор ставок', refresh: 'Обновление профилей (ночью, через Batch)' };
     const tasks = ['parse', 'analysis', 'postmortem', 'refresh'].map(id => {
-      const m = saved.models[id], eff = supportsEffort(m) ? 'effort: ' + EFFORT_LABEL[saved.effort[id]].toLowerCase() : 'effort не поддерживается';
+      const m = saved.models[id], eff = supportsEffort(m) ? 'глубина размышлений: ' + effortWord(saved.effort[id]) : 'глубина размышлений не настраивается';
       const shared = SHARED.includes(id);
       return { title: TASK_LABEL[id], sub: m + ' · ' + eff + (shared ? ' · общая задача, платит администратор' : ''), value: shared ? null : '≈ ' + usd(perRun(id, saved), 3) };
     });
@@ -1157,12 +1191,13 @@
     ];
     const limits = V.own ? [
       { title: 'Лимит на месяц', sub: 'ставите сами в консоли Anthropic', value: '—' },
-      { title: 'Потолок на один анализ', value: usd(L.perAnalysis, 0) },
+      { title: 'Потолок на один анализ', sub: 'задаете сами в личном кабинете', value: usdL(V.cap) },
     ] : [
-      { title: 'Ваш лимит на месяц', value: usd(L.monthly, 0) },
+      L.paused ? { title: PAUSED, value: chip('Пауза', 'warn', 'pause') } : null,
+      { title: 'Ваш лимит на месяц', value: usdL(L.monthly) },
       { title: 'Анализов в день', value: String(L.daily) },
-      { title: 'Потолок на один анализ', sub: 'дороже — анализ остановится без ставки', value: usd(L.perAnalysis, 0) },
-    ];
+      { title: 'Потолок на один анализ', sub: 'дороже — анализ остановится без ставки', value: usdL(L.perAnalysis) },
+    ].filter(Boolean);
     limits.push({ title: 'Предупредить о цене анализа', value: 'от ' + usd(saved.limitSoft) });
     limits.push({ title: 'Веб-поиски', sub: 'на анализ и в день', value: (saved.searchLimit || '∞') + ' / ' + (saved.searchDay || '∞') });
     return card({
@@ -1198,44 +1233,43 @@
         const per = perRun(t.id, draft);
         if (hints[t.id]) hints[t.id].textContent = '≈ ' + usd(per, 3) + ' за запуск · ≈ ' + Math.round(BASE[t.id].perMonth) + ' в месяц · ≈ ' + usdM(per * BASE[t.id].perMonth) + '/мес';
       });
-      const now = forecastFor(saved), next = forecastFor(draft), lim = +draft.limitMonth || 0;
+      const now = forecastFor(saved), next = forecastFor(draft), diff = next - now, same = Math.abs(diff) <= 0.005;
       UI.clear(forecastNum);
-      if (Math.abs(next - now) > 0.005) UI.append(forecastNum, [h('span', { class: 'was' }, '≈ ' + usd(now) + ' → '), '≈ ' + usd(next)]);
+      if (!same) UI.append(forecastNum, [h('span', { class: 'was' }, '≈ ' + usd(now) + ' → '), '≈ ' + usd(next)]);
       else forecastNum.textContent = '≈ ' + usd(next);
-      UI.clear(forecastChip).appendChild(lim && next > lim ? chip('Выше ориентира ' + usd(lim, 0), 'bad', 'alert') : chip(pct(lim ? next / lim : 0) + ' ориентира', budgetKind(lim ? next / lim : 0), 'check'));
+      UI.clear(forecastChip).appendChild(same ? chip('Как сейчас', 'outline') : chip((diff > 0 ? '+' : '') + usd(diff) + ' в месяц', diff < 0 ? 'good' : 'warn', diff < 0 ? 'arrowDown' : 'arrowUp'));
       UI.clear(warnSlot);
-      const perAn = perRun('analysis', draft);
-      if (draft.limitHard > 0 && perAn > draft.limitHard) warnSlot.appendChild(UI.callout('warn', 'alert', 'Средний анализ (≈ ' + usd(perAn) + ') дороже жесткого порога (' + usd(+draft.limitHard) + '): запуски будут останавливаться без ставки.'));
+      const perAn = perRun('analysis', draft), capDef = D.admin.defaults.perAnalysis;
+      if (perAn > capDef) warnSlot.appendChild(UI.callout('warn', 'alert', 'Средний анализ (≈ ' + usd(perAn) + ') дороже потолка по умолчанию на один анализ (' + usdL(capDef) + '): у участников с таким потолком анализы будут останавливаться без ставки.'));
       else if (draft.limitSoft > 0 && perAn > draft.limitSoft) warnSlot.appendChild(UI.callout('warn', 'alert', 'Средний анализ (≈ ' + usd(perAn) + ') дороже порога предупреждения (' + usd(+draft.limitSoft) + '): уведомление будет приходить почти каждый раз.'));
       if (draft.searchDay > 0 && TOT.searches / DAYS > draft.searchDay) warnSlot.appendChild(UI.callout('warn', 'alert', 'Сейчас в среднем ' + fmt.dec(TOT.searches / DAYS, 1) + ' поиска в день — больше лимита ' + draft.searchDay + '. Лишние поиски не выполнятся, новости возьмутся из кэша.'));
       if (!draft.dossier) warnSlot.appendChild(UI.callout('warn', 'alert', 'Без досье ИИ снова читает файлы в 10–20 итераций, как старый бот: анализ дороже в ≈ ' + Math.round(perAn / BASE.analysis.avgCost) + ' раз.'));
-      if (draft.effort.analysis !== saved.effort.analysis && draft.models.analysis !== 'Haiku 4.5') warnSlot.appendChild(UI.callout('info', 'flask', 'Effort анализа меняет глубину размышлений, а значит и качество на трудных матчах. При сохранении настройка пройдет проверку на eval-наборе.'));
-      if (!draft.eval) warnSlot.appendChild(UI.callout('bad', 'shield', 'Проверка на eval-наборе выключена: смена модели или effort применится сразу, и просадку качества вы увидите только по проигранным ставкам.'));
+      if (draft.effort.analysis !== saved.effort.analysis && draft.models.analysis !== 'Haiku 4.5') warnSlot.appendChild(UI.callout('info', 'flask', 'Глубина размышлений влияет на качество анализа на трудных матчах. При сохранении настройка пройдет проверку на eval-наборе.'));
+      if (!draft.eval) warnSlot.appendChild(UI.callout('bad', 'shield', 'Проверка на eval-наборе выключена: смена модели или глубины размышлений применится сразу, и просадку качества вы увидите только по проигранным ставкам.'));
       const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
       dirtyEl.textContent = dirty ? 'Есть несохраненные изменения' : 'Изменений нет';
       dirtyEl.classList.toggle('on', dirty);
       resetBtn.disabled = !dirty;
     }
 
-    // Глубина размышлений: переключатель зависит от выбранной модели (Haiku 4.5 effort не поддерживает)
+    // Глубина размышлений: переключатель зависит от выбранной модели (Haiku 4.5 ее не поддерживает)
     function drawEffort(id) {
       const slot = UI.clear(effortSlots[id]);
       const model = draft.models[id];
       const labelId = 'costs-effort-' + id + '-label';
       if (!supportsEffort(model)) {
-        slot.appendChild(h('div', { class: 'costs-effort-off' }, icon('info'), 'Глубина размышлений (effort): не поддерживается в ' + model));
+        slot.appendChild(h('div', { class: 'costs-effort-off' }, icon('info'), 'Глубина размышлений: ' + model + ' ее не поддерживает'));
         return;
       }
       const levels = EFFORT_LEVELS[id];
       if (!levels.includes(draft.effort[id])) draft.effort[id] = levels[0];
       const seg = UI.segmented({
-        label: 'Глубина размышлений (effort) — ' + typeOf(id).label.toLowerCase(),
+        label: 'Глубина размышлений — ' + typeOf(id).label.toLowerCase(),
         items: levels.map(e => ({ id: e, label: EFFORT_LABEL[e] })),
         active: draft.effort[id],
         onChange: e => { draft.effort[id] = e; refresh(); },
       });
-      seg.querySelectorAll('button').forEach((b, i) => { b.title = 'effort: ' + levels[i]; });
-      slot.appendChild(h('div', { class: 'costs-effort' }, h('span', { class: 'costs-effort-label', id: labelId }, 'Глубина размышлений (effort)'), seg));
+      slot.appendChild(h('div', { class: 'costs-effort' }, h('span', { class: 'costs-effort-label', id: labelId }, 'Глубина размышлений'), seg));
     }
 
     const TASK_LABEL = { parse: 'Разбор текста событий', analysis: 'Анализ матчей', postmortem: 'Разбор ставок', refresh: 'Обновление профилей (ночью, через Batch)' };
@@ -1260,18 +1294,18 @@
     const maxRun = Math.max(...SCOPE_RUNS.filter(r => r.type === 'analysis').map(r => r.cost));
 
     const form = h('form', { class: 'card costs-card', id: 'costs-settings', novalidate: true, 'aria-labelledby': 'costs-settings-title', on: { submit: e => { e.preventDefault(); save(); } } },
-      h('div', { class: 'card-head' }, h('div', { style: 'min-width:0' }, h('h3', { id: 'costs-settings-title' }, 'Настройки экономии'), h('div', { class: 'card-sub' }, 'Модель и глубина размышлений для каждой задачи, лимиты и приемы, которые снижают расход. Применяются со следующего запуска.'))),
+      h('div', { class: 'card-head' }, h('div', { style: 'min-width:0' }, h('h3', { id: 'costs-settings-title' }, 'Настройки экономии'), h('div', { class: 'card-sub' }, 'Модель и глубина размышлений для каждой задачи, порог предупреждения о цене и приемы, которые снижают расход. Применяются со следующего запуска.'))),
       h('div', { class: 'card-body' },
         h('div', { class: 'costs-settings-grid' },
           h('div', { class: 'costs-settings-col' },
-            h('div', { class: 'eyebrow' }, 'Модель и effort для каждой задачи'),
+            h('div', { class: 'eyebrow' }, 'Модель и глубина размышлений для каждой задачи'),
             modelFields,
-            h('div', { class: 'eyebrow', style: 'margin-top:6px' }, 'Лимиты на деньги'),
-            h('div', { class: 'costs-limits' },
-              num('costs-limit-month', 'limitMonth', 'Ваш ориентир на месяц', '$', 'подсказка: анализы не останавливает', 0, 'costs-wide'),
-              num('costs-limit-soft', 'limitSoft', 'Предупредить при', '$', 'цена одного анализа', 2),
-              num('costs-limit-hard', 'limitHard', 'Остановить анализ при', '$', 'макс. было ' + usd(maxRun) + '; ставка не формируется', 2)),
-            h('div', { class: 'costs-task-hint' }, 'Пороги на анализ — для всех. Бюджет ключа администратора (' + usd(D.admin.budget.monthly, 0) + ' в месяц) и лимиты участников — в ', h('a', { href: '#admin-limits' }, 'Администрировании'), '.'),
+            h('div', { class: 'eyebrow', style: 'margin-top:6px' }, 'Цена одного анализа'),
+            h('div', { class: 'costs-limits two' },
+              num('costs-limit-soft', 'limitSoft', 'Предупредить при', '$', 'макс. было ' + usd(maxRun), 2)),
+            h('div', { class: 'costs-task-hint' }, 'Это мягкий порог для всех: анализ не останавливается, приходит уведомление. Жесткий потолок на один анализ задается в ',
+              h('a', { href: '#admin-limits' }, 'лимитах участников'), ' (Администрирование) и в ', h('a', { href: '#profile-key' }, 'потолке своего ключа'),
+              ' (личный кабинет). Бюджет ключа администратора (' + usdL(D.admin.budget.monthly) + ' в месяц) — тоже в лимитах.'),
             h('div', { class: 'eyebrow', style: 'margin-top:6px' }, 'Лимиты на веб-поиск'),
             h('div', { class: 'costs-limits two' },
               num('costs-limit-search', 'searchLimit', 'На анализ, не больше', 'шт', '2–3 на игрока; 0 — без лимита', 0),
@@ -1283,7 +1317,7 @@
               tog('batch', 'Ночные обновления через Batch API (−50%)', 'Профили игроков обновляются пакетом ночью: ответ до 24 ч, цена вдвое ниже.'),
               tog('newsCache', 'Кэш новостей 12 ч', 'Новости по игроку не ищутся повторно, если им меньше 12 часов. Кэш общий: найденное один раз переиспользуется.'),
               tog('dossier', 'Сжатое досье вместо чтения файлов', 'Одно досье на 2–3 тыс. токенов на игрока вместо 10–20 обращений к файлам.'),
-              tog('eval', 'Проверять качество на eval-наборе перед сменой модели или effort', 'Новая настройка анализа принимается, только если на 220 событиях отложенной выборки она ' + RULE_TEXT + '.')),
+              tog('eval', 'Проверять качество на eval-наборе перед сменой модели или глубины размышлений', 'Новая настройка анализа принимается, только если на 220 событиях отложенной выборки она ' + RULE_TEXT + '.')),
             h('div', { class: 'costs-forecast' },
               h('div', { style: 'min-width:0' }, h('div', { class: 'small soft' }, 'Прогноз ваших запусков на октябрь с этими настройками'), forecastNum),
               forecastChip),
@@ -1291,16 +1325,13 @@
       h('div', { class: 'card-foot costs-settings-foot' }, saveBtn, resetBtn, dirtyEl));
 
     function validate() {
-      if (!(draft.limitMonth >= 1)) return 'Ориентир на месяц — не меньше $1';
       if (!(draft.limitSoft > 0)) return 'Порог предупреждения должен быть больше нуля';
-      if (!(draft.limitHard >= draft.limitSoft)) return 'Порог остановки анализа — не меньше порога предупреждения';
       if (draft.searchLimit < 0 || draft.searchLimit > 10 || Math.round(draft.searchLimit) !== draft.searchLimit) return 'Поисков на анализ — целое число от 0 до 10';
       if (draft.searchDay < 0 || draft.searchDay > 50 || Math.round(draft.searchDay) !== draft.searchDay) return 'Поисков в день — целое число от 0 до 50';
       return null;
     }
     function commit(msg) {
       saved = clone(draft);
-      A.budget = saved.limitMonth; // личный ориентир администратора; настоящие лимиты — в DATA.admin и DATA.users
       redraw();
       UI.toast(msg || 'Настройки экономии сохранены');
     }

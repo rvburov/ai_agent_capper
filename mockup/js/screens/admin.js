@@ -1,4 +1,4 @@
-/* Кабинет администратора (docs/PLAN.md, раздел 7 «Кабинет администратора»; решения Р4–Р9, Р12–Р17).
+/* Раздел «Администрирование» — кабинет администратора (docs/PLAN.md, раздел 7 «Кабинет администратора»; решения Р4–Р9, Р12–Р17).
    Вкладки — подмаршруты #admin-<вкладка>: users, invites, access, key, usage, settings, audit, message.
    #admin-limits — вкладка «Ключ и бюджет» с прокруткой к лимитам участников (туда ведет уведомление о 80% лимита).
    Действия имитируются: состояние меняется в памяти (DATA.users, DATA.admin), каждое действие пишется в журнал
@@ -26,8 +26,9 @@
     return t ? day + ', ' + t : day;
   }
   const lc = s => s.charAt(0).toLowerCase() + s.slice(1);
-  // «Сейчас» в макете — утро 7 октября; каждое действие сдвигает часы на минуту, чтобы порядок в журнале был виден
-  let clock = toMin(TODAY + 'T09:41');
+  // «Сейчас» в макете — утро 7 октября; каждое действие сдвигает часы на минуту, чтобы порядок в журнале был виден.
+  // Запись о смене валюты переживает перезагрузку — часы идут после нее.
+  let clock = Math.max(toMin(TODAY + 'T09:41'), ...DATA.admin.audit.map(e => toMin(e.at) + 1));
   const now = () => fromMin(clock);
   const tick = () => fromMin(clock++);
   function left(expires) {
@@ -58,43 +59,34 @@
   const onAdminKey = () => people().filter(u => u.aiMode === 'admin');
   const recipients = () => people().filter(u => u.status === 'active' && !isMe(u));
   const alertShare = () => A.budget.alertAt / 100;
-  // Расход участника за месяц (u.spent, его читают и другие экраны) делится на ключ администратора и свой ключ.
-  // Свой ключ подключен до 1-го числа — весь расход месяца его; подключен в этом месяце — до перехода платил ключ
-  // администратора. Вернулся на ключ администратора — потраченное на своем (ownSpent) в бюджет не входит.
-  const MONTH_START = TODAY.slice(0, 8) + '01';
-  const ownAllMonth = u => !!(u.ownKey && u.ownKey.verified && u.ownKey.verified.slice(0, 10) < MONTH_START);
-  const ownSpentOf = u => u.aiMode === 'own' ? (ownAllMonth(u) ? u.spent : 0) : (u.ownSpent || 0);
-  const keySpent = u => Math.max(0, Math.round((u.spent - ownSpentOf(u)) * 100) / 100);
-  const keyUsers = () => people().filter(u => u.aiMode === 'admin' || keySpent(u) > 0);
-  const ratio = u => (u.aiMode === 'admin' && u.limit && u.limit.monthly) ? keySpent(u) / u.limit.monthly : null;
+  // Бюджет ключа администратора, расход на ключе и на своем ключе, лимиты и дела администратора считает
+  // DATA.ai — один расчет для всех экранов (главная, «ИИ и расходы», личный кабинет, этот раздел).
+  const AI = D.ai;
+  const ratio = u => { const L = AI.limitOf(u); return L && L.monthly ? AI.keySpent(u) / L.monthly : null; };
   const toneOf = r => r == null ? null : r >= 1 ? 'bad' : r >= alertShare() ? 'warn' : null;
+  // Потолок на один анализ для своего ключа задает сам участник (личный кабинет), администратор только видит
   const ownCap = u => u.ownCap != null ? u.ownCap : A.defaults.perAnalysis;
   const maskCode = c => c.slice(0, 4) + '••••-' + c.slice(-4);
-
-  // Бюджет ключа администратора. Прогноз — по темпу 1–7 окт с учетом личных лимитов, та же формула,
-  // что на главной и в «ИИ и расходы»: на 100% лимита анализы участника останавливаются.
-  const DAY = parts(TODAY)[2], MONTH_DAYS = 31;
-  const pace = v => v / DAY * MONTH_DAYS;
-  function budget() {
-    const spent = A.budget.spent, monthly = A.budget.monthly;
-    const forecast = sum(keyUsers(), u => { const v = keySpent(u); return (u.aiMode !== 'admin' || u.status !== 'active' || (u.limit && u.limit.paused)) ? v : u.limit ? Math.min(u.limit.monthly, pace(v)) : pace(v); }) + pace(A.budget.shared);
-    return { spent, monthly, forecast, left: Math.max(0, monthly - spent), daysLeft: MONTH_DAYS - DAY, share: spent / monthly, fShare: forecast / monthly };
-  }
+  // Средняя цена анализа — по всем запускам «Анализ матчей», как на экране «ИИ и расходы»
+  const avgAnalysis = () => { const rs = AI.runs.filter(r => r.type === 'analysis'); return rs.length ? sum(rs, r => r.cost) / rs.length : 0; };
+  // День месяца в макете (для подписей «за 1–7 окт»); конец месяца — по daysLeft из DATA.ai.budget()
+  const DAY = parts(TODAY)[2];
+  const monthEnd = b => DAY + b.daysLeft;
 
   // Расход по задачам. В демо-данных запуски (DATA.ai.runs) есть только у одного человека, поэтому личный
   // расход каждого делим по задачам в тех же долях; общие фоновые задачи — как есть. Сумма сходится с бюджетом.
   function taskBreakdown() {
-    const runs = D.ai.runs, personal = runs.filter(r => r.type !== 'refresh');
+    const runs = AI.runs, personal = runs.filter(r => r.type !== 'refresh');
     const pCost = sum(personal, r => r.cost) || 1;
-    const membersSpent = A.budget.spent - A.budget.shared;
+    const b = AI.budget(), membersSpent = b.spent - b.shared;
     const SHORT = { analysis: 'Анализ матчей', refresh: 'Профили', postmortem: 'Разбор ставок', parse: 'Разбор текста' };
-    return D.ai.runTypes.map(t => {
+    return AI.runTypes.map(t => {
       const rs = runs.filter(r => r.type === t.id);
       const input = sum(rs, r => r.input), cached = sum(rs, r => r.cached);
       const shared = t.id === 'refresh';
       return {
         id: t.id, label: shared ? 'Обновление профилей (общая задача, пакетом)' : t.label, short: SHORT[t.id] || t.label, model: t.model, shared,
-        cost: shared ? A.budget.shared : sum(rs, r => r.cost) / pCost * membersSpent, cache: input ? cached / input : 0,
+        cost: shared ? b.shared : sum(rs, r => r.cost) / pCost * membersSpent, cache: input ? cached / input : 0,
       };
     }).sort((a, b) => b.cost - a.cost);
   }
@@ -131,8 +123,11 @@
     { id: 'settings', label: 'Валюта, настройки, сообщения', test: inGroup(['set_currency', 'settings', 'message']) },
     { id: 'terminal', label: 'Команды терминала', test: e => e.actor === 'терминал' },
   ];
-  function log(action, target, details) {
-    A.audit.unshift({ at: tick(), actor: D.user.name, action, target: target || null, details, ip: '95.216.•.•', fresh: true });
+  const entry = (action, target, details) => ({ at: tick(), actor: D.user.name, action, target: target || null, details, ip: '95.216.•.•' });
+  function log(action, target, details, e) {
+    e = e || entry(action, target, details);
+    A.audit.unshift(Object.assign({}, e, { fresh: true }));
+    return e;
   }
 
   // ---------- состояние экрана ----------
@@ -156,16 +151,8 @@
     twofaUser: '',
     tz: 'Europe/Helsinki',
     msg: { to: 'all', user: '', text: '' },
-    sent: [],
   };
-  const TZ = [
-    { value: 'Europe/Helsinki', label: 'Хельсинки (UTC+3)' },
-    { value: 'Europe/Berlin', label: 'Берлин (UTC+2)' },
-    { value: 'America/New_York', label: 'Нью-Йорк (UTC−4)' },
-    { value: 'America/Chicago', label: 'Чикаго (UTC−5)' },
-    { value: 'America/Denver', label: 'Денвер (UTC−6)' },
-    { value: 'America/Los_Angeles', label: 'Лос-Анджелес (UTC−7)' },
-  ];
+  const TZ = D.timezones.map(t => ({ value: t.value, label: t.label }));
   const tzLabel = v => (TZ.find(t => t.value === v) || { label: v }).label.replace(/ \(.*\)$/, '');
   const CLI = 'docker compose exec api python -m app.admin.cli';
 
@@ -435,6 +422,10 @@
     .adm-urows.compact .adm-urow { padding: 8px 0; }
     .adm-urows.compact .adm-urow:first-child { padding-top: 0; }
     .adm-urows.compact .adm-urow-bar { height: 4px; margin-top: 4px; }
+    .adm-urow.adm-total { border-top: 1px solid var(--line-strong); margin-top: -1px; }
+    .adm-urow.adm-total .adm-urow-name { font-weight: 700; }
+    .adm-urows .adm-urow.adm-total:last-child { padding-top: 11px; }
+    .adm-urows.compact .adm-urow.adm-total:last-child { padding-top: 8px; }
 
     /* обзор: последние действия, журнал */
     .adm-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -533,31 +524,35 @@
   }
   function keyCell(u) {
     if (u.aiMode === 'own') return h('div', { class: 'adm-cell2' }, h('span', { class: 'adm-nowrap' }, 'Свой ключ'), h('span', { class: 'adm-sub mono' }, 'sk-ant-…' + (u.ownKey ? u.ownKey.last4 : '••••')), u.returnRequested && chip('просит вернуть', 'warn', 'key'));
-    return h('div', { class: 'adm-cell2' }, h('span', { class: 'adm-nowrap' }, 'Ключ администратора'), h('span', { class: 'adm-sub' }, u.limit ? limitShort(u.limit) : 'без личного лимита'));
+    const L = AI.limitOf(u);
+    return h('div', { class: 'adm-cell2' }, h('span', { class: 'adm-nowrap' }, 'Ключ администратора'), h('span', { class: 'adm-sub' }, L ? limitShort(L) : 'без личного лимита'));
   }
   const limitShort = L => usdL(L.monthly) + ' · ' + L.daily + ' в день · ' + usdL(L.perAnalysis);
 
   function spendBlock(u) {
+    const own = AI.ownSpent(u), onKey = AI.keySpent(u);
     if (u.aiMode === 'own') {
       return h('div', { class: 'adm-spend' },
-        h('div', { class: 'adm-spend-top' }, h('span', null, h('b', null, usd(ownSpentOf(u))), ' · свой счет'), h('span', { class: 'muted' }, 'вне бюджета')),
-        keySpent(u) > 0 ? h('span', { class: 'adm-sub' }, '+ ' + usd(keySpent(u)) + ' на вашем ключе до перехода') : null);
+        h('div', { class: 'adm-spend-top' }, h('span', null, h('b', null, usd(own)), ' · свой счет'), h('span', { class: 'muted' }, 'вне бюджета')),
+        onKey > 0 ? h('span', { class: 'adm-sub' }, '+ ' + usd(onKey) + ' на вашем ключе до перехода') : null);
     }
-    if (!u.limit) {
+    const L = AI.limitOf(u);
+    if (!L) {
       return h('div', { class: 'adm-spend' },
-        h('div', { class: 'adm-spend-top' }, h('span', null, h('b', null, usd(keySpent(u)))), h('span', { class: 'muted' }, 'в общем бюджете')));
+        h('div', { class: 'adm-spend-top' }, h('span', null, h('b', null, usd(onKey))), h('span', { class: 'muted' }, 'в общем бюджете')),
+        own > 0 ? h('span', { class: 'adm-sub' }, '+ ' + usd(own) + ' на своем ключе, вне бюджета') : null);
     }
-    const v = keySpent(u), r = ratio(u), t = toneOf(r);
-    const m = UI.meter(v, u.limit.monthly, t);
-    m.setAttribute('aria-label', 'Израсходовано ' + usd(v) + ' из ' + usdL(u.limit.monthly));
+    const r = ratio(u), t = toneOf(r);
+    const m = UI.meter(onKey, L.monthly, t);
+    m.setAttribute('aria-label', 'Израсходовано ' + usd(onKey) + ' из ' + usdL(L.monthly));
     return h('div', { class: 'adm-spend' },
-      h('div', { class: 'adm-spend-top' }, h('span', null, h('b', null, usd(v)), ' из ' + usdL(u.limit.monthly)), h('span', { class: t ? t + '-text' : 'muted' }, fmt.pct(r * 100, 0))),
+      h('div', { class: 'adm-spend-top' }, h('span', null, h('b', null, usd(onKey)), ' из ' + usdL(L.monthly)), h('span', { class: t ? t + '-text' : 'muted' }, fmt.pct(r * 100, 0))),
       m,
-      u.ownSpent ? h('span', { class: 'adm-sub' }, '+ ' + usd(u.ownSpent) + ' на своем ключе, вне бюджета') : null,
-      u.limit.paused ? chip('Анализы на паузе', 'warn', 'pause') : null);
+      own > 0 ? h('span', { class: 'adm-sub' }, '+ ' + usd(own) + ' на своем ключе, вне бюджета') : null,
+      L.paused ? chip('Анализы на паузе', 'warn', 'pause') : null);
   }
   function analysesCell(u) {
-    const lim = u.aiMode === 'admin' && u.limit ? u.limit.daily : null;
+    const L = AI.limitOf(u), lim = L ? L.daily : null;
     return h('div', { class: 'adm-cell2', style: 'align-items:flex-end' },
       h('span', { class: 'mono' }, u.todayAnalyses + ' / ' + u.analyses),
       h('span', { class: 'adm-sub' }, lim ? 'сегодня из ' + lim : 'сегодня / месяц'));
@@ -759,8 +754,12 @@
     const me = isMe(u), blocked = u.status === 'blocked';
     const items = [];
     if (me) items.push({ icon: 'user', label: 'Личный кабинет', hint: 'пароль, 2FA и ваши сеансы', onClick: () => UI.go('profile-security') });
-    if (u.returnRequested) items.push({ icon: 'key', label: 'Разрешить вернуть ключ администратора', onClick: () => approveReturn(u) });
-    if (!me) items.push({ icon: 'sliders', label: u.aiMode === 'own' ? 'Потолок на один анализ' : 'Изменить лимит', hint: u.aiMode === 'own' ? 'остальные лимиты — в его консоли Anthropic' : null, onClick: () => limitModal(u) });
+    if (u.returnRequested && u.aiMode === 'own') {
+      items.push({ icon: 'key', label: 'Разрешить вернуть ключ администратора', onClick: () => approveReturn(u) });
+      items.push({ icon: 'x', label: 'Отклонить просьбу', hint: 'останется на своем ключе', onClick: () => rejectReturn(u) });
+    }
+    if (!me && AI.limitOf(u)) items.push({ icon: 'sliders', label: 'Изменить лимит', hint: 'лимит, пауза анализов', onClick: () => limitModal(u) });
+    if (!me && u.aiMode === 'own') items.push({ icon: 'sliders', label: 'Потолок ' + usdL(ownCap(u)) + ' на анализ', disabled: true, hint: 'потолок задает участник, лимит трат — в его консоли Anthropic', onClick: () => {} });
     items.push('sep');
     items.push({ icon: 'lock', label: 'Выдать код сброса пароля', disabled: me, hint: me ? 'свой пароль — только командой в терминале' : 'код на 24 часа', onClick: () => resetCodeModal(u) });
     items.push({ icon: 'shield', label: 'Сбросить 2FA', disabled: me || !u.twoFa, hint: me ? 'свою 2FA — только командой в терминале' : !u.twoFa ? '2FA сейчас не настроена' : 'нужен ваш код 2FA', onClick: () => reset2fa(u) });
@@ -776,12 +775,13 @@
   // =====================================================================
   // ДЕЙСТВИЯ
   // =====================================================================
+  // Лимит участника на ключе администратора (на своем ключе лимиты и потолок задает сам участник)
   function limitModal(u) {
-    if (u.aiMode === 'own') return ownCapModal(u);
-    const L0 = u.limit || A.defaults;
+    const L0 = AI.limitOf(u);
+    if (!L0) return;
     const lf = limitFields(L0, 'adm-lim');
     const info = h('div', { class: 'adm-preview', 'aria-live': 'polite' });
-    let paused = !!(u.limit && u.limit.paused);
+    let paused = !!L0.paused;
     const presetVals = [8, 10, 12, 15, 20];
     const presets = h('div', { class: 'adm-presets' }, h('span', null, 'Быстро:'));
     const monthInput = lf.month.querySelector('input');
@@ -791,11 +791,11 @@
     }
     function drawInfo() {
       const m = num(monthInput.value);
-      const others = sum(onAdminKey().filter(x => x.limit && x.id !== u.id && x.status !== 'deleted'), x => x.limit.monthly);
+      const others = sum(people().filter(x => x.id !== u.id && AI.limitOf(x)), x => AI.limitOf(x).monthly);
       UI.clear(info);
       if (!(m > 0)) { info.appendChild(h('span', null, 'Введите лимит в долларах')); return; }
-      const r = keySpent(u) / m;
-      info.appendChild(h('span', null, 'Израсходовано в октябре ', h('b', null, usd(keySpent(u))), ' — это ', h('b', { class: r >= 1 ? 'bad-text' : r >= alertShare() ? 'warn-text' : null }, fmt.pct(r * 100, 0)), ' нового лимита.'));
+      const r = AI.keySpent(u) / m;
+      info.appendChild(h('span', null, 'Израсходовано в октябре ', h('b', null, usd(AI.keySpent(u))), ' — это ', h('b', { class: r >= 1 ? 'bad-text' : r >= alertShare() ? 'warn-text' : null }, fmt.pct(r * 100, 0)), ' нового лимита.'));
       if (r >= 1) info.appendChild(h('span', { class: 'bad-text' }, 'Лимит меньше уже потраченного: анализы остановятся сразу.'));
       info.appendChild(h('span', null, 'Сумма личных лимитов станет ', h('b', null, usdL(Math.round((others + m) * 100) / 100)), ' при общем бюджете ', h('b', null, usdL(A.budget.monthly)), '.'));
     }
@@ -814,8 +814,8 @@
           const L = lf.read();
           if (!L) return;
           L.paused = paused;
-          const diff = limitDiff(u.limit, L);
-          if ((u.limit && !!u.limit.paused) !== paused) diff.push(paused ? 'анализы на паузе' : 'пауза снята');
+          const diff = limitDiff(L0, L);
+          if (!!L0.paused !== paused) diff.push(paused ? 'анализы на паузе' : 'пауза снята');
           close();
           if (!diff.length) { UI.toast('Лимит не изменился', 'info'); return; }
           u.limit = L;
@@ -828,38 +828,13 @@
     });
   }
 
-  function ownCapModal(u) {
-    const f = UI.field({ id: 'adm-cap', label: 'Потолок на один анализ, $', value: dec(ownCap(u)), inputmode: 'decimal', autocomplete: 'off', hint: 'Анализ, который выходит дороже, останавливается с понятной ошибкой' });
-    UI.modal({
-      title: 'Потолок на один анализ',
-      body: h('div', { class: 'stack' },
-        personRow(u, true),
-        h('p', { class: 'small soft' }, 'Участник работает на своем ключе sk-ant-…' + (u.ownKey ? u.ownKey.last4 : '••••') + ' и платит сам. Месячный лимит и лимит в день он ставит в своей консоли Anthropic — в программе только потолок на один анализ.'),
-        f),
-      actions: close => [
-        button('Отмена', { kind: 'secondary', onClick: close }),
-        button('Сохранить', { kind: 'primary', icon: 'check', onClick: () => {
-          const p = num(valOf(f));
-          if (!setErr(f, p >= 0.1 && p <= 20 ? null : 'От $0,10 до $20')) return;
-          close();
-          const old = ownCap(u), v = Math.round(p * 100) / 100;
-          if (old === v) { UI.toast('Потолок не изменился', 'info'); return; }
-          u.ownCap = v;
-          log('limit_change', u.name, 'Потолок на анализ ' + usdL(old) + ' → ' + usdL(v) + ' (свой ключ)');
-          UI.toast(u.name + ': потолок ' + usdL(v) + ' на анализ', 'sliders');
-          refresh();
-        } }),
-      ],
-    });
-  }
-
   function approveReturn(u) {
     const lf = limitFields(u.limit || A.defaults, 'adm-ret');
     UI.modal({
       title: 'Вернуть на ключ администратора',
       body: h('div', { class: 'stack' },
         personRow(u, true),
-        h('p', { class: 'small soft' }, 'Просьба пришла ' + lc(when(u.returnRequested)) + '. Анализы участника снова пойдут с вашего ключа и будут считаться в общем бюджете. Его ключ sk-ant-…' + (u.ownKey ? u.ownKey.last4 : '••••') + ' отключится; расход на нем за октябрь (' + usd(ownSpentOf(u)) + ') в ваш бюджет не войдет.'),
+        h('p', { class: 'small soft' }, 'Просьба пришла ' + lc(when(u.returnRequested)) + '. Анализы участника снова пойдут с вашего ключа и будут считаться в общем бюджете. Его ключ sk-ant-…' + (u.ownKey ? u.ownKey.last4 : '••••') + ' отключится; расход на нем за октябрь (' + usd(AI.ownSpent(u)) + ') в ваш бюджет не войдет.'),
         h('div', { class: 'field-label' }, h('span', null, 'Лимит на вашем ключе')),
         lf.node,
         howto('По умолчанию для новых участников: ' + limitText(A.defaults) + '.')),
@@ -869,7 +844,7 @@
           const L = lf.read();
           if (!L) return;
           close();
-          u.ownSpent = ownSpentOf(u); // потраченное на своем ключе остается вне бюджета администратора
+          // u.ownSpent не трогаем: потраченное на своем ключе остается вне бюджета администратора
           u.aiMode = 'admin'; u.limit = L; u.returnRequested = null; u.ownKey = null;
           log('ai_mode', u.name, 'Разрешен возврат на ключ администратора: ' + limitText(L));
           dropRequest(u);
@@ -961,8 +936,8 @@
       id: 'adm-role-otp',
       title: toAdmin ? 'Сделать администратором' : 'Сделать участником',
       body: [personRow(u, true), h('p', { class: 'small soft' }, toAdmin
-        ? 'Он увидит этот кабинет: участников, приглашения, ключ Claude, бюджет и журнал — и сможет делать все то же, что и вы. Ставки, банк и стратегию участников не видит никто из администраторов.'
-        : 'Он перестанет видеть кабинет администратора. Его ставки, банк, стратегия и лимит на ИИ не изменятся.')],
+        ? 'Он увидит раздел «Администрирование»: участников, приглашения, ключ Claude, бюджет и журнал — и сможет делать все то же, что и вы. Ставки, банк и стратегию участников не видит никто из администраторов.'
+        : 'Он перестанет видеть раздел «Администрирование». Его ставки, банк, стратегия и лимит на ИИ не изменятся.')],
       confirmLabel: toAdmin ? 'Сделать администратором' : 'Сделать участником', icon: 'admin',
       onConfirm: () => {
         const from = ROLE[u.role];
@@ -1008,7 +983,7 @@
     const stay = [];
     if (u.consent) stay.push('Прогнозы без имени и email — для обучения общей модели. Участник дал согласие при регистрации');
     stay.push('Запись в журнале: кто, когда и кого удалил');
-    if (u.aiMode === 'admin' && keySpent(u) > 0) stay.push('Расход на ИИ за октябрь (' + usd(keySpent(u)) + ') остается в бюджете: деньги уже потрачены');
+    if (AI.keySpent(u) > 0) stay.push('Расход на вашем ключе за октябрь (' + usd(AI.keySpent(u)) + ') остается в общем бюджете: деньги уже потрачены');
     UI.modal({
       title: 'Удалить участника', wide: true,
       body: h('div', { class: 'stack' },
@@ -1044,14 +1019,14 @@
     const draft = { role: 'member', aiMode: 'admin' };
     const body = h('div', { class: 'stack' }), foot = h('div', { style: 'display:contents' });
     let closeFn = () => {};
-    const fEmail = UI.field({ id: 'adm-inv-email', label: 'Email', type: 'email', placeholder: 'name@example.com', autocomplete: 'off', hint: 'С этим email человек зарегистрируется — другой код не примет', attrs: { spellcheck: 'false' } });
-    const fRole = UI.field({ id: 'adm-inv-role', label: 'Роль', options: [{ value: 'member', label: 'Участник' }, { value: 'admin', label: 'Администратор' }], value: 'member', hint: 'Свой банк, ставки и аналитика. Кабинет администратора не видит' });
+    const fEmail = UI.field({ id: 'adm-inv-email', label: 'Email', type: 'email', placeholder: 'name@example.com', autocomplete: 'off', hint: 'Код сработает только с этим email', attrs: { spellcheck: 'false' } });
+    const fRole = UI.field({ id: 'adm-inv-role', label: 'Роль', options: [{ value: 'member', label: 'Участник' }, { value: 'admin', label: 'Администратор' }], value: 'member', hint: 'Свой банк, ставки и аналитика. Раздел «Администрирование» не видит' });
     fRole.querySelector('select').addEventListener('change', e => {
       draft.role = e.target.value;
-      fRole.querySelector('.field-hint').textContent = draft.role === 'admin' ? 'Увидит этот кабинет и сможет управлять участниками' : 'Свой банк, ставки и аналитика. Кабинет администратора не видит';
+      fRole.querySelector('.field-hint').textContent = draft.role === 'admin' ? 'Увидит раздел «Администрирование» и сможет управлять участниками' : 'Свой банк, ставки и аналитика. Раздел «Администрирование» не видит';
     });
     const limSlot = h('div', { class: 'stack', style: 'gap:8px' });
-    let lf = null, capField = null;
+    let lf = null;
     const choice = (value, title, text) => h('label', { class: 'adm-choice' },
       h('input', { type: 'radio', name: 'adm-inv-mode', value, checked: draft.aiMode === value, on: { change: () => { draft.aiMode = value; drawLimits(); } } }),
       h('span', null, h('b', null, title), h('small', null, text)));
@@ -1061,12 +1036,11 @@
     function drawLimits() {
       UI.clear(limSlot);
       if (draft.aiMode === 'admin') {
-        lf = limitFields(A.defaults, 'adm-inv-lim'); capField = null;
+        lf = limitFields(A.defaults, 'adm-inv-lim');
         UI.append(limSlot, [h('div', { class: 'field-label' }, h('span', null, 'Стартовый лимит')), lf.node, howto('По умолчанию для новых участников: ' + limitText(A.defaults) + '. Меняется на вкладке «Ключ и бюджет».')]);
       } else {
         lf = null;
-        capField = UI.field({ id: 'adm-inv-cap', label: 'Потолок на один анализ, $', value: dec(A.defaults.perAnalysis), inputmode: 'decimal', autocomplete: 'off', hint: 'Месячный лимит человек ставит сам в консоли Anthropic' });
-        limSlot.appendChild(capField);
+        limSlot.appendChild(howto('Лимиты человек задает сам: потолок на один анализ — в личном кабинете (по умолчанию ' + usdL(A.defaults.perAnalysis) + '), лимит трат — в своей консоли Anthropic.'));
       }
     }
     function drawForm() {
@@ -1087,14 +1061,13 @@
       else if (people().some(u => u.email === email)) ok = setErr(fEmail, 'Этот email уже есть среди участников');
       else if (A.invites.some(i => i.email === email && i.status === 'active')) ok = setErr(fEmail, 'Для этого email уже есть активное приглашение — отзовите его или дождитесь регистрации');
       else setErr(fEmail, null);
-      let L = null, cap = null;
+      let L = null;
       if (lf) { L = lf.read(); if (!L) ok = false; }
-      if (capField) { cap = num(valOf(capField)); if (!setErr(capField, cap >= 0.1 && cap <= 20 ? null : 'От $0,10 до $20')) ok = false; }
       if (!ok) { const bad = body.querySelector('.invalid'); if (bad) bad.focus(); return; }
       const code = genCode('CAP'), at = now();
-      const inv = { code, email, role: draft.role, aiMode: draft.aiMode, limit: L ? L.monthly : null, limits: L, cap, created: at, expires: addHours(at, 24 * 7), status: 'active', fresh: true };
+      const inv = { code, email, role: draft.role, aiMode: draft.aiMode, limit: L ? L.monthly : null, limits: L, created: at, expires: addHours(at, 24 * 7), status: 'active', fresh: true };
       A.invites.unshift(inv);
-      log('invite', email, ROLE[inv.role] + ', ' + (L ? 'ключ администратора, ' + limitText(L) : 'свой ключ, потолок ' + usdL(cap) + ' на анализ'));
+      log('invite', email, ROLE[inv.role] + ', ' + (L ? 'ключ администратора, ' + limitText(L) : 'свой ключ'));
       drawDone(inv);
     }
     function drawDone(inv) {
@@ -1103,7 +1076,7 @@
         h('p', { class: 'small soft' }, 'Приглашение для ', h('b', null, inv.email), ' создано. Код:'),
         codeBox(inv.code, 'Код приглашения'),
         UI.callout('warn', 'clock', h('b', null, 'Код действует 7 дней — до ' + lc(when(inv.expires)) + '. '), 'Передайте его человеку сами: почты и Telegram в программе нет. Код показывается один раз — потом в списке будет видна только его концовка.'),
-        UI.kv([['Роль', ROLE[inv.role]], ['Ключ Claude', inv.aiMode === 'admin' ? 'ключ администратора' : 'свой ключ'], inv.limits ? ['Лимит', limitText(inv.limits)] : ['Потолок на анализ', usdL(inv.cap)]]),
+        UI.kv([['Роль', ROLE[inv.role]], ['Ключ Claude', inv.aiMode === 'admin' ? 'ключ администратора' : 'свой ключ'], inv.limits ? ['Лимит', limitText(inv.limits)] : ['Лимиты', 'задает сам']]),
         h('div', { class: 'eyebrow' }, 'Что делать человеку'),
         h('ol', { class: 'adm-steps' },
           h('li', null, h('span', null, 'Открыть AI Capper → ', h('b', null, '«Регистрация только по приглашению»'))),
@@ -1150,14 +1123,11 @@
   // =====================================================================
   // ШАПКА И ВКЛАДКИ
   // =====================================================================
-  function attention() {
-    const out = [];
-    people().filter(u => u.returnRequested).forEach(u => out.push({ kind: 'return', u }));
-    people().filter(u => u.status === 'active' && ratio(u) != null && ratio(u) >= alertShare()).forEach(u => out.push({ kind: 'limit', u }));
-    A.resetCodes.filter(c => c.status === 'active').forEach(c => out.push({ kind: 'reset', c }));
-    A.invites.filter(i => i.status === 'active').forEach(i => out.push({ kind: 'invite', i }));
-    return out;
-  }
+  // Дела администратора — ровно DATA.ai.decisions(): то же число у пункта меню и на главной.
+  // Коды сброса и приглашения решения не ждут — они в блоке «Действует сейчас».
+  const decisions = () => AI.decisions();
+  const pending = () => A.resetCodes.filter(c => c.status === 'active').map(c => ({ kind: 'reset', c }))
+    .concat(A.invites.filter(i => i.status === 'active').map(i => ({ kind: 'invite', i })));
 
   function headBlock() {
     const all = people(), active = all.filter(u => u.status === 'active').length, blocked = all.length - active;
@@ -1179,15 +1149,15 @@
 
   function drawTabs() {
     const mobile = UI.isMobile();
-    const att = attention().length;
-    const dot = id => id === 'overview' && att ? [h('span', { class: 'adm-tab-dot', 'aria-hidden': 'true' }), h('span', { class: 'sr-only' }, ' (есть что сделать: ' + att + ')')] : null;
+    const att = decisions().length;
+    const dot = id => id === 'overview' && att ? [h('span', { class: 'adm-tab-dot', 'aria-hidden': 'true' }), h('span', { class: 'sr-only' }, ' (нужно решение: ' + att + ')')] : null;
     const t = UI.tabs({
       items: TABS.map(x => ({ id: x.id, label: mobile ? [x.short, dot(x.id)] : [icon(x.icon), x.label, dot(x.id)] })),
       active: st.tab,
       onChange: id => switchTab(id, null, true),
     });
     t.classList.add('adm-tabs');
-    t.setAttribute('aria-label', 'Разделы кабинета администратора');
+    t.setAttribute('aria-label', 'Вкладки раздела «Администрирование»');
     t.querySelectorAll('button').forEach((b, i) => { b.setAttribute('aria-controls', 'adm-panel'); b.dataset.tab = TABS[i].id; });
     UI.clear(tabsSlot).appendChild(t);
   }
@@ -1208,39 +1178,48 @@
       h('div', { style: 'min-width:0' }, h('div', { class: 'adm-att-title' }, o.title), h('div', { class: 'adm-att-meta' }, o.meta)),
       h('div', { class: 'adm-att-actions' }, o.actions));
   }
-  function attentionCard() {
-    const items = attention();
-    const rows = items.map(it => {
-      if (it.kind === 'return') {
-        const u = it.u;
-        return attRow({ tone: 'info', ic: 'key', title: u.name + ' просит вернуть ключ администратора',
-          meta: 'Сейчас работает на своем ключе sk-ant-…' + (u.ownKey ? u.ownKey.last4 : '••••') + ', просьба — ' + lc(when(u.returnRequested)) + '. Вернуть можно только с вашего разрешения.',
-          actions: [button('Разрешить', { kind: 'primary', size: 'sm', icon: 'check', attrs: { id: 'adm-att-allow' }, onClick: () => approveReturn(u) }), button('Отклонить', { kind: 'secondary', size: 'sm', onClick: () => rejectReturn(u) })] });
-      }
-      if (it.kind === 'limit') {
-        const u = it.u, r = ratio(u);
-        const perDay = keySpent(u) / DAY, rest = u.limit.monthly - keySpent(u);
-        const capDay = perDay > 0 && rest > 0 ? dayShift(Math.max(1, Math.ceil(rest / perDay))) : null;
-        return attRow({ tone: r >= 1 ? 'bad' : 'warn', ic: 'coins', title: u.name + ' — ' + fmt.pct(r * 100, 0) + ' лимита',
-          meta: usd(keySpent(u)) + ' из ' + usdL(u.limit.monthly) + ' за октябрь, сегодня ' + u.todayAnalyses + ' из ' + u.limit.daily + ' анализов. ' + (r >= 1 ? 'Анализы на вашем ключе остановлены.' : capDay ? 'При таком темпе лимит закончится ' + lc(when(capDay)) + ', и анализы на вашем ключе остановятся.' : ''),
-          actions: [button('Поднять лимит', { kind: 'primary', size: 'sm', icon: 'arrowUp', onClick: () => limitModal(u) })] });
-      }
-      if (it.kind === 'reset') {
-        const c = it.c, u = userById(c.user);
-        return attRow({ tone: 'info', ic: 'lock', title: 'Действует код сброса пароля' + (u ? ': ' + u.name : ''),
-          meta: maskCode(c.code) + ' выдан ' + lc(when(c.created)) + ', ' + left(c.expires) + '. Участник вводит его на экране «Забыли пароль?».',
-          actions: [button('Отозвать', { kind: 'secondary', size: 'sm', icon: 'x', onClick: () => revokeReset(c) }), button('Сброс доступа', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => switchTab('access') })] });
-      }
-      const i = it.i;
-      return attRow({ tone: 'warn', ic: 'userPlus', title: 'Приглашение ждет регистрации: ' + i.email,
-        meta: 'Код ' + maskCode(i.code) + ' истекает ' + lc(when(i.expires)) + ' — ' + left(i.expires) + '. Если человек не успеет, создайте новое.',
-        actions: [button('Отозвать', { kind: 'secondary', size: 'sm', icon: 'x', onClick: () => revokeInvite(i) }), button('Приглашения', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => switchTab('invites') })] });
-    });
+  function decisionRow(d) {
+    const u = d.user;
+    if (d.kind === 'return') {
+      return attRow({ tone: 'info', ic: 'key', title: u.name + ' просит вернуть ключ администратора',
+        meta: 'Сейчас работает на своем ключе sk-ant-…' + (u.ownKey ? u.ownKey.last4 : '••••') + ', просьба — ' + lc(when(d.at)) + '. Вернуть можно только с вашего разрешения.',
+        actions: [button('Разрешить', { kind: 'primary', size: 'sm', icon: 'check', attrs: { id: 'adm-att-allow', 'data-user': u.id }, onClick: () => approveReturn(u) }), button('Отклонить', { kind: 'secondary', size: 'sm', attrs: { 'data-user': u.id, 'data-act': 'reject' }, onClick: () => rejectReturn(u) })] });
+    }
+    const L = AI.limitOf(u), v = AI.keySpent(u), r = d.ratio;
+    const perDay = v / DAY, rest = L.monthly - v;
+    const capDay = perDay > 0 && rest > 0 ? dayShift(Math.max(1, Math.ceil(rest / perDay))) : null;
+    return attRow({ tone: r >= 1 ? 'bad' : 'warn', ic: 'coins', title: u.name + ' — ' + fmt.pct(r * 100, 0) + ' лимита',
+      meta: usd(v) + ' из ' + usdL(L.monthly) + ' за октябрь, сегодня ' + u.todayAnalyses + ' из ' + L.daily + ' анализов. ' + (L.paused ? 'Анализы на паузе.' : r >= 1 ? 'Анализы на вашем ключе остановлены.' : capDay ? 'При таком темпе лимит закончится ' + lc(when(capDay)) + ', и анализы на вашем ключе остановятся.' : ''),
+      actions: [button('Поднять лимит', { kind: 'primary', size: 'sm', icon: 'arrowUp', attrs: { 'data-user': u.id }, onClick: () => limitModal(u) })] });
+  }
+  function decisionsCard() {
+    const items = decisions();
     return card({
-      title: 'Что требует внимания', class: 'adm-fill adm-nowrap-head',
-      subtitle: items.length ? 'Просьбы участников, лимиты и коды, которые еще действуют' : 'Просьб и предупреждений нет',
+      title: 'Нужно решение', class: 'adm-nowrap-head', id: 'adm-decisions',
+      subtitle: items.length ? 'Просьбы вернуть ключ администратора и участники у лимита' : 'Просьб и предупреждений нет',
       actions: items.length ? [chip(String(items.length), 'warn')] : [chip('Все спокойно', 'good', 'check')],
-      body: items.length ? h('ul', { class: 'adm-att-list' }, rows) : h('p', { class: 'small soft' }, 'Когда участник попросит вернуть ключ администратора, подойдет к лимиту или будет ждать код — это появится здесь.'),
+      body: items.length ? h('ul', { class: 'adm-att-list' }, items.map(decisionRow)) : h('p', { class: 'small soft' }, 'Когда участник попросит вернуть ключ администратора или подойдет к ' + A.budget.alertAt + '% лимита, это появится здесь и у пункта меню.'),
+    });
+  }
+  function pendingRow(it) {
+    if (it.kind === 'reset') {
+      const c = it.c, u = userById(c.user);
+      return attRow({ tone: 'info', ic: 'lock', title: 'Код сброса пароля' + (u ? ': ' + u.name : ''),
+        meta: maskCode(c.code) + ' выдан ' + lc(when(c.created)) + ', ' + left(c.expires) + '. Участник вводит его на экране «Забыли пароль?».',
+        actions: [button('Отозвать', { kind: 'secondary', size: 'sm', icon: 'x', onClick: () => revokeReset(c) }), button('Сброс доступа', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => switchTab('access') })] });
+    }
+    const i = it.i;
+    return attRow({ tone: 'info', ic: 'userPlus', title: 'Приглашение ждет регистрации: ' + i.email,
+      meta: 'Код ' + maskCode(i.code) + ' действует до ' + lc(when(i.expires)) + ' — ' + left(i.expires) + '. Если человек не успеет, создайте новое.',
+      actions: [button('Отозвать', { kind: 'secondary', size: 'sm', icon: 'x', onClick: () => revokeInvite(i) }), button('Приглашения', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => switchTab('invites') })] });
+  }
+  function pendingCard() {
+    const items = pending();
+    return card({
+      title: 'Действует сейчас', class: 'adm-nowrap-head adm-fill', id: 'adm-pending',
+      subtitle: items.length ? 'Выданные коды сброса и приглашения. Решения не ждут — сгорят сами' : 'Действующих кодов и приглашений нет',
+      actions: [chip(String(items.length), 'outline')],
+      body: items.length ? h('ul', { class: 'adm-att-list' }, items.map(pendingRow)) : h('p', { class: 'small soft' }, 'Здесь видно коды сброса пароля и приглашения, пока они действуют.'),
     });
   }
 
@@ -1250,11 +1229,11 @@
       h('div', { class: 'adm-bar', role: 'meter', 'aria-label': 'Потрачено ' + usd(b.spent) + ' из ' + usdL(b.monthly) + ', прогноз ' + usd(b.forecast), 'aria-valuenow': b.spent, 'aria-valuemin': 0, 'aria-valuemax': b.monthly },
         h('i', { class: 'proj', style: { width: Math.min(100, b.fShare * 100) + '%' } }),
         h('i', { class: ['spent', tone], style: { width: Math.min(100, b.share * 100) + '%' } }),
-        h('span', { class: 'mark', style: { left: A.budget.alertAt + '%' }, title: 'Уведомление при ' + A.budget.alertAt + '%' })),
+        h('span', { class: 'mark', style: { left: b.alertAt + '%' }, title: 'Уведомление при ' + b.alertAt + '%' })),
       h('div', { class: 'adm-legend' },
         h('span', null, h('i', { class: 'spent' }), 'Потрачено за 1–' + DAY + ' окт'),
-        h('span', null, h('i', { class: 'proj' }), 'Прогноз на ' + MONTH_DAYS + ' окт'),
-        h('span', null, h('i', { class: 'mark' }), 'Уведомление при ' + A.budget.alertAt + '%')));
+        h('span', null, h('i', { class: 'proj' }), 'Прогноз на ' + monthEnd(b) + ' окт'),
+        h('span', null, h('i', { class: 'mark' }), 'Уведомление при ' + b.alertAt + '%')));
   }
   function budgetBody(b) {
     return [
@@ -1263,36 +1242,49 @@
         chip(pctOf(b.spent, b.monthly) + ' бюджета', b.share >= 1 ? 'bad' : b.share >= alertShare() ? 'warn' : 'good', b.share >= alertShare() ? 'alert' : 'check')),
       budgetBar(b),
       h('dl', { class: 'adm-kv3' },
-        h('div', null, h('dt', null, 'Осталось'), h('dd', null, usd(b.left), h('small', null, 'до ' + MONTH_DAYS + ' окт'))),
+        h('div', null, h('dt', null, 'Осталось'), h('dd', null, usd(b.left), h('small', null, 'до ' + monthEnd(b) + ' окт'))),
         h('div', null, h('dt', null, 'До конца месяца'), h('dd', null, pl(b.daysLeft, 'день', 'дня', 'дней'), h('small', null, 'сегодня ' + fmt.date(TODAY)))),
         h('div', null, h('dt', null, 'Прогноз'), h('dd', null, '≈ ' + usd(b.forecast), h('small', null, pctOf(b.forecast, b.monthly) + ' бюджета')))),
     ];
   }
-  function spendersList(b, n) {
-    const rows = keyUsers().filter(u => keySpent(u) > 0).sort((x, y) => keySpent(y) - keySpent(x)).slice(0, n)
-      .map(u => ({ name: u.name, me: isMe(u), spent: keySpent(u), r: ratio(u), note: u.limit ? 'лимит ' + usdL(u.limit.monthly) : 'без личного лимита' }))
-      .concat([{ name: 'Общие фоновые задачи', spent: A.budget.shared, note: 'обновление профилей игроков', shared: true }]);
+  // Строка «Итого» под списком расхода: та же сумма, что «Потрачено» в бюджете (DATA.ai.budget().spent)
+  function totalRow(b) {
+    return h('li', { class: 'adm-urow adm-total' },
+      h('div', { class: 'adm-urow-name' }, 'Итого с вашего ключа'),
+      h('div', { class: 'adm-urow-val' }, h('b', null, usd(b.spent)), h('small', null, pctOf(b.spent, b.monthly, 1) + ' бюджета')),
+      h('div', { class: 'adm-urow-meta' }, 'за 1–' + DAY + ' октября'));
+  }
+  // Кто тратит ключ администратора: все с расходом на нем; если людей много — первые трое и «остальные»
+  function spendersList(b) {
+    const list = AI.keyUsers().filter(u => AI.keySpent(u) > 0).sort((x, y) => AI.keySpent(y) - AI.keySpent(x));
+    const top = list.length > 4 ? list.slice(0, 3) : list, rest = list.slice(top.length);
+    const noteOf = u => { const L = AI.limitOf(u); return u.aiMode === 'own' ? 'до перехода на свой ключ' : L ? 'лимит ' + usdL(L.monthly) : 'без личного лимита'; };
+    const rows = top.map(u => ({ name: u.name, me: isMe(u), gone: u.status === 'deleted', spent: AI.keySpent(u), r: ratio(u), note: noteOf(u) }))
+      .concat(rest.length ? [{ name: 'Остальные: ' + rest.length, spent: Math.round(sum(rest, AI.keySpent) * 100) / 100, note: rest.map(u => u.name.split(' ')[0]).join(', ') }] : [])
+      .concat([{ name: 'Общие фоновые задачи', spent: b.shared, note: 'обновление профилей игроков', shared: true }]);
     const max = Math.max(...rows.map(x => x.spent)) || 1;
     return h('ul', { class: 'adm-urows compact', 'aria-label': 'Кто тратит' }, rows.map(x => h('li', { class: 'adm-urow' },
-      h('div', { class: 'adm-urow-name' }, x.name, x.me && chip('вы', 'accent')),
+      h('div', { class: 'adm-urow-name' }, x.name, x.me && chip('вы', 'accent'), x.gone && chip('удален', 'outline')),
       h('div', { class: 'adm-urow-val' }, h('b', null, usd(x.spent)), h('small', null, pctOf(x.spent, b.monthly, 1) + ' бюджета')),
       h('div', { class: 'adm-urow-meta' }, x.note + (x.r != null ? ' · израсходовано ' + fmt.pct(x.r * 100, 0) : '')),
-      h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: (x.spent / max * 100) + '%', background: x.shared ? 'var(--fg-3)' : toneOf(x.r) === 'bad' ? 'var(--bad)' : toneOf(x.r) === 'warn' ? 'var(--warn)' : 'var(--accent)' } })))));
+      h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: (x.spent / max * 100) + '%', background: x.shared ? 'var(--fg-3)' : toneOf(x.r) === 'bad' ? 'var(--bad)' : toneOf(x.r) === 'warn' ? 'var(--warn)' : 'var(--accent)' } })))),
+      totalRow(b));
   }
   function budgetCard() {
-    const b = budget();
+    const b = AI.budget();
     return card({
       title: 'Бюджет ключа администратора', subtitle: 'Октябрь · расходы на Claude всегда в долларах', class: 'adm-fill',
-      body: [...budgetBody(b), howto(b.fShare >= 1 ? 'Прогноз выше бюджета: поднимите бюджет или снизьте лимиты участников.' : 'Прогноз учитывает личные лимиты: на 100% лимита анализы участника останавливаются.'),
-        h('div', { class: 'eyebrow', style: 'margin-top:4px' }, 'Кто тратит больше всего'), spendersList(b, 2)],
-      foot: [button('Расход по людям', { kind: 'ghost', size: 'sm', icon: 'coins', onClick: () => switchTab('usage') }), button('Бюджет и лимиты', { kind: 'ghost', size: 'sm', icon: 'sliders', onClick: () => switchTab('key') })],
+      body: [...budgetBody(b), howto(b.fShare >= 1 ? 'Прогноз выше бюджета: поднимите бюджет или снизьте лимиты участников.' : 'Прогноз учитывает личные лимиты и паузы: на 100% лимита анализы участника останавливаются.'),
+        h('div', { class: 'eyebrow', style: 'margin-top:4px' }, 'Кто тратит'), spendersList(b)],
+      foot: [button('Расход ИИ', { kind: 'ghost', size: 'sm', icon: 'coins', onClick: () => switchTab('usage') }), button('Ключ и бюджет', { kind: 'ghost', size: 'sm', icon: 'key', onClick: () => switchTab('key') })],
     });
   }
+  // Аккаунты: администраторы и участники вместе (на вкладке «Сообщение» считаются только получатели — без вас)
   function peopleTile() {
     const all = people(), active = all.filter(u => u.status === 'active'), blocked = all.length - active.length;
     const onKey = active.filter(u => u.aiMode === 'admin').length, own = active.filter(u => u.aiMode === 'own').length;
     const today = all.filter(u => u.lastLogin && u.lastLogin.slice(0, 10) === TODAY).length;
-    return tile({ icon: 'users', label: 'Участников активно',
+    return tile({ icon: 'users', label: 'Активных аккаунтов',
       value: [String(active.length), h('span', { class: 'adm-of' }, 'из ' + all.length)],
       sub: onKey + ' на ключе администратора · ' + own + ' на своем ключе' + (blocked ? ' · ' + blocked + ' ' + fmt.plural(blocked, 'заблокирован', 'заблокированы', 'заблокированы') : ''),
       foot: [h('span', { class: 'stat-hint' }, 'Сегодня заходили: ' + today), button('Участники', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => switchTab('users') })] });
@@ -1335,7 +1327,7 @@
   }
   PANELS.overview = () => [
     h('div', { class: 'grid' },
-      h('div', { class: 'col-7 adm-col' }, attentionCard()),
+      h('div', { class: 'col-7 adm-col' }, decisionsCard(), pendingCard()),
       h('div', { class: 'col-5 adm-col' }, budgetCard())),
     h('div', { class: 'grid' },
       h('div', { class: 'adm-third' }, peopleTile()),
@@ -1379,7 +1371,7 @@
       h('div', { class: 'row adm-chips' }, roleChip(u), statusChip(u), keyChip(u), u.returnRequested && chip('просит вернуть ключ', 'warn')),
       spendBlock(u),
       h('dl', { class: 'adm-facts two' },
-        h('div', null, h('dt', null, 'Анализов сегодня'), h('dd', null, u.todayAnalyses + (u.aiMode === 'admin' && u.limit ? ' из ' + u.limit.daily : ''))),
+        h('div', null, h('dt', null, 'Анализов сегодня'), h('dd', null, u.todayAnalyses + (AI.limitOf(u) ? ' из ' + AI.limitOf(u).daily : ''))),
         h('div', null, h('dt', null, 'За октябрь'), h('dd', null, pl(u.analyses, 'анализ', 'анализа', 'анализов')))),
       h('div', { class: 'row', style: 'gap:6px 10px' }, twoFaChip(u), h('span', { class: 'xsmall muted' }, 'Вход: ' + lc(when(u.lastLogin)))));
   }
@@ -1441,7 +1433,7 @@
       title: 'Как работает приглашение', subtitle: 'Открытой регистрации нет',
       body: [
         h('ol', { class: 'adm-steps' },
-          h('li', null, h('span', null, h('b', null, 'Вы создаете код'), ' — email, роль, режим ключа Claude и стартовый лимит.')),
+          h('li', null, h('span', null, h('b', null, 'Вы создаете код'), ' — email, роль, режим ключа Claude и стартовый лимит на вашем ключе.')),
           h('li', null, h('span', null, h('b', null, 'Передаете его сами'), ' — лично или в мессенджере. Почты и Telegram в программе нет.')),
           h('li', null, h('span', null, h('b', null, 'Человек регистрируется'), ': экран входа → «Регистрация только по приглашению», код, тот же email, пароль и 2FA.')),
           h('li', null, h('span', null, h('b', null, 'Код сгорает'), ' после регистрации или через 7 дней. Код в базе хранится только в виде отпечатка, поэтому в списке видна лишь его концовка.'))),
@@ -1529,7 +1521,7 @@
     return card({
       title: 'Если забыл пароль администратор', subtitle: 'Только с сервера, где установлено приложение — как createsuperuser в Django', id: 'adm-terminal', class: 'adm-anchor',
       body: [
-        h('p', { class: 'small soft' }, 'Кабинет не выдает код сброса администратору: так доступ не перехватит никто, кроме владельца сервера. Подключитесь к серверу по SSH и выполните команду в папке приложения. Каждая команда пишется в журнал с пометкой «терминал».'),
+        h('p', { class: 'small soft' }, 'Здесь нельзя выдать код сброса администратору: так доступ не перехватит никто, кроме владельца сервера. Подключитесь к серверу по SSH и выполните команду в папке приложения. Каждая команда пишется в журнал с пометкой «терминал».'),
         h('ul', { class: 'adm-cmds' }, CMDS.map(c => h('li', null,
           h('div', { class: 'adm-cmd-desc' }, h('b', null, c.name), ' — ' + c.text),
           h('div', { class: 'adm-pre' }, h('code', null, CLI + ' ' + c.cmd),
@@ -1546,7 +1538,7 @@
   ];
 
   // =====================================================================
-  // 5. КЛЮЧ CLAUDE И БЮДЖЕТ
+  // 5. КЛЮЧ И БЮДЖЕТ
   // =====================================================================
   function keyForm() {
     const f = UI.field({ id: 'adm-key-new', label: 'Новый ключ', type: 'password', placeholder: 'sk-ant-api03-…', autocomplete: 'off', hint: 'Скопируйте ключ в консоли Anthropic: Settings → API keys. После сохранения его не увидит никто, даже вы: останутся последние 4 символа', attrs: { spellcheck: 'false' } });
@@ -1593,17 +1585,17 @@
     });
   }
   function budgetEditCard() {
-    const b = budget();
+    const b = AI.budget();
     const fM = UI.field({ id: 'adm-budget', label: 'Бюджет в месяц, $', value: dec(A.budget.monthly), inputmode: 'decimal', autocomplete: 'off' });
     const fA = UI.field({ id: 'adm-alert', label: 'Уведомить при', options: [50, 70, 80, 90].map(v => ({ value: String(v), label: v + '%' })), value: String(A.budget.alertAt) });
-    const limited = onAdminKey().filter(u => u.limit);
-    const limitsSum = sum(limited, u => u.limit.monthly);
+    const limited = people().filter(u => AI.limitOf(u));
+    const limitsSum = sum(limited, u => AI.limitOf(u).monthly);
     let save = null;
     const changed = () => num(valOf(fM)) !== A.budget.monthly || Number(valOf(fA)) !== A.budget.alertAt;
     const sync = () => { save.disabled = !changed(); };
     save = button('Сохранить', { kind: 'primary', icon: 'check', disabled: true, onClick: () => {
       const m = num(valOf(fM)), a = Number(valOf(fA));
-      if (!setErr(fM, !(m >= 1 && m <= 5000) ? 'От $1 до $5000' : m < A.budget.spent ? 'Меньше уже потраченного (' + usd(A.budget.spent) + '): анализы на вашем ключе остановятся сразу' : null)) return;
+      if (!setErr(fM, !(m >= 1 && m <= 5000) ? 'От $1 до $5000' : m < AI.budget().spent ? 'Меньше уже потраченного (' + usd(AI.budget().spent) + '): анализы на вашем ключе остановятся сразу' : null)) return;
       const diff = [];
       if (m !== A.budget.monthly) diff.push('Общий бюджет ' + usdL(A.budget.monthly) + ' → ' + usdL(m) + ' в месяц');
       if (a !== A.budget.alertAt) diff.push('уведомление при ' + A.budget.alertAt + '% → ' + a + '%');
@@ -1619,7 +1611,7 @@
       body: [
         ...budgetBody(b),
         h('div', { class: 'adm-fields two' }, fM, fA),
-        howto('Сумма личных лимитов — ' + usdL(limitsSum) + ' (' + limited.map(u => u.name.split(' ')[0] + ' ' + usdL(u.limit.monthly)).join(', ') + '). Ваши анализы и общие задачи идут без личного лимита, только в рамках бюджета.'),
+        howto('Сумма личных лимитов — ' + usdL(limitsSum) + ' (' + limited.map(u => u.name.split(' ')[0] + ' ' + usdL(AI.limitOf(u).monthly)).join(', ') + '). Ваши анализы и общие задачи идут без личного лимита, только в рамках бюджета.'),
       ],
       foot: [save],
     });
@@ -1660,10 +1652,12 @@
         rule('100% лимита участника', 'bad', 'Его анализы на вашем ключе останавливаются до вашего решения: поднять лимит или дождаться 1-го числа. Участник видит, почему анализ не запускается.'),
         rule(A.budget.alertAt + '% общего бюджета', 'warn', 'Уведомление вам.'),
         rule('100% общего бюджета', 'bad', 'Останавливаются все анализы на вашем ключе и фоновые задачи. Участники на своем ключе работают как обычно.'),
-        rule('Потолок на анализ', null, 'Анализ, который выходит дороже, останавливается, участник видит понятную ошибку.')),
+        rule('Потолок на анализ', null, 'Анализ, который выходит дороже, останавливается, участник видит понятную ошибку. На своем ключе потолок задает сам участник.')),
     });
   }
+  // Пауза анализов участника на ключе администратора: DATA.ai.access учитывает limit.paused
   function setPause(u, v) {
+    if (!u.limit) u.limit = Object.assign({}, A.defaults);
     u.limit.paused = v;
     log('limit_change', u.name, v ? 'Анализы на вашем ключе на паузе' : 'Пауза снята');
     UI.toast(v ? u.name + ': анализы на паузе' : u.name + ': пауза снята', v ? 'pause' : 'play');
@@ -1671,32 +1665,37 @@
   }
   function limitsCard() {
     const rows = people().slice().sort((a, b) => (isMe(b) - isMe(a)) || (a.aiMode === 'own') - (b.aiMode === 'own'));
-    const editBtn = u => isMe(u) ? null : button(u.aiMode === 'own' ? 'Потолок' : 'Изменить', { kind: 'secondary', size: 'sm', icon: 'edit', ariaLabel: (u.aiMode === 'own' ? 'Потолок на анализ: ' : 'Изменить лимит: ') + u.name, onClick: () => limitModal(u) });
+    const editBtn = u => isMe(u) || !AI.limitOf(u) ? null : button('Изменить', { kind: 'secondary', size: 'sm', icon: 'edit', ariaLabel: 'Изменить лимит: ' + u.name, onClick: () => limitModal(u) });
     const flash = u => toneOf(ratio(u)) ? 'true' : null;
     const keyLine = u => u.aiMode === 'own' ? 'свой ключ …' + (u.ownKey ? u.ownKey.last4 : '••••') : 'ключ администратора';
     const nameCell = u => h('div', { class: 'adm-cell2' },
-      h('span', { class: 'adm-person-name' }, h('span', { class: 'adm-nowrap' }, u.name), isMe(u) && chip('вы', 'accent'), u.status === 'blocked' && chip('заблокирован', 'bad')),
+      h('span', { class: 'adm-person-name' }, h('span', { class: 'adm-nowrap' }, u.name), isMe(u) && chip('вы', 'accent'), u.role === 'admin' && !isMe(u) && chip('администратор', 'outline'), u.status === 'blocked' && chip('заблокирован', 'bad')),
       h('span', { class: 'adm-sub' }, keyLine(u)));
+    const NO_LIMIT = 'Без личного лимита — только общий бюджет';
+    const OWN = 'Лимит трат — в его консоли Anthropic';
+    const capCell = u => h('div', { class: 'adm-cell2', style: 'align-items:flex-end' }, h('span', { class: 'mono' }, usdL(ownCap(u))), h('span', { class: 'adm-sub' }, 'задает участник'));
     const table = h('div', { class: 'table-wrap' }, h('table', { class: 'table adm-limits-table' },
       h('thead', null, h('tr', null, ['Участник', 'В месяц', 'Анализов в день', 'На анализ', 'Израсходовано', 'Пауза', ''].map((l, i) => h('th', { class: (i >= 1 && i <= 3) || i === 6 ? 'r' : null }, l || h('span', { class: 'sr-only' }, 'Действия'))))),
       h('tbody', null, rows.map(u => {
-        if (isMe(u)) return h('tr', null, h('td', null, nameCell(u)), h('td', { colspan: 3, class: 'adm-muted-cell' }, 'Без личного лимита — только общий бюджет'), h('td', null, spendBlock(u)), h('td', { class: 'adm-muted-cell' }, '—'), h('td'));
-        if (u.aiMode === 'own') return h('tr', null, h('td', null, nameCell(u)), h('td', { colspan: 2, class: 'adm-muted-cell' }, 'Лимиты — в его консоли Anthropic'), h('td', { class: 'r mono' }, usdL(ownCap(u))), h('td', null, spendBlock(u)), h('td', { class: 'adm-muted-cell' }, '—'), h('td', { class: 'r' }, editBtn(u)));
-        return h('tr', { 'data-flash': flash(u) }, h('td', null, nameCell(u)), h('td', { class: 'r mono' }, usdL(u.limit.monthly)), h('td', { class: 'r mono' }, String(u.limit.daily)), h('td', { class: 'r mono' }, usdL(u.limit.perAnalysis)), h('td', null, spendBlock(u)),
-          h('td', null, switchInput('adm-pause-' + u.id, u.limit.paused, 'Пауза: ' + u.name, v => setPause(u, v))), h('td', { class: 'r' }, editBtn(u)));
+        const L = AI.limitOf(u);
+        if (u.aiMode === 'own') return h('tr', null, h('td', null, nameCell(u)), h('td', { colspan: 2, class: 'adm-muted-cell' }, OWN), h('td', { class: 'r' }, capCell(u)), h('td', null, spendBlock(u)), h('td', { class: 'adm-muted-cell' }, '—'), h('td'));
+        if (!L) return h('tr', null, h('td', null, nameCell(u)), h('td', { colspan: 3, class: 'adm-muted-cell' }, NO_LIMIT), h('td', null, spendBlock(u)), h('td', { class: 'adm-muted-cell' }, '—'), h('td'));
+        return h('tr', { 'data-flash': flash(u) }, h('td', null, nameCell(u)), h('td', { class: 'r mono' }, usdL(L.monthly)), h('td', { class: 'r mono' }, String(L.daily)), h('td', { class: 'r mono' }, usdL(L.perAnalysis)), h('td', null, spendBlock(u)),
+          h('td', null, switchInput('adm-pause-' + u.id, L.paused, 'Пауза: ' + u.name, v => setPause(u, v))), h('td', { class: 'r' }, editBtn(u)));
       }))));
     const cards = h('div', { class: 'adm-lcards' }, rows.map(u => {
+      const L = AI.limitOf(u);
       const head = h('div', { class: 'adm-lcard-head' }, nameCell(u), editBtn(u));
-      if (isMe(u)) return h('div', { class: 'adm-lcard' }, head, h('div', { class: 'small soft' }, 'Без личного лимита — только общий бюджет'), spendBlock(u));
-      if (u.aiMode === 'own') return h('div', { class: 'adm-lcard' }, head, h('div', { class: 'small soft' }, 'Лимиты — в его консоли Anthropic. В программе только потолок ' + usdL(ownCap(u)) + ' на анализ'), spendBlock(u));
+      if (u.aiMode === 'own') return h('div', { class: 'adm-lcard' }, head, h('div', { class: 'small soft' }, OWN + '. Потолок на анализ — ' + usdL(ownCap(u)) + ', его задает участник'), spendBlock(u));
+      if (!L) return h('div', { class: 'adm-lcard' }, head, h('div', { class: 'small soft' }, NO_LIMIT), spendBlock(u));
       return h('div', { class: 'adm-lcard', 'data-flash': flash(u) }, head,
         h('dl', { class: 'adm-facts' },
-          h('div', null, h('dt', null, 'В месяц'), h('dd', null, usdL(u.limit.monthly))),
-          h('div', null, h('dt', null, 'В день'), h('dd', null, pl(u.limit.daily, 'анализ', 'анализа', 'анализов'))),
-          h('div', null, h('dt', null, 'На анализ'), h('dd', null, usdL(u.limit.perAnalysis)))),
+          h('div', null, h('dt', null, 'В месяц'), h('dd', null, usdL(L.monthly))),
+          h('div', null, h('dt', null, 'В день'), h('dd', null, pl(L.daily, 'анализ', 'анализа', 'анализов'))),
+          h('div', null, h('dt', null, 'На анализ'), h('dd', null, usdL(L.perAnalysis)))),
         spendBlock(u),
         h('label', { class: 'row-between', style: 'cursor:pointer;flex-wrap:nowrap', for: 'adm-pause-' + u.id + '-m' }, h('span', { class: 'small', style: 'min-width:0' }, h('b', null, 'Пауза'), h('span', { class: 'muted' }, ' — остановить анализы на вашем ключе')),
-          switchInput('adm-pause-' + u.id + '-m', u.limit.paused, 'Пауза: ' + u.name, v => setPause(u, v))));
+          switchInput('adm-pause-' + u.id + '-m', L.paused, 'Пауза: ' + u.name, v => setPause(u, v))));
     }));
     return card({
       title: 'Лимиты участников', subtitle: 'Расход за октябрь · лимит обнуляется 1-го числа', id: 'adm-limits', class: 'adm-anchor',
@@ -1705,7 +1704,8 @@
           h('div', { style: 'min-width:0' }, h('div', { class: 'eyebrow' }, 'Новым участникам по умолчанию'), h('div', { class: 'adm-defaults-v' }, limitText(A.defaults))),
           button('Изменить', { kind: 'secondary', size: 'sm', icon: 'edit', attrs: { id: 'adm-def-edit' }, ariaLabel: 'Изменить лимиты по умолчанию', onClick: defaultsModal })),
         h('div', { class: 'adm-wide-only adm-bleed' }, table),
-        h('div', { class: 'adm-narrow-only', style: 'flex-direction:column' }, cards)],
+        h('div', { class: 'adm-narrow-only', style: 'flex-direction:column' }, cards),
+        howto('На своем ключе участник платит сам: лимит трат ставит в консоли Anthropic, потолок на один анализ — в личном кабинете. Здесь его можно только посмотреть.')],
     });
   }
   PANELS.key = () => [
@@ -1721,41 +1721,47 @@
   // =====================================================================
   const PERSON_COLORS = ['var(--s1)', 'var(--s3)', 'var(--s4)', 'var(--s7)', 'var(--s5)', 'var(--s2)'];
   PANELS.usage = () => {
-    const b = budget();
-    const onKey = keyUsers().sort((a, b2) => keySpent(b2) - keySpent(a));
-    const ownUsers = people().filter(u => u.aiMode === 'own' || ownSpentOf(u) > 0);
-    const analyses = sum(onKey, u => u.aiMode === 'admin' && !u.ownSpent ? u.analyses : 0); // анализы, сделанные на своем ключе, в бюджет не входят
-    const membersSpent = b.spent - A.budget.shared;
-    const ownSpent = sum(ownUsers, ownSpentOf);
+    const b = AI.budget();
+    const onKey = AI.keyUsers().sort((x, y) => AI.keySpent(y) - AI.keySpent(x));
+    const ownUsers = people().filter(u => u.aiMode === 'own' || AI.ownSpent(u) > 0);
+    // анализы на вашем ключе: у тех, кто на нем весь месяц (сделанные на своем ключе в бюджет не входят)
+    const analyses = sum(onKey, u => u.aiMode === 'admin' && !AI.ownSpent(u) ? u.analyses : 0);
+    const ownTotal = sum(ownUsers, AI.ownSpent);
     const colored = onKey.map((u, i) => ({ u, color: PERSON_COLORS[i % PERSON_COLORS.length] }));
-    const segs = colored.filter(x => keySpent(x.u) > 0).map(x => ({ label: x.u.name.split(' ')[0], value: keySpent(x.u), color: x.color }))
-      .concat([{ label: 'Общие задачи', value: A.budget.shared, color: 'var(--fg-3)' }]);
+    const segs = colored.filter(x => AI.keySpent(x.u) > 0).map(x => ({ label: x.u.name.split(' ')[0], value: AI.keySpent(x.u), color: x.color }))
+      .concat([{ label: 'Общие задачи', value: b.shared, color: 'var(--fg-3)' }]);
     const total = sum(segs, s => s.value) || 1;
-    const max = Math.max(...colored.map(x => keySpent(x.u)), A.budget.shared) || 1;
+    const max = Math.max(...colored.map(x => AI.keySpent(x.u)), b.shared) || 1;
+    const metaOf = u => {
+      const L = AI.limitOf(u), own = AI.ownSpent(u);
+      if (u.aiMode === 'own') return 'до перехода на свой ключ';
+      return (own ? 'вернулся со своего ключа · ' : '') + pl(u.analyses, 'анализ', 'анализа', 'анализов') + ' за октябрь · ' + (L ? 'лимит ' + usdL(L.monthly) + (L.paused ? ', пауза' : '') : 'без личного лимита');
+    };
 
     const tiles = h('div', { class: 'grid' },
       UI.stat({ class: 'col-3 half-mobile', icon: 'coins', label: 'С вашего ключа', value: usd(b.spent), hint: pctOf(b.spent, b.monthly) + ' бюджета ' + usdL(b.monthly) }),
-      UI.stat({ class: 'col-3 half-mobile', icon: 'spark', label: 'Анализов на вашем ключе', value: String(analyses), hint: '≈ ' + usd(analyses ? membersSpent / analyses : 0) + ' за анализ' }),
-      UI.stat({ class: 'col-3 half-mobile', icon: 'database', label: 'Вход из кэша', value: fmt.pct(D.ai.cacheShare, 0), hint: 'по всем задачам за октябрь' }),
-      UI.stat({ class: 'col-3 half-mobile', icon: 'key', label: 'На своих ключах', value: usd(ownSpent), hint: 'в ваш бюджет не входит' }));
+      UI.stat({ class: 'col-3 half-mobile', icon: 'spark', label: 'Анализов на вашем ключе', value: String(analyses), hint: '≈ ' + usd(avgAnalysis()) + ' за анализ' }),
+      UI.stat({ class: 'col-3 half-mobile', icon: 'database', label: 'Вход из кэша', value: fmt.pct(AI.cacheShare, 0), hint: 'по всем задачам за октябрь' }),
+      UI.stat({ class: 'col-3 half-mobile', icon: 'key', label: 'На своих ключах', value: usd(ownTotal), hint: 'в ваш бюджет не входит' }));
 
     const peopleCard = card({
-      title: 'По людям', subtitle: 'Октябрь, 1–' + DAY + ' · из чего складываются ' + usd(b.spent),
+      title: 'По людям', subtitle: 'Октябрь, 1–' + DAY + ' · из чего складываются ' + usd(b.spent), id: 'adm-usage-people',
       body: [
         h('div', { class: 'adm-stack', role: 'img', 'aria-label': 'Состав расхода: ' + segs.map(s => s.label + ' ' + usd(s.value)).join(', ') },
           segs.map(s => h('i', { style: { width: (s.value / total * 100) + '%', background: s.color }, title: s.label + ': ' + usd(s.value) }))),
         h('div', { class: 'adm-legend' }, segs.map(s => h('span', null, h('i', { style: { background: s.color } }), s.label + ' ' + pctOf(s.value, total)))),
         h('ul', { class: 'adm-urows' },
           colored.map(({ u, color }) => h('li', { class: 'adm-urow' },
-            h('div', { class: 'adm-urow-name' }, h('i', { class: 'adm-sw', style: { background: color } }), u.name, isMe(u) && chip('вы', 'accent'), u.status === 'blocked' && chip('заблокирован', 'bad')),
-            h('div', { class: 'adm-urow-val' }, h('b', null, usd(keySpent(u))), h('small', null, pctOf(keySpent(u), b.monthly, 1) + ' бюджета')),
-            h('div', { class: 'adm-urow-meta' }, u.aiMode === 'own' ? 'до перехода на свой ключ' : (u.ownSpent ? 'вернулся со своего ключа · ' : '') + pl(u.analyses, 'анализ', 'анализа', 'анализов') + (u.analyses && !u.ownSpent ? ' · ≈ ' + usd(keySpent(u) / u.analyses) + ' за анализ' : '') + ' · ' + (u.limit ? 'лимит ' + usdL(u.limit.monthly) : 'без личного лимита')),
-            h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: (keySpent(u) / max * 100) + '%', background: color } })))),
+            h('div', { class: 'adm-urow-name' }, h('i', { class: 'adm-sw', style: { background: color } }), u.name, isMe(u) && chip('вы', 'accent'), u.status === 'blocked' && chip('заблокирован', 'bad'), u.status === 'deleted' && chip('удален', 'outline')),
+            h('div', { class: 'adm-urow-val' }, h('b', null, usd(AI.keySpent(u))), h('small', null, pctOf(AI.keySpent(u), b.monthly, 1) + ' бюджета')),
+            h('div', { class: 'adm-urow-meta' }, metaOf(u)),
+            h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: (AI.keySpent(u) / max * 100) + '%', background: color } })))),
           h('li', { class: 'adm-urow' },
             h('div', { class: 'adm-urow-name' }, h('i', { class: 'adm-sw', style: { background: 'var(--fg-3)' } }), 'Общие фоновые задачи'),
-            h('div', { class: 'adm-urow-val' }, h('b', null, usd(A.budget.shared)), h('small', null, pctOf(A.budget.shared, b.monthly, 1) + ' бюджета')),
+            h('div', { class: 'adm-urow-val' }, h('b', null, usd(b.shared)), h('small', null, pctOf(b.shared, b.monthly, 1) + ' бюджета')),
             h('div', { class: 'adm-urow-meta' }, 'Обновление профилей игроков ночью пакетом — для всех сразу'),
-            h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: (A.budget.shared / max * 100) + '%', background: 'var(--fg-3)' } })))),
+            h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: (b.shared / max * 100) + '%', background: 'var(--fg-3)' } }))),
+          totalRow(b)),
         howto('Длина полосы — расход, справа — доля месячного бюджета ' + usdL(b.monthly) + '. Ставки и банк участников здесь не показываются.'),
       ],
     });
@@ -1784,13 +1790,13 @@
           meta: u.aiMode === 'own'
             ? pl(u.analyses, 'анализ', 'анализа', 'анализов') + ' · ключ sk-ant-…' + (u.ownKey ? u.ownKey.last4 : '••••') + (u.ownKey && u.ownKey.verified ? ', проверен ' + dateDay(u.ownKey.verified) : '')
             : 'До ' + dateDay(TODAY) + ' работал на своем ключе, теперь — на вашем',
-          side: h('b', { class: 'mono' }, usd(ownSpentOf(u))) }))),
-        howto('Лимиты такие участники ставят в своей консоли Anthropic, в программе у них только потолок на один анализ.'),
+          side: h('b', { class: 'mono' }, usd(AI.ownSpent(u))) }))),
+        howto('Лимит трат такие участники ставят в своей консоли Anthropic, потолок на один анализ — сами в личном кабинете.'),
       ] : h('p', { class: 'small soft' }, 'Сейчас все участники на вашем ключе.'),
     });
 
     return [
-      h('div', { class: 'row-between' }, h('div', { class: 'small soft' }, 'Октябрь, 1–' + DAY + ' · все суммы в долларах, как считает Anthropic'), button('Бюджет и лимиты', { kind: 'ghost', size: 'sm', icon: 'sliders', onClick: () => switchTab('key') })),
+      h('div', { class: 'row-between' }, h('div', { class: 'small soft' }, 'Октябрь, 1–' + DAY + ' · все суммы в долларах, как считает Anthropic'), button('Ключ и бюджет', { kind: 'ghost', size: 'sm', icon: 'key', onClick: () => switchTab('key') })),
       tiles,
       h('div', { class: 'adm-main' }, peopleCard, h('div', { class: 'adm-col' }, tasksCard, ownCard)),
     ];
@@ -1803,26 +1809,31 @@
     const L = UI.currency.list[code];
     return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: L.dec, maximumFractionDigits: L.dec }).format(x) + ' ' + L.sym;
   }
+  // Курс ЕЦБ евро к доллару на 7 октября (в макете — константа; рубль ЕЦБ не публикует с марта 2022 года)
+  const ECB_EUR_USD = 1.0887;
+  const rateStr = (x, d) => x.toFixed(d).replace('.', ',');
   function currencyModal(to) {
     const from = UI.currency.code, L = UI.currency.list;
     const viaRub = from === 'RUB' || to === 'RUB';
     const base = viaRub ? (to === 'RUB' ? from : to) : 'EUR';
     const quote = viaRub ? 'RUB' : 'USD';
-    const demo = L[quote].rate / L[base].rate; // 1 base = demo quote
+    const current = L[quote].rate / L[base].rate; // сейчас программа считает 1 base = current quote
     const digits = quote === 'RUB' ? 2 : 4;
-    const fRate = UI.field({ id: 'adm-rate', label: 'Курс: 1 ' + L[base].sym + ' =', value: demo.toFixed(digits).replace('.', ','), inputmode: 'decimal', autocomplete: 'off', suffix: L[quote].sym,
-      hint: viaRub ? 'ЕЦБ не публикует курс рубля с марта 2022 года — проверьте курс и при необходимости введите свой, например курс вашего банка на сегодня' : 'Подсказка — курс ЕЦБ на ' + dateDay(TODAY) + ': 1 € = ' + demo.toFixed(4).replace('.', ',') + ' $' });
+    const fRate = UI.field({ id: 'adm-rate', label: 'Курс: 1 ' + L[base].sym + ' =', value: rateStr(current, digits), inputmode: 'decimal', autocomplete: 'off', suffix: L[quote].sym,
+      hint: viaRub ? 'ЕЦБ не публикует курс рубля с марта 2022 года — проверьте курс и при необходимости введите свой, например курс вашего банка на сегодня' : 'Курс ЕЦБ на ' + dateDay(TODAY) + ': 1 € = ' + rateStr(ECB_EUR_USD, 4) + ' $' });
     const rateInput = fRate.querySelector('input');
     const preview = h('div', { class: 'adm-preview', 'aria-live': 'polite' });
     const bankFrom = D.stats.bank * L[from].rate; // банк администратора в текущей валюте
     const stakeFrom = 1500 * L[from].rate;
+    // Множитель: сумма в новой валюте = сумма в текущей × f (по введенному курсу)
+    const factor = r => base === to ? 1 / r : r;
     function drawPreview() {
       const r = num(rateInput.value);
       UI.clear(preview);
       if (!(r > 0)) { preview.appendChild(h('span', null, 'Введите курс больше нуля')); return; }
-      const conv = x => base === to ? x / r : x * r;
-      preview.appendChild(h('span', null, 'Ваш банк: ', h('b', null, curFmt(bankFrom, from)), ' → ', h('b', null, curFmt(conv(bankFrom), to))));
-      preview.appendChild(h('span', null, 'Ставка: ', h('b', null, curFmt(stakeFrom, from)), ' → ', h('b', null, curFmt(conv(stakeFrom), to))));
+      const f = factor(r);
+      preview.appendChild(h('span', null, 'Ваш банк: ', h('b', null, curFmt(bankFrom, from)), ' → ', h('b', null, curFmt(bankFrom * f, to))));
+      preview.appendChild(h('span', null, 'Ставка: ', h('b', null, curFmt(stakeFrom, from)), ' → ', h('b', null, curFmt(stakeFrom * f, to))));
     }
     rateInput.addEventListener('input', drawPreview);
     drawPreview();
@@ -1834,7 +1845,7 @@
       body: h('div', { class: 'stack' },
         h('div', { class: 'adm-swap' }, L[from].sym + ' ' + L[from].label, icon('arrowRight'), L[to].sym + ' ' + L[to].label),
         fRate,
-        viaRub ? null : h('div', { class: 'row' }, button('Подставить курс ЕЦБ', { kind: 'ghost', size: 'sm', icon: 'refresh', onClick: () => { rateInput.value = demo.toFixed(4).replace('.', ','); drawPreview(); } })),
+        viaRub ? null : h('div', { class: 'row' }, button('Подставить курс ЕЦБ', { kind: 'ghost', size: 'sm', icon: 'refresh', onClick: () => { rateInput.value = rateStr(ECB_EUR_USD, 4); drawPreview(); } })),
         preview,
         UI.callout('warn', 'alert', h('b', null, 'Все суммы у всех участников будут пересчитаны по этому курсу: '), 'банки, ставки, прибыль, лимиты на ставки. ROI, CLV и Brier не изменятся. Расходы на Claude остаются в долларах. Курс, дата и кто менял запишутся в журнал.'),
         h('label', { class: 'adm-check', for: 'adm-cur-ack' }, ack, h('span', null, 'Понимаю: суммы пересчитаются у всех участников'))),
@@ -1844,28 +1855,43 @@
           const r = num(rateInput.value);
           if (!setErr(fRate, r > 0 ? null : 'Введите курс больше нуля')) return;
           close();
-          UI.currency.set(to);
-          log('set_currency', null, 'Валюта программы: ' + lc(L[from].label) + ' → ' + lc(L[to].label) + ', курс 1 ' + L[base].sym + ' = ' + String(r).replace('.', ',') + ' ' + L[quote].sym);
+          // Новый курс валюты к рублям демо-данных: пересчет идет ровно по введенному курсу
+          const newRate = L[from].rate * factor(r);
+          const e = entry('set_currency', null, 'Валюта программы: ' + lc(L[from].label) + ' → ' + lc(L[to].label) + ', курс 1 ' + L[base].sym + ' = ' + String(r).replace('.', ',') + ' ' + L[quote].sym);
+          UI.currency.set(to, newRate, e);
+          log(null, null, null, e);
           UI.rerender();
           UI.toast('Валюта программы — ' + lc(L[to].label) + '. Суммы пересчитаны у всех участников', 'currency');
         } }),
       ],
     });
   }
+  // Последняя смена валюты из журнала: «с какой даты», кто менял и по какому курсу
+  function lastCurrencyChange() {
+    const list = A.audit.filter(e => e.action === 'set_currency').sort((a, b) => (a.at < b.at ? 1 : -1));
+    const e = list[0];
+    if (!e) return null;
+    const m = e.details.match(/(?:→|:)\s*([^,→]+?)\s*(?:,|$)/g);
+    const toLabel = m ? m[m.length - 1].replace(/^(?:→|:)\s*/, '').replace(/,$/, '').trim() : '';
+    if (toLabel !== lc(UI.currency.label)) return null; // запись не о текущей валюте
+    const rate = (e.details.match(/курс (.+)$/) || [])[1];
+    return { e, rate };
+  }
   function currencyCard() {
     const c = UI.currency, L = c.list;
-    const since = A.audit.find(e => e.action === 'set_currency');
+    const last = lastCurrencyChange();
     return card({
       title: 'Валюта программы', subtitle: 'Одна на всех участников', class: 'adm-fill',
       body: [
         h('div', { class: 'adm-cur-now' }, h('span', { class: 'adm-cur-sym', 'aria-hidden': 'true' }, c.sym),
-          h('div', null, h('div', { class: 'adm-cur-name' }, c.label), h('div', { class: 'xsmall muted' }, since ? 'с ' + dateLong(since.at) + ' · ' + actorText(since) : ''))),
+          h('div', null, h('div', { class: 'adm-cur-name' }, c.label),
+            last && h('div', { class: 'xsmall muted', id: 'adm-cur-since' }, 'с ' + dateLong(last.e.at) + ' · ' + actorText(last.e) + (last.rate ? ' · курс ' + last.rate : '')))),
         h('p', { class: 'small soft' }, 'В ней ведутся банки, суммы ставок, прибыль и аналитика у всех участников. Расходы на Claude всегда в долларах — так считает Anthropic.'),
         h('div', { class: 'adm-choices three', role: 'group', 'aria-label': 'Валюта программы' }, Object.keys(L).map(code => h('button', {
           type: 'button', class: 'adm-choice', 'aria-pressed': String(code === c.code), 'data-cur': code,
           on: { click: () => { if (code !== c.code) currencyModal(code); } },
-        }, h('span', { class: 'adm-choice-sym', 'aria-hidden': 'true' }, L[code].sym), h('span', null, h('b', null, L[code].label), h('small', null, code === c.code ? 'сейчас' : code === 'RUB' ? 'курс вводится вручную' : 'подсказка — курс ЕЦБ'))))),
-        UI.kv([['Букмекеры', 'список каждый участник ведет сам'], ['Эталон рынка', 'кэф Pinnacle']]),
+        }, h('span', { class: 'adm-choice-sym', 'aria-hidden': 'true' }, L[code].sym), h('span', null, h('b', null, L[code].label), h('small', null, code === c.code ? 'сейчас' : code === 'RUB' || c.code === 'RUB' ? 'курс вводится вручную' : 'подсказка — курс ЕЦБ'))))),
+        UI.kv([['Букмекеры', 'список каждый участник ведет сам'], ['Эталон рынка', 'кэф ' + D.marketRef]]),
       ],
     });
   }
@@ -1968,8 +1994,7 @@
       if (!text || !to.length) return;
       const n = to.length, at = now();
       const target = st.msg.to === 'all' ? 'Все участники (' + n + ')' : to[0].name;
-      log('message', target, '«' + text + '»');
-      st.sent.unshift({ at, to: st.msg.to === 'all' ? 'всем участникам (' + n + ')' : to[0].name, text });
+      log('message', target, text);
       // участница из демо-роли увидит сообщение в колокольчике, если переключить макет на нее
       if (to.some(u => u.id === D.personas.member.id)) D.notifications.member.unshift({ id: 'adm-' + D.notifications.member.length + '-' + clock, kind: 'admin_message', icon: 'megaphone', tone: 'info', title: 'Сообщение администратора', body: text, at, read: false });
       st.msg.text = '';
@@ -1998,11 +2023,11 @@
           h('span', { class: 'notif-text' }, h('span', { class: 'notif-title' }, 'Сообщение администратора'), pBody, h('span', { class: 'notif-time' }, 'Сейчас')),
           h('span', { class: 'notif-dot', 'aria-hidden': 'true' })))),
     });
-    const earlier = (D.notifications.member || []).filter(n => n.kind === 'admin_message' && String(n.id).indexOf('adm-') !== 0).map(n => ({ at: n.at, to: 'всем участникам', text: n.body }));
-    const history = st.sent.concat(earlier);
+    // Отправленные — те же записи «Сообщение участникам», что в журнале
+    const history = A.audit.filter(e => e.action === 'message');
     const historyCard = card({
-      title: 'Отправленные', subtitle: 'Последние сообщения',
-      body: history.length ? h('div', { class: 'adm-list' }, history.slice(0, 5).map(m => item({ ic: 'megaphone', title: when(m.at) + ' · ' + m.to, meta: m.text }))) : h('p', { class: 'small soft' }, 'Сообщений еще не было.'),
+      title: 'Отправленные', subtitle: 'Последние сообщения · они же в журнале', id: 'adm-msg-sent',
+      body: history.length ? h('div', { class: 'adm-list' }, history.slice(0, 5).map(e => item({ ic: 'megaphone', title: when(e.at) + ' · ' + (e.target || 'Все участники'), titleExtra: e.fresh && chip('новое', 'accent'), meta: [e.details, h('div', { class: 'xsmall muted' }, 'Отправил ' + actorText(e))] }))) : h('p', { class: 'small soft' }, 'Сообщений еще не было.'),
     });
     sync();
     return h('div', { class: 'adm-main' }, form, h('div', { class: 'adm-col' }, preview, historyCard));
@@ -2010,7 +2035,7 @@
 
   // ---------- экран ----------
   UI.register('admin', {
-    title: 'Кабинет администратора',
+    title: 'Администрирование',
     nav: 'admin',
     crumbs: 'Управление',
     adminOnly: true,

@@ -1,6 +1,7 @@
 /* Экран входа (без оболочки приложения): защищенный вход в личный кабинет.
    Шаги — подмаршруты #login-<шаг>: вход по паролю → код 2FA (или резервный код), демо-вход под двумя ролями,
-   сброс пароля кодом от администратора (Р5, Р6), регистрация по коду приглашения (Р4) → настройка 2FA,
+   сброс пароля кодом от администратора (Р5, Р6), регистрация по коду приглашения (Р4; email берем из приглашения
+   в DATA.admin.invites) → настройка 2FA,
    пауза после 5 неудачных попыток с одного IP. Почты и Telegram нет (Р2, Р3).
    Состояние живет в памяти модуля, поэтому смена темы или ширины экрана не сбрасывает введенное. */
 (function () {
@@ -13,11 +14,12 @@
   const SECRET = 'JK3M Q7XP L2VD 6WRA ZT4N HC5Y B7QE 2MKS';
   const BACKUP_CODES = ['4f7k-2m9q', 'x8c3-vn5d', '7hpt-k2wz', 'm6qa-93rf', 'e2yd-u7jb', 'r5ns-8gxk', 'b9wl-c4tm', 'q3jv-6pzh'];
   const LEAKED = ['password', 'qwerty', '123456', '111111', '000000', 'йцукен', 'пароль', 'iloveyou', 'admin', 'letmein', 'abc123'];
-  const APPS = ['Google Authenticator', 'Яндекс Ключ', '1Password'];
+  const APPS = ['Google Authenticator', 'Microsoft Authenticator', '1Password'];
+  const APPS_TEXT = 'Google Authenticator, Microsoft Authenticator или 1Password';
 
   const SEC = [
     { icon: 'lock', t: 'Пароль — только хеш Argon2id', d: 'Сам пароль не хранится и не попадает в логи' },
-    { icon: 'shield', t: 'Двухфакторная аутентификация', d: 'TOTP-коды: Google Authenticator, Яндекс Ключ или 1Password' },
+    { icon: 'shield', t: 'Двухфакторная аутентификация', d: 'TOTP-коды: ' + APPS_TEXT },
     { icon: 'key', t: 'Сессия в защищенной httpOnly-cookie', d: 'Secure и SameSite: скрипты на странице ее не прочитают' },
     { icon: 'alert', t: 'Пауза после 5 неудачных попыток', d: 'IP-адрес ждет 15 минут, с других устройств вход работает' },
     { icon: 'bell', t: 'Уведомление о новом устройстве', d: 'На сайте и push — о каждом входе с нового устройства' },
@@ -43,7 +45,7 @@
       email: DATA.personas.admin.email, pwd: '', remember: false, attempts: MAX_ATTEMPTS, error: false, emailError: null, pwdError: null,
       otp: '', otpError: null, backup: '', backupError: null,
       rs: { email: null, code: '', pwd: '', pwd2: '' }, rsErr: {}, rsDoneEmail: null,
-      reg: { invite: null, name: '', email: '', pwd: '', pwd2: '', age: false, ai: false, train: false }, regErr: {},
+      reg: { invite: null, name: '', email: '', emailAuto: null, pwd: '', pwd2: '', age: false, ai: false, train: false }, regErr: {},
       setupMode: 'reg', regRole: 'member', setupOtp: '', saved: false, setupErr: {},
     };
   }
@@ -604,7 +606,7 @@
   function view2fa() {
     const form = h('form', { class: 'login-form', novalidate: true, 'aria-labelledby': 'login-title', on: { submit: e => { e.preventDefault(); submit2fa(); } } },
       stepper(['Пароль', 'Код 2FA'], 1),
-      head('Шаг 2 из 2', 'Код из приложения', 'Откройте Google Authenticator, Яндекс Ключ или 1Password — там 6 цифр для AI Capper.'),
+      head('Шаг 2 из 2', 'Код из приложения', 'Откройте ' + APPS_TEXT + ' — там 6 цифр для AI Capper.'),
       acctRow(),
       h('div', { class: 'field' },
         h('label', { class: 'field-label', for: 'login-otp-1', id: 'login-otp-label' }, 'Код из приложения-аутентификатора'),
@@ -664,7 +666,7 @@
     UI.modal({
       title: 'Нет ни приложения, ни резервных кодов',
       body: close => [
-        h('p', { class: 'soft' }, 'Попросите администратора сбросить 2FA. После сброса при входе настроите его заново.'),
+        h('p', { class: 'soft' }, 'Попросите администратора сбросить 2FA. После сброса при входе настроите ее заново.'),
         h('ol', { class: 'login-ol' },
           h('li', null, 'Напишите администратору AI Capper так, как вы обычно с ним связываетесь.'),
           h('li', null, 'Он нажмет «Сбросить 2FA» в кабинете администратора. Ваши сеансы завершатся, старые резервные коды перестанут работать.'),
@@ -764,18 +766,39 @@
   }
 
   // Регистрация только по коду приглашения (Р4) с согласиями и уведомлением о данных (Р15, GDPR)
-  function activeInvite() { const a = (DATA.admin.invites || []).find(i => i.status === 'active'); return a ? a.code : ''; }
+  const INVITES = () => DATA.admin.invites || [];
+  function activeInvite() { const a = INVITES().find(i => i.status === 'active'); return a ? a.code : ''; }
+  // Приглашение по коду (DATA.admin.invites): администратор выдает его на конкретный email
+  function inviteFor(code) { return INVITES().find(i => i.code === maskCode('CAP', code)) || null; }
+  const MAIL_HINT = 'Это ваш логин для входа.';
+  const mailHint = inv => (inv ? 'Подставлен из приглашения: код выдан на этот адрес. ' + MAIL_HINT : MAIL_HINT);
+  // Email из приглашения подставляем, пока человек не ввел свой; сменился код — подставленный адрес убираем
+  function fillInviteEmail(R) {
+    const inv = inviteFor(R.invite), auto = R.emailAuto && R.email === R.emailAuto;
+    if (inv && (!R.email.trim() || auto)) { R.email = inv.email; R.emailAuto = inv.email; }
+    else if (!inv && auto) { R.email = ''; R.emailAuto = null; }
+    return inv;
+  }
   function viewInvite() {
     const E = S.regErr, R = S.reg;
     if (R.invite == null) R.invite = activeInvite();
-    const inv = codeField('CAP', { id: 'login-inv-code', label: 'Код приглашения', value: R.invite, error: E.invite, hint: 'Код выдает администратор, он действует 7 дней.', attrs: { 'data-autofocus': true }, onInput: v => { R.invite = v; E.invite = null; } });
+    fillInviteEmail(R);
+    let mail = null;
+    const syncMail = () => { // код поменялся — обновляем подставленный email и подсказку без перерисовки формы
+      if (!mail) return;
+      const inv = fillInviteEmail(R), i = mail.querySelector('input'), hint = mail.querySelector('.field-hint');
+      if (i.value !== R.email) { i.value = R.email; refresh(); }
+      if (hint) hint.textContent = mailHint(inv && inv.email === R.email.trim().toLowerCase() ? inv : null);
+    };
+    const inv = codeField('CAP', { id: 'login-inv-code', label: 'Код приглашения', value: R.invite, error: E.invite, hint: 'Код выдает администратор, он действует 7 дней.', attrs: { 'data-autofocus': true }, onInput: v => { R.invite = v; E.invite = null; syncMail(); } });
     const name = UI.field({ id: 'login-inv-name', label: 'Имя', value: R.name, placeholder: 'Как к вам обращаться', autocomplete: 'name', error: E.name, attrs: { autocapitalize: 'words' } });
     onInput(name, v => { R.name = v; E.name = null; });
-    const mail = UI.field({ id: 'login-inv-email', label: 'Email', type: 'email', value: R.email, placeholder: 'you@example.com', autocomplete: 'email', inputmode: 'email', error: E.email, hint: 'Это ваш логин для входа.', attrs: { spellcheck: 'false', autocapitalize: 'off' } });
+    const known = inviteFor(R.invite);
+    mail = UI.field({ id: 'login-inv-email', label: 'Email', type: 'email', value: R.email, placeholder: 'you@example.com', autocomplete: 'email', inputmode: 'email', error: E.email, hint: mailHint(known && known.email === R.email.trim().toLowerCase() ? known : null), attrs: { spellcheck: 'false', autocapitalize: 'off' } });
     const strength = h('div', { class: 'login-strength' }, strengthContent(R.pwd, R.email));
     const match = h('div', { class: 'login-match' }, matchContent(R.pwd, R.pwd2));
     const refresh = () => { UI.clear(strength); UI.append(strength, [strengthContent(R.pwd, R.email)]); UI.clear(match); UI.append(match, [matchContent(R.pwd, R.pwd2)]); };
-    onInput(mail, v => { R.email = v; E.email = null; refresh(); });
+    onInput(mail, v => { R.email = v; E.email = null; refresh(); const k = inviteFor(R.invite), hint = mail.querySelector('.field-hint'); if (hint) hint.textContent = mailHint(k && k.email === v.trim().toLowerCase() ? k : null); });
     const req = () => h('span', { class: 'login-req', 'aria-hidden': 'true' }, '*');
     const form = h('form', { class: 'login-form', novalidate: true, 'aria-labelledby': 'login-title', on: { submit: submitInvite } },
       stepper(['Аккаунт', 'Защита 2FA'], 0),
@@ -799,7 +822,7 @@
         h('div', { class: 'field-hint' }, req(), ' — обязательно для регистрации')),
       button('Создать аккаунт', { kind: 'primary', size: 'lg', block: true, type: 'submit', iconRight: 'arrowRight' }),
       h('div', { class: 'login-alt' }, h('span', { class: 'muted' }, 'Уже есть аккаунт?'), h('a', { class: 'login-link', href: '#login' }, 'Войти')),
-      demoHint('В макете подойдет любой код вида ', nb('CAP-XXXX-XXXX'), ', код ', nb(BAD_INVITE), ' покажет ошибку. Попробуйте пароль «qwerty123456» — увидите проверку утечек.'));
+      demoHint('В макете код ', nb(activeInvite() || 'CAP-K7QM-2XPA'), ' выдан на ', nb((INVITES().find(i => i.status === 'active') || { email: 'maria@example.com' }).email), ' — с другим email будет ошибка. Любой новый код вида ', nb('CAP-XXXX-XXXX'), ' подойдет с любым email, ', nb(BAD_INVITE), ' покажет ошибку. Пароль «qwerty123456» покажет проверку утечек.'));
     return { node: form };
   }
   function submitInvite(e) {
@@ -820,9 +843,10 @@
     busy = true;
     setBusy(e.target.querySelector('[type=submit]'), 'Проверяем код…');
     later(600, () => {
-      if (r.invite === BAD_INVITE) { S.regErr = { invite: 'Код не подходит: он неверный, уже использован или истек (7 дней). Попросите у администратора новый.' }; draw(); focusSel('#login-inv-code'); return; }
+      const known = inviteFor(r.invite);
+      if (r.invite === BAD_INVITE || (known && known.status !== 'active')) { S.regErr = { invite: 'Код не подходит: он неверный, уже использован или истек (7 дней). Попросите у администратора новый.' }; draw(); focusSel('#login-inv-code'); return; }
+      if (known && known.email.toLowerCase() !== r.email.trim().toLowerCase()) { S.regErr = { email: 'Код выдан на другой email. Укажите адрес из приглашения или попросите у администратора новый код' }; draw(); focusSel('#login-inv-email'); return; }
       // Роль задается приглашением; в демо-данных все приглашения — для участников
-      const known = (DATA.admin.invites || []).find(i => i.code === r.invite);
       S.email = r.email.trim(); S.setupMode = 'reg'; S.regRole = known ? known.role : 'member';
       UI.go('login-setup'); UI.toast('Аккаунт создан. Осталось включить 2FA', 'check');
     });

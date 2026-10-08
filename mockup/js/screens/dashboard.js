@@ -81,9 +81,15 @@
   // Валюта программы одна на всех (Р17): подпись «в рублях / в долларах / в евро» берем из UI.currency
   const CUR_IN = { RUB: 'в рублях', USD: 'в долларах', EUR: 'в евро' };
   const curIn = () => CUR_IN[UI.currency.code] || 'в валюте программы';
-  // Время показываем в поясе пользователя (DATA.user.tz)
-  const TZ_CITY = { 'Europe/Helsinki': 'Хельсинки', 'Europe/Berlin': 'Берлину', 'Europe/Moscow': 'Москве', 'America/New_York': 'Нью-Йорку', 'America/Chicago': 'Чикаго', 'America/Los_Angeles': 'Лос-Анджелесу' };
-  const tzLabel = () => { const tz = (D.user && D.user.tz) || ''; return TZ_CITY[tz] ? 'время по ' + TZ_CITY[tz] : 'ваше время'; };
+  // Выплата — как на экране «Ставки» (payCur в bets.js): сумма ставки в валюте программы, округленная
+  // до ее точности (рубль или цент), × кэф и снова до точности; обратно в рубли демо-данных для fmt.money
+  const curDec = () => (UI.currency.list[UI.currency.code] || { dec: 0 }).dec;
+  const roundCur = x => { const k = 10 ** curDec(); return Math.round(x * k) / k; };
+  const payoutOf = (stake, k) => fmt.fromMoney(roundCur(fmt.moneyNum(stake) * k));
+  // Время показываем в поясе пользователя: «время по Хельсинки» (город — из DATA.tzCity)
+  const tzLabel = () => 'время по ' + D.tzCity(D.user.tz);
+  // Лимиты и потолки: $10, $8, но $1,50 — как на остальных экранах
+  const usdL = n => fmt.usd(n, Number.isInteger(n) ? 0 : 2);
   // «3–5 окт» или «28 сен – 2 окт»
   function dateRange(isos) {
     const ds = isos.map(x => x.slice(0, 10)).sort();
@@ -337,7 +343,7 @@
     const open = openBets();
     const inPlay = sum(open, b => b.stake);
     const body = open.length ? open.map(b => {
-      const payout = Math.round(b.stake * b.total);
+      const payout = payoutOf(b.stake, b.total);
       return h('article', { class: 'dashboard-bet', 'aria-label': 'Ставка №' + b.id },
         h('div', { class: 'dashboard-bet-head' },
           h('div', null, h('strong', null, b.legs.length > 1 ? 'Экспресс из ' + b.legs.length + ' ' + fmt.plural(b.legs.length, 'события', 'событий', 'событий') : 'Ординар'), h('div', { class: 'xsmall muted' }, '№' + b.id + ' · ' + b.bookmaker + ' · ' + b.tournament)),
@@ -391,21 +397,17 @@
       body: h('div', null, rows),
       foot: [
         button('Собрать экспресс из матчей дня', { kind: 'primary', size: 'sm', icon: 'spark', href: '#new-today' }),
-        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 220px' }, 'Перед анализом ИИ обновит устаревшие профили и соберет недостающие. Это общая фоновая задача: ее оплачивает ключ администратора' + (UI.auth.isAdmin ? '.' : ', в ваш лимит она не входит.')),
+        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 220px' }, 'Сбор и обновление профилей перед анализом входят в цену анализа. Ночное обновление базы оплачивает администратор.'),
       ],
     });
   }
 
   // Дела администратора (Р8): просьбы вернуть ключ администратора и участники у лимита.
-  // Тот же отбор, что у счетчика у пункта меню «Администрирование».
+  // DATA.ai.decisions() — тот же список, по которому считается значок у пункта меню «Администрирование».
   function adminTodo() {
-    const alert = D.admin.budget.alertAt / 100;
-    const asks = [], limits = [];
-    D.users.forEach(u => {
-      if (u.returnRequested) asks.push(u.name + ' просит вернуть ключ администратора.');
-      else if (u.limit && u.status === 'active' && u.spent / u.limit.monthly >= alert) limits.push(u.name + ' — уже ' + fmt.pct(u.spent / u.limit.monthly * 100, 0) + ' месячного лимита (' + fmt.usd(u.spent) + ' из ' + fmt.usd(u.limit.monthly, 0) + ').');
-    });
-    return asks.concat(limits);
+    return D.ai.decisions().map(d => d.kind === 'return'
+      ? d.user.name + ' просит вернуть ключ администратора.'
+      : d.user.name + ' — уже ' + fmt.pct(d.ratio * 100, 0) + ' месячного лимита (' + fmt.usd(D.ai.keySpent(d.user)) + ' из ' + usdL(D.ai.limitOf(d.user).monthly) + ').');
   }
 
   // Состояние кнопок в «Требует внимания» — сохраняется между перерисовками периода
@@ -523,15 +525,16 @@
   }
 
   // Расходы ИИ (Р7, Р9, Р13). Участник на ключе администратора видит свой лимит, администратор — бюджет ключа.
-  // Общие фоновые задачи (обновление профилей) оплачивает ключ администратора: в лимит участника они не входят.
-  // Прогноз — по темпу 1–7 окт, как на экране «ИИ и расходы»; для бюджета ключа — с учетом личных лимитов.
+  // Бюджет ключа, расход по людям и лимиты — только общий расчет DATA.ai (budget, keySpent, ownSpent, keyUsers,
+  // limitOf): те же цифры, что в «ИИ и расходах» и «Администрировании». Ночное обновление базы оплачивает
+  // администратор, в лимит участника оно не входит.
   const SHARED_TYPES = ['refresh'];
+  const PAUSED = 'Анализы на паузе — решение администратора';
   function costsCard() {
     const A = D.ai, me = D.me || {}, isAdmin = UI.auth.isAdmin;
     const day = +TODAY.slice(8, 10);
-    const pace = v => v / day * 31;
+    const pace = v => v / day * 31; // темп 1–7 окт на месяц — для личного прогноза, как в DATA.ai.budget()
     const runs = isAdmin ? A.runs : A.runs.filter(r => !SHARED_TYPES.includes(r.type));
-    const todayRuns = runs.filter(r => r.at.slice(0, 10) === TODAY);
     const spentRuns = sum(runs, r => r.cost);
     const byType = {};
     runs.forEach(r => { byType[r.type] = (byType[r.type] || 0) + r.cost; });
@@ -542,28 +545,26 @@
     const howto = text => h('div', { class: 'dashboard-howto' }, icon('info'), text);
     const valueRow = (spent, max, tail, share, what) => [
       h('div', { class: 'row-between', style: 'align-items:flex-end' },
-        h('div', { style: 'min-width:0' }, h('span', { class: 'dashboard-cost-value' }, fmt.usd(spent)), h('span', { class: 'muted' }, ' из ' + fmt.usd(max, 0) + tail)),
+        h('div', { style: 'min-width:0' }, h('span', { class: 'dashboard-cost-value' }, fmt.usd(spent)), h('span', { class: 'muted' }, ' из ' + usdL(max) + tail)),
         chip(fmt.pct(share * 100, 0) + ' ' + what, kindOf(share), share > 0.7 ? 'alert' : 'check')),
-      (() => { const m = UI.meter(spent, max, share > 0.9 ? 'bad' : share > 0.7 ? 'warn' : null); m.setAttribute('aria-label', 'Израсходовано ' + fmt.usd(spent) + ' из ' + fmt.usd(max, 0)); return m; })(),
+      (() => { const m = UI.meter(spent, max, share > 0.9 ? 'bad' : share > 0.7 ? 'warn' : null); m.setAttribute('aria-label', 'Израсходовано ' + fmt.usd(spent) + ' из ' + usdL(max)); return m; })(),
     ];
     const title = 'Расходы ИИ в ' + (A.month === 'октябрь' ? 'октябре' : A.month);
     const more = button('Подробнее', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', href: '#costs' });
 
     if (isAdmin) {
-      // Бюджет ключа администратора: все, кто на нем, и общие фоновые задачи
-      const B = D.admin.budget;
-      const onKey = D.users.filter(u => u.aiMode === 'admin' && u.status !== 'deleted');
-      const forecast = sum(onKey, u => u.status !== 'active' ? u.spent : u.limit ? Math.min(u.limit.monthly, pace(u.spent)) : pace(u.spent)) + pace(B.shared);
-      const others = onKey.filter(u => !u.you);
+      // Бюджет ключа администратора: «Вы» + «Участники на вашем ключе» + «Общие фоновые задачи» = DATA.ai.budget().spent
+      const B = A.budget();
+      const others = A.keyUsers().filter(u => u !== me);
       return card({
         title, class: 'dashboard-card', subtitle: 'Бюджет ключа администратора', actions: [more],
         body: [
-          ...valueRow(B.spent, B.monthly, '', B.spent / B.monthly, 'бюджета'),
+          ...valueRow(B.spent, B.monthly, '', B.share, 'бюджета'),
           UI.kv([
-            ['Вы', fmt.usd(me.spent || 0)],
-            ['Участники на вашем ключе', fmt.usd(sum(others, u => u.spent))],
+            ['Вы', fmt.usd(A.keySpent(me))],
+            ['Участники на вашем ключе', fmt.usd(sum(others, A.keySpent))],
             ['Общие фоновые задачи', fmt.usd(B.shared)],
-            ['Прогноз на месяц', '≈ ' + fmt.usd(forecast)],
+            ['Прогноз на месяц', '≈ ' + fmt.usd(B.forecast)],
           ]),
           howto('Прогноз учитывает личные лимиты участников. Ставки и банк участников вам не видны — только расход на ИИ.'),
         ],
@@ -572,36 +573,41 @@
     }
 
     if (me.aiMode === 'own') {
-      // Участник на своем ключе: расход с его счета, лимит администратора не действует
+      // Участник на своем ключе: расход с его счета (DATA.ai.ownSpent), до перехода — на ключе администратора (DATA.ai.keySpent)
+      const own = A.ownSpent(me), before = A.keySpent(me);
+      const cap = me.ownCap != null ? me.ownCap : D.admin.defaults.perAnalysis;
       return card({
         title, class: 'dashboard-card', subtitle: 'Свой ключ · расход с вашего счета Anthropic', actions: [more],
         body: [
-          h('div', null, h('span', { class: 'dashboard-cost-value' }, fmt.usd(me.spent || 0)), h('span', { class: 'muted' }, ' за ' + (A.month === 'октябрь' ? 'октябрь' : A.month))),
+          h('div', null, h('span', { class: 'dashboard-cost-value' }, fmt.usd(own)), h('span', { class: 'muted' }, ' с вашего счета за ' + (A.month === 'октябрь' ? 'октябрь' : A.month))),
           UI.kv([
-            ['Прогноз на месяц', '≈ ' + fmt.usd(pace(me.spent || 0))],
+            before > 0 ? ['До перехода', fmt.usd(before)] : ['Прогноз на месяц', '≈ ' + fmt.usd(pace(own))],
+            ['Потолок на анализ', 'до ' + usdL(cap)],
             ['Из кэша', fmt.pct(cacheShare, 0) + ' входных токенов'],
-            ['Сегодня', todayRuns.length + ' ' + fmt.plural(todayRuns.length, 'запуск', 'запуска', 'запусков') + ' · ' + fmt.usd(sum(todayRuns, r => r.cost))],
           ]),
-          howto('Лимит трат на свой ключ вы ставите сами в консоли Anthropic.'),
+          howto((before > 0 ? 'До перехода на свой ключ анализы шли на ключе администратора — эти ' + fmt.usd(before) + ' в его бюджете. ' : '') + 'Лимит трат на месяц вы ставите сами в консоли Anthropic, потолок на анализ — в личном кабинете.'),
         ],
+        foot: [button('Ключ Claude', { kind: 'ghost', size: 'sm', icon: 'key', iconRight: 'chevronRight', href: '#profile-key' })],
       });
     }
 
-    // Участник на ключе администратора: личный лимит
-    const L = me.limit || D.LIMIT_DEFAULT;
-    const spent = me.spent != null ? me.spent : spentRuns;
+    // Участник на ключе администратора: личный лимит (DATA.ai.limitOf) и расход на этом ключе (DATA.ai.keySpent)
+    const L = A.limitOf(me) || Object.assign({}, D.admin.defaults);
+    const spent = A.keySpent(me);
     const left = Math.max(0, L.monthly - spent);
+    const forecast = L.paused ? spent : Math.min(L.monthly, pace(spent)); // на 100% лимита анализы останавливаются
     return card({
       title, class: 'dashboard-card', subtitle: 'Ваш лимит на ключе администратора', actions: [more],
       body: [
         ...valueRow(spent, L.monthly, ' · осталось ' + fmt.usd(left), spent / L.monthly, 'лимита'),
+        L.paused ? UI.callout('warn', 'pause', h('b', null, PAUSED), '. Новые анализы не запускаются, пока администратор не снимет паузу.') : null,
         UI.kv([
           ['Анализов сегодня', (me.todayAnalyses || 0) + ' из ' + L.daily],
-          ['Прогноз на месяц', '≈ ' + fmt.usd(pace(spent))],
+          ['Прогноз на месяц', '≈ ' + fmt.usd(forecast)],
           ['Из кэша', fmt.pct(cacheShare, 0) + ' входных токенов'],
           ['Дороже всего', topLabel + ' · ' + fmt.pct(top ? top[1] / spentRuns * 100 : 0, 0)],
         ]),
-        howto('Лимит меняет администратор. Общие фоновые задачи (обновление профилей) он оплачивает сам — в ваш лимит они не входят.'),
+        howto('Лимит меняет администратор. Ночное обновление базы он оплачивает сам — в ваш лимит оно не входит.'),
       ],
     });
   }
