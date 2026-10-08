@@ -443,7 +443,7 @@ button.dd-trigger.select { padding: 0 12px 0 14px; } /* отступы один�
 .toast-host { position: fixed; z-index: 80; left: 50%; transform: translateX(-50%); bottom: 24px; display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100% - 32px)); pointer-events: none; }
 @media (max-width: 960px) {
   .toast-host { bottom: calc(var(--tabbar-h) + 16px + env(safe-area-inset-bottom, 0px)); }
-  /* поверх открытой шторки тост показываем сверху, чтобы он не закрывал её пункты */
+  /* поверх открытой шторки тост показываем сверху, чтобы он не закрывал ее пункты */
   body:has(.modal-backdrop) .toast-host { top: calc(16px + env(safe-area-inset-top, 0px)); bottom: auto; }
   /* то, что прокручивается в поле зрения (фокус с клавиатуры, scrollIntoView), не уходит под нижнюю панель */
   html { scroll-padding-bottom: calc(var(--tabbar-h) + 16px); }

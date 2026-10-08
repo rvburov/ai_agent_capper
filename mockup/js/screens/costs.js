@@ -33,7 +33,7 @@
   const TYPES = [
     { id: 'analysis', label: 'Анализ матчей', short: 'Анализ', tiny: 'Анализ', bar: 'Анализ матчей', what: 'Вероятности по событиям, валуй и экспресс', options: ['Opus 5.5', 'Sonnet 5.5'] },
     { id: 'refresh', label: 'Обновление профилей', short: 'Профили', tiny: 'Профили', bar: 'Профили', what: 'Ночью пакетом: статистика, форма, новости', options: ['Sonnet 5.5', 'Haiku 4.5', 'Opus 5.5'] },
-    { id: 'postmortem', label: 'Разбор ставки', short: 'Разбор ставок', tiny: 'Ставки', bar: 'Разбор ставки', what: 'После расчёта: что сработало — кандидаты в уроки', options: ['Sonnet 5.5', 'Opus 5.5', 'Haiku 4.5'] },
+    { id: 'postmortem', label: 'Разбор ставки', short: 'Разбор ставок', tiny: 'Ставки', bar: 'Разбор ставки', what: 'После расчета: что сработало — кандидаты в уроки', options: ['Sonnet 5.5', 'Opus 5.5', 'Haiku 4.5'] },
     { id: 'parse', label: 'Разбор текста', short: 'Разбор текста', tiny: 'Текст', bar: 'Разбор текста', what: 'Вставленный текст → список событий', options: ['Haiku 4.5', 'Sonnet 5.5', 'Opus 5.5'] },
   ];
   const typeOf = id => TYPES.find(t => t.id === id);
@@ -83,7 +83,7 @@
   (function buildMeta() {
     const an = A.runs.filter(r => r.type === 'analysis'), rf = A.runs.filter(r => r.type === 'refresh'), ps = A.runs.filter(r => r.type === 'parse'), pm = A.runs.filter(r => r.type === 'postmortem');
     // Номера анализов идут до #A-0141: #A-0142 — живой демо-анализ на экране «Анализ».
-    // Последний анализ дня, после которого появилась ставка, ссылается на неё.
+    // Последний анализ дня, после которого появилась ставка, ссылается на нее.
     an.forEach((r, i) => {
       const day = r.at.slice(0, 10);
       const sameDay = an.filter(x => x.at.slice(0, 10) === day);
@@ -117,7 +117,7 @@
   })();
 
   // ---------- настройки и оценка расходов ----------
-  // Лимиты — по docs/TOKEN_ECONOMY.md §6: анализ — мягкий порог $0,50 и жёсткий $1,00;
+  // Лимиты — по docs/TOKEN_ECONOMY.md §6: анализ — мягкий порог $0,50 и жесткий $1,00;
   // поиски — не больше 6 на запуск (2–3 на игрока) и 15 в день.
   const DEFAULTS = {
     models: { parse: 'Haiku 4.5', analysis: 'Opus 5.5', postmortem: 'Sonnet 5.5', refresh: 'Sonnet 5.5' },
@@ -156,7 +156,7 @@
   const forecastFor = set => FORECAST + estRaw(set) - estRaw(DEFAULTS);
   const withSet = (set, patch) => { const s = clone(set); Object.keys(patch).forEach(k => { if (k === 'models' || k === 'effort') Object.assign(s[k], patch[k]); else s[k] = patch[k]; }); return s; };
 
-  // Рычаги экономии: включён ли и сколько экономит (оценка на месяц при остальных настройках как сейчас)
+  // Рычаги экономии: включен ли и сколько экономит (оценка на месяц при остальных настройках как сейчас)
   const LEVERS = [
     { id: 'dossier', title: 'Сжатое досье вместо 10–20 итераций', how: 'ИИ получает одно готовое досье по игрокам из базы, а не читает .md и JSON-файлы по одному, пересылая всю историю на каждом шаге. 2–4 запроса к модели вместо 10–20.',
       isOn: s => s.dossier, set: (s, on) => withSet(s, { dossier: on }) },
@@ -164,10 +164,10 @@
       isOn: s => s.cache, set: (s, on) => withSet(s, { cache: on }) },
     { id: 'search', title: 'Лимит веб-поисков и кэш новостей 12 ч', how: 'Не больше 6 поисков на анализ (2–3 на игрока) и 15 в день; новости по игроку не ищутся заново, если им меньше 12 часов. Каждый поиск — $0,01 и ≈ 4 тыс. токенов во входе.',
       isOn: s => s.searchLimit > 0 && s.newsCache, set: (s, on) => withSet(s, on ? { searchLimit: s.searchLimit || 6, newsCache: true } : { searchLimit: 0, newsCache: false }) },
-    { id: 'routing', title: 'Маршрутизация моделей', how: 'Простые задачи — дешёвым моделям: разбор текста на Haiku 4.5, разбор ставок и профили на Sonnet 5.5. Opus 5.5 — только для анализа.',
+    { id: 'routing', title: 'Маршрутизация моделей', how: 'Простые задачи — дешевым моделям: разбор текста на Haiku 4.5, разбор ставок и профили на Sonnet 5.5. Opus 5.5 — только для анализа.',
       isOn: s => !(s.models.parse === 'Opus 5.5' && s.models.postmortem === 'Opus 5.5' && s.models.refresh === 'Opus 5.5'),
       set: (s, on) => on ? (LEVERS[3].isOn(s) ? clone(s) : withSet(s, { models: { parse: 'Haiku 4.5', postmortem: 'Sonnet 5.5', refresh: 'Sonnet 5.5' } })) : withSet(s, { models: { parse: 'Opus 5.5', postmortem: 'Opus 5.5', refresh: 'Opus 5.5' } }) },
-    { id: 'batch', title: 'Batch API для фоновых задач', how: 'Ночное обновление профилей идёт пакетом: ответ приходит в течение суток, зато вдвое дешевле.',
+    { id: 'batch', title: 'Batch API для фоновых задач', how: 'Ночное обновление профилей идет пакетом: ответ приходит в течение суток, зато вдвое дешевле.',
       isOn: s => s.batch, set: (s, on) => withSet(s, { batch: on }) },
     // Рычаги без переключателя: уже встроены в схему v2, их вклад входит в фактическую цену анализа
     { id: 'prompt', fixed: true, title: 'Сжатые инструкции: 5–7 тыс. символов вместо 22 тыс.', how: 'Шесть файлов бота свели к сути стратегии: работа с файлами, правила экспресса и шаблон ответа ушли в код и JSON-схему. System prompt короче на 60–70%.',
@@ -197,14 +197,14 @@
   const EVAL = {
     analysis: { set: '220 событий после июня 2026: свои рассчитанные и исторические, 15–20% трудных', size: 220, perRun: 2.3 },
     parse: { set: '150 сообщений с проверенным разбором', size: 150, perRun: 1 },
-    postmortem: { set: '40 ставок с подтверждёнными выводами', size: 40, perRun: 1 },
+    postmortem: { set: '40 ставок с подтвержденными выводами', size: 40, perRun: 1 },
     refresh: { set: '30 досье, сверенных вручную', size: 30, perRun: 1 },
   };
   // Изменение для проверки: { type, kind: 'model'|'effort', from, to }
   const applyChange = (set, c) => withSet(set, c.kind === 'effort' ? { effort: { [c.type]: c.to } } : { models: { [c.type]: c.to } });
   const changeLabel = c => (c.kind === 'effort' ? 'effort ' : '') + c.from + ' → ' + c.to;
   function evalCost(c) {
-    const per = perRun(c.type, applyChange(saved, c)) - BASE[c.type].avgSearch * SEARCH; // проверка идёт на снимках входа, без поиска
+    const per = perRun(c.type, applyChange(saved, c)) - BASE[c.type].avgSearch * SEARCH; // проверка идет на снимках входа, без поиска
     return EVAL[c.type].size / EVAL[c.type].perRun * per * 0.5;                          // через Batch API
   }
   // Строка результата: { name, now, next, delta, verdict } · verdict: ok | over | same | better | worse | noproof
@@ -244,7 +244,7 @@
       const ece = eceRow(3.1 + a.ece, b.ece - a.ece, b.ece - a.ece - HW.ece, b.ece - a.ece + HW.ece);
       if (back) ece.verdict = 'same';
       const rows = [mr('Лог-лосс', LL, 'll', TOL.logloss), mr('Brier', BR, 'br', TOL.brier), ece];
-      if (back) return { ok: true, rows, why: 'Возврат к проверенной настройке medium: её метрики известны.' };
+      if (back) return { ok: true, rows, why: 'Возврат к проверенной настройке medium: ее метрики известны.' };
       if (cheaper) {
         const ok = rows.every(r => r.verdict !== 'over');
         return { ok, rows, why: ok ? 'Разница в пределах допуска — это «не хуже», а не «то же самое». После включения подтверждаем теневым прогоном на реальных анализах; на трудном хвосте (≈40 событий) интервал слишком широкий для отдельного вывода.' : 'Верхняя граница интервала выше допуска — экономия не стоит потери качества.' };
@@ -257,8 +257,8 @@
       ? { ok: true, rows: [pctRow('Точность разбора событий', 98.7, 98.7, 'same')], why: 'Качество то же, дешевле.' }
       : { ok: true, rows: [pctRow('Точность разбора событий', 98.7, c.to === 'Opus 5.5' ? 99.1 : 98.9, 'same')], why: dearer ? 'Качество не хуже, но дороже: на коротких текстах Haiku 4.5 справляется так же, разница в пределах шума на 150 сообщениях.' : 'Качество не хуже.' };
     if (c.type === 'postmortem') return c.kind === 'model' && c.to === 'Haiku 4.5'
-      ? { ok: false, rows: [pctRow('Совпадение с подтверждёнными уроками', 85, 72, 'worse')], why: 'Haiku 4.5 пропускает причины проигрыша, связанные с усталостью и покрытием.' }
-      : { ok: true, rows: [pctRow('Совпадение с подтверждёнными уроками', 85, c.to === 'Opus 5.5' || c.to === 'medium' ? 87 : 85, 'same')], why: dearer || c.to === 'Opus 5.5' ? 'Качество не хуже, но дороже: +2 п.п. на 40 ставках — в пределах шума.' : 'Качество не хуже.' };
+      ? { ok: false, rows: [pctRow('Совпадение с подтвержденными уроками', 85, 72, 'worse')], why: 'Haiku 4.5 пропускает причины проигрыша, связанные с усталостью и покрытием.' }
+      : { ok: true, rows: [pctRow('Совпадение с подтвержденными уроками', 85, c.to === 'Opus 5.5' || c.to === 'medium' ? 87 : 85, 'same')], why: dearer || c.to === 'Opus 5.5' ? 'Качество не хуже, но дороже: +2 п.п. на 40 ставках — в пределах шума.' : 'Качество не хуже.' };
     return c.kind === 'model' && c.to === 'Haiku 4.5'
       ? { ok: false, rows: [pctRow('Полнота по травмам и снятиям', 96, 88, 'worse'), pctRow('Ошибки в статистике подачи', 0.4, 2.1, 'worse')], why: 'Haiku 4.5 теряет часть статистики из длинных страниц и пропускает снятия — порог полноты 95%.' }
       : { ok: true, rows: [pctRow('Полнота по травмам и снятиям', 96, c.to === 'Opus 5.5' || c.to === 'medium' ? 97 : 96, 'same')], why: dearer || c.to === 'Opus 5.5' ? 'Качество не хуже, но дороже.' : 'Качество не хуже.' };
@@ -500,7 +500,7 @@
         UI.isMobile() ? mlist(parts.map(x => ({ title: x.name, sub: x.tokens != null ? fmt.int(x.tokens) + ' ток. × ' + usd(x.price) + ' за 1M' + (r.batch ? ' × 0,5' : '') : x.n + ' ' + fmt.plural(x.n, 'поиск', 'поиска', 'поисков') + ' × $0,01', value: usd(x.cost, 4) }))) : UI.table({
           columns: [
             { label: 'Статья', render: x => x.name },
-            { label: 'Объём', align: 'r', render: x => x.tokens != null ? fmt.int(x.tokens) + ' ток.' : x.n + ' ' + fmt.plural(x.n, 'поиск', 'поиска', 'поисков') },
+            { label: 'Объем', align: 'r', render: x => x.tokens != null ? fmt.int(x.tokens) + ' ток.' : x.n + ' ' + fmt.plural(x.n, 'поиск', 'поиска', 'поисков') },
             { label: 'Цена', align: 'r', render: x => x.tokens != null ? usd(x.price) + ' / 1M' : '$10 / 1000' },
             { label: 'Сумма', align: 'r', render: x => h('b', null, usd(x.cost, 4)) },
           ],
@@ -512,7 +512,7 @@
           ['Связано', m.href ? h('a', { href: m.href, on: { click: close } }, m.ref) : (m.ref || '—')],
           ['Что сделал', m.what || t.what],
           ['Версия промпта', h('span', { class: 'mono' }, m.prompt || '—')],
-          ['Effort', m.effort ? h('span', { class: 'mono' }, m.effort) : 'не задаётся: Haiku 4.5 его не поддерживает'],
+          ['Effort', m.effort ? h('span', { class: 'mono' }, m.effort) : 'не задается: Haiku 4.5 его не поддерживает'],
           ['Из кэша читается', m.prefix || 'Не кэшируется: у Haiku 4.5 минимальный префикс для кэша — 4096 токенов, а запрос короче'],
           ['ID модели', h('span', { class: 'mono' }, p.id)],
         ].map(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
@@ -583,7 +583,7 @@
         UI.kv([['Стоимость проверки', '≈ ' + usd(totalCost) + ' через Batch API'], ['Списывается', 'из бюджета экспериментов (отдельный ключ, ≈$25 в месяц) — не из лимита на анализы']]),
         UI.callout('accent', 'shield', changes.some(c => c.type === 'analysis')
           ? 'Для анализа настройка принимается, только если она ' + RULE_TEXT + '. Для остальных задач — свой порог по их метрике.'
-          : 'Настройка принимается, только если метрика качества задачи не ниже порога на своём наборе.'),
+          : 'Настройка принимается, только если метрика качества задачи не ниже порога на своем наборе.'),
       ]);
       UI.clear(footEl);
       UI.append(footEl, [button('Отмена', { kind: 'secondary', onClick: () => ui.close() }), button('Запустить проверку', { kind: 'primary', icon: 'play', onClick: run })]);
@@ -593,10 +593,10 @@
       const meterBox = h('div');
       const label = h('div', { class: 'small soft', 'aria-live': 'polite' });
       UI.clear(bodyEl);
-      UI.append(bodyEl, [h('div', { class: 'costs-progress' }, h('div', { class: 'row-between' }, h('b', null, 'Идёт проверка…'), label), meterBox),
-        howto('В приложении проверка через Batch API занимает до нескольких часов — придёт уведомление. В макете — пара секунд.')]);
+      UI.append(bodyEl, [h('div', { class: 'costs-progress' }, h('div', { class: 'row-between' }, h('b', null, 'Идет проверка…'), label), meterBox),
+        howto('В приложении проверка через Batch API занимает до нескольких часов — придет уведомление. В макете — пара секунд.')]);
       UI.clear(footEl);
-      UI.append(footEl, [button('Проверка идёт…', { kind: 'secondary', disabled: true })]);
+      UI.append(footEl, [button('Проверка идет…', { kind: 'secondary', disabled: true })]);
       let step = 0;
       const draw = () => { const done = Math.min(size, Math.round(size * step / 14)); UI.clear(meterBox).appendChild(UI.meter(done, size)); label.textContent = 'Обработано ' + done + ' из ' + size; };
       draw();
@@ -630,7 +630,7 @@
       if (results.some(r => r.type === 'analysis')) UI.append(bodyEl, howto('Разница = новая − текущая на тех же 220 событиях; для лог-лосса и Brier меньше — лучше. ДИ — 95% бутстрэп-интервал. ROI для решения не используется: на 220 событиях это шум.'));
       UI.append(bodyEl, [rejected.length
         ? UI.callout('warn', 'shield', 'Не принято по правилу «не хуже»: оставляем ' + rejected.map(r => (r.kind === 'effort' ? 'effort ' : '') + r.from + ' для задачи «' + typeOf(r.type).label.toLowerCase() + '»').join(', ') + '.')
-        : UI.callout('good', 'check', 'Качество не хуже с учётом допуска — смену можно применить.')]);
+        : UI.callout('good', 'check', 'Качество не хуже с учетом допуска — смену можно применить.')]);
       UI.clear(footEl);
       UI.append(footEl, rejected.length
         ? [button('Подробнее в «Обучении модели»', { kind: 'ghost', href: '#learning', attrs: { on: { click: () => ui.close() } } }), button(results.some(r => r.ok) ? 'Применить принятое' : 'Оставить ' + (rejected[0].kind === 'effort' ? 'effort ' : '') + rejected[0].from, { kind: 'primary', onClick: () => { ui.close(); done(results); } })]
@@ -644,7 +644,7 @@
     return h('div', { class: 'page-head costs-head' },
       h('div', { style: 'min-width:0' },
         h('h2', null, 'Расходы на Claude в октябре'),
-        h('p', { class: 'lead' }, '1–7 октября · ' + TOT.runs + ' ' + fmt.plural(TOT.runs, 'запуск', 'запуска', 'запусков') + ' Claude API. Сколько стоит каждый анализ, что берётся из кэша и где ещё можно сэкономить без потери качества.')),
+        h('p', { class: 'lead' }, '1–7 октября · ' + TOT.runs + ' ' + fmt.plural(TOT.runs, 'запуск', 'запуска', 'запусков') + ' Claude API. Сколько стоит каждый анализ, что берется из кэша и где еще можно сэкономить без потери качества.')),
       h('div', { class: 'costs-head-actions' },
         button('Цены моделей', { kind: 'secondary', size: 'sm', icon: 'coins', onClick: pricesModal }),
         button('Настройки экономии', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: () => scrollToSettings() })));
@@ -737,7 +737,7 @@
             h('span', { class: 'costs-type-name' }, x.t.label, modelChip(A.runs.find(r => r.type === x.t.id).model), x.t.id === 'refresh' && batchChip()),
             h('span', { class: 'costs-type-meta' }, x.b.n + ' ' + fmt.plural(x.b.n, 'запуск', 'запуска', 'запусков') + ' · в среднем ' + fmt.tokens(x.b.avgIn) + ' вход / ' + fmt.tokens(x.b.avgOut) + ' выход · ' + (x.b.cached ? 'кэш ' + pct(x.b.cacheShare) : 'без кэша')),
             h('span', { class: 'costs-type-cost' }, h('span', null, h('b', null, usd(x.b.avgCost, 3)), h('small', null, 'за запуск')), icon('chevronRight')))))),
-        howto('Длина полосы — сумма за неделю, справа — доля в расходах. Нажмите на задачу, чтобы увидеть её запуски.'),
+        howto('Длина полосы — сумма за неделю, справа — доля в расходах. Нажмите на задачу, чтобы увидеть ее запуски.'),
       ],
     });
   }
@@ -762,7 +762,7 @@
     return card({
       class: 'costs-card costs-o-3',
       title: 'Где экономим',
-      subtitle: 'Оценка на октябрь по запускам 1–7 окт. Каждая мера посчитана при остальных включённых, поэтому суммы не складываются.',
+      subtitle: 'Оценка на октябрь по запускам 1–7 окт. Каждая мера посчитана при остальных включенных, поэтому суммы не складываются.',
       body: [
         h('ol', { class: 'costs-levers' }, list.map(x => {
           const lv = x.lv;
@@ -773,7 +773,7 @@
             if (x.on) status = chip('Включено', 'good', 'check');
             else if (candidateState[lv.id] === 'rejected') { status = chip('Не прошло проверку', 'bad', 'x'); note = lv.rejectedNote; }
             else {
-              status = chip('Кандидат · ждёт проверки', 'info', 'flask');
+              status = chip('Кандидат · ждет проверки', 'info', 'flask');
               action = button('Проверить на eval-наборе', { kind: 'secondary', size: 'sm', icon: 'flask', onClick: () => runCheck(lv) });
             }
             if (lv.perRunNote && !note) {
@@ -795,8 +795,8 @@
               ? h('div', { class: 'costs-lever-save soft' }, lv.saveNote)
               : h('div', { class: 'costs-lever-save' }, '≈ ' + usdM(x.save), h('small', null, x.on ? 'в месяц' : lv.candidate ? 'можно сэкономить' : 'теряем в месяц')));
         })),
-        h('div', { class: 'costs-total' }, h('span', null, 'Без мер 1–' + rankN + ' октябрь обошёлся бы'), h('span', null, h('b', null, '≈ ' + usdM(without)), ' вместо ', h('b', null, '≈ ' + usd(current)))),
-        UI.callout('accent', 'shield', h('b', null, 'Правило: '), 'экономия принимается, только если на eval-наборе она ' + RULE_TEXT + '. Дешевле, но хуже — не берём.'),
+        h('div', { class: 'costs-total' }, h('span', null, 'Без мер 1–' + rankN + ' октябрь обошелся бы'), h('span', null, h('b', null, '≈ ' + usdM(without)), ' вместо ', h('b', null, '≈ ' + usd(current)))),
+        UI.callout('accent', 'shield', h('b', null, 'Правило: '), 'экономия принимается, только если на eval-наборе она ' + RULE_TEXT + '. Дешевле, но хуже — не берем.'),
       ],
     });
   }
@@ -864,7 +864,7 @@
       subtitle: 'Экономию оцениваем только вместе с качеством той же версии. Цена ' + activeStrategy.id + ' — факт за 1–7 окт, остальных — оценка по токенам. Лог-лосс — на ' + (act ? act.v.n : 220) + ' событиях отложенной выборки, меньше — лучше.',
       body: [
         body,
-        cand && act ? howto(cand.v.id + ' дешевле ' + act.v.id + ' на ' + Math.round((1 - cand.cost / act.cost) * 100) + '%, а разница лог-лосса (' + d3(cand.v.logloss - act.v.logloss) + ') — в пределах шума. Как более дешёвую, ' + cand.v.id + ' проверяют по правилу «не хуже с допуском»; решение — в «Обучении модели».') : null,
+        cand && act ? howto(cand.v.id + ' дешевле ' + act.v.id + ' на ' + Math.round((1 - cand.cost / act.cost) * 100) + '%, а разница лог-лосса (' + d3(cand.v.logloss - act.v.logloss) + ') — в пределах шума. Как более дешевую, ' + cand.v.id + ' проверяют по правилу «не хуже с допуском»; решение — в «Обучении модели».') : null,
       ],
       foot: [button('Версии и сравнение', { kind: 'ghost', size: 'sm', iconRight: 'arrowRight', href: '#learning-versions' })],
     });
@@ -949,14 +949,14 @@
       UI.clear(forecastChip).appendChild(lim && next > lim ? chip('Выше лимита ' + usd(lim, 0), 'bad', 'alert') : chip(pct(lim ? next / lim : 0) + ' лимита', budgetKind(lim ? next / lim : 0), 'check'));
       UI.clear(warnSlot);
       const perAn = perRun('analysis', draft);
-      if (draft.limitHard > 0 && perAn > draft.limitHard) warnSlot.appendChild(UI.callout('warn', 'alert', 'Средний анализ (≈ ' + usd(perAn) + ') дороже жёсткого порога (' + usd(+draft.limitHard) + '): запуски будут останавливаться без ставки.'));
+      if (draft.limitHard > 0 && perAn > draft.limitHard) warnSlot.appendChild(UI.callout('warn', 'alert', 'Средний анализ (≈ ' + usd(perAn) + ') дороже жесткого порога (' + usd(+draft.limitHard) + '): запуски будут останавливаться без ставки.'));
       else if (draft.limitSoft > 0 && perAn > draft.limitSoft) warnSlot.appendChild(UI.callout('warn', 'alert', 'Средний анализ (≈ ' + usd(perAn) + ') дороже порога предупреждения (' + usd(+draft.limitSoft) + '): уведомление будет приходить почти каждый раз.'));
       if (draft.searchDay > 0 && TOT.searches / DAYS > draft.searchDay) warnSlot.appendChild(UI.callout('warn', 'alert', 'Сейчас в среднем ' + fmt.dec(TOT.searches / DAYS, 1) + ' поиска в день — больше лимита ' + draft.searchDay + '. Лишние поиски не выполнятся, новости возьмутся из кэша.'));
       if (!draft.dossier) warnSlot.appendChild(UI.callout('warn', 'alert', 'Без досье ИИ снова читает файлы в 10–20 итераций, как бот сейчас: анализ дороже в ≈ ' + Math.round(perAn / BASE.analysis.avgCost) + ' раз.'));
-      if (draft.effort.analysis !== saved.effort.analysis && draft.models.analysis !== 'Haiku 4.5') warnSlot.appendChild(UI.callout('info', 'flask', 'Effort анализа меняет глубину размышлений, а значит и качество на трудных матчах. При сохранении настройка пройдёт проверку на eval-наборе.'));
+      if (draft.effort.analysis !== saved.effort.analysis && draft.models.analysis !== 'Haiku 4.5') warnSlot.appendChild(UI.callout('info', 'flask', 'Effort анализа меняет глубину размышлений, а значит и качество на трудных матчах. При сохранении настройка пройдет проверку на eval-наборе.'));
       if (!draft.eval) warnSlot.appendChild(UI.callout('bad', 'shield', 'Проверка на eval-наборе выключена: смена модели или effort применится сразу, и просадку качества вы увидите только по проигранным ставкам.'));
       const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
-      dirtyEl.textContent = dirty ? 'Есть несохранённые изменения' : 'Изменений нет';
+      dirtyEl.textContent = dirty ? 'Есть несохраненные изменения' : 'Изменений нет';
       dirtyEl.classList.toggle('on', dirty);
       resetBtn.disabled = !dirty;
     }
@@ -1004,7 +1004,7 @@
     const maxRun = Math.max(...A.runs.filter(r => r.type === 'analysis').map(r => r.cost));
 
     const form = h('form', { class: 'card costs-card', id: 'costs-settings', novalidate: true, 'aria-labelledby': 'costs-settings-title', on: { submit: e => { e.preventDefault(); save(); } } },
-      h('div', { class: 'card-head' }, h('div', { style: 'min-width:0' }, h('h3', { id: 'costs-settings-title' }, 'Настройки экономии'), h('div', { class: 'card-sub' }, 'Модель и глубина размышлений для каждой задачи, лимиты и приёмы, которые снижают расход. Применяются со следующего запуска.'))),
+      h('div', { class: 'card-head' }, h('div', { style: 'min-width:0' }, h('h3', { id: 'costs-settings-title' }, 'Настройки экономии'), h('div', { class: 'card-sub' }, 'Модель и глубина размышлений для каждой задачи, лимиты и приемы, которые снижают расход. Применяются со следующего запуска.'))),
       h('div', { class: 'card-body' },
         h('div', { class: 'costs-settings-grid' },
           h('div', { class: 'costs-settings-col' },
@@ -1020,7 +1020,7 @@
               num('costs-limit-search', 'searchLimit', 'На анализ, не больше', 'шт', '2–3 на игрока; 0 — без лимита', 0),
               num('costs-limit-day', 'searchDay', 'В день, не больше', 'шт', 'сейчас ≈ ' + fmt.dec(TOT.searches / DAYS, 1) + ' в день', 0))),
           h('div', { class: 'costs-settings-col' },
-            h('div', { class: 'eyebrow' }, 'Приёмы экономии'),
+            h('div', { class: 'eyebrow' }, 'Приемы экономии'),
             h('div', { class: 'costs-toggles' },
               tog('cache', 'Кэширование промпта', 'Внутри одного анализа итерации 2–3 читают инструкции, уроки и досье из кэша — у Opus 5.5 в 20 раз дешевле обычного входа. Между анализами кэш (5 мин) обычно не доживает.'),
               tog('batch', 'Ночные обновления через Batch API (−50%)', 'Профили игроков обновляются пакетом ночью: ответ до 24 ч, цена вдвое ниже.'),
@@ -1043,14 +1043,14 @@
     }
     function commit(msg) {
       saved = clone(draft);
-      A.budget = saved.limitMonth; // главная берёт лимит отсюда
+      A.budget = saved.limitMonth; // главная берет лимит отсюда
       redraw();
       UI.toast(msg || 'Настройки экономии сохранены');
     }
     function save() {
       const err = validate();
       if (err) { UI.toast(err, 'alert'); return; }
-      if (JSON.stringify(draft) === JSON.stringify(saved)) { UI.toast('Изменений нет — всё уже сохранено', 'info'); return; }
+      if (JSON.stringify(draft) === JSON.stringify(saved)) { UI.toast('Изменений нет — все уже сохранено', 'info'); return; }
       const changes = [];
       TYPES.forEach(t => {
         if (draft.models[t.id] !== saved.models[t.id]) changes.push({ type: t.id, kind: 'model', from: saved.models[t.id], to: draft.models[t.id] });

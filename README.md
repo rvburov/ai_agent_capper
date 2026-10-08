@@ -65,7 +65,7 @@ git push -u origin master
 ```bash
 cp .env.example .env
 ```
-Откройте `.env` и вставьте токены. Файл `.env` в `.gitignore` — никогда не попадёт в GitHub.
+Откройте `.env` и вставьте токены. Файл `.env` в `.gitignore` — никогда не попадет в GitHub.
 
 ---
 
@@ -156,7 +156,7 @@ docker compose logs -f
 ```bash
 # На вашем компьютере
 cat ~/.ssh/id_rsa
-# Скопируйте всё содержимое включая BEGIN и END строки
+# Скопируйте все содержимое включая BEGIN и END строки
 # Вставьте в секрет SERVER_SSH_KEY
 ```
 
@@ -177,7 +177,7 @@ git commit -m "test deploy"
 git push origin main
 ```
 
-GitHub Actions автоматически: зайдёт на сервер → сделает `git pull` → пересоберёт Docker → перезапустит бот.
+GitHub Actions автоматически: зайдет на сервер → сделает `git pull` → пересоберет Docker → перезапустит бот.
 
 Статус деплоя: GitHub → Actions → последний workflow.
 

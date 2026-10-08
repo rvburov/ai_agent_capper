@@ -1,7 +1,7 @@
-/* Экран входа (без оболочки приложения): защищённый вход в личный кабинет.
+/* Экран входа (без оболочки приложения): защищенный вход в личный кабинет.
    Шаги — подмаршруты #login-<шаг>: вход по паролю → код 2FA (или резервный код), восстановление пароля,
-   регистрация по приглашению → настройка 2FA, блокировка после 5 ошибок. Состояние живёт в памяти модуля,
-   поэтому смена темы или ширины экрана не сбрасывает введённое. */
+   регистрация по приглашению → настройка 2FA, блокировка после 5 ошибок. Состояние живет в памяти модуля,
+   поэтому смена темы или ширины экрана не сбрасывает введенное. */
 (function () {
   'use strict';
   const { h, icon, button } = UI;
@@ -17,7 +17,7 @@
   const SEC = [
     { icon: 'lock', t: 'Пароль — только хеш Argon2id', d: 'Сам пароль не хранится и не попадает в логи' },
     { icon: 'shield', t: 'Двухфакторная аутентификация', d: 'TOTP-коды: Google Authenticator, Яндекс Ключ или 1Password' },
-    { icon: 'key', t: 'Сессия в защищённой httpOnly-cookie', d: 'Secure и SameSite: скрипты на странице её не прочитают' },
+    { icon: 'key', t: 'Сессия в защищенной httpOnly-cookie', d: 'Secure и SameSite: скрипты на странице ее не прочитают' },
     { icon: 'alert', t: 'Блокировка после 5 неудачных попыток', d: 'Вход закрывается на 15 минут — подбор пароля бесполезен' },
     { icon: 'telegram', t: 'Уведомление в Telegram', d: 'О каждом входе с нового устройства' },
     { icon: 'history', t: 'Журнал входов', d: 'Устройство, город и время — в личном кабинете' },
@@ -28,7 +28,7 @@
     { label: 'Слабый', chip: 'bad', icon: 'alert', meter: 'bad' },
     { label: 'Средний', chip: 'warn', icon: 'alert', meter: 'warn' },
     { label: 'Хороший', chip: 'accent', icon: 'check', meter: null },
-    { label: 'Надёжный', chip: 'good', icon: 'shield', meter: 'login-good' },
+    { label: 'Надежный', chip: 'good', icon: 'shield', meter: 'login-good' },
   ];
 
   function fresh() {
@@ -215,7 +215,7 @@
 
   // ---------- мелкие помощники ----------
   function isDark() { return (document.documentElement.dataset.theme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark'; }
-  function themeBtn() { const d = isDark(); return button('', { kind: 'ghost', size: 'sm', icon: d ? 'sun' : 'moon', title: d ? 'Светлая тема' : 'Тёмная тема', onClick: () => UI.toggleTheme() }); }
+  function themeBtn() { const d = isDark(); return button('', { kind: 'ghost', size: 'sm', icon: d ? 'sun' : 'moon', title: d ? 'Светлая тема' : 'Темная тема', onClick: () => UI.toggleTheme() }); }
   function focusSel(sel) { requestAnimationFrame(() => { const el = ROOT && ROOT.querySelector(sel); if (el) el.focus(); }); }
   function setBusy(btn, label) {
     if (!btn) return;
@@ -275,7 +275,7 @@
       'aria-describedby': o.error ? errId : (o.describedBy || null), 'data-autofocus': o.autofocus || null,
     });
     input.value = o.value || '';
-    const caps = h('div', { class: 'login-caps', hidden: true }, icon('alert'), 'Включён Caps Lock');
+    const caps = h('div', { class: 'login-caps', hidden: true }, icon('alert'), 'Включен Caps Lock');
     const capsCheck = e => { if (e.getModifierState) caps.hidden = !e.getModifierState('CapsLock'); };
     input.addEventListener('keydown', capsCheck);
     input.addEventListener('keyup', capsCheck);
@@ -408,19 +408,19 @@
       logo);
   }
 
-  // ---------- пароль: надёжность и правила ----------
+  // ---------- пароль: надежность и правила ----------
   function analyze(p, email) {
     const low = p.toLowerCase();
     const local = (email || '').split('@')[0].toLowerCase();
     const len = p.length >= 12;
-    const mix = /[a-zа-яё]/i.test(p) && /\d/.test(p);
+    const mix = /[a-zа-яе]/i.test(p) && /\d/.test(p);
     const leaked = !!p && (LEAKED.some(w => low.includes(w)) || (local.length >= 3 && low.includes(local)));
     let score = 0;
     if (p) {
       score = 1;
       if (p.length >= 8) score = 2;
       if (len && mix) score = 3;
-      if (len && mix && (p.length >= 16 || /[^a-zа-яё0-9]/i.test(p) || (/[A-ZА-ЯЁ]/.test(p) && /[a-zа-яё]/.test(p)))) score = 4;
+      if (len && mix && (p.length >= 16 || /[^a-zа-яе0-9]/i.test(p) || (/[A-ZА-ЯЕ]/.test(p) && /[a-zа-яе]/.test(p)))) score = 4;
     }
     if (leaked) score = Math.min(score, 1);
     return { len, mix, leaked, score, ok: !!p && len && mix && !leaked };
@@ -434,9 +434,9 @@
   function strengthContent() {
     const p = S.reg.pwd, r = analyze(p, S.reg.email), lv = LEVELS[r.score];
     const m = UI.meter(r.score, 4, lv.meter);
-    m.setAttribute('aria-label', 'Надёжность пароля'); m.setAttribute('aria-valuetext', lv.label);
+    m.setAttribute('aria-label', 'Надежность пароля'); m.setAttribute('aria-valuetext', lv.label);
     return [
-      h('div', { class: 'row-between' }, h('span', { class: 'small soft' }, 'Надёжность пароля'), UI.chip(lv.label, lv.chip, lv.icon)),
+      h('div', { class: 'row-between' }, h('span', { class: 'small soft' }, 'Надежность пароля'), UI.chip(lv.label, lv.chip, lv.icon)),
       m,
       h('ul', { class: 'login-rules', 'aria-label': 'Требования к паролю' },
         rule(r.len ? 'ok' : 'todo', p ? '12+ символов (сейчас ' + p.length + ')' : '12+ символов'),
@@ -463,14 +463,14 @@
       err && h('div', { class: 'callout bad', role: 'alert', id: 'login-error' }, icon('alert'),
         h('div', { style: 'min-width:0' },
           h('div', null, h('b', null, 'Неверный email или пароль.'), ' Осталось попыток: ' + S.attempts),
-          S.attempts === 1 && h('div', null, 'После следующей ошибки вход закроется на 15 минут, а в Telegram придёт уведомление.'))),
+          S.attempts === 1 && h('div', null, 'После следующей ошибки вход закроется на 15 минут, а в Telegram придет уведомление.'))),
       email,
       pwField({ id: 'login-password', label: 'Пароль', value: S.pwd, autocomplete: 'current-password', invalid: !!(err || S.pwdError), error: S.pwdError, describedBy: err ? 'login-error' : null, autofocus: true,
         aside: h('a', { class: 'login-link', href: '#login-reset' }, 'Забыли пароль?'), onInput: v => { S.pwd = v; S.pwdError = null; } }),
       check({ id: 'login-remember', checked: S.remember, title: 'Запомнить это устройство на 30 дней', hint: 'Код 2FA здесь не спросим 30 дней. Не отмечайте на чужом компьютере.', onChange: v => { S.remember = v; } }),
       button('Войти', { kind: 'primary', size: 'lg', block: true, type: 'submit', iconRight: 'arrowRight' }),
       h('div', { class: 'login-alt' }, h('span', { class: 'muted' }, 'Нет аккаунта?'), h('a', { class: 'login-link', href: '#login-invite' }, 'Регистрация только по приглашению', icon('chevronRight'))),
-      demoHint('В макете пароль «wrong» покажет ошибку и спишет одну попытку из 5, любой другой пароль ведёт к шагу с кодом.'));
+      demoHint('В макете пароль «wrong» покажет ошибку и спишет одну попытку из 5, любой другой пароль ведет к шагу с кодом.'));
     return { node: form };
   }
   function submitLogin(e) {
@@ -515,8 +515,8 @@
       h('div', { class: 'login-alt between' },
         h('a', { class: 'login-link', href: '#login' }, icon('chevronLeft'), 'Назад'),
         h('a', { class: 'login-link', href: '#login-backup' }, icon('key'), 'Использовать резервный код')),
-      note('telegram', 'Если устройство новое, после входа придёт уведомление в Telegram: город, браузер и время.'),
-      demoHint('В макете подойдёт любой код: введите или вставьте 6 любых цифр — вход произойдёт сразу.'));
+      note('telegram', 'Если устройство новое, после входа придет уведомление в Telegram: город, браузер и время.'),
+      demoHint('В макете подойдет любой код: введите или вставьте 6 любых цифр — вход произойдет сразу.'));
     return { node: form };
   }
   function submit2fa() {
@@ -539,7 +539,7 @@
     onInput(f, v => { S.backup = v; S.backupError = null; });
     const form = h('form', { class: 'login-form', novalidate: true, 'aria-labelledby': 'login-title', on: { submit: submitBackup } },
       stepper(['Пароль', 'Резервный код'], 1),
-      head('Шаг 2 из 2', 'Вход по резервному коду', 'Подойдёт любой из 8 кодов, которые вы сохранили при настройке 2FA. Каждый срабатывает один раз.'),
+      head('Шаг 2 из 2', 'Вход по резервному коду', 'Подойдет любой из 8 кодов, которые вы сохранили при настройке 2FA. Каждый срабатывает один раз.'),
       acctRow(),
       f,
       button('Войти по резервному коду', { kind: 'primary', size: 'lg', block: true, type: 'submit', icon: 'key' }),
@@ -547,7 +547,7 @@
       h('div', { class: 'login-alt between' },
         h('a', { class: 'login-link', href: '#login-2fa' }, icon('chevronLeft'), 'Код из приложения'),
         h('button', { type: 'button', class: 'login-link', on: { click: recoveryModal } }, 'Нет ни телефона, ни кодов?')),
-      demoHint('В макете подойдёт любой код из 8 букв и цифр.'));
+      demoHint('В макете подойдет любой код из 8 букв и цифр.'));
     return { node: form };
   }
   function submitBackup(e) {
@@ -578,7 +578,7 @@
     const f = UI.field({ id: 'login-reset-email', label: 'Email аккаунта', type: 'email', value: S.resetEmail != null ? S.resetEmail : S.email, autocomplete: 'username', inputmode: 'email', error: S.resetError, attrs: { spellcheck: 'false', autocapitalize: 'off', 'data-autofocus': true } });
     onInput(f, v => { S.resetEmail = v; S.resetError = null; });
     const form = h('form', { class: 'login-form', novalidate: true, 'aria-labelledby': 'login-title', on: { submit: submitReset } },
-      head('Восстановление доступа', 'Сброс пароля', 'Пришлём ссылку для нового пароля на email аккаунта. Двухфакторная защита после сброса останется включённой.'),
+      head('Восстановление доступа', 'Сброс пароля', 'Пришлем ссылку для нового пароля на email аккаунта. Двухфакторная защита после сброса останется включенной.'),
       f,
       button('Отправить ссылку', { kind: 'primary', size: 'lg', block: true, type: 'submit', icon: 'send' }),
       note('lock', 'Мы не сообщаем, зарегистрирован ли такой email, — так посторонний не сможет проверять адреса.'),
@@ -606,10 +606,10 @@
       h('ul', { class: 'login-bul' },
         h('li', null, 'Письмо от AI Capper могло попасть в «Спам» или «Промоакции».'),
         h('li', null, 'Ссылка одноразовая. После смены пароля сессии на других устройствах завершатся.'),
-        h('li', null, 'При входе с новым паролем код 2FA всё равно понадобится.')),
+        h('li', null, 'При входе с новым паролем код 2FA все равно понадобится.')),
       button('Вернуться ко входу', { kind: 'primary', size: 'lg', block: true, href: '#login', attrs: { 'data-autofocus': true } }),
       h('div', { class: 'login-alt between' },
-        button(S.resent ? 'Отправлено повторно' : 'Отправить ещё раз', { kind: 'ghost', size: 'sm', icon: S.resent ? 'check' : 'refresh', disabled: S.resent, onClick: () => { S.resent = true; draw(); UI.toast('Ссылка отправлена ещё раз. Следующий повтор — через 60 секунд', 'send'); } }),
+        button(S.resent ? 'Отправлено повторно' : 'Отправить еще раз', { kind: 'ghost', size: 'sm', icon: S.resent ? 'check' : 'refresh', disabled: S.resent, onClick: () => { S.resent = true; draw(); UI.toast('Ссылка отправлена еще раз. Следующий повтор — через 60 секунд', 'send'); } }),
         h('a', { class: 'login-link', href: '#login-reset' }, 'Изменить email')),
       demoHint('В макете письмо не отправляется.'));
     return { node };
@@ -625,9 +625,9 @@
         ['Повторный вход', 'через 15 минут'],
         ['Уведомление', UI.chip('Отправлено в Telegram', 'good', 'telegram')],
       ]),
-      UI.callout('warn', 'alert', 'Если пароль вводили не вы — смените его: ссылка придёт на почту, а сессии на других устройствах завершатся.'),
+      UI.callout('warn', 'alert', 'Если пароль вводили не вы — смените его: ссылка придет на почту, а сессии на других устройствах завершатся.'),
       button('Сбросить пароль', { kind: 'primary', size: 'lg', block: true, href: '#login-reset', icon: 'key', attrs: { 'data-autofocus': true } }),
-      button('Снять блокировку (макет)', { kind: 'ghost', block: true, icon: 'refresh', onClick: () => { S.attempts = MAX_ATTEMPTS; S.error = false; UI.go('login'); UI.toast('Счётчик попыток сброшен — только в макете', 'refresh'); } }),
+      button('Снять блокировку (макет)', { kind: 'ghost', block: true, icon: 'refresh', onClick: () => { S.attempts = MAX_ATTEMPTS; S.error = false; UI.go('login'); UI.toast('Счетчик попыток сброшен — только в макете', 'refresh'); } }),
       demoHint('В макете блокировку можно снять кнопкой выше. В продукте она снимается только по таймеру или после сброса пароля.'));
     return { node };
   }
@@ -650,10 +650,10 @@
       mail,
       pwField({ id: 'login-inv-pwd', label: 'Пароль', value: S.reg.pwd, autocomplete: 'new-password', invalid: !!E.pwd, error: E.pwd, onInput: v => { S.reg.pwd = v; E.pwd = null; refresh(); }, after: strength }),
       pwField({ id: 'login-inv-pwd2', label: 'Повторите пароль', value: S.reg.pwd2, autocomplete: 'new-password', invalid: !!E.pwd2, error: E.pwd2, onInput: v => { S.reg.pwd2 = v; E.pwd2 = null; refresh(); }, after: match }),
-      check({ id: 'login-inv-agree', checked: S.reg.agree, error: E.agree, title: 'Понимаю: AI Capper даёт аналитику и вероятности, а не гарантию выигрыша', hint: 'Решение о ставке и риск остаются за мной.', onChange: v => { S.reg.agree = v; if (v) E.agree = null; } }),
+      check({ id: 'login-inv-agree', checked: S.reg.agree, error: E.agree, title: 'Понимаю: AI Capper дает аналитику и вероятности, а не гарантию выигрыша', hint: 'Решение о ставке и риск остаются за мной.', onChange: v => { S.reg.agree = v; if (v) E.agree = null; } }),
       button('Создать аккаунт', { kind: 'primary', size: 'lg', block: true, type: 'submit', iconRight: 'arrowRight' }),
       h('div', { class: 'login-alt' }, h('span', { class: 'muted' }, 'Уже есть аккаунт?'), h('a', { class: 'login-link', href: '#login' }, 'Войти')),
-      demoHint('В макете подойдёт любой код вида CAP-XXXX-XXXX. Попробуйте пароль «qwerty123456» — увидите проверку утечек.'));
+      demoHint('В макете подойдет любой код вида CAP-XXXX-XXXX. Попробуйте пароль «qwerty123456» — увидите проверку утечек.'));
     return { node: form };
   }
   function submitInvite(e) {
@@ -669,7 +669,7 @@
     S.regErr = E;
     if (Object.values(E).some(Boolean)) { draw(); focusSel('.input.invalid, .login-check.invalid input'); return; }
     busy = true;
-    setBusy(e.target.querySelector('[type=submit]'), 'Создаём аккаунт…');
+    setBusy(e.target.querySelector('[type=submit]'), 'Создаем аккаунт…');
     later(600, () => { S.email = r.email.trim(); UI.go('login-setup'); UI.toast('Аккаунт создан. Осталось включить 2FA', 'check'); });
   }
 
@@ -679,7 +679,7 @@
     const mobile = UI.isMobile();
     const form = h('form', { class: 'login-form wide', novalidate: true, 'aria-labelledby': 'login-title', on: { submit: submitSetup } },
       stepper(['Аккаунт', 'Защита 2FA'], 1),
-      head('Обязательный шаг', 'Включите двухфакторную защиту', 'Даже если пароль утечёт, без кода с вашего телефона в кабинет не войти.'),
+      head('Обязательный шаг', 'Включите двухфакторную защиту', 'Даже если пароль утечет, без кода с вашего телефона в кабинет не войти.'),
       h('div', { class: 'login-secs' },
         h('section', { class: 'login-s', 'aria-labelledby': 'login-s1' },
           h('span', { class: 'login-s-n', 'aria-hidden': 'true' }, '1'),
@@ -688,7 +688,7 @@
             h('div', { class: 'login-qrrow' },
               h('div', { class: 'login-qr' }, qrSvg(mobile ? 152 : 164)),
               h('div', { class: 'login-qr-side' },
-                h('div', { class: 'small soft' }, 'Подойдёт любое приложение с TOTP-кодами:'),
+                h('div', { class: 'small soft' }, 'Подойдет любое приложение с TOTP-кодами:'),
                 h('div', { class: 'row', style: 'gap:6px' }, APPS.map(a => UI.chip(a, 'outline', 'device'))),
                 h('div', { class: 'small soft' }, 'Не сканируется? Введите ключ вручную:'),
                 h('div', { class: 'login-key' }, keyCode,
@@ -708,9 +708,9 @@
             h('ol', { class: 'login-codes', 'aria-label': 'Резервные коды' }, BACKUP_CODES.map(c => h('li', null, c))),
             h('div', { class: 'row' },
               button('Скопировать коды', { kind: 'secondary', size: 'sm', icon: 'copy', onClick: e => copyText(BACKUP_CODES.join('\n'), 'Резервные коды скопированы', e.currentTarget.closest('.login-s-body').querySelector('.login-codes')) })),
-            check({ id: 'login-setup-saved', checked: S.saved, error: E.saved, title: 'Я сохранил(а) резервные коды в надёжном месте', onChange: v => { S.saved = v; if (v) E.saved = null; } })))),
+            check({ id: 'login-setup-saved', checked: S.saved, error: E.saved, title: 'Я сохранил(а) резервные коды в надежном месте', onChange: v => { S.saved = v; if (v) E.saved = null; } })))),
       button('Готово — войти в кабинет', { kind: 'primary', size: 'lg', block: true, type: 'submit', icon: 'check' }),
-      demoHint('В макете QR-код и ключ — заглушки, а в шаге 2 подойдёт любой код из 6 цифр.'));
+      demoHint('В макете QR-код и ключ — заглушки, а в шаге 2 подойдет любой код из 6 цифр.'));
     return { node: form, wide: true };
   }
   function submitSetup(e) {
@@ -750,7 +750,7 @@
           h('p', { class: 'login-hero-p' }, 'Claude собирает данные об игроках, разбирает матчи, которые вы внесли, предлагает экспресс и сверяет прогнозы с результатами.'),
           h('p', { class: 'login-hero-note' }, icon('info'), 'Аналитика и вероятности — не гарантия выигрыша.')),
         h('section', { class: 'login-sec', 'aria-labelledby': 'login-sec-title' },
-          h('div', { class: 'login-sec-head' }, icon('shield'), h('h2', { id: 'login-sec-title' }, 'Как защищён вход'), UI.chip('6 мер', 'accent', 'check')),
+          h('div', { class: 'login-sec-head' }, icon('shield'), h('h2', { id: 'login-sec-title' }, 'Как защищен вход'), UI.chip('6 мер', 'accent', 'check')),
           secList()),
         h('div', { class: 'login-brandfoot' }, h('span', null, '© 2026 AI Capper · личный сервис'), h('span', null, 'Соединение только по HTTPS (TLS 1.3)'))),
       h('main', { class: 'login-main' },
@@ -770,7 +770,7 @@
       h('main', { class: 'login-m-card' }, v.node),
       h('details', { class: 'login-secd' },
         h('summary', null, icon('shield'),
-          h('span', { class: 'login-secd-t' }, h('b', null, 'Как защищён вход'), h('span', { class: 'xsmall muted' }, 'Argon2id, 2FA, журнал входов')),
+          h('span', { class: 'login-secd-t' }, h('b', null, 'Как защищен вход'), h('span', { class: 'xsmall muted' }, 'Argon2id, 2FA, журнал входов')),
           UI.chip('6 мер', 'accent'),
           icon('chevronDown', { class: 'chev' })),
         secList()),

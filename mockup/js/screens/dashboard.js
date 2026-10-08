@@ -16,7 +16,7 @@
     { id: '7', label: '7 дней', days: 7, ctx: 'за 7 дней', prev: 'к пред. 7 дням' },
     { id: '30', label: '30 дней', days: 30, ctx: 'за 30 дней', prev: 'к пред. 30 дням' },
     { id: '90', label: '3 месяца', days: 90, ctx: 'за 3 месяца', prev: 'к пред. 3 месяцам' },
-    { id: 'all', label: 'Всё', days: null, ctx: 'с ' + fmt.date(firstDate), prev: null },
+    { id: 'all', label: 'Все', days: null, ctx: 'с ' + fmt.date(firstDate), prev: null },
   ];
   let periodId = '30';
   try { const s = sessionStorage.getItem('capper.dash.period'); if (s && PERIODS.some(p => p.id === s)) periodId = s; } catch (e) { /* ок */ }
@@ -383,7 +383,7 @@
       body: h('div', null, rows),
       foot: [
         button('Собрать экспресс из матчей дня', { kind: 'primary', size: 'sm', icon: 'spark', href: '#new-today' }),
-        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 220px' }, 'Перед анализом ИИ обновит устаревшие профили и соберёт недостающие — это отразится в расходах.'),
+        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 220px' }, 'Перед анализом ИИ обновит устаревшие профили и соберет недостающие — это отразится в расходах.'),
       ],
     });
   }
@@ -408,7 +408,7 @@
         items.push({
           tone: 'bad', ic: 'database', sr: 'Важно',
           title: h('span', null, 'Нет в базе: ', playerLink(p.id)),
-          text: (m ? 'Играет сегодня в ' + m.time + (opp ? ', соперник — ' + opp.short + '. ' : '. ') : '') + 'Профиль соберётся сам при анализе матча (≈ 1–2 мин, несколько веб-поисков).',
+          text: (m ? 'Играет сегодня в ' + m.time + (opp ? ', соперник — ' + opp.short + '. ' : '. ') : '') + 'Профиль соберется сам при анализе матча (≈ 1–2 мин, несколько веб-поисков).',
           action: queued.rune
             ? chip('Сбор профиля в очереди', 'info', 'clock')
             : button('Собрать сейчас', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => { queued.rune = true; draw(); UI.toast('Сбор профиля ' + p.short + ' запущен — около 1–2 минут', 'refresh'); } }),
@@ -442,9 +442,9 @@
       ].filter(Boolean);
       items.push({
         tone: activeRules.length ? 'warn' : 'info', ic: 'shield', sr: activeRules.length ? 'Предупреждение' : 'Информация',
-        title: activeRules.length ? 'Размер ставки изменён правилом адаптации' : 'Размер ставки: адаптации не действуют',
+        title: activeRules.length ? 'Размер ставки изменен правилом адаптации' : 'Размер ставки: адаптации не действуют',
         text: 'Серия — ' + streakText + ', ' + (fromPeak < 0 ? 'банк ' + fmt.signedPct(fromPeak) + ' от пика' : 'банк на пике') + '. ' + (activeRules.length
-          ? 'Сейчас ' + activeRules.join('; ') + '. Новые анализы предложат суммы с учётом этого.'
+          ? 'Сейчас ' + activeRules.join('; ') + '. Новые анализы предложат суммы с учетом этого.'
           : 'Ставка снизится на 40% после 3 проигрышей подряд и не превысит 2,5% банка при просадке от −10%. Сегодня суммы — по таблице.'),
         action: button('Правила ставок', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#profile-bank' }),
       });
@@ -476,7 +476,7 @@
       actions: [button('Все уроки', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', href: '#learning' })],
       body: [
         latest && h('figure', { class: 'dashboard-lesson' },
-          h('div', { class: 'row', style: 'gap:6px' }, chip(latest.id, 'outline'), chip('Подтверждён', 'good', 'check'), latest.inPrompt && chip('В инструкциях анализа', 'accent', 'book')),
+          h('div', { class: 'row', style: 'gap:6px' }, chip(latest.id, 'outline'), chip('Подтвержден', 'good', 'check'), latest.inPrompt && chip('В инструкциях анализа', 'accent', 'book')),
           h('p', null, latest.text),
           h('figcaption', { class: 'xsmall muted' }, latest.evidence + ' ' + fmt.plural(latest.evidence, 'случай', 'случая', 'случаев') + ' · ' + latest.effect + ' · ' + latest.scope + ' · с ' + fmt.date(latest.created)),
           isProcessLesson(latest) && h('div', { class: 'dashboard-howto' }, icon('info'), 'Урок про сбор данных: вероятности не меняет, убирает лишние поиски. Такие принимаются, если качество не хуже на 10+ случаях; уроки о вероятностях — от 20 своих случаев.')),

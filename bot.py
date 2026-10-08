@@ -354,7 +354,7 @@ async def run_agent(user_message: str, status_callback=None) -> str:
             text_blocks = [b.text for b in resp.content if hasattr(b, "text")]
             return "\n".join(text_blocks) or f"Неожиданное завершение: {resp.stop_reason}"
 
-    return f"Превышен лимит циклов ({MAX_TOOL_LOOPS}). Попробуйте ещё раз."
+    return f"Превышен лимит циклов ({MAX_TOOL_LOOPS}). Попробуйте еще раз."
 
 # ─────────────────────────────────────────────
 # УПРАВЛЕНИЕ ИСТОРИЕЙ СТАВОК
@@ -401,13 +401,13 @@ def save_result(bet_id: int, status: str) -> dict:
             data["meta"]["текущий_банк"] = с["результат"]["банк_после"]
             break
 
-    завершённые = [с for с in ставки if с.get("результат", {}).get("статус")]
-    победы = sum(1 for с in завершённые if с["результат"]["статус"] == "победа")
+    завершенные = [с for с in ставки if с.get("результат", {}).get("статус")]
+    победы = sum(1 for с in завершенные if с["результат"]["статус"] == "победа")
     data["статистика"].update({
-        "всего_ставок":    len(завершённые),
+        "всего_ставок":    len(завершенные),
         "победы":          победы,
-        "поражения":       len(завершённые) - победы,
-        "винрейт_процент": round(победы / len(завершённые) * 100, 1) if завершённые else None,
+        "поражения":       len(завершенные) - победы,
+        "винрейт_процент": round(победы / len(завершенные) * 100, 1) if завершенные else None,
     })
 
     data["meta"]["последнее_обновление"] = datetime.now().strftime("%Y-%m-%d")
@@ -529,7 +529,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Сообщение-статус которое будем обновлять
     status_msg = await update.message.reply_text("Запускаю анализ...")
 
-    # Счётчик шагов для обновления статуса
+    # Счетчик шагов для обновления статуса
     step = [0]
 
     async def update_status(new_text: str):
@@ -560,7 +560,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         log.error(f"Ошибка агента: {e}", exc_info=True)
-        await status_msg.edit_text(f"Ошибка: {str(e)[:300]}\n\nПопробуйте ещё раз.")
+        await status_msg.edit_text(f"Ошибка: {str(e)[:300]}\n\nПопробуйте еще раз.")
 
 # ─────────────────────────────────────────────
 # ЗАПУСК

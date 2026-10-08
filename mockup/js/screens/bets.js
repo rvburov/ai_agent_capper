@@ -1,6 +1,6 @@
 /* Экран «Ставки»: итоги по фильтрам, открытые ставки с вводом результата и закрывающего кэфа,
    история (таблица с раскрытием на компьютере, карточки и нижний лист на телефоне), разбор ставки ИИ.
-   Все цифры — из window.DATA; расчёт ставки меняет DATA в памяти (банк, статистика, история банка). */
+   Все цифры — из window.DATA; расчет ставки меняет DATA в памяти (банк, статистика, история банка). */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
@@ -34,15 +34,15 @@
     return h('a', { class: 'bets-plink', href: '#player-' + id, title: p ? p.name + ' — карточка игрока' : id, on: { click: e => e.stopPropagation() } }, pname(id));
   }
 
-  const RES = { win: ['Зашло', 'check'], loss: ['Не зашло', 'x'], void: ['Возврат', 'refresh'], open: ['Ещё не сыграно', 'clock'] };
+  const RES = { win: ['Зашло', 'check'], loss: ['Не зашло', 'x'], void: ['Возврат', 'refresh'], open: ['Еще не сыграно', 'clock'] };
   function resIcon(r) {
     const [t, ic] = RES[r] || RES.open;
     return h('span', { class: 'bets-res ' + r, role: 'img', 'aria-label': t, title: t }, icon(ic));
   }
-  const RES_CHIP = { win: ['Зашло', 'good', 'check'], loss: ['Не зашло', 'bad', 'x'], void: ['Возврат', 'outline', 'refresh'], open: ['Ждём матч', 'info', 'clock'] };
+  const RES_CHIP = { win: ['Зашло', 'good', 'check'], loss: ['Не зашло', 'bad', 'x'], void: ['Возврат', 'outline', 'refresh'], open: ['Ждем матч', 'info', 'clock'] };
   const resChip = r => { const [t, k, i] = RES_CHIP[r] || RES_CHIP.open; return chip(t, k, i); };
 
-  // Счёт по сетам для истории (в демо-данных его нет): согласован с рынком и исходом
+  // Счет по сетам для истории (в демо-данных его нет): согласован с рынком и исходом
   const SCORES = {
     p1: { win: ['2:0', '2:1'], loss: ['1:2', '0:2'] },
     p2: { win: ['0:2', '1:2'], loss: ['2:0', '2:1'] },
@@ -82,7 +82,7 @@
   function verdict(b) {
     if (b.status === 'void') return { label: 'Без разбора', kind: 'outline', icon: 'refresh' };
     if (b.status === 'open') return null;
-    if (b.status === 'win') return b.clv != null && b.clv < 0 ? { label: 'Выигрыш против рынка', kind: 'warn', icon: 'alert' } : { label: 'Перевес подтверждён', kind: 'good', icon: 'check' };
+    if (b.status === 'win') return b.clv != null && b.clv < 0 ? { label: 'Выигрыш против рынка', kind: 'warn', icon: 'alert' } : { label: 'Перевес подтвержден', kind: 'good', icon: 'check' };
     const lost = b.legs.filter(l => l.result === 'loss');
     const against = lost.some(l => legClv(l) != null && legClv(l) < 0);
     return against ? { label: 'Возможна ошибка модели', kind: 'serious', icon: 'alert' } : { label: 'Дисперсия', kind: 'info', icon: 'info' };
@@ -94,7 +94,7 @@
     { id: '7', label: '7 дней', days: 7 },
     { id: '30', label: '30 дней', days: 30 },
     { id: '90', label: '3 месяца', days: 90 },
-    { id: 'all', label: 'Всё время', days: null },
+    { id: 'all', label: 'Все время', days: null },
   ];
   const STATUS_OPTS = [
     { value: 'all', label: 'Все статусы' }, { value: 'open', label: 'В игре' }, { value: 'win', label: 'Выигрыш' },
@@ -109,10 +109,10 @@
   const expanded = new Set();
   let expandInit = false;
   let lastSettled = null; // {id} — ставка, рассчитанная в этой сессии
-  let justSaved = null; // номер ставки, только что сохранённой на экране «Анализ»
+  let justSaved = null; // номер ставки, только что сохраненной на экране «Анализ»
   let ui = null;
 
-  const norm = s => String(s).toLowerCase().replace(/ё/g, 'е');
+  const norm = s => String(s).toLowerCase().replace(/е/g, 'е');
   function matches(b, flt) {
     const p = PERIODS.find(x => x.id === flt.period);
     if (p && p.days && b.date <= addDays(TODAY, -p.days)) return false;
@@ -133,7 +133,7 @@
   function describe(flt) {
     const parts = [];
     const p = PERIODS.find(x => x.id === flt.period);
-    parts.push(p.days ? 'за ' + p.label : 'за всё время');
+    parts.push(p.days ? 'за ' + p.label : 'за все время');
     if (flt.status !== 'all') parts.push(STATUS_OPTS.find(o => o.value === flt.status).label.toLowerCase());
     if (flt.market !== 'all') parts.push(MARKET_OPTS.find(o => o.value === flt.market).label);
     if (flt.surfaces.size) parts.push([...flt.surfaces].map(k => surfLabel(k).toLowerCase()).join(', '));
@@ -415,7 +415,7 @@
       periodSeg(),
       active.length ? h('div', { class: 'bets-active' },
         active.map(([t, drop]) => h('button', { type: 'button', class: 'bets-chipbtn', 'aria-pressed': 'true', 'aria-label': 'Убрать фильтр: ' + t, on: { click: () => { drop(); shown = PAGE; build(); } } }, t, icon('x'))),
-        h('button', { type: 'button', class: 'bets-chipbtn', on: { click: resetFilters } }, 'Сбросить всё')) : null);
+        h('button', { type: 'button', class: 'bets-chipbtn', on: { click: resetFilters } }, 'Сбросить все')) : null);
   }
 
   function filterSheet() {
@@ -443,7 +443,7 @@
       title: 'Фильтры',
       body: [
         h('div', { class: 'field' }, h('div', { class: 'field-label' }, 'Статус'), statusGroup),
-        UI.field({ id: 'bets-sheet-market', label: 'Рынок', options: MARKET_OPTS, value: d.market, hint: 'Ставка попадёт в выборку, если рынок есть хотя бы в одном событии экспресса', attrs: { on: { change: e => { d.market = e.target.value; upd(); } } } }),
+        UI.field({ id: 'bets-sheet-market', label: 'Рынок', options: MARKET_OPTS, value: d.market, hint: 'Ставка попадет в выборку, если рынок есть хотя бы в одном событии экспресса', attrs: { on: { change: e => { d.market = e.target.value; upd(); } } } }),
         h('div', { class: 'field' }, h('div', { class: 'field-label' }, 'Покрытие'), surfGroup, h('div', { class: 'field-hint' }, 'Можно выбрать несколько')),
       ],
       actions: close => [
@@ -484,7 +484,7 @@
       h('div', { class: 'bets-sum-cap' }, h('span', { class: 'eyebrow' }, 'Итоги'), h('span', { class: 'small muted', style: 'min-width:0' }, describe(F)),
         anyActive(F) && !UI.isMobile() ? button('Сбросить фильтры', { kind: 'ghost', size: 'sm', icon: 'x', onClick: resetFilters, attrs: { class: 'btn ghost sm bets-sum-reset' } }) : null),
       h('div', { class: 'bets-sum-grid' },
-        cell('Рассчитано ставок', String(s.n), s.open.length ? ['и ещё ' + s.open.length + ' в игре: ', h('span', { class: 'bets-nw' }, fmt.money(s.openStake))] : 'открытых нет'),
+        cell('Рассчитано ставок', String(s.n), s.open.length ? ['и еще ' + s.open.length + ' в игре: ', h('span', { class: 'bets-nw' }, fmt.money(s.openStake))] : 'открытых нет'),
         cell([h('span', { class: 'bets-l-full' }, 'Выигрыш · проигрыш · возврат'), h('span', { class: 'bets-l-short' }, 'Выигр. · проигр. · возвр.')], s.wins + ' · ' + s.losses + ' · ' + s.voids, s.winrate == null ? 'нет рассчитанных' : 'винрейт ' + fmt.pct(s.winrate), null, wlv),
         cell('Оборот', fmt.money(s.turnover), s.avgStake ? ['в среднем ', h('span', { class: 'bets-nw' }, fmt.money(s.avgStake))] : '—'),
         cell('Прибыль', fmt.signedMoney(s.profit), anyActive(F) ? 'по выбранным ставкам' : ['банк сейчас ', h('span', { class: 'bets-nw' }, fmt.money(S.bank))], toneCls(s.profit)),
@@ -494,18 +494,18 @@
         h('span', null, 'CLV — на сколько ваш кэф выше закрывающего, то есть кэфа перед началом матча. Если CLV стабильно в плюсе, модель находит перевес, даже когда отдельные ставки проигрывают.')));
   }
 
-  // ---------- баннер после расчёта ----------
+  // ---------- баннер после расчета ----------
   function banner() {
     if (!lastSettled) return null;
     const b = D.bets.find(x => x.id === lastSettled.id);
     if (!b) return null;
-    const res = b.status === 'win' ? 'выигрыш ' + fmt.signedMoney(b.profit) : b.status === 'loss' ? 'проигрыш ' + fmt.signedMoney(b.profit) : 'возврат, сумма вернулась на счёт';
+    const res = b.status === 'win' ? 'выигрыш ' + fmt.signedMoney(b.profit) : b.status === 'loss' ? 'проигрыш ' + fmt.signedMoney(b.profit) : 'возврат, сумма вернулась на счет';
     return h('div', { class: 'callout accent bets-banner', role: 'status' }, icon('brain'),
       h('div', { class: 'bets-banner-body' },
         h('div', null, h('b', null, 'Ставка №' + b.id + ' рассчитана: ' + res + '. '), 'Банк — ' + fmt.money(S.bank) + '.'),
         h('div', null, b.status === 'void'
           ? 'Возврат не участвует в обучении и калибровке, разбор не нужен.'
-          : 'ИИ сравнит прогноз с исходом и закрывающей линией. Если ошибка повторяется, предложит урок — в промпт он попадёт только после проверки на 20+ похожих случаях.'),
+          : 'ИИ сравнит прогноз с исходом и закрывающей линией. Если ошибка повторяется, предложит урок — в промпт он попадет только после проверки на 20+ похожих случаях.'),
         h('div', { class: 'row' },
           b.status !== 'void' && button('Посмотреть разбор', { kind: 'secondary', size: 'sm', icon: 'spark', onClick: () => reviewModal(b) }),
           button('Обучение модели', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', href: '#learning' }))),
@@ -526,7 +526,7 @@
     const stake = sum(open, b => b.stake), pay = sum(open, b => Math.round(b.stake * b.total));
     return h('section', { class: 'stack', 'aria-label': 'Ставки в игре' },
       h('div', { class: 'bets-sec-head' }, h('h3', null, 'В игре'), chip(open.length + ' ' + betsWord(open.length), 'info', 'clock'),
-        h('span', { class: 'small muted' }, 'на кону ' + fmt.money(stake) + ' · если всё зайдёт, выплата ' + fmt.money(pay))),
+        h('span', { class: 'small muted' }, 'на кону ' + fmt.money(stake) + ' · если все зайдет, выплата ' + fmt.money(pay))),
       h('div', { class: 'bets-open-grid' }, open.map(openCard)));
   }
 
@@ -552,7 +552,7 @@
         h('div', null, h('dt', null, 'Выплата'), h('dd', null, fmt.money(pay)))),
       h('div', { class: 'bets-open-actions' },
         button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => settleModal(b), attrs: { 'data-settle': String(b.id) } }),
-        // экран «Анализ» показывает только последний анализ — ссылку даём, если ставка сделана по нему
+        // экран «Анализ» показывает только последний анализ — ссылку даем, если ставка сделана по нему
         b.analysis && b.analysis === D.currentAnalysis
           ? button('Анализ', { kind: 'secondary', icon: 'spark', href: '#analysis', title: 'Открыть анализ #' + b.analysis + ', по которому сделана ставка' })
           : button('Почему эта ставка', { kind: 'secondary', icon: 'info', onClick: () => whyModal(b) })));
@@ -581,7 +581,7 @@
           ['Правило суммы', 'кэф ' + band.range + ' → ' + band.pct + ' банка'],
           ['Сумма', fmt.money(b.stake) + ' · ' + fmt.dec(b.stake / bankAt * 100, 2) + '% банка'],
         ]),
-        h('p', { class: 'xsmall muted', style: 'margin:0' }, (runId ? 'Анализ #' + runId + ' · ' + fmt.date(b.date) + ', ' + run.at.slice(11, 16) : 'Анализ ' + fmt.date(b.date)) + ' · пример данных. Полный разбор с факторами в макете есть только для примера Синнер — Руне и Джокович — Рублёв.'),
+        h('p', { class: 'xsmall muted', style: 'margin:0' }, (runId ? 'Анализ #' + runId + ' · ' + fmt.date(b.date) + ', ' + run.at.slice(11, 16) : 'Анализ ' + fmt.date(b.date)) + ' · пример данных. Полный разбор с факторами в макете есть только для примера Синнер — Руне и Джокович — Рублев.'),
       ],
       actions: close => [
         button('Закрыть', { kind: 'secondary', onClick: close }),
@@ -610,7 +610,7 @@
     const months = monthAgg(settled);
     const left = settled.length - page.length;
     const count = h('span', { class: 'small muted' }, 'Показано ' + page.length + ' из ' + settled.length);
-    const more = left > 0 ? button('Показать ещё ' + Math.min(PAGE, left), { kind: 'secondary', size: 'sm', icon: 'chevronDown', onClick: () => { shown += PAGE; refresh(); } }) : null;
+    const more = left > 0 ? button('Показать еще ' + Math.min(PAGE, left), { kind: 'secondary', size: 'sm', icon: 'chevronDown', onClick: () => { shown += PAGE; refresh(); } }) : null;
     if (mobile) {
       return h('section', { class: 'stack', 'aria-label': 'История ставок' },
         h('div', { class: 'bets-sec-head' }, h('h3', null, 'История'), h('span', { class: 'small muted' }, settled.length + ' ' + plural(settled.length, 'рассчитанная ставка', 'рассчитанные ставки', 'рассчитанных ставок') + ' · сначала новые')),
@@ -681,7 +681,7 @@
   function legsTable(b) {
     const th = (t, cls, title) => h('th', { class: cls, title }, t);
     return h('div', { class: 'table-wrap' }, h('table', { class: 'table bets-legtable' },
-      h('thead', null, h('tr', null, th('Событие'), th('Счёт', 'c'), th('Кэф', 'r'), th('Закрытие', 'r', 'Кэф перед началом матча'), th('CLV', 'r'), th('ИИ', 'r', 'Вероятность исхода по оценке ИИ'), th('По кэфу', 'r', 'Вероятность по кэфу: 1 / кэф'), th('Разница', 'r', 'ИИ − по кэфу, п.п.'), th('Итог'))),
+      h('thead', null, h('tr', null, th('Событие'), th('Счет', 'c'), th('Кэф', 'r'), th('Закрытие', 'r', 'Кэф перед началом матча'), th('CLV', 'r'), th('ИИ', 'r', 'Вероятность исхода по оценке ИИ'), th('По кэфу', 'r', 'Вероятность по кэфу: 1 / кэф'), th('Разница', 'r', 'ИИ − по кэфу, п.п.'), th('Итог'))),
       h('tbody', null, b.legs.map((l, i) => {
         const implied = 1 / l.odds, edge = (l.p - implied) * 100, clv = legClv(l), sc = legScore(b, l, i);
         return h('tr', null,
@@ -730,9 +730,9 @@
       h('div', { class: 'bets-detail-main' },
         h('div', { class: 'bets-detail-cap' }, h('h4', null, 'События ставки'), h('span', { class: 'xsmall muted' }, 'Разница = вероятность ИИ − вероятность по кэфу, п.п. CLV = кэф ÷ закрывающий − 1.')),
         legsTable(b),
-        b.status === 'void' && h('div', { class: 'bets-detail-note' }, UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счёт. В калибровке и обучении не учитывается.'))),
+        b.status === 'void' && h('div', { class: 'bets-detail-note' }, UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счет. В калибровке и обучении не учитывается.'))),
       h('div', { class: 'bets-detail-bottom' },
-        h('div', { class: 'bets-detail-box' }, h('span', { class: 'eyebrow' }, 'Расчёт'), kvGrid(b)),
+        h('div', { class: 'bets-detail-box' }, h('span', { class: 'eyebrow' }, 'Расчет'), kvGrid(b)),
         h('div', { class: 'bets-detail-box' },
           h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Разбор ИИ'), verdictChip(b)),
           h('p', null, reviewNext(b)),
@@ -789,7 +789,7 @@
               h('div', { class: 'bets-dleg-head' }, resIcon(legRes(b, l)),
                 h('div', { style: 'min-width:0;flex:1' },
                   h('div', { class: 'bets-dleg-match' }, plink(l.p1), ' — ', plink(l.p2)),
-                  h('div', { class: 'xsmall muted' }, l.marketLabel + ' · ' + l.tournament + (sc ? ' · счёт ' + sc : ''))),
+                  h('div', { class: 'xsmall muted' }, l.marketLabel + ' · ' + l.tournament + (sc ? ' · счет ' + sc : ''))),
                 h('span', { class: 'odds' }, fmt.odds(l.odds))),
               h('dl', { class: 'bets-dleg-grid' },
                 h('div', null, h('dt', null, 'Закрытие'), h('dd', { class: 'odds' }, l.closing ? fmt.odds(l.closing) : '—')),
@@ -797,7 +797,7 @@
                 h('div', null, h('dt', null, 'ИИ'), h('dd', null, fmt.prob(l.p))),
                 h('div', null, h('dt', null, 'По кэфу'), h('dd', null, fmt.prob(1 / l.odds)))));
           }),
-          b.status === 'void' && UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счёт.'),
+          b.status === 'void' && UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счет.'),
           b.status === 'open'
             ? UI.kv([['Букмекер', b.bookmaker], ['Итоговый кэф', h('span', { class: 'odds' }, fmt.odds(b.total))], ['Выплата при выигрыше', fmt.money(Math.round(b.stake * b.total))]])
             : betKv(b),
@@ -814,7 +814,7 @@
     if (b.status === 'void') return 'Возврат не участвует в калибровке и обучении.';
     if (b.status === 'open') return 'Разбор появится после внесения результата.';
     if (b.status === 'win') return v.kind === 'good' ? 'Урок не нужен: перевес модели подтвердили и результат, и закрывающая линия.' : 'Выигрыш не засчитан как подтверждение: на дистанции ставки с отрицательным CLV теряют деньги. Рынок отмечен для наблюдения.';
-    return v.kind === 'info' ? 'Урок не нужен: ошибки в оценке не найдено, проигрыш в пределах дисперсии. Ставка учтена в калибровке модели.' : 'Рынок не согласился с моделью. Предложена гипотеза для раздела «Обучение модели» — в промпт она попадёт, только если подтвердится на 20 и более похожих случаях.';
+    return v.kind === 'info' ? 'Урок не нужен: ошибки в оценке не найдено, проигрыш в пределах дисперсии. Ставка учтена в калибровке модели.' : 'Рынок не согласился с моделью. Предложена гипотеза для раздела «Обучение модели» — в промпт она попадет, только если подтвердится на 20 и более похожих случаях.';
   }
 
   // ---------- разбор ставки ИИ (пример) ----------
@@ -826,10 +826,10 @@
       let text;
       if (r === 'win') {
         text = [' — зашло' + (sc ? ' (' + sc + ')' : '') + '. ИИ ' + fmt.prob(l.p) + ', по кэфу ' + fmt.prob(1 / l.odds) + '. ',
-          clv == null ? 'Закрывающий кэф не внесён — CLV не посчитать.' : clv >= 0 ? 'Кэф к старту упал до ' + fmt.odds(l.closing) + ' (CLV ' + fmt.signedPct(clv) + ') — рынок согласился с оценкой.' : 'Кэф к старту вырос до ' + fmt.odds(l.closing) + ' (CLV ' + fmt.signedPct(clv) + '): рынок был против, выигрыш скорее удачный.'];
+          clv == null ? 'Закрывающий кэф не внесен — CLV не посчитать.' : clv >= 0 ? 'Кэф к старту упал до ' + fmt.odds(l.closing) + ' (CLV ' + fmt.signedPct(clv) + ') — рынок согласился с оценкой.' : 'Кэф к старту вырос до ' + fmt.odds(l.closing) + ' (CLV ' + fmt.signedPct(clv) + '): рынок был против, выигрыш скорее удачный.'];
       } else if (r === 'loss') {
         text = [' — не зашло' + (sc ? ' (' + sc + ')' : '') + '. ИИ давал ' + fmt.prob(l.p) + ', по кэфу ' + fmt.prob(1 / l.odds) + '. ',
-          clv == null ? 'Закрывающий кэф не внесён, поэтому отличить невезение от ошибки сложнее.'
+          clv == null ? 'Закрывающий кэф не внесен, поэтому отличить невезение от ошибки сложнее.'
             : clv >= 0 ? 'К старту кэф упал до ' + fmt.odds(l.closing) + ' — рынок согласился с нами. Такой исход ожидаем примерно в ' + fmt.prob(1 - l.p) + ' случаев: это дисперсия.'
               : 'К старту кэф вырос до ' + fmt.odds(l.closing) + ' — рынок оценил шансы ниже модели. Проверяю, что могло быть упущено: усталость после прошлого матча, новости, статистика на покрытии.',
           l.market === 'h1m' ? ' Похоже на урок L-014 (фора −1.5 срезается тай-брейками) — случай добавлен в его доказательную базу.' : ''];
@@ -879,7 +879,7 @@
       const complete = st.every(s => s.result);
       const cell = (label, value, note) => h('div', null, h('dt', null, label), h('dd', null, value), note && h('small', null, note));
       sumHost.appendChild(h('dl', { class: 'bets-ssum', style: 'margin:0' },
-        cell('Итог ставки', o ? UI.statusChip(o.status) : h('span', { class: 'muted' }, 'ждём исходы')),
+        cell('Итог ставки', o ? UI.statusChip(o.status) : h('span', { class: 'muted' }, 'ждем исходы')),
         cell('Выплата', o ? fmt.money(o.payout) : '—', o && o.eff && o.eff !== b.total ? 'кэф пересчитан: ' + fmt.odds(o.eff) : 'кэф ' + fmt.odds(b.total)),
         cell('Прибыль', o ? h('span', { class: toneCls(o.profit) }, fmt.signedMoney(o.profit)) : '—'),
         cell('Банк после', o ? fmt.money(S.bank + o.profit) : '—', 'сейчас ' + fmt.money(S.bank))));
@@ -902,14 +902,14 @@
       const checkConflict = () => {
         const sc = s.score && parseScore(s.score);
         const fromScore = sc ? resultFromScore(l.market, sc[0], sc[1]) : null;
-        if (s.auto) { autoNote.hidden = false; autoNote.className = 'field-hint bets-auto'; autoNote.textContent = 'Отметили по счёту — можно поправить'; }
-        else if (fromScore && s.result && fromScore !== s.result) { autoNote.hidden = false; autoNote.className = 'field-hint bets-auto warn'; autoNote.textContent = 'По счёту ставка ' + RES_WORD[fromScore] + ' — проверьте, что выбрано верно'; }
+        if (s.auto) { autoNote.hidden = false; autoNote.className = 'field-hint bets-auto'; autoNote.textContent = 'Отметили по счету — можно поправить'; }
+        else if (fromScore && s.result && fromScore !== s.result) { autoNote.hidden = false; autoNote.className = 'field-hint bets-auto warn'; autoNote.textContent = 'По счету ставка ' + RES_WORD[fromScore] + ' — проверьте, что выбрано верно'; }
         else autoNote.hidden = true;
       };
       const seg = h('div', { class: 'bets-resseg', role: 'group', 'aria-label': 'Исход ставки на матч ' + D.match(l) },
         RES_OPTS.map(o => (btns[o.id] = h('button', { type: 'button', class: o.id, 'aria-pressed': 'false', on: { click: () => setRes(o.id, false) } }, icon(o.icon), o.label))));
 
-      const scoreF = UI.field({ id: formId + '-score-' + i, label: 'Счёт по сетам', placeholder: '2:0', hint: 'первым — ' + pname(l.p1), attrs: { autocomplete: 'off', maxlength: '5' } });
+      const scoreF = UI.field({ id: formId + '-score-' + i, label: 'Счет по сетам', placeholder: '2:0', hint: 'первым — ' + pname(l.p1), attrs: { autocomplete: 'off', maxlength: '5' } });
       const scoreIn = scoreF.querySelector('input'), scoreHint = scoreF.querySelector('.field-hint');
       scoreIn.classList.add('mono');
       scoreIn.addEventListener('input', () => {
@@ -973,7 +973,7 @@
           h('div', { class: 'bets-settle-intro' }, UI.statusChip('open'), h('span', null, betKindLong(b) + ' · ' + b.bookmaker + ' · сумма ' + fmt.money(b.stake) + ' · кэф ', h('span', { class: 'odds' }, fmt.odds(b.total)))),
           b.legs.map(legBlock),
           sumHost,
-          UI.callout('accent', 'brain', h('b', null, 'После расчёта модель разберёт ошибки и предложит урок. '), 'Она сравнит свою вероятность с исходом и закрывающей линией. Закрывающий кэф можно не вносить, но без него CLV не посчитать и отличить невезение от ошибки сложнее.'));
+          UI.callout('accent', 'brain', h('b', null, 'После расчета модель разберет ошибки и предложит урок. '), 'Она сравнит свою вероятность с исходом и закрывающей линией. Закрывающий кэф можно не вносить, но без него CLV не посчитать и отличить невезение от ошибки сложнее.'));
         drawSum();
         return form;
       },

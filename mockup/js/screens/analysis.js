@@ -1,7 +1,7 @@
 /* Анализ #A-0142: ход анализа по шагам (в макете ускорен до ~5 с), затем результат —
    карточки матчей (сравнение игроков, вероятности по рынкам, факторы), экспресс с суммой по стратегии,
-   «Почему так» и строка расходов. Состояние живёт в памяти модуля: смена темы или ширины экрана
-   продолжает анимацию с того же места, а повторный запуск идёт только при переходе из «Нового анализа». */
+   «Почему так» и строка расходов. Состояние живет в памяти модуля: смена темы или ширины экрана
+   продолжает анимацию с того же места, а повторный запуск идет только при переходе из «Нового анализа». */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
@@ -39,7 +39,7 @@
         { label: 'Форма, 10 матчей', form: true, better: 'l' },
         { label: 'Матчей за 14 дней', l: '3', ls: 'Пекин — 1 (снялся), Шанхай — 2', r: '4', rs: 'Токио — 2, Шанхай — 2', rsWarn: true, better: 'l' },
         { label: 'Очки на 1-й подаче', l: D.P.sinner.serve.firstWon + '%', r: D.P.rune.serve.firstWon + '%', better: 'l' },
-        { label: 'Выиграно на приёме', l: '42%', r: '38%', better: 'l' },
+        { label: 'Выиграно на приеме', l: '42%', r: '38%', better: 'l' },
         { label: 'Тай-брейки, 52 недели', l: '21–9', ls: '70%', r: '10–12', rs: '45%', better: 'l' },
         { label: 'Личные встречи', l: '3', ls: 'на харде 2–0', r: '1', better: 'l' },
       ],
@@ -57,7 +57,7 @@
     {
       id: 'm2', a: 'djokovic', b: 'rublev', pick: 'p1', conf: 'high',
       confNote: 'Все данные свежие, источники согласуются',
-      fresh: 'Джокович — сегодня 02:30 · Рублёв — 6 окт 21:50',
+      fresh: 'Джокович — сегодня 02:30 · Рублев — 6 окт 21:50',
       probs: { p1: [0.78, 0.79], h1m: [0.50, 0.54] },
       // цифры совпадают с карточками игроков (#player-djokovic, #player-rublev)
       cmp: [
@@ -65,18 +65,18 @@
         { label: 'Форма, 10 матчей', form: true, better: 'l' },
         { label: 'Матчей за 14 дней', l: '2', ls: 'Шанхай — 2', r: '3', rs: 'Токио — 1, Шанхай — 2', better: 'l' },
         { label: 'Очки на 1-й подаче', l: D.P.djokovic.serve.firstWon + '%', r: D.P.rublev.serve.firstWon + '%', better: 'l' },
-        { label: 'Выиграно на приёме', l: '43%', r: '37%', better: 'l' },
+        { label: 'Выиграно на приеме', l: '43%', r: '37%', better: 'l' },
         { label: 'Тай-брейки, 52 недели', l: '13–8', ls: '62%', r: '10–13', rs: '43%', better: 'l' },
         { label: 'Личные встречи', l: '4', ls: 'на харде 2–1', r: '1', better: 'l' },
       ],
       pro: [
         { t: 'Личные встречи 4–1, на харде 2–1', src: 'база матчей (архив ATP)' },
-        { t: 'Лучший приём в туре: 43% выигранных очков на приёме против 37% у Рублёва', src: 'база матчей (архив ATP)' },
-        { t: 'Против топ-10 за 52 недели у Рублёва 4–11 (27%), у Джоковича 7–7', src: 'база матчей (архив ATP)' },
+        { t: 'Лучший прием в туре: 43% выигранных очков на приеме против 37% у Рублева', src: 'база матчей (архив ATP)' },
+        { t: 'Против топ-10 за 52 недели у Рублева 4–11 (27%), у Джоковича 7–7', src: 'база матчей (архив ATP)' },
       ],
       con: [
-        { t: 'Джоковичу 39; в 1/32 (4 окт) он провёл на корте 2 ч 38 мин в трёх сетах, а на следующий день сыграл ещё матч', src: 'база матчей (архив ATP), 4–5 окт' },
-        { t: 'Рублёв выиграл оба матча в Шанхае без потери сета: у Бублика (№18) — два тай-брейка, у Корды (№31) — 6:2 6:4', src: 'база матчей (архив ATP), 4–5 окт' },
+        { t: 'Джоковичу 39; в 1/32 (4 окт) он провел на корте 2 ч 38 мин в трех сетах, а на следующий день сыграл еще матч', src: 'база матчей (архив ATP), 4–5 окт' },
+        { t: 'Рублев выиграл оба матча в Шанхае без потери сета: у Бублика (№18) — два тай-брейка, у Корды (№31) — 6:2 6:4', src: 'база матчей (архив ATP), 4–5 окт' },
       ],
     },
   ];
@@ -87,7 +87,7 @@
   const MK = {
     p1: { label: 'П1', desc: m => m.A.short + ' выигрывает матч', who: 'A' },
     h1m: { label: 'Ф1(−1.5)', desc: m => m.A.short + ' выигрывает 2:0', who: 'A' },
-    h2p: { label: 'Ф2(+1.5)', desc: m => m.B.short + ' берёт хотя бы сет', who: 'B' },
+    h2p: { label: 'Ф2(+1.5)', desc: m => m.B.short + ' берет хотя бы сет', who: 'B' },
     p2: { label: 'П2', desc: m => m.B.short + ' выигрывает матч', who: 'B' },
   };
   const PAIR = { p1: 'p2', p2: 'p1', h1m: 'h2p', h2p: 'h1m' };
@@ -120,7 +120,7 @@
     return 'Проходит правила, но ' + pick.name + ' выгоднее';
   }
 
-  // ---------- запрос с экрана «Новый анализ» и всё, что от него зависит ----------
+  // ---------- запрос с экрана «Новый анализ» и все, что от него зависит ----------
   // DATA.pendingAnalysis: события, режим, модель, кэфы, банк, букмекер, оценка цены. Без него (прямая ссылка) — пример как есть.
   let REQ, MODE, BK, BANK, FOREIGN, ODDS_EDITED, RUNE_NEW, EST, ID;
   let STEPS, TOTAL_MS, TOTAL, NO_AI, MODELS;
@@ -151,34 +151,34 @@
     return [
       { title: 'Разбор событий', model: 'Haiku 4.5', sec: 3, tokens: 2400, cost: 0.004, dur: 450,
         detail: '2 матча, 8 рынков, кэфы ' + BK + (ODDS_EDITED ? ' с вашими правками' : ' на 09:39'),
-        live: ['Синнер — Руне: П1/П2 и фора ±1.5', 'Джокович — Рублёв: П1/П2 и фора ±1.5'] },
+        live: ['Синнер — Руне: П1/П2 и фора ±1.5', 'Джокович — Рублев: П1/П2 и фора ±1.5'] },
       RUNE_NEW
         ? { title: 'Проверка базы игроков', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
-          detail: 'Синнер, Джокович, Рублёв — досье свежие · Руне — есть только архив ATP, досье нет',
-          live: ['Синнер, Джокович, Рублёв — досье свежие', 'Руне — только архив ATP, нужно досье'] }
+          detail: 'Синнер, Джокович, Рублев — досье свежие · Руне — есть только архив ATP, досье нет',
+          live: ['Синнер, Джокович, Рублев — досье свежие', 'Руне — только архив ATP, нужно досье'] }
         : { title: 'Проверка базы игроков', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
-          detail: 'Досье всех четырёх игроков свежие · Руне собран ' + runeAt,
-          live: ['Синнер, Джокович, Рублёв — досье свежие', 'Руне — досье собрано ' + runeAt] },
+          detail: 'Досье всех четырех игроков свежие · Руне собран ' + runeAt,
+          live: ['Синнер, Джокович, Рублев — досье свежие', 'Руне — досье собрано ' + runeAt] },
       RUNE_NEW
         ? { title: 'Досье Руне: архив ATP и новости', model: 'Sonnet 5.5 + поиск', sec: 34, tokens: 9800, cost: 0.056, searches: 3, dur: 1100,
-          detail: 'Матчи, подача, приём и тай-брейки за 52 недели — из архива ATP в базе, считает код · новости — 3 запроса (atptour.com, tennis.com), effort low',
+          detail: 'Матчи, подача, прием и тай-брейки за 52 недели — из архива ATP в базе, считает код · новости — 3 запроса (atptour.com, tennis.com), effort low',
           live: ['Архив ATP в базе: 64 матча за 2 сезона, статистика без ИИ', 'atptour.com — 5 окт: 1/16 финала, 4:6 6:3 6:4 с Тиафо', 'Слух о плече из соцсетей без подтверждения — по L-019 не учитываем'] }
         : { title: 'Досье Руне — из базы', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
           detail: 'Собрано ' + runeAt + ' — повторный сбор и поиск не нужны',
           live: ['Досье Руне из базы', 'Слух о плече без подтверждения — по L-019 не учитываем'] },
       MODE.news
-        ? { title: 'Новости Синнера, Джоковича, Рублёва', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
+        ? { title: 'Новости Синнера, Джоковича, Рублева', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
           detail: 'Из кэша: обновлены ночью, моложе 12 ч — повторный поиск не нужен · матчи 1/16 финала (5 окт) уже в базе',
-          live: ['Синнер — 04:10, Джокович — 02:30, Рублёв — 21:50', 'Новых травм и снятий нет'] }
+          live: ['Синнер — 04:10, Джокович — 02:30, Рублев — 21:50', 'Новых травм и снятий нет'] }
         : { title: 'Новости: в этом режиме не ищем', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
-          detail: 'Режим «' + MODE.label + '» свежие новости не ищет — берём то, что уже есть в досье (Синнер — 04:10, Джокович — 02:30, Рублёв — 6 окт 21:50)',
-          live: ['Новости из сохранённых досье', 'Свежий поиск пропущен — так дешевле, но можно пропустить снятие'] },
-      { title: 'Расчёт ML-модели: Эло по покрытию, подача/приём, нагрузка', model: null, sec: 2, tokens: 0, cost: 0, dur: 350,
+          detail: 'Режим «' + MODE.label + '» свежие новости не ищет — берем то, что уже есть в досье (Синнер — 04:10, Джокович — 02:30, Рублев — 6 окт 21:50)',
+          live: ['Новости из сохраненных досье', 'Свежий поиск пропущен — так дешевле, но можно пропустить снятие'] },
+      { title: 'Расчет ML-модели: Эло по покрытию, подача/прием, нагрузка', model: null, sec: 2, tokens: 0, cost: 0, dur: 350,
         detail: 'Вероятности по 8 рынкам · формула, без ИИ',
-        live: ['Эло на харде и форма за 10 матчей', 'Подача/приём, нагрузка за 14 дней'] },
+        live: ['Эло на харде и форма за 10 матчей', 'Подача/прием, нагрузка за 14 дней'] },
       { title: 'Анализ Claude: корректировка вероятностей', model: MODE.model, sec: MODE.sec, tokens: AI.input + AI.output, cost: aCost, dur: 1500,
         detail: adj(m1, 'h1m', '2:0') + ', ' + adj(m2, 'p1', 'П1') + ' · 3 вызова без веб-поиска, вызовы 2–3 берут ' + CACHE_SHARE + '% входа из кэша',
-        live: ['Читает досье 4 игроков и 5 уроков', MODE.news ? 'Сверяет новости с уроками L-014 и L-019' : 'Сверяет сохранённые досье с уроками L-014 и L-019', 'Поправки: ' + m1.A.short + ' 2:0 ' + ppDelta(m1.pickRow.claude - m1.pickRow.model) + ', ' + m2.A.short + ' П1 ' + ppDelta(m2.pickRow.claude - m2.pickRow.model)] },
+        live: ['Читает досье 4 игроков и 5 уроков', MODE.news ? 'Сверяет новости с уроками L-014 и L-019' : 'Сверяет сохраненные досье с уроками L-014 и L-019', 'Поправки: ' + m1.A.short + ' 2:0 ' + ppDelta(m1.pickRow.claude - m1.pickRow.model) + ', ' + m2.A.short + ' П1 ' + ppDelta(m2.pickRow.claude - m2.pickRow.model)] },
       { title: 'Подбор экспресса по стратегии', model: null, sec: 3, tokens: 0, cost: 0, dur: 600,
         detail: 'Стратегия ' + STRAT_V + ' · отобраны 2 события из 8 рынков · сумма по таблице банка',
         live: ['Фильтр: p ≥ ' + STRAT.minProb + '%, кэф ' + fmt.odds(STRAT.oddsMin) + '–' + fmt.odds(STRAT.oddsMax), 'Итоговый кэф и сумма от банка'] },
@@ -206,7 +206,7 @@
       m.pickRow = m.rows.find(r => r.pick);
       m.rows.forEach(r => { r.note = noteFor(r); });
     });
-    MX[0].confNote = (RUNE_NEW ? 'Досье Руне собрано только в этом анализе' : 'Досье Руне собрано сегодня') + '; слух о плече не подтверждён';
+    MX[0].confNote = (RUNE_NEW ? 'Досье Руне собрано только в этом анализе' : 'Досье Руне собрано сегодня') + '; слух о плече не подтвержден';
     MX[0].fresh = 'Синнер — сегодня 04:10 · Руне — ' + (RUNE_NEW ? 'собран в этом анализе' : 'собран ' + (D.P.rune.updated && D.P.rune.updated.slice(0, 10) === TODAY ? 'сегодня ' + D.P.rune.updated.slice(11, 16) : 'ранее'));
     FOREIGN = !!REQ && !(evs.length === MX.length && MX.every(m => m.entered));
     ODDS_EDITED = MX.some(m => m.entered && m.rows.some(r => r.edited));
@@ -237,7 +237,7 @@
   // ---------- состояние ----------
   const RUN = { startedAt: null, done: false, focusResult: false, runeMarked: false };
   const ST = { stake: null, decision: null, betId: null, whyOpen: null, stepsOpen: false, calcOpen: false, exampleAck: false, tab: { m1: 'probs', m2: 'probs' } };
-  // Новый запуск — когда с экрана «Новый анализ» пришёл новый запрос; возврат из «Ставок» показывает готовый результат
+  // Новый запуск — когда с экрана «Новый анализ» пришел новый запрос; возврат из «Ставок» показывает готовый результат
   function resetRun() {
     RUN.startedAt = null; RUN.done = false;
     ST.decision = null; ST.stake = null; ST.betId = null; ST.exampleAck = false;
@@ -328,8 +328,8 @@
     @keyframes analysis-in { from { opacity: 0; transform: translateY(6px); } }
     .analysis-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
     @media (max-width: 1180px) { .analysis-result { grid-template-columns: minmax(0, 1fr); } .analysis-side { order: -1; } }
-    /* решение остаётся на виду, пока читаете оба матча */
-    /* только когда карточка целиком помещается в экран: при раскрытом расчёте суммы она выше — тогда обычная прокрутка */
+    /* решение остается на виду, пока читаете оба матча */
+    /* только когда карточка целиком помещается в экран: при раскрытом расчете суммы она выше — тогда обычная прокрутка */
     @media (min-width: 1181px) and (min-height: 880px) { .analysis-side:not(.is-calc-open) { position: sticky; top: calc(var(--topbar-h) + 16px); } }
 
     /* карточка матча */
@@ -502,12 +502,12 @@
   // ---------- шапка экрана ----------
   function modeChip() {
     const c = chip('Режим «' + MODE.label + '» · ' + MODE.model, MODE.id === 'precise' ? 'outline' : 'warn', MODE.id === 'precise' ? 'spark' : 'alert');
-    c.title = MODE.id === 'precise' ? 'Режим для решения о ставке' : MODE.id === 'eco' ? 'Черновая оценка — не для решения о ставке' : 'Качество режима на eval-наборе ещё не проверено';
+    c.title = MODE.id === 'precise' ? 'Режим для решения о ставке' : MODE.id === 'eco' ? 'Черновая оценка — не для решения о ставке' : 'Качество режима на eval-наборе еще не проверено';
     return c;
   }
   function headBlock(done) {
     const tm = MX[0].info;
-    const how = MODE.news ? 'Claude поправил их по свежим новостям' : 'Claude (' + MODE.model + ') поправил их по сохранённым досье, без поиска свежих новостей';
+    const how = MODE.news ? 'Claude поправил их по свежим новостям' : 'Claude (' + MODE.model + ') поправил их по сохраненным досье, без поиска свежих новостей';
     return h('div', { class: 'page-head analysis-head' },
       h('div', null,
         h('div', { class: 'analysis-eyebrow' }, h('span', { class: 'eyebrow' }, fmt.dateFull(TODAY) + ' · ' + tm.tournament + ' · ' + tm.category), UI.surfaceChip('hard'), modeChip()),
@@ -516,7 +516,7 @@
           : (FOREIGN ? 'Пример: анализ ' + MX.length + ' ' + fmt.plural(MX.length, 'матча', 'матчей', 'матчей') : 'Анализирую ' + MX.length + ' ' + fmt.plural(MX.length, 'матч', 'матча', 'матчей'))),
         h('p', { class: 'lead' }, done
           ? 'ML-модель посчитала вероятности, ' + how + ', стратегия ' + STRAT_V + ' отобрала рынки и сумму. Решение — за вами.'
-          : 'Шаги идут по порядку: сначала дешёвые проверки и формулы, дорогая модель — только там, где она нужна.')),
+          : 'Шаги идут по порядку: сначала дешевые проверки и формулы, дорогая модель — только там, где она нужна.')),
       button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new' }));
   }
 
@@ -581,7 +581,7 @@
     if (EST == null) return '';
     const d = TOTAL.cost - EST;
     if (Math.abs(d) < 0.01) return 'Совпало с оценкой';
-    return d < 0 ? (MODE.news ? 'Дешевле оценки: новости Синнера, Джоковича и Рублёва взяты из кэша' : 'Дешевле оценки: вывод модели получился короче среднего') : 'Дороже оценки: досье нового игрока потребовало больше текста';
+    return d < 0 ? (MODE.news ? 'Дешевле оценки: новости Синнера, Джоковича и Рублева взяты из кэша' : 'Дешевле оценки: вывод модели получился короче среднего') : 'Дороже оценки: досье нового игрока потребовало больше текста';
   }
 
   function progressRunning(root) {
@@ -772,14 +772,14 @@
 
   // ---------- экспресс ----------
   function stakePct(v) { return v / BANK * 100; }
-  // доля банка для показа: если сумма — округлённый шаг стратегии (1 080 ₽ = 2,25%), показываем шаг, а не 2,24% после округления
+  // доля банка для показа: если сумма — округленный шаг стратегии (1 080 ₽ = 2,25%), показываем шаг, а не 2,24% после округления
   // доли банка в окне суммы: рекомендованная по таблице стратегии всегда среди вариантов
   const presets = () => [...new Set([1.5, 2, BASE_PCT || 2.25, 2.5, 3])].sort((a, b) => a - b);
   function sharePct(v) { const pre = presets().find(p => round10(BANK * p / 100) === v); return pctTxt(pre != null ? pre : Math.round(stakePct(v) * 100) / 100); }
   function expressCard(root) {
     const s = stake(), payout = Math.round(s * TOTAL_ODDS);
     const custom = ST.stake != null && ST.stake !== REC_STAKE;
-    const statusChip = ST.decision === 'saved' ? chip('Ставка сохранена', 'good', 'check') : ST.decision === 'skipped' ? chip('Без ставки', 'outline', 'x') : chip('Ждёт решения', 'info', 'clock');
+    const statusChip = ST.decision === 'saved' ? chip('Ставка сохранена', 'good', 'check') : ST.decision === 'skipped' ? chip('Без ставки', 'outline', 'x') : chip('Ждет решения', 'info', 'clock');
 
     const legs = h('div', { class: 'analysis-legs' }, MX.map(m => {
       const r = m.pickRow;
@@ -804,7 +804,7 @@
     const lastTxt = LAST ? (LAST.status === 'win' ? 'выиграна' : LAST.status === 'loss' ? 'проиграна' : 'возврат') : '—';
     const adapt = UI.callout('accent', 'history',
       h('b', null, 'Адаптация: '), 'последняя ставка ' + lastTxt + ' (№' + LAST.id + ', ' + fmt.date(LAST.date) + ', ' + fmt.signedMoney(LAST.profit) + ') → без изменений. ',
-      STREAK.type === 'win' ? 'Серия побед ' + STREAK.n + ' из 3 нужных для +20%.' : STREAK.type === 'loss' ? 'Поражений подряд ' + STREAK.n + ' из 3 — после трёх сумма −40%.' : '');
+      STREAK.type === 'win' ? 'Серия побед ' + STREAK.n + ' из 3 нужных для +20%.' : STREAK.type === 'loss' ? 'Поражений подряд ' + STREAK.n + ' из 3 — после трех сумма −40%.' : '');
 
     const calc = h('dl', { class: 'analysis-calc' },
       h('dt', null, BANK !== D.stats.bank ? 'Банк из вашего ввода' : 'Банк сейчас'), h('dd', null, fmt.money(BANK)),
@@ -814,7 +814,7 @@
       h('dt', null, 'Валуй ног (' + MX.map(m => fmt.signedPct(m.pickRow.value * 100, 1)).join(', ') + ')'), h('dd', null, 'без поправки'),
       h('dt', null, 'Адаптация по истории'), h('dd', null, 'без изменений'),
       h('dt', { class: 'is-sum' }, nw(fmt.money(BANK) + ' × ' + pctTxt(BASE_PCT)), ' = ', nw(fmt.money(BANK * BASE_PCT / 100)), ', ', nw('округление до 10 ₽')), h('dd', { class: 'is-sum' }, fmt.money(REC_STAKE)));
-    // расчёт суммы свёрнут: карточка решения короче и целиком видна рядом с матчами
+    // расчет суммы свернут: карточка решения короче и целиком видна рядом с матчами
     const calcBox = h('div', { class: 'stack analysis-calc-box', id: 'analysis-calc', style: 'gap:10px', hidden: !ST.calcOpen }, calc, adapt);
     const calcToggle = button('Как посчитана сумма', { kind: 'ghost', size: 'sm', icon: 'info', iconRight: 'chevronDown', attrs: { 'aria-expanded': String(ST.calcOpen), 'aria-controls': 'analysis-calc' }, onClick: () => {
       ST.calcOpen = !ST.calcOpen; calcBox.hidden = !ST.calcOpen; calcToggle.setAttribute('aria-expanded', String(ST.calcOpen));
@@ -826,24 +826,24 @@
       h('div', { style: 'min-width:0' },
         h('div', { class: 'eyebrow' }, custom ? 'Сумма · изменена вручную' : 'Рекомендуемая сумма'),
         h('div', { class: 'analysis-stake-value' }, s ? fmt.money(s) : '—'),
-        h('div', { class: 'small muted' }, s ? (custom ? sharePct(s) : pctTxt(BASE_PCT)) + ' банка · при выигрыше ' + fmt.money(payout) + ' (' + fmt.signedMoney(payout - s) + ')' : 'Стратегия не даёт суммы: экспресс вне её правил')),
+        h('div', { class: 'small muted' }, s ? (custom ? sharePct(s) : pctTxt(BASE_PCT)) + ' банка · при выигрыше ' + fmt.money(payout) + ' (' + fmt.signedMoney(payout - s) + ')' : 'Стратегия не дает суммы: экспресс вне ее правил')),
       custom && REC_STAKE > 0 && button('Вернуть ' + fmt.money(REC_STAKE), { kind: 'ghost', size: 'sm', icon: 'refresh', onClick: () => { ST.stake = null; draw(root); UI.toast('Сумма возвращена к рекомендованной: ' + fmt.money(REC_STAKE), 'refresh'); } }));
 
     let foot;
     if (ST.decision === 'saved') {
       foot = h('div', { class: 'stack', style: 'width:100%;gap:10px' },
-        UI.callout('good', 'check', 'Ставка №' + ST.betId + ' в игре: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(TOTAL_ODDS) + '. Результат внесёте после матчей — модель сверит прогноз.'),
+        UI.callout('good', 'check', 'Ставка №' + ST.betId + ' в игре: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(TOTAL_ODDS) + '. Результат внесете после матчей — модель сверит прогноз.'),
         h('div', { class: 'analysis-actions' }, button('Открыть в ставках', { kind: 'primary', icon: 'ticket', href: '#bets' })));
     } else if (ST.decision === 'skipped') {
       foot = h('div', { class: 'stack', style: 'width:100%;gap:10px' },
-        UI.callout('', 'info', 'Анализ сохранён без ставки. Модель всё равно сверит свои вероятности с итогами матчей — так растёт выборка для калибровки.'),
+        UI.callout('', 'info', 'Анализ сохранен без ставки. Модель все равно сверит свои вероятности с итогами матчей — так растет выборка для калибровки.'),
         h('div', { class: 'analysis-actions' },
-          button('Всё-таки поставить', { kind: 'primary', icon: 'ticket', onClick: () => { ST.decision = null; logDecision(null); draw(root); } })));
+          button('Все-таки поставить', { kind: 'primary', icon: 'ticket', onClick: () => { ST.decision = null; logDecision(null); draw(root); } })));
     } else {
       foot = h('div', { class: 'analysis-actions' },
         button('Сохранить ставку', { kind: 'primary', icon: 'check', onClick: () => saveBet(root) }),
         button('Изменить сумму', { kind: 'secondary', icon: 'edit', onClick: () => stakeModal(root) }),
-        button('Не ставить', { kind: 'ghost', icon: 'x', onClick: () => { ST.decision = 'skipped'; logDecision('skip'); draw(root); UI.toast('Анализ #' + ID + ' сохранён без ставки', 'check'); } }));
+        button('Не ставить', { kind: 'ghost', icon: 'x', onClick: () => { ST.decision = 'skipped'; logDecision('skip'); draw(root); UI.toast('Анализ #' + ID + ' сохранен без ставки', 'check'); } }));
     }
 
     return h('section', { class: 'card analysis-exp', 'aria-labelledby': 'analysis-exp-title' },
@@ -861,14 +861,14 @@
     if (!bad.length) return null;
     return UI.callout('warn', 'alert', h('b', null, 'С вашими кэфами экспресс выходит за правила стратегии ' + STRAT_V + ': '),
       bad.map(r => r.t.charAt(0).toLowerCase() + r.t.slice(1) + (r.d ? ' (' + r.d + ')' : '')).join('; ') + '. ',
-      'В приложении ИИ подобрал бы другие рынки или не предложил бы ставку; в макете расчёт показан как есть.');
+      'В приложении ИИ подобрал бы другие рынки или не предложил бы ставку; в макете расчет показан как есть.');
   }
-  // режим без свежих новостей — предупреждаем и даём перезапустить в точном
+  // режим без свежих новостей — предупреждаем и даем перезапустить в точном
   function modeNote(root) {
     if (MODE.id === 'precise') return null;
     const txt = MODE.id === 'eco'
-      ? 'Режим «Экономный» (Haiku 4.5) — черновая оценка по сохранённым досье, без свежих новостей. Чтобы отсеять лишнее — годится, для решения о ставке — нет.'
-      : 'Режим «Сбалансированный» (Sonnet 5.5) ещё не проверен на eval-наборе и не ищет свежие новости. Для решения о ставке надёжнее «Точный».';
+      ? 'Режим «Экономный» (Haiku 4.5) — черновая оценка по сохраненным досье, без свежих новостей. Чтобы отсеять лишнее — годится, для решения о ставке — нет.'
+      : 'Режим «Сбалансированный» (Sonnet 5.5) еще не проверен на eval-наборе и не ищет свежие новости. Для решения о ставке надежнее «Точный».';
     return UI.callout(MODE.id === 'eco' ? 'warn' : 'info', MODE.id === 'eco' ? 'alert' : 'info',
       txt, ' В макете вероятности примера одинаковы во всех режимах.',
       h('div', { class: 'row analysis-mode-acts' }, button('Перезапустить в режиме «Точный»', { kind: 'secondary', size: 'sm', icon: 'refresh', onClick: () => rerunPrecise(root) })));
@@ -889,7 +889,7 @@
     D.analyses = D.analyses || [];
     let rec = D.analyses.find(a => a.id === ID);
     if (!rec) { rec = { id: ID, date: TODAY, legs: LEGS.length, total: TOTAL_ODDS }; D.analyses.push(rec); }
-    rec.decision = decision; rec.stake = decision === 'bet' ? stake() : null; rec.note = decision === 'skip' ? 'анализ сохранён без ставки' : null;
+    rec.decision = decision; rec.stake = decision === 'bet' ? stake() : null; rec.note = decision === 'skip' ? 'анализ сохранен без ставки' : null;
   }
 
   function saveBet(root) {
@@ -906,7 +906,7 @@
     ST.decision = 'saved'; ST.betId = bet.id;
     logDecision('bet');
     UI.toast('Ставка №' + bet.id + ' сохранена: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(TOTAL_ODDS), 'check');
-    D.lastSavedBet = bet.id; // экран «Ставки» подсветит её и прокрутит к ней
+    D.lastSavedBet = bet.id; // экран «Ставки» подсветит ее и прокрутит к ней
     UI.go('bets');
   }
 
@@ -914,7 +914,7 @@
     let val = stake();
     const preview = h('div', { class: 'stack', style: 'gap:10px', 'aria-live': 'polite' });
     if (!val) val = round10(BANK * 1.5 / 100);
-    const fieldEl = UI.field({ label: 'Сумма ставки', id: 'analysis-stake-input', type: 'number', value: String(val), suffix: '₽', inputmode: 'numeric', hint: REC_STAKE ? 'Рекомендовано ' + fmt.money(REC_STAKE) + ' — ' + pctTxt(BASE_PCT) + ' банка по стратегии ' + STRAT_V : 'Стратегия ' + STRAT_V + ' суммы для кэфа выше ' + fmt.odds(STRAT.totalMax) + ' не даёт — сумма на ваш риск', attrs: { min: '50', step: '10' } });
+    const fieldEl = UI.field({ label: 'Сумма ставки', id: 'analysis-stake-input', type: 'number', value: String(val), suffix: '₽', inputmode: 'numeric', hint: REC_STAKE ? 'Рекомендовано ' + fmt.money(REC_STAKE) + ' — ' + pctTxt(BASE_PCT) + ' банка по стратегии ' + STRAT_V : 'Стратегия ' + STRAT_V + ' суммы для кэфа выше ' + fmt.odds(STRAT.totalMax) + ' не дает — сумма на ваш риск', attrs: { min: '50', step: '10' } });
     const input = fieldEl.querySelector('input');
     const segHolder = h('div');
     function drawSeg() {
@@ -963,9 +963,9 @@
     const alt2 = m2.rows.find(r => r.k === 'h1m'), alt1 = m1.rows.find(r => r.k === 'p1');
     const body = h('div', { class: 'analysis-why-body', id: 'analysis-why', hidden: !ST.whyOpen },
       h('ol', { class: 'analysis-reasons' },
-        h('li', null, h('b', null, m1.A.short + ' 2:0. '), 'ML-модель (Эло + признаки) даёт ' + pr(r1.model) + ', Claude поднял до ' + pr(r1.claude) + ': ' + m1.A.short + ' свежее (3 матча за 14 дней против 4 у ' + m1.B.short + ', у которого последний матч — три сета), а 71% его побед на харде — 2:0. Рынок закладывает ' + pr(r1.market) + '.'),
-        h('li', null, h('b', null, 'Уроки. '), 'L-014 (фора −1.5 против подающего левши) проверен и не применён: ' + m1.B.short + ' правша, подача в среднем ' + m1.B.serve.speed + ' км/ч. По L-019 пост из соцсетей о плече ' + m1.B.short + ' без подтверждения турнира не учитывался.'),
-        h('li', null, h('b', null, m2.A.short + ' П1. '), 'ML-модель даёт ' + pr(r2.model) + ', Claude — ' + pr(r2.claude) + ': плюс за приём и личные встречи почти съеден возрастом и трёхсетовиком в 1/32 (4 окт).'),
+        h('li', null, h('b', null, m1.A.short + ' 2:0. '), 'ML-модель (Эло + признаки) дает ' + pr(r1.model) + ', Claude поднял до ' + pr(r1.claude) + ': ' + m1.A.short + ' свежее (3 матча за 14 дней против 4 у ' + m1.B.short + ', у которого последний матч — три сета), а 71% его побед на харде — 2:0. Рынок закладывает ' + pr(r1.market) + '.'),
+        h('li', null, h('b', null, 'Уроки. '), 'L-014 (фора −1.5 против подающего левши) проверен и не применен: ' + m1.B.short + ' правша, подача в среднем ' + m1.B.serve.speed + ' км/ч. По L-019 пост из соцсетей о плече ' + m1.B.short + ' без подтверждения турнира не учитывался.'),
+        h('li', null, h('b', null, m2.A.short + ' П1. '), 'ML-модель дает ' + pr(r2.model) + ', Claude — ' + pr(r2.claude) + ': плюс за прием и личные встречи почти съеден возрастом и трехсетовиком в 1/32 (4 окт).'),
         h('li', null, h('b', null, 'Что отброшено. '), droppedText(alt2, r2) + ' ' + droppedText(alt1, r1)),
         h('li', null, h('b', null, 'Главный риск. '), 'Тай-брейк в матче ' + D.match({ p1: m1.a, p2: m1.b }) + ': один отданный сет — и нога проиграна. Если наши p завышены на 5 п.п. по каждой ноге, перевес экспресса исчезает.')),
       h('div', { class: 'stack', style: 'gap:8px' },
@@ -978,16 +978,16 @@
       icon('chevronDown'));
     return h('section', { class: 'card', 'aria-label': 'Почему так' }, h('h3', { class: 'analysis-why-h' }, toggle), body);
   }
-  // «Что отброшено»: причина берётся из тех кэфов, что пришли в анализ
+  // «Что отброшено»: причина берется из тех кэфов, что пришли в анализ
   function droppedText(alt, pick) {
     const why = [];
     if (alt.odds > STRAT.oddsMax) why.push('кэф ' + fmt.odds(alt.odds) + ' выше лимита ' + fmt.odds(STRAT.oddsMax));
     if (alt.odds < STRAT.oddsMin) why.push('кэф ' + fmt.odds(alt.odds) + ' ниже минимума ' + fmt.odds(STRAT.oddsMin));
     if (alt.claude * 100 < STRAT.minProb) why.push('p ' + pr(alt.claude) + ' ниже ' + STRAT.minProb + '%');
     const val = fmt.signedPct(alt.value * 100, 1);
-    if (why.length) return alt.name + ' даёт ' + (alt.value > pick.value ? 'больший валуй' : 'валуй') + ' (' + val + '), но ' + why.join(', а ') + '.';
+    if (why.length) return alt.name + ' дает ' + (alt.value > pick.value ? 'больший валуй' : 'валуй') + ' (' + val + '), но ' + why.join(', а ') + '.';
     if (alt.value > pick.value) return alt.name + ' @' + fmt.odds(alt.odds) + ' с этим кэфом выгоднее выбранного (' + val + ') — в приложении ИИ пересмотрел бы ногу.';
-    return alt.name + ' @' + fmt.odds(alt.odds) + ' надёжнее, но перевес всего ' + val + '.';
+    return alt.name + ' @' + fmt.odds(alt.odds) + ' надежнее, но перевес всего ' + val + '.';
   }
   function whySub() {
     const rs = rules(), bad = rs.filter(r => !r.ok).length;
@@ -1006,7 +1006,7 @@
     ];
     if (fora.length) list.push({ ok: fora.every(l => l.p >= 0.55), t: 'Для форы −1.5 вероятность 2:0 ≥ 55%', d: fora.map(l => pr(l.p)).join(' и ') });
     list.push({ ok: LEGS.every(l => form5(who(l)) >= 3), t: 'Форма за 5 матчей не хуже 3–2', d: LEGS.map(l => D.P[who(l)].short + ' ' + form5(who(l)) + '–' + (5 - form5(who(l)))).join(', ') });
-    list.push({ ok: true, t: 'Нет травм и перегруза', d: D.P[LEGS[0].p1].short + ' — 3 матча за 14 дней, ' + D.P[LEGS[1].p1].short + ' — 2; подтверждённых травм нет' });
+    list.push({ ok: true, t: 'Нет травм и перегруза', d: D.P[LEGS[0].p1].short + ' — 3 матча за 14 дней, ' + D.P[LEGS[1].p1].short + ' — 2; подтвержденных травм нет' });
     return list;
   }
 
@@ -1030,7 +1030,7 @@
     return h('div', { class: 'callout warn analysis-foreign', role: 'note' }, icon('alert'),
       h('div', { style: 'min-width:0' },
         h('b', null, 'Это пример, а не разбор ваших матчей. '),
-        'В макете подробный разбор есть только для примера Синнер — Руне и Джокович — Рублёв. Вы ввели: ' + list.join(', ') + '. В приложении здесь будет разбор ваших матчей.' +
+        'В макете подробный разбор есть только для примера Синнер — Руне и Джокович — Рублев. Вы ввели: ' + list.join(', ') + '. В приложении здесь будет разбор ваших матчей.' +
           (used.length ? ' Ваши кэфы на ' + used.join(' и ') + ' в примере учтены.' : ''),
         h('div', { class: 'analysis-foreign-acts' }, back,
           button('Смотреть пример', { kind: 'ghost', size: 'sm', icon: 'eye', onClick: () => { ST.exampleAck = true; draw(root); } }))));
@@ -1071,10 +1071,10 @@
     nav: 'new',
     crumbs: 'Новый анализ → Анализ #' + ID,
     render(root) {
-      // пришёл новый запрос с экрана «Новый анализ» — пересчитываем всё под него и запускаем заново
+      // пришел новый запрос с экрана «Новый анализ» — пересчитываем все под него и запускаем заново
       if ((D.pendingAnalysis || null) !== REQ) { setup(D.pendingAnalysis); resetRun(); }
       setHead();
-      // при «уменьшении движения» анализ сразу показывается завершённым
+      // при «уменьшении движения» анализ сразу показывается завершенным
       if (RUN.startedAt == null) RUN.startedAt = performance.now() - (reduced() ? TOTAL_MS : 0);
       if (!RUN.done && performance.now() - RUN.startedAt >= TOTAL_MS) finish(root);
       else draw(root);

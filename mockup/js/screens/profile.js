@@ -2,7 +2,7 @@
    банк и стратегия (букмекеры, правила, ставки по кэфу, адаптации, ответственная игра); интеграции и ключи;
    уведомления; данные (экспорт, перенос из бота, удаление аккаунта).
    Вкладки — подмаршруты #profile-<вкладка>: security, bank, integrations, notifications, data.
-   Состояние живёт в памяти модуля, цифры банка и стратегии — из window.DATA. */
+   Состояние живет в памяти модуля, цифры банка и стратегии — из window.DATA. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
@@ -24,7 +24,7 @@
   const initials = name => name.trim().split(/\s+/).slice(0, 2).map(w => w.charAt(0).toUpperCase()).join('') || U.initials;
 
   // ---------- производные данные ----------
-  // Ставки в игре считаются при каждой отрисовке: ставка, сохранённая в «Анализе» или рассчитанная в «Ставках», видна сразу
+  // Ставки в игре считаются при каждой отрисовке: ставка, сохраненная в «Анализе» или рассчитанная в «Ставках», видна сразу
   const openBets = () => D.bets.filter(b => b.status === 'open');
   const inPlay = () => openBets().reduce((a, b) => a + b.stake, 0);
   const todayBets = () => D.bets.filter(b => b.date === TODAY);
@@ -111,11 +111,11 @@
   const weekPct = (S.bank - weekBase.bank) / weekBase.bank * 100;
 
   const NOTIF = [
-    { id: 'results', t: 'Результаты матчей и расчёт ставок', d: 'Счёт, исход экспресса и новый банк — сразу после матча' },
+    { id: 'results', t: 'Результаты матчей и расчет ставок', d: 'Счет, исход экспресса и новый банк — сразу после матча' },
     { id: 'stale', t: 'Устаревшие данные игроков', d: 'Если профиль игрока из анализа старше 24 часов. Сейчас: ' + staleN + ' ' + pl(staleN, 'профиль устарел', 'профиля устарели', 'профилей устарели') + ', ' + missingN + ' ' + pl(missingN, 'игрока', 'игроков', 'игроков') + ' нет в базе' },
     { id: 'budget', t: 'Превышение лимита расходов на ИИ', d: 'При 80% и 100% месячного бюджета ($' + D.ai.budget + ')' },
     { id: 'login', t: 'Вход с нового устройства', d: 'Город, браузер и время входа. Хотя бы один канал обязателен', guard: true },
-    { id: 'weekly', t: 'Еженедельный отчёт', d: 'По понедельникам в 09:00: ROI, CLV, калибровка, расходы ИИ' },
+    { id: 'weekly', t: 'Еженедельный отчет', d: 'По понедельникам в 09:00: ROI, CLV, калибровка, расходы ИИ' },
     { id: 'lessons', t: 'Новые уроки и версии стратегии', d: 'Модель предлагает урок или кандидата в стратегию — решение за вами' },
   ];
 
@@ -390,7 +390,7 @@
   function securityChecks() {
     const pk = st.passkeys.length;
     return [
-      { ok: true, t: 'Надёжный пароль', d: 'изменён ' + (st.pwdChanged === TODAY ? 'сегодня' : dateLong(st.pwdChanged)) },
+      { ok: true, t: 'Надежный пароль', d: 'изменен ' + (st.pwdChanged === TODAY ? 'сегодня' : dateLong(st.pwdChanged)) },
       { ok: true, t: 'Код 2FA при входе', d: 'приложение-аутентификатор (TOTP)' },
       { ok: st.codesLeft >= 4, t: 'Резервные коды сохранены', d: st.codesLeft + ' из 8 не использованы' },
       { ok: pk > 0, t: 'Ключ доступа (passkey)', d: pk ? pk + ' ' + pl(pk, 'ключ', 'ключа', 'ключей') + ' · вход по Face ID' : 'не добавлен — вход по Face ID без пароля',
@@ -431,8 +431,8 @@
       h('div', { class: 'profile-guard' },
         h('div', { class: 'row-between' }, h('h3', null, 'Защита аккаунта'), chip(done + ' из ' + checks.length, done === checks.length ? 'good' : 'outline', done === checks.length ? 'check' : null)),
         meter,
-        mobile && !shown.length ? h('div', { class: 'small soft' }, 'Пароль, 2FA, резервные коды и ключ доступа — всё включено.') : null,
-        mobile && shown.length ? h('div', { class: 'xsmall muted' }, (checks.length - shown.length) + ' из ' + checks.length + ' мер включены. Что ещё можно усилить:') : null,
+        mobile && !shown.length ? h('div', { class: 'small soft' }, 'Пароль, 2FA, резервные коды и ключ доступа — все включено.') : null,
+        mobile && shown.length ? h('div', { class: 'xsmall muted' }, (checks.length - shown.length) + ' из ' + checks.length + ' мер включены. Что еще можно усилить:') : null,
         shown.length ? h('ul', { class: 'profile-guard-list' }, shown.map(c => h('li', null,
           h('span', { class: ['profile-guard-ic', c.ok ? 'ok' : 'todo'] }, icon(c.ok ? 'check' : 'plus')),
           h('div', { class: 'profile-guard-text' }, h('div', null, c.t, h('span', { class: 'sr-only' }, c.ok ? ' — готово' : ' — не сделано')), h('div', { class: 'xsmall muted' }, c.d)),
@@ -482,22 +482,22 @@
   }
 
   function personalCard() {
-    const nameF = UI.field({ label: 'Имя и фамилия', id: 'profile-name', value: st.name, autocomplete: 'name', hint: 'Так к вам обращается бот, этим именем подписаны отчёты' });
-    const emailF = UI.field({ label: 'Email для входа', id: 'profile-email', type: 'email', value: st.email, attrs: { readonly: true }, labelAside: chip('Подтверждён', 'good', 'check'), hint: 'Сменить можно только с текущим паролем и подтверждением по ссылке из письма' });
+    const nameF = UI.field({ label: 'Имя и фамилия', id: 'profile-name', value: st.name, autocomplete: 'name', hint: 'Так к вам обращается бот, этим именем подписаны отчеты' });
+    const emailF = UI.field({ label: 'Email для входа', id: 'profile-email', type: 'email', value: st.email, attrs: { readonly: true }, labelAside: chip('Подтвержден', 'good', 'check'), hint: 'Сменить можно только с текущим паролем и подтверждением по ссылке из письма' });
     const save = button('Сохранить', { kind: 'primary', type: 'submit', icon: 'check', disabled: true });
     const status = h('span', { class: 'profile-status', 'aria-live': 'polite' });
     const nameInput = nameF.querySelector('input');
     const pending = st.pendingEmail && UI.callout('info', 'send',
       h('div', { class: 'stack', style: 'gap:8px' },
-        h('div', null, h('b', null, 'Ждём подтверждения: ' + st.pendingEmail + '. '), 'Ссылка в письме действует 24 часа. До перехода по ней вход работает со старым адресом.'),
+        h('div', null, h('b', null, 'Ждем подтверждения: ' + st.pendingEmail + '. '), 'Ссылка в письме действует 24 часа. До перехода по ней вход работает со старым адресом.'),
         h('div', { class: 'row' },
-          button('Отправить ещё раз', { kind: 'secondary', size: 'sm', icon: 'send', onClick: () => UI.toast('Письмо отправлено повторно на ' + st.pendingEmail, 'send') }),
+          button('Отправить еще раз', { kind: 'secondary', size: 'sm', icon: 'send', onClick: () => UI.toast('Письмо отправлено повторно на ' + st.pendingEmail, 'send') }),
           button('Отменить смену', { kind: 'ghost', size: 'sm', onClick: () => { st.pendingEmail = null; drawPanel(); UI.toast('Смена email отменена, ссылка из письма больше не действует', 'x'); } }))));
     return formCard({
       id: 'profile-personal', title: 'Личные данные', subtitle: 'Аккаунт создан ' + dateLong(U.since),
       body: [nameF, emailF, pending || h('div', { class: 'row' }, button('Изменить email', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: emailModal }))],
       foot: [save, status],
-      onInput: () => { const dirty = nameInput.value.trim() !== st.name; save.disabled = !dirty; status.textContent = dirty ? 'Есть несохранённые изменения' : ''; setFieldError(nameF, null); },
+      onInput: () => { const dirty = nameInput.value.trim() !== st.name; save.disabled = !dirty; status.textContent = dirty ? 'Есть несохраненные изменения' : ''; setFieldError(nameF, null); },
       onSubmit: () => {
         const v = nameInput.value.trim();
         if (v.length < 2) return setFieldError(nameF, 'Укажите имя — хотя бы 2 буквы');
@@ -510,11 +510,11 @@
 
   function emailModal() {
     const f1 = UI.field({ label: 'Новый email', id: 'profile-new-email', type: 'email', autocomplete: 'email', placeholder: 'name@example.com' });
-    const f2 = UI.field({ label: 'Текущий пароль', id: 'profile-email-pass', type: 'password', autocomplete: 'current-password', hint: 'В макете подойдёт любой, кроме «wrong»' });
+    const f2 = UI.field({ label: 'Текущий пароль', id: 'profile-email-pass', type: 'password', autocomplete: 'current-password', hint: 'В макете подойдет любой, кроме «wrong»' });
     const m = UI.modal({
       title: 'Смена email',
       body: h('form', { id: 'profile-email-form', class: 'stack', novalidate: true, on: { submit: e => { e.preventDefault(); submit(); } } },
-        h('p', { class: 'small soft' }, 'Отправим письмо со ссылкой на новый адрес. Пока вы не перейдёте по ней, вход работает со старым — ' + st.email + '.'),
+        h('p', { class: 'small soft' }, 'Отправим письмо со ссылкой на новый адрес. Пока вы не перейдете по ней, вход работает со старым — ' + st.email + '.'),
         f1, f2),
       actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Отправить письмо', { kind: 'primary', type: 'submit', icon: 'send', attrs: { form: 'profile-email-form' } })],
     });
@@ -535,7 +535,7 @@
   function regionCard() {
     const tzF = UI.field({ label: 'Часовой пояс', id: 'profile-tz', value: st.tz, options: TZ, hint: 'По нему показываем время матчей, считаем лимиты «в день» и тихие часы' });
     const curF = UI.field({ label: 'Валюта банка', id: 'profile-cur', value: st.currency, options: CUR });
-    const langF = UI.field({ label: 'Язык интерфейса и отчётов', id: 'profile-lang', value: st.lang, options: LANG });
+    const langF = UI.field({ label: 'Язык интерфейса и отчетов', id: 'profile-lang', value: st.lang, options: LANG });
     const note = h('div', { 'aria-live': 'polite' });
     const save = button('Сохранить', { kind: 'primary', type: 'submit', icon: 'check', disabled: true });
     const status = h('span', { class: 'profile-status' });
@@ -543,15 +543,15 @@
       id: 'profile-region', title: 'Регион и язык', subtitle: 'Время, деньги и язык ответов ИИ',
       body: [
         h('div', { class: 'profile-fields collapse' }, h('div', { class: 'span-2' }, tzF), curF, langF),
-        h('p', { class: 'xsmall muted' }, 'Перевод служебных инструкций на английский (вместе со сжатым досье −31% токенов) — кандидат v4, решение за вами в ', h('a', { href: '#learning' }, 'Обучении модели'), '. Анализы и отчёты ИИ пишет на выбранном языке.'),
+        h('p', { class: 'xsmall muted' }, 'Перевод служебных инструкций на английский (вместе со сжатым досье −31% токенов) — кандидат v4, решение за вами в ', h('a', { href: '#learning' }, 'Обучении модели'), '. Анализы и отчеты ИИ пишет на выбранном языке.'),
         note,
       ],
       foot: [save, status],
       onInput: () => {
         const dirty = valOf(tzF) !== st.tz || valOf(curF) !== st.currency || valOf(langF) !== st.lang;
-        save.disabled = !dirty; status.textContent = dirty ? 'Есть несохранённые изменения' : '';
+        save.disabled = !dirty; status.textContent = dirty ? 'Есть несохраненные изменения' : '';
         UI.clear(note);
-        if (valOf(curF) !== 'RUB') note.appendChild(UI.callout('warn', 'alert', 'История ставок и банк останутся в рублях — пересчёта по курсу нет. Новая валюта применится к новым ставкам; графики разделятся на два периода.'));
+        if (valOf(curF) !== 'RUB') note.appendChild(UI.callout('warn', 'alert', 'История ставок и банк останутся в рублях — пересчета по курсу нет. Новая валюта применится к новым ставкам; графики разделятся на два периода.'));
       },
       onSubmit: () => {
         st.tz = valOf(tzF); st.currency = valOf(curF); st.lang = valOf(langF);
@@ -563,7 +563,7 @@
 
   function appearanceCard() {
     const theme = document.documentElement.dataset.theme || 'system';
-    const items = [{ id: 'system', label: 'Как в системе' }, { id: 'light', label: 'Светлая' }, { id: 'dark', label: 'Тёмная' }];
+    const items = [{ id: 'system', label: 'Как в системе' }, { id: 'light', label: 'Светлая' }, { id: 'dark', label: 'Темная' }];
     return card({
       title: 'Внешний вид', subtitle: 'Тема сохраняется на этом устройстве',
       body: [
@@ -584,10 +584,10 @@
       body: [
         UI.kv([['Ваша роль', U.role], ['Вход', 'email + пароль + код 2FA'], ['Другие пользователи', st.invites.length ? st.invites.length + ' ' + pl(st.invites.length, 'приглашение', 'приглашения', 'приглашений') : 'нет']]),
         st.invites.length ? h('div', { class: 'profile-list' }, st.invites.map(inv => item({
-          ic: 'send', title: inv.email, meta: (inv.role === 'view' ? 'Только просмотр' : 'Полный доступ') + ' · ждёт регистрации до ' + dateDay(addDays(TODAY, 2)), wrap: true,
+          ic: 'send', title: inv.email, meta: (inv.role === 'view' ? 'Только просмотр' : 'Полный доступ') + ' · ждет регистрации до ' + dateDay(addDays(TODAY, 2)), wrap: true,
           side: button('Отозвать', { kind: 'ghost', size: 'sm', icon: 'x', onClick: () => { st.invites = st.invites.filter(x => x !== inv); drawPanel(); UI.toast('Приглашение для ' + inv.email + ' отозвано', 'x'); } }),
         }))) : null,
-        h('p', { class: 'xsmall muted' }, 'Анализы приглашённых расходуют ваш бюджет на ИИ и видны в разделе «ИИ и расходы».'),
+        h('p', { class: 'xsmall muted' }, 'Анализы приглашенных расходуют ваш бюджет на ИИ и видны в разделе «ИИ и расходы».'),
       ],
       foot: [button('Пригласить пользователя', { kind: 'secondary', icon: 'plus', onClick: inviteModal })],
     });
@@ -625,9 +625,9 @@
     let s = 0;
     if (p.length >= 12) s++;
     if (p.length >= 16) s++;
-    if (/[a-zа-яё]/.test(p) && /[A-ZА-ЯЁ]/.test(p)) s++;
+    if (/[a-zа-яе]/.test(p) && /[A-ZА-ЯЕ]/.test(p)) s++;
     if (/\d/.test(p)) s++;
-    if (/[^A-Za-zА-Яа-яЁё0-9]/.test(p)) s++;
+    if (/[^A-Za-zА-Яа-яЕе0-9]/.test(p)) s++;
     if (p.length < 8) s = Math.min(s, 1);
     return s;
   }
@@ -643,17 +643,17 @@
     function drawStrength() {
       const p = valOf(nw), c = valOf(cur);
       const s = strengthOf(p);
-      const lvl = !p ? null : s <= 1 ? ['Слабый', 'bad', 'alert'] : s <= 3 ? ['Средний', 'warn', 'info'] : ['Надёжный', 'good', 'check'];
+      const lvl = !p ? null : s <= 1 ? ['Слабый', 'bad', 'alert'] : s <= 3 ? ['Средний', 'warn', 'info'] : ['Надежный', 'good', 'check'];
       const reqs = [
         [p.length >= 12, 'Не короче 12 символов'],
-        [/[A-Za-zА-Яа-яЁё]/.test(p) && /\d/.test(p), 'Буквы и цифры'],
+        [/[A-Za-zА-Яа-яЕе]/.test(p) && /\d/.test(p), 'Буквы и цифры'],
         [!!p && p !== c, 'Не совпадает с текущим'],
       ];
       const m = UI.meter(p ? Math.max(s, 0.4) : 0, 5, lvl ? (lvl[1] === 'good' ? null : lvl[1]) : null);
-      m.setAttribute('aria-label', 'Надёжность пароля');
+      m.setAttribute('aria-label', 'Надежность пароля');
       UI.clear(strength);
       UI.append(strength, [
-        h('div', { class: 'row-between' }, h('span', null, 'Надёжность'), lvl ? chip(lvl[0], lvl[1], lvl[2]) : h('span', { class: 'xsmall muted' }, 'введите новый пароль')),
+        h('div', { class: 'row-between' }, h('span', null, 'Надежность'), lvl ? chip(lvl[0], lvl[1], lvl[2]) : h('span', { class: 'xsmall muted' }, 'введите новый пароль')),
         m,
         h('ul', { class: 'profile-reqs', 'aria-label': 'Требования к паролю' }, reqs.map(([ok, t]) => h('li', { class: ok ? 'ok' : null }, icon(ok ? 'check' : 'x'), t, h('span', { class: 'sr-only' }, ok ? ' — выполнено' : ' — не выполнено')))),
       ]);
@@ -662,9 +662,9 @@
     const days = daysBetween(st.pwdChanged, TODAY);
     return formCard({
       id: 'profile-password', title: 'Пароль',
-      subtitle: st.pwdChanged === TODAY ? 'Изменён сегодня' : 'Изменён ' + dateLong(st.pwdChanged) + ' · ' + days + ' ' + pl(days, 'день', 'дня', 'дней') + ' назад',
+      subtitle: st.pwdChanged === TODAY ? 'Изменен сегодня' : 'Изменен ' + dateLong(st.pwdChanged) + ' · ' + days + ' ' + pl(days, 'день', 'дня', 'дней') + ' назад',
       body: [cur, nw, strength, cf, show,
-        others.length ? h('label', { class: 'check small', for: 'profile-pass-kill' }, kill, h('span', null, 'Завершить другие сеансы', h('span', { class: 'field-hint', style: 'display:block' }, others.map(s => s.short).join(', ') + ' — войти заново. Telegram-бот останется подключён'))) : null],
+        others.length ? h('label', { class: 'check small', for: 'profile-pass-kill' }, kill, h('span', null, 'Завершить другие сеансы', h('span', { class: 'field-hint', style: 'display:block' }, others.map(s => s.short).join(', ') + ' — войти заново. Telegram-бот останется подключен'))) : null],
       foot: [button('Сменить пароль', { kind: 'primary', type: 'submit', icon: 'lock' })],
       onInput: e => { if (e && e.target && e.target.id !== 'profile-pass-kill' && e.target.id !== 'profile-pass-show') { drawStrength(); [cur, nw, cf].forEach(f => { if (f.contains(e.target)) setFieldError(f, null); }); } },
       onSubmit: () => {
@@ -673,7 +673,7 @@
         if (!c) ok = setFieldError(cur, 'Введите текущий пароль');
         else if (c === 'wrong') ok = setFieldError(cur, 'Текущий пароль не подходит');
         if (n.length < 12) ok = setFieldError(nw, 'Нужно не меньше 12 символов');
-        else if (!(/[A-Za-zА-Яа-яЁё]/.test(n) && /\d/.test(n))) ok = setFieldError(nw, 'Добавьте и буквы, и цифры');
+        else if (!(/[A-Za-zА-Яа-яЕе]/.test(n) && /\d/.test(n))) ok = setFieldError(nw, 'Добавьте и буквы, и цифры');
         else if (n === c) ok = setFieldError(nw, 'Новый пароль совпадает с текущим');
         if (n && r !== n) ok = setFieldError(cf, 'Пароли не совпадают');
         if (!ok) return;
@@ -681,7 +681,7 @@
         st.pwdChanged = TODAY;
         if (killed) st.sessions = st.sessions.filter(s => s.current);
         drawHero(); drawPanel();
-        UI.toast(killed ? 'Пароль изменён. Другие сеансы завершены' : 'Пароль изменён', 'lock');
+        UI.toast(killed ? 'Пароль изменен. Другие сеансы завершены' : 'Пароль изменен', 'lock');
       },
     });
   }
@@ -702,10 +702,10 @@
         h('div', { class: 'stack', style: 'gap:10px' },
           h('div', { class: 'profile-section-title' }, h('h4', null, 'Ключи доступа (passkey)'), pk.length ? chip(pk.length + ' ' + pl(pk.length, 'ключ', 'ключа', 'ключей'), 'good', 'check') : chip('Не добавлены', 'outline')),
           h('p', { class: 'small soft' }, 'Вход по Face ID, Touch ID или PIN-коду устройства — без пароля и кода. Ключ не украсть поддельной страницей: он привязан к адресу сайта.'),
-          pk.length ? h('div', { class: 'profile-list' }, pk.map(k => item({ ic: 'key', title: k.name, meta: 'Добавлен ' + (k.added === TODAY ? 'сегодня' : dateLong(k.added)) + ' · ещё не использовался',
-            side: button('', { kind: 'ghost', size: 'sm', icon: 'trash', title: 'Удалить ключ «' + k.name + '»', onClick: () => { st.passkeys = st.passkeys.filter(x => x !== k); drawHero(); drawPanel(); UI.toast('Ключ доступа «' + k.name + '» удалён', 'trash'); } }) }))) : null,
+          pk.length ? h('div', { class: 'profile-list' }, pk.map(k => item({ ic: 'key', title: k.name, meta: 'Добавлен ' + (k.added === TODAY ? 'сегодня' : dateLong(k.added)) + ' · еще не использовался',
+            side: button('', { kind: 'ghost', size: 'sm', icon: 'trash', title: 'Удалить ключ «' + k.name + '»', onClick: () => { st.passkeys = st.passkeys.filter(x => x !== k); drawHero(); drawPanel(); UI.toast('Ключ доступа «' + k.name + '» удален', 'trash'); } }) }))) : null,
           h('div', { class: 'row' }, button('Добавить ключ доступа', { kind: 'secondary', icon: 'plus', onClick: passkeyModal }))),
-        UI.callout('', 'lock', 'Для владельца 2FA обязательна — отключить её нельзя. Потеряли телефон и коды: сброс только из консоли сервера.'),
+        UI.callout('', 'lock', 'Для владельца 2FA обязательна — отключить ее нельзя. Потеряли телефон и коды: сброс только из консоли сервера.'),
       ],
     });
   }
@@ -719,7 +719,7 @@
     function draw() {
       UI.clear(body); UI.clear(foot);
       if (step === 'confirm') {
-        const pf = UI.field({ label: 'Пароль от аккаунта', id: 'profile-codes-pass', type: 'password', autocomplete: 'current-password', hint: 'В макете подойдёт любой, кроме «wrong»' });
+        const pf = UI.field({ label: 'Пароль от аккаунта', id: 'profile-codes-pass', type: 'password', autocomplete: 'current-password', hint: 'В макете подойдет любой, кроме «wrong»' });
         UI.append(body, [
           h('p', { class: 'small soft' }, 'Коды открывают вход без телефона, поэтому сначала подтвердите, что это вы.'),
           h('form', { id: 'profile-codes-form', novalidate: true, on: { submit: e => {
@@ -734,7 +734,7 @@
       } else if (step === 'regen') {
         UI.append(body, [
           UI.callout('warn', 'alert', h('b', null, 'Старые 8 кодов перестанут работать сразу.'), ' Если они сохранены в менеджере паролей или на бумаге — замените их новыми.'),
-          h('p', { class: 'small soft' }, 'Создавайте новые коды, если старые могли попасть к кому-то ещё или почти закончились.'),
+          h('p', { class: 'small soft' }, 'Создавайте новые коды, если старые могли попасть к кому-то еще или почти закончились.'),
         ]);
         UI.append(foot, [button('Отмена', { kind: 'ghost', onClick: () => { step = 'codes'; draw(); } }), button('Создать новые коды', { kind: 'primary', icon: 'refresh', onClick: () => {
           st.codeSeed += 1; st.codes = makeCodes(st.codeSeed); st.codesLeft = 8; st.codesCreated = TODAY;
@@ -765,7 +765,7 @@
     const m = UI.modal({
       title: 'Новый ключ доступа',
       body: h('form', { id: 'profile-pk-form', class: 'stack', novalidate: true, on: { submit: e => { e.preventDefault(); submit(); } } },
-        h('p', { class: 'small soft' }, 'Браузер попросит подтвердить Face ID, Touch ID или PIN-код устройства. Секретная часть ключа остаётся на устройстве — сервер хранит только публичную.'),
+        h('p', { class: 'small soft' }, 'Браузер попросит подтвердить Face ID, Touch ID или PIN-код устройства. Секретная часть ключа остается на устройстве — сервер хранит только публичную.'),
         nf),
       actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Создать ключ', { kind: 'primary', type: 'submit', icon: 'key', attrs: { form: 'profile-pk-form', id: 'profile-pk-submit' } })],
     });
@@ -792,7 +792,7 @@
       if (s.bot) { st.tg.linked = false; st.tg.code = null; }
       else st.sessions = st.sessions.filter(x => x !== s);
       drawHero(); drawPanel();
-      UI.toast(s.bot ? 'Бот отвязан. Привязать заново — во вкладке «Интеграции и ключи»' : 'Сеанс на ' + s.short + ' завершён', 'logout');
+      UI.toast(s.bot ? 'Бот отвязан. Привязать заново — во вкладке «Интеграции и ключи»' : 'Сеанс на ' + s.short + ' завершен', 'logout');
     }
     if (others.length) {
       UI.append(confirmBox, [
@@ -817,7 +817,7 @@
     const mobile = UI.isMobile();
     const rows = st.logFilter === 'fail' ? LOG.filter(r => r.result !== 'ok') : LOG;
     const alert = st.suspicious && UI.callout('warn', 'alert', h('div', { class: 'stack', style: 'gap:8px' },
-      h('div', null, h('b', null, '4 октября в 03:17 кто-то ввёл верный пароль, но не прошёл 2FA.'), ' Windows · Firefox, Франкфурт (185.220.xx.xx). Вход не состоялся. Если это были не вы — пароль, скорее всего, утёк: смените его.'),
+      h('div', null, h('b', null, '4 октября в 03:17 кто-то ввел верный пароль, но не прошел 2FA.'), ' Windows · Firefox, Франкфурт (185.220.xx.xx). Вход не состоялся. Если это были не вы — пароль, скорее всего, утек: смените его.'),
       h('div', { class: 'row' },
         button('Сменить пароль', { kind: 'primary', size: 'sm', icon: 'lock', onClick: () => scrollToId('profile-password', '#profile-pass-cur') }),
         button('Это был я', { kind: 'ghost', size: 'sm', onClick: () => { st.suspicious = false; drawHero(); drawTabs(); drawPanel(); UI.toast('Отметили как ваш вход. Предупреждение скрыто', 'check'); } }))));
@@ -905,7 +905,7 @@
       if (v.oddsMax > 2) why.push('кэф события выше 2.00');
       if (v.stakes.some(s => s.max > 3)) why.push('ставка больше 3% банка');
       UI.clear(risk);
-      if (why.length) risk.appendChild(UI.callout('warn', 'alert', h('b', null, 'Правила стали рискованнее: '), why.join(', ') + '. ', 'Модель проверена на истории с правилами ' + activeVersion.name.split(' · ')[0] + ' — на новых её оценка ROI менее надёжна. Сначала прогоните их на истории в разделе ', h('a', { href: '#learning' }, 'Обучение модели'), '.'));
+      if (why.length) risk.appendChild(UI.callout('warn', 'alert', h('b', null, 'Правила стали рискованнее: '), why.join(', ') + '. ', 'Модель проверена на истории с правилами ' + activeVersion.name.split(' · ')[0] + ' — на новых ее оценка ROI менее надежна. Сначала прогоните их на истории в разделе ', h('a', { href: '#learning' }, 'Обучение модели'), '.'));
     }
     return formCard({
       id: 'profile-strategy', title: 'Правила стратегии',
@@ -918,7 +918,7 @@
           h('div', { class: 'profile-stakes' }, stakeRows.map(x => x.row)),
           h('div', { class: 'profile-section-title', style: 'margin-top:6px' }, h('h4', null, 'Поправка на валуй'), h('span', { class: 'xsmall muted' }, 'средний перевес ног экспресса')),
           h('dl', { class: 'profile-value', 'aria-label': 'Поправка ставки на валуй, в процентах банка' }, VALUE_ADJ.map(x => h('div', null, h('dt', null, x.t, h('small', null, x.d)), h('dd', null, x.v)))),
-          h('p', { class: 'xsmall muted' }, 'Чем выше итоговый кэф, тем меньше ставка. Внутри диапазона берётся середина, затем поправка на валуй и адаптации ниже; суммы округляются до 10 ₽.')),
+          h('p', { class: 'xsmall muted' }, 'Чем выше итоговый кэф, тем меньше ставка. Внутри диапазона берется середина, затем поправка на валуй и адаптации ниже; суммы округляются до 10 ₽.')),
         risk,
       ],
       foot: [save, reset],
@@ -984,7 +984,7 @@
       ] },
     ];
     const RULES = GROUPS.reduce((a, g) => a.concat(g.rules), []);
-    const ruleChip = r => !st.adapt[r.id] ? chip('Выключено', 'outline', 'pause') : r.active ? chip('Действует сейчас', 'warn', 'bolt') : chip('Ждёт условия', 'outline', 'clock');
+    const ruleChip = r => !st.adapt[r.id] ? chip('Выключено', 'outline', 'pause') : r.active ? chip('Действует сейчас', 'warn', 'bolt') : chip('Ждет условия', 'outline', 'clock');
     const anyActive = RULES.some(r => r.active && st.adapt[r.id]);
     const ruleRow = r => {
       const id = 'profile-rule-' + r.id;
@@ -1038,7 +1038,7 @@
     };
     const end = addDays(TODAY, +st.pauseDays);
     const confirmBox = st.pauseConfirm && h('div', { class: 'profile-confirm' },
-      UI.callout('warn', 'alert', h('b', null, 'Пауза до ' + dateLong(end) + ' включительно. '), 'Отменить её досрочно будет нельзя — ни вам, ни через поддержку.'),
+      UI.callout('warn', 'alert', h('b', null, 'Пауза до ' + dateLong(end) + ' включительно. '), 'Отменить ее досрочно будет нельзя — ни вам, ни через поддержку.'),
       h('div', { class: 'row' },
         button('Да, взять паузу', { kind: 'primary', icon: 'pause', onClick: () => { st.pause = { days: +st.pauseDays, until: end }; st.pauseConfirm = false; drawHero(); drawPanel(); UI.toast('Пауза до ' + dateDay(end) + '. Новые анализы и ставки недоступны', 'pause'); } }),
         button('Отмена', { kind: 'ghost', onClick: () => { st.pauseConfirm = false; drawPanel(); } })));
@@ -1063,7 +1063,7 @@
         h('p', { class: 'xsmall muted' }, 'При достижении лимита кнопка «Сохранить ставку» блокируется до полуночи по вашему времени. Понизить лимит можно сразу, повысить — через 24 часа после запроса.'),
         P && UI.callout('info', 'clock', h('div', { class: 'stack', style: 'gap:8px' },
           h('div', null, 'Запрошено повышение: ' + [P.count && 'до ' + P.count + ' ' + pl(P.count, 'ставки', 'ставок', 'ставок'), P.amount && 'до ' + fmt.money(P.amount)].filter(Boolean).join(' и ') + ' в день. Вступит в силу ' + dateDay(addDays(TODAY, 1)) + ', через 24 часа.'),
-          h('div', { class: 'row' }, button('Отменить запрос', { kind: 'ghost', size: 'sm', onClick: () => { st.limitsPending = null; drawPanel(); UI.toast('Запрос на повышение лимита отменён', 'x'); } })))),
+          h('div', { class: 'row' }, button('Отменить запрос', { kind: 'ghost', size: 'sm', onClick: () => { st.limitsPending = null; drawPanel(); UI.toast('Запрос на повышение лимита отменен', 'x'); } })))),
         h('hr', { class: 'divider' }),
         h('h4', null, 'Пауза от ставок'),
         pauseBlock,
@@ -1102,9 +1102,9 @@
         }))),
         h('div', { class: 'row-between', style: 'padding-top:10px;border-top:1px solid var(--line)' },
           h('div', { style: 'min-width:0' }, h('div', { class: 'small soft' }, 'Сумма балансов'), h('div', { class: 'profile-money', style: 'font-size:var(--fs-lg)' }, fmt.money(sum))),
-          diff === 0 ? chip('Сходится с учётом', 'good', 'check') : chip('Расхождение ' + fmt.signedMoney(diff), 'warn', 'alert')),
+          diff === 0 ? chip('Сходится с учетом', 'good', 'check') : chip('Расхождение ' + fmt.signedMoney(diff), 'warn', 'alert')),
         diff !== 0 && UI.callout('warn', 'info', h('div', { class: 'stack', style: 'gap:8px' },
-          h('div', null, 'Балансы у букмекеров на ' + fmt.money(Math.abs(diff)) + (diff > 0 ? ' больше' : ' меньше') + ', чем банк в учёте (' + fmt.money(bankNow()) + '). Это ' + (diff > 0 ? 'пополнение' : 'вывод') + ' или ставка мимо приложения?'),
+          h('div', null, 'Балансы у букмекеров на ' + fmt.money(Math.abs(diff)) + (diff > 0 ? ' больше' : ' меньше') + ', чем банк в учете (' + fmt.money(bankNow()) + '). Это ' + (diff > 0 ? 'пополнение' : 'вывод') + ' или ставка мимо приложения?'),
           h('div', { class: 'row' }, button('Учесть как ' + (diff > 0 ? 'пополнение' : 'вывод'), { kind: 'secondary', size: 'sm', onClick: () => { st.bankAdj += diff; drawPanel(); UI.toast((diff > 0 ? 'Пополнение ' : 'Вывод ') + fmt.signedMoney(diff) + ' записан в историю банка. В ROI не входит', 'wallet'); } })))),
       ],
       foot: [button('Добавить букмекера', { kind: 'secondary', icon: 'plus', onClick: () => bookModal(null) })],
@@ -1115,7 +1115,7 @@
     const isNew = !b;
     const nameF = isNew && UI.field({ label: 'Букмекер', id: 'profile-bk-name', placeholder: 'Например, Пари', autocomplete: 'off' });
     const balF = UI.field({ label: isNew ? 'Баланс сейчас' : 'Баланс в ' + b.name, id: 'profile-bk-bal', value: isNew ? '' : fmt.int(b.balance), suffix: '₽', inputmode: 'numeric', autocomplete: 'off',
-      hint: isNew ? 'Сумма на счёте, включая нерассчитанные ставки' : 'Сверьте с личным кабинетом букмекера. Включая ставки в игре' + (b.inPlay ? ': ' + fmt.money(b.inPlay) : '') });
+      hint: isNew ? 'Сумма на счете, включая нерассчитанные ставки' : 'Сверьте с личным кабинетом букмекера. Включая ставки в игре' + (b.inPlay ? ': ' + fmt.money(b.inPlay) : '') });
     const m = UI.modal({
       title: isNew ? 'Новый букмекер' : 'Сверка баланса',
       body: h('form', { id: 'profile-bk-form', class: 'stack', novalidate: true, on: { submit: e => { e.preventDefault(); submit(); } } }, nameF, balF),
@@ -1128,7 +1128,7 @@
       if (isNew && !name) ok = setFieldError(nameF, 'Укажите название');
       if (!(v >= 0)) ok = setFieldError(balF, 'Введите сумму в рублях');
       if (!ok) return;
-      if (isNew) st.books.push({ id: 'bk-' + st.books.length, name, mark: name.replace(/[^A-Za-zА-Яа-яЁё]/g, '').slice(0, 2).toUpperCase(), base: Math.round(v) - sessionProfit(name), balance: Math.round(v), checked: TODAY, bets: 0, inPlay: 0 });
+      if (isNew) st.books.push({ id: 'bk-' + st.books.length, name, mark: name.replace(/[^A-Za-zА-Яа-яЕе]/g, '').slice(0, 2).toUpperCase(), base: Math.round(v) - sessionProfit(name), balance: Math.round(v), checked: TODAY, bets: 0, inPlay: 0 });
       else { b.base = Math.round(v) - sessionProfit(b.name); b.balance = Math.round(v); b.checked = TODAY; }
       m.close(); drawPanel();
       UI.toast(isNew ? name + ' добавлен' : 'Баланс ' + name + ' сверен: ' + fmt.money(v), 'wallet');
@@ -1155,7 +1155,7 @@
       actions: [chip('Работает', 'good', 'check')],
       body: [
         h('div', { class: 'profile-secret' }, icon('key'), h('code', { 'aria-label': 'Ключ, последние символы ' + st.key.last.split('').join(' ') }, 'sk-ant-…' + st.key.last), h('span', { class: 'xsmall muted' }, 'проверен ' + (st.key.checked === 'now' ? 'только что' : lower1(when(st.key.checked))))),
-        h('p', { class: 'small soft' }, 'Хранится зашифрованным, виден только последний фрагмент. Ключ использует только сервер — в браузер и в Telegram он не передаётся.'),
+        h('p', { class: 'small soft' }, 'Хранится зашифрованным, виден только последний фрагмент. Ключ использует только сервер — в браузер и в Telegram он не передается.'),
         UI.kv(modelsByUse),
         h('div', { class: 'stack', style: 'gap:6px' },
           h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Расход за ' + D.ai.month), h('b', { class: 'num' }, fmt.usd(D.ai.spent) + ' из ' + fmt.usd(D.ai.budget, 0))),
@@ -1167,13 +1167,13 @@
   }
 
   function keyModal() {
-    const kf = UI.field({ label: 'Новый ключ', id: 'profile-key-new', type: 'password', autocomplete: 'off', placeholder: 'sk-ant-api03-…', hint: 'В макете подойдёт любая строка, начинающаяся с sk-ant-' });
+    const kf = UI.field({ label: 'Новый ключ', id: 'profile-key-new', type: 'password', autocomplete: 'off', placeholder: 'sk-ant-api03-…', hint: 'В макете подойдет любая строка, начинающаяся с sk-ant-' });
     const m = UI.modal({
       title: 'Замена ключа Claude API',
       body: h('form', { id: 'profile-key-form', class: 'stack', novalidate: true, on: { submit: e => { e.preventDefault(); submit(); } } },
         h('ol', { class: 'small soft', style: 'margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px' },
           h('li', null, 'Создайте новый ключ в консоли Anthropic.'),
-          h('li', null, 'Вставьте его сюда — проверим пробным запросом к самой дешёвой модели.'),
+          h('li', null, 'Вставьте его сюда — проверим пробным запросом к самой дешевой модели.'),
           h('li', null, 'Старый ключ удалим с сервера. Отзовите его в консоли Anthropic — отсюда это сделать нельзя.')),
         kf),
       actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Проверить и сохранить', { kind: 'primary', type: 'submit', icon: 'key', attrs: { form: 'profile-key-form', id: 'profile-key-submit' } })],
@@ -1185,7 +1185,7 @@
       if (!b || b.disabled) return;
       busy(b, 'Проверяем ключ…', 800, () => {
         st.key = { last: v.slice(-4), checked: 'now' }; m.close(); drawPanel();
-        UI.toast('Ключ заменён и проверен. Не забудьте отозвать старый в консоли Anthropic', 'key');
+        UI.toast('Ключ заменен и проверен. Не забудьте отозвать старый в консоли Anthropic', 'key');
       });
     }
   }
@@ -1204,7 +1204,7 @@
         ],
         foot: [
           button('Синхронизировать', { kind: 'secondary', icon: 'refresh', onClick: () => UI.toast('Синхронизация запущена: расписание Шанхая и линия на 5 матчей', 'refresh') }),
-          button('Отключить', { kind: 'ghost', icon: 'x', onClick: () => { st.provider = null; drawPanel(); UI.toast('Провайдер отключён. Кэфы и результаты — снова вручную', 'x'); } }),
+          button('Отключить', { kind: 'ghost', icon: 'x', onClick: () => { st.provider = null; drawPanel(); UI.toast('Провайдер отключен. Кэфы и результаты — снова вручную', 'x'); } }),
         ],
       });
     }
@@ -1229,7 +1229,7 @@
     const m = UI.modal({
       title: 'Подключить данные матчей',
       body: h('form', { id: 'profile-prov-form', class: 'stack', novalidate: true, on: { submit: e => { e.preventDefault(); submit(); } } },
-        tf, kf, UI.callout('info', 'info', 'Конкретного провайдера выберем на этапе разработки. В макете подойдёт любой ключ.')),
+        tf, kf, UI.callout('info', 'info', 'Конкретного провайдера выберем на этапе разработки. В макете подойдет любой ключ.')),
       actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Подключить', { kind: 'primary', type: 'submit', icon: 'link', attrs: { form: 'profile-prov-form', id: 'profile-prov-submit' } })],
     });
     function submit() {
@@ -1239,7 +1239,7 @@
       if (!b || b.disabled) return;
       busy(b, 'Проверяем доступ…', 800, () => {
         st.provider = { label: OPTS.find(o => o.value === valOf(tf)).label, last: k.slice(-4) }; m.close(); drawPanel();
-        UI.toast('Источник данных подключён. Первая синхронизация — через минуту', 'link');
+        UI.toast('Источник данных подключен. Первая синхронизация — через минуту', 'link');
       });
     }
   }
@@ -1254,7 +1254,7 @@
     if (!t.linked) {
       return card({
         id: 'profile-tg', class: 'profile-anchor', title: 'Telegram-бот', subtitle: 'Ввод событий текстом, уведомления, подтверждение входа',
-        actions: [chip('Не подключён', 'outline', 'x')],
+        actions: [chip('Не подключен', 'outline', 'x')],
         body: [
           h('p', { class: 'small soft' }, 'Без бота не придут уведомления о результатах и о входе с нового устройства — только на почту.'),
           codeBlock,
@@ -1272,7 +1272,7 @@
         button('Отмена', { kind: 'ghost', onClick: () => { t.confirmUnlink = false; drawPanel(); } })));
     return card({
       id: 'profile-tg', class: 'profile-anchor', title: 'Telegram-бот', subtitle: 'Ввод событий текстом, уведомления, подтверждение входа',
-      actions: [chip('Подключён', 'good', 'check')],
+      actions: [chip('Подключен', 'good', 'check')],
       body: [
         UI.kv([['Бот', '@capper_bot'], ['Чат', 'Роман Б. (личный)'], ['Привязан', dateLong('2026-06-30')], ['Последняя команда', 'сегодня, 07:58']]),
         h('ul', { class: 'profile-bullets' },
@@ -1327,9 +1327,9 @@
         h('div', { class: 'profile-notif-cell' }, sw('mail', 'Почта')));
     };
     return card({
-      id: 'profile-notif', class: 'profile-anchor', title: 'О чём сообщать', subtitle: 'Изменения сохраняются сразу',
+      id: 'profile-notif', class: 'profile-anchor', title: 'О чем сообщать', subtitle: 'Изменения сохраняются сразу',
       body: [
-        tgOff && UI.callout('warn', 'telegram', 'Telegram-бот не подключён — уведомления придут только на почту. ', h('a', { href: '#profile-integrations', on: { click: e => { e.preventDefault(); switchTab('integrations', () => scrollToId('profile-tg')); } } }, 'Подключить бота')),
+        tgOff && UI.callout('warn', 'telegram', 'Telegram-бот не подключен — уведомления придут только на почту. ', h('a', { href: '#profile-integrations', on: { click: e => { e.preventDefault(); switchTab('integrations', () => scrollToId('profile-tg')); } } }, 'Подключить бота')),
         h('div', null,
           h('div', { class: 'profile-notif-head', 'aria-hidden': 'true' }, h('span', null, 'Событие'), h('span', null, 'Telegram'), h('span', null, 'Почта')),
           NOTIF.map(row)),
@@ -1342,7 +1342,7 @@
     return card({
       title: 'Каналы', subtitle: 'Куда приходят уведомления',
       body: h('div', { class: 'profile-list' },
-        item({ ic: 'telegram', title: 'Telegram', titleExtra: st.tg.linked ? chip('Подключён', 'good', 'check') : chip('Не подключён', 'outline', 'x'), meta: st.tg.linked ? '@capper_bot · чат «Роман Б.»' : 'привяжите во вкладке «Интеграции»' }),
+        item({ ic: 'telegram', title: 'Telegram', titleExtra: st.tg.linked ? chip('Подключен', 'good', 'check') : chip('Не подключен', 'outline', 'x'), meta: st.tg.linked ? '@capper_bot · чат «Роман Б.»' : 'привяжите во вкладке «Интеграции»' }),
         item({ mark: mailIcon(), title: 'Почта', titleExtra: chip('Подтверждена', 'good', 'check'), meta: st.email })),
       foot: [tgBtn],
     });
@@ -1402,7 +1402,7 @@
         h('p', { class: 'xsmall muted' }, 'В JSON у каждого события есть вероятность модели, кэф, закрывающая линия и результат — готовый датасет для своих экспериментов с обучением. См. ', h('a', { href: '#learning' }, 'Обучение модели'), '.'),
         st.exportState === 'ready' && h('div', { class: 'profile-list' }, item({
           ic: 'download', icKind: 'good', title: file, meta: (st.exportFmt === 'json' ? '≈ 420 КБ' : '≈ 310 КБ, 7 таблиц') + ' · ссылка действует 24 часа, копия отправлена на ' + st.email, wrap: true,
-          side: button('Скачать', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => UI.toast('В рабочей версии начнётся скачивание. В макете файлов нет', 'info') }),
+          side: button('Скачать', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => UI.toast('В рабочей версии начнется скачивание. В макете файлов нет', 'info') }),
         })),
       ],
       foot: st.exportState === 'ready' ? [button('Собрать заново', { kind: 'ghost', icon: 'refresh', onClick: () => { st.exportState = 'idle'; drawPanel(); } })] : [prepBtn],
@@ -1413,7 +1413,7 @@
     return card({
       title: 'Перенос из Telegram-бота', subtitle: 'Из JSON-файлов и инструкций текущего бота',
       body: [
-        h('p', { class: 'small soft' }, 'Текущий бот хранит данные в JSON-файлах, а правила — в markdown-инструкциях. Загрузите их: перенесём ставки, игроков и правила стратегии, дубликаты отбросим.'),
+        h('p', { class: 'small soft' }, 'Текущий бот хранит данные в JSON-файлах, а правила — в markdown-инструкциях. Загрузите их: перенесем ставки, игроков и правила стратегии, дубликаты отбросим.'),
         UI.kv([['Последний перенос', dateLong(U.since)], ['Профили игроков', String(profiledN)], ['Правила стратегии', 'стали версией ' + D.strategyVersions[0].id]]),
       ],
       foot: [button('Выбрать файлы', { kind: 'secondary', icon: 'upload', onClick: importModal })],
@@ -1429,7 +1429,7 @@
     UI.modal({
       title: 'Проверка файлов',
       body: [
-        UI.callout('info', 'info', 'Пример разбора. В рабочей версии здесь будут ваши файлы — ничего не переносится, пока вы не нажмёте «Перенести».'),
+        UI.callout('info', 'info', 'Пример разбора. В рабочей версии здесь будут ваши файлы — ничего не переносится, пока вы не нажмете «Перенести».'),
         h('div', { class: 'profile-list' }, files.map(f => item({ ic: 'database', title: f.name, titleExtra: chip(f.what, 'outline'), meta: f.res }))),
       ],
       actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Перенести', { kind: 'primary', icon: 'upload', onClick: () => { close(); UI.toast('Перенесено: 3 профиля игроков обновлены', 'check'); } })],
@@ -1463,7 +1463,7 @@
         h('div', { class: 'field', style: 'max-width:420px' },
           h('label', { class: 'field-label', for: 'profile-del-email' }, h('span', null, 'Введите ', h('b', { class: 'mono' }, st.email), ', чтобы подтвердить')),
           inp,
-          h('div', { class: 'field-hint', id: 'profile-del-hint' }, 'Кнопка станет активной, когда адрес совпадёт')),
+          h('div', { class: 'field-hint', id: 'profile-del-hint' }, 'Кнопка станет активной, когда адрес совпадет')),
       ],
       foot: [del],
     });

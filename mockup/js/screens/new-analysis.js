@@ -1,6 +1,6 @@
 /* Новый анализ — окно ввода событий. Два способа: текстом в формате Telegram-бота (разбор имитирует Claude Haiku)
    или формой с подстановкой матчей дня. Справа — «Перед запуском»: свежесть данных игроков, режим анализа,
-   цена и время, правила стратегии. Состояние живёт в замыкании — черновик не теряется при переходах. */
+   цена и время, правила стратегии. Состояние живет в замыкании — черновик не теряется при переходах. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, chip, clear } = UI;
@@ -17,8 +17,8 @@
   ];
   const MODES = [
     { id: 'precise', label: 'Точный', model: 'Opus 5.5', perEvent: 0.09, secs: 45, note: 'Свежие новости о травмах и снятиях ищет Sonnet 5.5, вероятности считает Opus 5.5. Для решения о ставке.' },
-    { id: 'balanced', label: 'Сбалансированный', model: 'Sonnet 5.5', perEvent: 0.045, secs: 30, flag: 'не проверен', note: 'Та же схема без поиска новостей. Качество на eval-наборе ещё не проверено — для решения о ставке выбирайте «Точный».' },
-    { id: 'eco', label: 'Экономный', model: 'Haiku 4.5 + кэш', perEvent: 0.02, secs: 20, note: 'Черновая оценка по сохранённым профилям, чтобы отсеять лишнее. Не для решения о ставке.' },
+    { id: 'balanced', label: 'Сбалансированный', model: 'Sonnet 5.5', perEvent: 0.045, secs: 30, flag: 'не проверен', note: 'Та же схема без поиска новостей. Качество на eval-наборе еще не проверено — для решения о ставке выбирайте «Точный».' },
+    { id: 'eco', label: 'Экономный', model: 'Haiku 4.5 + кэш', perEvent: 0.02, secs: 20, note: 'Черновая оценка по сохраненным профилям, чтобы отсеять лишнее. Не для решения о ставке.' },
   ];
   const COLLECT = { cost: 0.05, secs: 40 };   // сбор профиля игрока, которого нет в базе
   const REFRESH = { cost: 0.01, secs: 15 };   // обновление устаревшего профиля
@@ -39,7 +39,7 @@
     'Кэфы: П1 = 1.17, П2 = 5.10',
     'Фора по сетам: П1(-1.5) = 1.62, П2(+1.5) = 2.30',
     '',
-    'Джокович vs Рублёв, Шанхай, хард',
+    'Джокович vs Рублев, Шанхай, хард',
     'Кэфы: П1 = 1.34, П2 = 3.35',
     'Фора по сетам: П1(-1.5) = 2.05, П2(+1.5) = 1.72',
   ].join('\n');
@@ -57,7 +57,7 @@
   const num = v => (v == null || v === '' ? NaN : parseFloat(String(v).replace(',', '.').replace(/\s/g, '')));
   const validOdd = v => { const n = num(v); return n >= 1.01 && n <= 50; };
   const inCorridor = v => { const n = num(v); return n >= ST.oddsMin && n <= ST.oddsMax; };
-  const norm = s => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+  const norm = s => String(s || '').toLowerCase().replace(/е/g, 'е').replace(/[^a-zа-я\s-]/g, ' ').replace(/\s+/g, ' ').trim();
   const evWord = n => n + ' ' + fmt.plural(n, 'событие', 'события', 'событий');
   const usd = n => '≈' + fmt.usd(n);
   function fmtTime(secs) {
@@ -230,7 +230,7 @@
     let reason = null;
     if (state.tab === 'text' && state.parsing) reason = 'Дождитесь окончания разбора';
     else if (state.tab === 'text' && !state.text.trim()) reason = 'Вставьте текст с событиями';
-    else if (state.tab === 'text' && isDirty()) reason = 'Текст изменён — нажмите «Разобрать»';
+    else if (state.tab === 'text' && isDirty()) reason = 'Текст изменен — нажмите «Разобрать»';
     else if (!n) reason = 'Добавьте хотя бы одно событие';
     else {
       const i = evs.findIndex(ev => check(ev).errors.length);
@@ -491,7 +491,7 @@
       applyParse(res);
       renderPanel(); renderSide();
       const n = res.events.length;
-      UI.toast(n ? 'Разобрано: ' + evWord(n) + (res.unknown.length ? ', ' + res.unknown.length + ' ' + fmt.plural(res.unknown.length, 'строку', 'строки', 'строк') + ' не понял' : '') : 'Не нашёл событий — проверьте формат', n ? 'check' : 'alert');
+      UI.toast(n ? 'Разобрано: ' + evWord(n) + (res.unknown.length ? ', ' + res.unknown.length + ' ' + fmt.plural(res.unknown.length, 'строку', 'строки', 'строк') + ' не понял' : '') : 'Не нашел событий — проверьте формат', n ? 'check' : 'alert');
     }, 650);
   }
   function removeEvent(ev) {
@@ -581,9 +581,9 @@
           h('li', null, h('b', null, 'После игроков через запятую: '), 'турнир, покрытие и, если знаете, раунд — «Шанхай, хард, 1/8».'),
           h('li', null, h('b', null, 'Кэфы: '), 'П1 и П2 обязательны. Форы по сетам — П1(-1.5), П1(+1.5), П2(-1.5), П2(+1.5).'),
           h('li', null, 'Дробную часть можно писать через точку или запятую: 1.62 или 1,62.'),
-          h('li', null, 'Банк и букмекер необязательны — по умолчанию возьмём из кабинета.'),
-          h('li', null, 'Строки, которые не удалось понять, покажем отдельно — ничего не пропадёт молча.')),
-        UI.callout('info', 'info', 'Разбор делает самая дешёвая модель (Claude Haiku 4.5, ' + PARSE_COST + ' за текст). Если имя не совпало с базой, вы увидите это до запуска анализа.'),
+          h('li', null, 'Банк и букмекер необязательны — по умолчанию возьмем из кабинета.'),
+          h('li', null, 'Строки, которые не удалось понять, покажем отдельно — ничего не пропадет молча.')),
+        UI.callout('info', 'info', 'Разбор делает самая дешевая модель (Claude Haiku 4.5, ' + PARSE_COST + ' за текст). Если имя не совпало с базой, вы увидите это до запуска анализа.'),
       ],
       actions: close => [
         button('Вставить шаблон', { kind: 'secondary', icon: 'copy', onClick: () => { close(); state.tab = 'text'; state.text = TEMPLATE; renderPanel(); renderSide(); focusLater('#new-text'); } }),
@@ -641,7 +641,7 @@
       node.append(h('button', { type: 'button', class: 'chip warn', on: { click: () => confirmPlayer(ev, k, r.p) } }, icon('alert'), 'Это ' + r.p.name + '?'), h('span', null, 'нажмите, чтобы подтвердить'));
       return;
     }
-    if (!r.p) { node.append(UI.freshnessChip('missing'), h('span', null, 'соберём профиль по имени, +' + usd(COLLECT.cost))); return; }
+    if (!r.p) { node.append(UI.freshnessChip('missing'), h('span', null, 'соберем профиль по имени, +' + usd(COLLECT.cost))); return; }
     node.append(freshChip(r), h('span', null, '№' + r.p.rank + ' ATP · ' + r.p.country));
   }
 
@@ -659,7 +659,7 @@
       } else if (r.fresh === 'missing') {
         node.appendChild(UI.callout('warn', 'database',
           h('div', null, h('b', null, (r.p ? r.p.short : '«' + r.name + '»') + ' нет в базе'), ' — профиль будет собран перед анализом, +' + usd(COLLECT.cost) + ' и ~' + COLLECT.secs + ' с.'),
-          h('div', { class: 'xsmall', style: 'margin-top:2px' }, r.p ? 'Соберём статистику за 52 недели, форму, личные встречи, подачу и приём из открытых источников.' : 'Игрока нет и в списке ATP — проверьте написание, иначе профиль соберём по имени.'),
+          h('div', { class: 'xsmall', style: 'margin-top:2px' }, r.p ? 'Соберем статистику за 52 недели, форму, личные встречи, подачу и прием из открытых источников.' : 'Игрока нет и в списке ATP — проверьте написание, иначе профиль соберем по имени.'),
           h('div', { class: 'row new-callout-actions' }, r.p && button('Собрать сейчас', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => collectNow(r.p) }), state.editing.has(ev.id) ? null : fix)));
       } else if (r.fresh === 'collecting') {
         node.appendChild(UI.callout('info', 'clock', h('b', null, 'Собираем профиль ' + r.p.short + '…'), ' Обычно это занимает до минуты, можно продолжать заполнение.'));
@@ -685,7 +685,7 @@
         h('span', { class: 'new-novig' }, 'Рынок без маржи: ', h('b', null, shortOf(ev.n1, 'П1') + ' ' + fmt.prob(q1)), ' · ', h('b', null, shortOf(ev.n2, 'П2') + ' ' + fmt.prob(1 - q1)))),
       corr.length
         ? h('div', { class: 'new-corr' }, icon('check'), 'В коридоре стратегии ' + fmt.odds(ST.oddsMin) + '–' + fmt.odds(ST.oddsMax) + ': ' + corr.map(mk => mk.label + ' ' + fmt.odds(num(o[mk.key]))).join(', '))
-        : h('div', { class: 'new-corr out' }, icon('alert'), 'Ни один кэф не попадает в коридор ' + fmt.odds(ST.oddsMin) + '–' + fmt.odds(ST.oddsMax) + ' — в экспресс событие, скорее всего, не войдёт.'));
+        : h('div', { class: 'new-corr out' }, icon('alert'), 'Ни один кэф не попадает в коридор ' + fmt.odds(ST.oddsMin) + '–' + fmt.odds(ST.oddsMax) + ' — в экспресс событие, скорее всего, не войдет.'));
   }
 
   function refreshEvent(ev, side = true) {
@@ -796,7 +796,7 @@
       h('span', { class: 'new-drop-ic' }, icon('image')),
       h('span', { class: 'new-drop-text' },
         h('span', { class: 'new-drop-title' }, 'Загрузить скриншот купона', chip('в разработке', 'warn', 'flask')),
-        h('span', { class: 'xsmall muted', id: 'new-shot-hint' }, 'PNG или JPG из приложения букмекера. Распознавать будет Claude по изображению, пока надёжнее вставить текст.')));
+        h('span', { class: 'xsmall muted', id: 'new-shot-hint' }, 'PNG или JPG из приложения букмекера. Распознавать будет Claude по изображению, пока надежнее вставить текст.')));
     input.addEventListener('change', () => { const f = input.files && input.files[0]; if (f) toastShot(f.name); input.value = ''; });
     z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('drag'); });
     z.addEventListener('dragleave', () => z.classList.remove('drag'));
@@ -823,7 +823,7 @@
           chip('Банк ' + fmt.money(state.bank), bankDiff ? 'warn' : 'outline', bankDiff ? 'alert' : 'wallet'),
           chip(state.bookmaker, 'outline'))),
       h('span', { class: 'xsmall muted', style: 'padding-top:4px' }, 'Haiku 4.5 · ' + PARSE_COST)));
-    if (bankDiff) wrap.appendChild(UI.callout('warn', 'wallet', 'Банк в тексте (' + fmt.money(pr.bank) + ') отличается от учёта ставок (' + fmt.money(S.bank) + '). Сумму ставки посчитаем от банка из текста.'));
+    if (bankDiff) wrap.appendChild(UI.callout('warn', 'wallet', 'Банк в тексте (' + fmt.money(pr.bank) + ') отличается от учета ставок (' + fmt.money(S.bank) + '). Сумму ставки посчитаем от банка из текста.'));
     if (pr.unknown.length) {
       wrap.appendChild(UI.callout('bad', 'alert',
         h('div', null, h('b', null, 'Не понял ' + pr.unknown.length + ' ' + fmt.plural(pr.unknown.length, 'строку', 'строки', 'строк') + ':')),
@@ -850,7 +850,7 @@
       clear(status);
       if (state.parsing) status.appendChild(chip('Разбираем…', 'info', 'clock'));
       else if (empty) status.appendChild(chip('Поле пустое', 'outline', 'info'));
-      else if (dirty) status.appendChild(chip(state.parse ? 'Текст изменён — разберите заново' : 'Ещё не разобрано', 'warn', 'alert'));
+      else if (dirty) status.appendChild(chip(state.parse ? 'Текст изменен — разберите заново' : 'Еще не разобрано', 'warn', 'alert'));
       else status.appendChild(chip('Разобрано · ' + evWord(state.events.length), 'good', 'check'));
       const again = !dirty && !state.parsing && state.parse;
       parseBtn.className = 'btn ' + (again ? 'secondary' : 'primary');
@@ -895,7 +895,7 @@
   }
 
   function formPanel() {
-    const bank = UI.field({ label: 'Банк', id: 'new-bank', value: fmt.int(state.bank), suffix: '₽', inputmode: 'numeric', autocomplete: 'off', hint: 'По учёту ставок на ' + fmt.date(D.today) + '. Сумма ставки — % от банка', attrs: { 'data-fk': 'bank' } });
+    const bank = UI.field({ label: 'Банк', id: 'new-bank', value: fmt.int(state.bank), suffix: '₽', inputmode: 'numeric', autocomplete: 'off', hint: 'По учету ставок на ' + fmt.date(D.today) + '. Сумма ставки — % от банка', attrs: { 'data-fk': 'bank' } });
     bank.querySelector('input').addEventListener('input', e => { state.bank = parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0; renderSide(); });
     const opts = BOOKMAKERS.includes(state.bookmaker) ? BOOKMAKERS : [state.bookmaker].concat(BOOKMAKERS);
     const bk = UI.field({ label: 'Букмекер', id: 'new-bk', value: state.bookmaker, options: opts, hint: 'Нужен, чтобы потом сверять закрывающую линию (CLV)', attrs: { 'data-fk': 'bk' } });
@@ -944,11 +944,11 @@
       h('div', { class: 'xsmall muted' }, 'После запуска ≈ ' + fmt.usd(after) + '. Профили и правила стратегии берутся из кэша промпта — в ' + D.ai.month.replace(/ь$/, 'е') + ' так пришло ' + D.ai.cacheShare + '% входных токенов.'));
     const launchBtn = button('Запустить анализ', { kind: 'primary', size: 'lg', icon: 'spark', block: true, disabled: !!a.reason, onClick: launch, attrs: { id: 'new-launch', 'data-fk': 'launch' } });
     return UI.card({
-      class: 'new-launch-card', title: 'Перед запуском', subtitle: 'Что уйдёт в анализ и сколько это стоит',
+      class: 'new-launch-card', title: 'Перед запуском', subtitle: 'Что уйдет в анализ и сколько это стоит',
       body: [strip, plist, h('hr', { class: 'divider' }), modes, costs, bud, launchBtn,
         a.reason
           ? h('p', { class: 'new-reason', role: 'status' }, icon('alert'), a.reason)
-          : h('p', { class: 'xsmall muted' }, 'Займёт ' + fmtTime(a.secs) + '. Ставку ИИ не делает: экспресс и сумму вы подтверждаете сами.'),
+          : h('p', { class: 'xsmall muted' }, 'Займет ' + fmtTime(a.secs) + '. Ставку ИИ не делает: экспресс и сумму вы подтверждаете сами.'),
         h('a', { class: 'new-link', href: '#costs' }, 'Цена и качество режимов — «ИИ и расходы»', icon('arrowRight'))],
     });
   }
@@ -956,14 +956,14 @@
   function flowCard(a) {
     const names = arr => arr.map(p => p.p ? p.p.short : p.name).join(', ');
     const steps = [];
-    if (a.missing.length || a.stale.length) steps.push(['database', 'warn', 'Соберём недостающие данные', [a.missing.length && 'Профиль с нуля: ' + names(a.missing) + '.', a.stale.length && 'Обновим: ' + names(a.stale) + '.'].filter(Boolean).join(' ')]);
-    else steps.push(['database', 'accent', 'Данные игроков свежие', 'Обновлять ничего не нужно — профили берём из базы.']);
-    steps.push(['brain', '', 'Оценим вероятности исходов', 'Форма, Эло на покрытии, подача и приём, личные встречи, усталость' + (a.mode.id === 'precise' ? ', свежие новости о травмах и снятиях' : '') + ' и ' + LESSONS_ON + ' ' + fmt.plural(LESSONS_ON, 'подтверждённый урок', 'подтверждённых урока', 'подтверждённых уроков') + ' из прошлых ставок.']);
-    steps.push(['target', '', 'Сравним с рынком', 'Уберём маржу букмекера и отметим исходы, где оценка модели выше рынка.']);
-    steps.push(['ticket', '', 'Соберём экспресс', LEGS + ' ' + fmt.plural(ST.maxLegs, 'событие', 'события', 'событий') + ' с итоговым кэфом ≤ ' + fmt.odds(ST.totalMax) + ' (ординары стратегия не допускает) и сумму по таблице ставок от банка ' + fmt.money(state.bank) + '.']);
-    steps.push(['check', '', 'Решение за вами', 'ИИ может ошибаться и сам ставки не делает. Результат вы внесёте после матча — на нём модель учится.']);
+    if (a.missing.length || a.stale.length) steps.push(['database', 'warn', 'Соберем недостающие данные', [a.missing.length && 'Профиль с нуля: ' + names(a.missing) + '.', a.stale.length && 'Обновим: ' + names(a.stale) + '.'].filter(Boolean).join(' ')]);
+    else steps.push(['database', 'accent', 'Данные игроков свежие', 'Обновлять ничего не нужно — профили берем из базы.']);
+    steps.push(['brain', '', 'Оценим вероятности исходов', 'Форма, Эло на покрытии, подача и прием, личные встречи, усталость' + (a.mode.id === 'precise' ? ', свежие новости о травмах и снятиях' : '') + ' и ' + LESSONS_ON + ' ' + fmt.plural(LESSONS_ON, 'подтвержденный урок', 'подтвержденных урока', 'подтвержденных уроков') + ' из прошлых ставок.']);
+    steps.push(['target', '', 'Сравним с рынком', 'Уберем маржу букмекера и отметим исходы, где оценка модели выше рынка.']);
+    steps.push(['ticket', '', 'Соберем экспресс', LEGS + ' ' + fmt.plural(ST.maxLegs, 'событие', 'события', 'событий') + ' с итоговым кэфом ≤ ' + fmt.odds(ST.totalMax) + ' (ординары стратегия не допускает) и сумму по таблице ставок от банка ' + fmt.money(state.bank) + '.']);
+    steps.push(['check', '', 'Решение за вами', 'ИИ может ошибаться и сам ставки не делает. Результат вы внесете после матча — на нем модель учится.']);
     return UI.card({
-      title: 'Что произойдёт после запуска',
+      title: 'Что произойдет после запуска',
       body: h('ol', { class: 'new-flow' }, steps.map(([ic, kind, t, d]) => h('li', null, h('span', { class: ['new-flow-ic', kind] }, icon(ic)), h('div', { class: 'new-flow-body' }, h('b', null, t), h('span', null, d))))),
     });
   }
@@ -983,7 +983,7 @@
         a.n > ST.maxLegs
           ? UI.callout('info', 'info', 'Событий больше ' + ST.maxLegs + ' — в экспресс попадут не больше ' + ST.maxLegs + ' лучших, остальные получат отдельную оценку.')
           : a.n === 1
-            ? UI.callout('warn', 'alert', 'Одно событие — экспресс из него не собрать, а ординары стратегия не допускает. Оценку покажем, ставку не предложим. Добавьте ещё одно событие.')
+            ? UI.callout('warn', 'alert', 'Одно событие — экспресс из него не собрать, а ординары стратегия не допускает. Оценку покажем, ставку не предложим. Добавьте еще одно событие.')
             : h('p', { class: 'xsmall muted' }, 'События, которые не проходят эти правила, ИИ в экспресс не включит, даже если вы их ввели, — но оценку по ним покажет.'),
       ],
     });
@@ -993,7 +993,7 @@
     const s = refs.steps; if (!s) return;
     clear(s);
     const inputDone = a.n > 0 && !(state.tab === 'text' && (isDirty() || state.parsing));
-    // На телефоне видны короткие подписи, полная подпись остаётся для экранного диктора
+    // На телефоне видны короткие подписи, полная подпись остается для экранного диктора
     [['Ввод событий', 'Ввод', inputDone ? 'done' : 'current'], ['Проверка', 'Проверка', inputDone ? 'current' : ''], ['Анализ', 'Анализ', '']].forEach(([label, short, st], i) =>
       s.appendChild(h('li', { class: ['new-step', st], 'aria-current': st === 'current' ? 'step' : null },
         h('span', { class: 'new-step-n' }, st === 'done' ? [icon('check'), h('span', { class: 'sr-only' }, 'готово:')] : String(i + 1)),
@@ -1010,8 +1010,8 @@
       button('Запустить', { kind: 'primary', icon: 'spark', disabled: !!a.reason, onClick: launch }));
   }
 
-  // На широком экране карточка «Правила стратегии» встаёт в ту колонку, которая короче:
-  // так под полем ввода не остаётся пустого места. Порог в 120px не даёт ей прыгать при наборе текста.
+  // На широком экране карточка «Правила стратегии» встает в ту колонку, которая короче:
+  // так под полем ввода не остается пустого места. Порог в 120px не дает ей прыгать при наборе текста.
   let rulesInMain = false;
   function balance() {
     const { main, side, rules, layout } = refs;
@@ -1085,7 +1085,7 @@
       state.tab = 'form';
       revealToday = true;
     }
-    // адрес без параметра: повторный заход на экран не сбросит черновик ещё раз
+    // адрес без параметра: повторный заход на экран не сбросит черновик еще раз
     try { history.replaceState(history.state, '', location.href.split('#')[0] + '#new'); } catch (e) { /* в песочнице адрес может быть недоступен */ }
   }
 

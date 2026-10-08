@@ -25,7 +25,7 @@
     musetti: { height: 185, best: 7, kind: 'Универсальный', pos: 'Универсальная', serveType: 'Комбинированная' },
     rublev: { height: 188, best: 5, kind: 'Атакующий', pos: 'Задняя линия', serveType: 'Комбинированная' },
   };
-  // Средние по туру (топ-50, 52 недели) — для сравнения подачи и приёма
+  // Средние по туру (топ-50, 52 недели) — для сравнения подачи и приема
   const TOUR = { first: 62, firstWon: 74, secondWon: 52, aces: 6.6, df: 2.9, speed: 201, firstRet: 30, secondRet: 51, bpConv: 40, bpSaved: 62 };
 
   // ---------- утилиты ----------
@@ -65,7 +65,7 @@
 
   // ---------- состояние модуля ----------
   const jobs = {};               // id → 'queued' (ночной пакет) | 'running' (обновляем сейчас)
-  const doneNow = new Set();     // игроки, обновлённые в этой сессии макета
+  const doneNow = new Set();     // игроки, обновленные в этой сессии макета
   let redraw = null;             // перерисовка текущего экрана при завершении задач
   const listState = { q: '', fresh: 'all', surface: 'hard', sort: 'rank' };
   const cardTabs = {};           // последняя открытая вкладка карточки по игроку
@@ -84,7 +84,7 @@
       const p = D.P[id];
       p.fresh = 'fresh'; p.updated = NOW; delete jobs[id]; doneNow.add(id);
       if (k === ids.length - 1) {
-        UI.toast(ids.length === 1 ? 'Профиль обновлён: ' + p.short + ' · ' + fmt.usd(cost) : 'Готово: ' + plural(ids.length, 'профиль обновлён', 'профиля обновлены', 'профилей обновлены') + ' · ' + fmt.usd(cost), 'check');
+        UI.toast(ids.length === 1 ? 'Профиль обновлен: ' + p.short + ' · ' + fmt.usd(cost) : 'Готово: ' + plural(ids.length, 'профиль обновлен', 'профиля обновлены', 'профилей обновлены') + ' · ' + fmt.usd(cost), 'check');
         done && done();
       }
       notify();
@@ -174,7 +174,7 @@
     const plays = !!todayMatch(p.id);
     const tops = D.players.filter(x => x.id !== p.id);
     // Случайный выбор — как раньше (тот же расход генератора, чтобы остальные цифры карточки не менялись);
-    // если соперник на этой неделе уже занят другим игроком базы — берём следующего свободного по списку.
+    // если соперник на этой неделе уже занят другим игроком базы — берем следующего свободного по списку.
     const pickOpp = (strong, live, week) => {
       const taken = WEEK_TAKEN[week] || new Set();
       for (let t = 0; t < 40; t++) {
@@ -239,8 +239,8 @@
 
   const SINNER_RATINGS = {
     phys: [['Скорость', 9], ['Выносливость', 8], ['Взрывная сила', 9], ['Гибкость', 9], ['Реакция', 9]],
-    tech: [['Сила подачи', 8], ['Точность подачи', 8], ['Второй мяч', 8], ['Форхенд', 9], ['Бэкхенд', 10], ['Задняя линия', 10], ['Игра у сетки', 7], ['Приём подачи', 9], ['Укороченный', 6]],
-    strong: ['Бэкхенд по линии с любой позиции', 'Темп и глубина с задней линии', 'Приём второй подачи'],
+    tech: [['Сила подачи', 8], ['Точность подачи', 8], ['Второй мяч', 8], ['Форхенд', 9], ['Бэкхенд', 10], ['Задняя линия', 10], ['Игра у сетки', 7], ['Прием подачи', 9], ['Укороченный', 6]],
+    strong: ['Бэкхенд по линии с любой позиции', 'Темп и глубина с задней линии', 'Прием второй подачи'],
     weak: ['Укороченные и игра у сетки — реже, чем у топ-5', 'Медленный старт первого сета против левшей'],
   };
   function genRatings(p) {
@@ -253,11 +253,11 @@
     const o = {
       phys: [['Скорость', j(base + (p.id === 'deminaur' ? 3 : 0))], ['Выносливость', j(base + (p.id === 'medvedev' ? 1.5 : 0))], ['Взрывная сила', j(base)], ['Гибкость', j(base - 0.6)], ['Реакция', j(base)]],
       tech: [['Сила подачи', j(serveP, 0.4)], ['Точность подачи', j((serveP + base) / 2)], ['Второй мяч', j(5 + (p.serve.secondWon - 50) * 0.6, 0.5)], ['Форхенд', j(base + 0.4)], ['Бэкхенд', j(base - 0.2 + (p.backhand === 'одноручный' ? 0.8 : 0))],
-        ['Задняя линия', j(base + 0.3)], ['Игра у сетки', j(base - 1.4 + (p.id === 'alcaraz' ? 2 : 0))], ['Приём подачи', j(ret, 0.4)], ['Укороченный', j(base - 1.6 + (['alcaraz', 'musetti'].includes(p.id) ? 3 : 0))]],
+        ['Задняя линия', j(base + 0.3)], ['Игра у сетки', j(base - 1.4 + (p.id === 'alcaraz' ? 2 : 0))], ['Прием подачи', j(ret, 0.4)], ['Укороченный', j(base - 1.6 + (['alcaraz', 'musetti'].includes(p.id) ? 3 : 0))]],
     };
     const tech = o.tech.slice().sort((a, b) => b[1] - a[1]);
-    const PH = { 'Сила подачи': 'Мощная первая подача', 'Точность подачи': 'Точная подача в углы', 'Второй мяч': 'Надёжный второй мяч', 'Форхенд': 'Форхенд — главный удар', 'Бэкхенд': 'Стабильный бэкхенд', 'Задняя линия': 'Длинные розыгрыши с задней линии', 'Игра у сетки': 'Уверенная игра у сетки', 'Приём подачи': 'Сильный приём', 'Укороченный': 'Укороченные удары' };
-    const WK = { 'Сила подачи': 'Подача без «бесплатных» очков', 'Точность подачи': 'Нестабильный процент первой подачи', 'Второй мяч': 'Атакуемая вторая подача', 'Форхенд': 'Форхенд ломается под давлением', 'Бэкхенд': 'Бэкхенд на высоких мячах', 'Задняя линия': 'Проигрывает длинные розыгрыши', 'Игра у сетки': 'Редко и неуверенно выходит к сетке', 'Приём подачи': 'Слабый приём против подающих', 'Укороченный': 'Почти не использует укороченные' };
+    const PH = { 'Сила подачи': 'Мощная первая подача', 'Точность подачи': 'Точная подача в углы', 'Второй мяч': 'Надежный второй мяч', 'Форхенд': 'Форхенд — главный удар', 'Бэкхенд': 'Стабильный бэкхенд', 'Задняя линия': 'Длинные розыгрыши с задней линии', 'Игра у сетки': 'Уверенная игра у сетки', 'Прием подачи': 'Сильный прием', 'Укороченный': 'Укороченные удары' };
+    const WK = { 'Сила подачи': 'Подача без «бесплатных» очков', 'Точность подачи': 'Нестабильный процент первой подачи', 'Второй мяч': 'Атакуемая вторая подача', 'Форхенд': 'Форхенд ломается под давлением', 'Бэкхенд': 'Бэкхенд на высоких мячах', 'Задняя линия': 'Проигрывает длинные розыгрыши', 'Игра у сетки': 'Редко и неуверенно выходит к сетке', 'Прием подачи': 'Слабый прием против подающих', 'Укороченный': 'Почти не использует укороченные' };
     o.strong = tech.slice(0, 3).map(x => PH[x[0]]);
     o.weak = tech.slice(-2).map(x => WK[x[0]]);
     return o;
@@ -279,13 +279,13 @@
     const tbPct = Math.round(tbW / tbTotal * 100);
     const patterns = [
       { k: 'На тай-брейке', stat: tbW + '–' + (tbTotal - tbW) + ' за 52 недели (' + tbPct + '%)',
-        text: tbPct >= 62 ? 'Играет первым номером, на своей подаче рискует вторым мячом. Тай-брейки — скорее плюс.' : tbPct >= 50 ? 'Ровно, без явного перекоса: тай-брейк для него почти лотерея.' : 'Отдаёт инициативу и чаще ошибается с задней линии. Против сильных подающих это минус.' },
+        text: tbPct >= 62 ? 'Играет первым номером, на своей подаче рискует вторым мячом. Тай-брейки — скорее плюс.' : tbPct >= 50 ? 'Ровно, без явного перекоса: тай-брейк для него почти лотерея.' : 'Отдает инициативу и чаще ошибается с задней линии. Против сильных подающих это минус.' },
       { k: 'При 0:40 на своей подаче', stat: 'отыгрывает гейм в ' + hold + '% (тур — 19%)',
-        text: hold >= 24 ? 'Поднимает процент первой подачи и играет на счёт, а не на эффект.' : hold >= 17 ? 'Ведёт себя как средний игрок тура: без провалов, но и без «чудес».' : 'Часто торопится и отдаёт гейм двойной или невынужденной ошибкой.' },
+        text: hold >= 24 ? 'Поднимает процент первой подачи и играет на счет, а не на эффект.' : hold >= 17 ? 'Ведет себя как средний игрок тура: без провалов, но и без «чудес».' : 'Часто торопится и отдает гейм двойной или невынужденной ошибкой.' },
       { k: 'После проигранного первого сета', stat: 'выиграл ' + setW + ' из ' + setTotal + ' матчей',
         text: setW / setTotal >= 0.5 ? 'Быстро перестраивается, во втором сете меняет направление ударов.' : 'Эмоционально «проседает»: второй сет часто проигрывает с брейком в начале.' },
       { k: 'Под давлением трибун и судьи', stat: type.toLowerCase(),
-        text: hot ? 'Спорит с судьёй и ракеткой, после эмоциональных эпизодов бывает серия проигранных очков.' : 'Спокоен, на решения судьи почти не реагирует.' },
+        text: hot ? 'Спорит с судьей и ракеткой, после эмоциональных эпизодов бывает серия проигранных очков.' : 'Спокоен, на решения судьи почти не реагирует.' },
     ];
     return { type, ratings, patterns };
   }
@@ -320,7 +320,7 @@
     const rest = last ? Math.round((ts(D.today) - ts(last.date)) / 864e5) - 1 : null;
     const fatigue = m14 >= 6 ? ['Высокая', 'bad'] : m14 >= 4 ? ['Умеренная', 'warn'] : ['Свежий', 'good'];
     const motivation = p.rank <= 2 ? 'Высокая · борьба за №1' : p.rank <= 10 ? 'Высокая · Итоговый турнир' : 'Средняя';
-    return { last, m14, rest, fatigue, motivation, health: p.id === 'medvedev' ? ['Лёгкое недомогание', 'warn'] : ['Здоров', 'good'] };
+    return { last, m14, rest, fatigue, motivation, health: p.id === 'medvedev' ? ['Легкое недомогание', 'warn'] : ['Здоров', 'good'] };
   }
 
   function genNews(p, matches) {
@@ -557,7 +557,7 @@
     return UI.freshnessChip(p.fresh);
   }
   function updatedText(p) {
-    if (jobs[p.id] === 'running') return 'идёт обновление';
+    if (jobs[p.id] === 'running') return 'идет обновление';
     if (p.fresh === 'missing') return jobs[p.id] === 'queued' ? 'сбор в ночном пакете' : 'профиль не собран';
     return 'обновлено ' + ago(p.updated) + (jobs[p.id] === 'queued' ? ' · в пакете' : '');
   }
@@ -600,7 +600,7 @@
           h('fieldset', { class: 'players-fieldset' }, h('legend', { class: 'field-label' }, 'Когда собрать профиль'),
             h('label', { class: 'check' }, h('input', { type: 'radio', name: 'players-when', value: 'now', checked: true }), h('span', null, h('b', null, 'Сейчас'), ' — ~', fmt.usd(COST.collect), ', 1–2 минуты')),
             h('label', { class: 'check' }, h('input', { type: 'radio', name: 'players-when', value: 'batch' }), h('span', null, h('b', null, 'Ночным пакетом'), ' — ~', usd(COST.collect / 2), ', готово к 05:00 (Batch API, −50%)'))),
-          UI.callout('', 'database', 'Соберём то же, что и в Telegram-боте: личные данные, игровой профиль, физику и технику, психологию, текущее состояние и последние матчи. Статистика берётся из архива ATP, новости и оценки — веб-поиском Claude с источниками.'));
+          UI.callout('', 'database', 'Соберем то же, что и в Telegram-боте: личные данные, игровой профиль, физику и технику, психологию, текущее состояние и последние матчи. Статистика берется из архива ATP, новости и оценки — веб-поиском Claude с источниками.'));
         return form;
       },
       actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Добавить', { kind: 'primary', type: 'submit', icon: 'plus', attrs: { form: 'players-add-form' } })],
@@ -651,10 +651,10 @@
     const listCard = h('section', { class: 'card', 'aria-label': 'Список игроков' }, filters, results, resultsFoot);
 
     const sources = card({
-      title: 'Откуда берутся данные', subtitle: 'Каждая запись хранит источник и дату — можно проверить, на чём основан вывод модели',
+      title: 'Откуда берутся данные', subtitle: 'Каждая запись хранит источник и дату — можно проверить, на чем основан вывод модели',
       body: h('div', { class: 'players-sources' },
-        source('database', 'Архив матчей ATP', 'Рейтинг, счёт, подача и приём. Структурированные данные без ИИ и без токенов — импорт каждую ночь. Эло считаем сами по этим матчам.'),
-        source('globe', 'Веб-поиск Claude', 'Новости, травмы, усталость, мотивация. У каждой записи ссылка на источник. Неподтверждённые слухи помечаются и не влияют на расчёт.'),
+        source('database', 'Архив матчей ATP', 'Рейтинг, счет, подача и прием. Структурированные данные без ИИ и без токенов — импорт каждую ночь. Эло считаем сами по этим матчам.'),
+        source('globe', 'Веб-поиск Claude', 'Новости, травмы, усталость, мотивация. У каждой записи ссылка на источник. Неподтвержденные слухи помечаются и не влияют на расчет.'),
         source('brain', 'Оценки Claude 1–10', 'Стиль, физика, техника, психология. Собираются из разборов матчей и интервью раз в 30 дней. Это мнение, а не измерение — вес в модели небольшой.'),
         source('coins', 'Сколько стоит', 'Обновление профиля ночным пакетом ≈ ' + usd(COST.batch) + ' (Batch API, −50%), сразу ≈ ' + fmt.usd(COST.now) + '. Сбор нового игрока ≈ ' + fmt.usd(COST.collect) + '.')),
     });
@@ -667,7 +667,7 @@
       const c = counts();
       const queued = Object.keys(jobs).filter(id => jobs[id] === 'queued').length;
       tiles.append(
-        UI.stat({ class: 'col-3 half-mobile', icon: 'users', label: 'Игроков в базе', value: String(c.all - c.missing), hint: c.missing ? 'ещё ' + c.missing + ' без профиля' : 'все профили собраны' }),
+        UI.stat({ class: 'col-3 half-mobile', icon: 'users', label: 'Игроков в базе', value: String(c.all - c.missing), hint: c.missing ? 'еще ' + c.missing + ' без профиля' : 'все профили собраны' }),
         UI.stat({ class: 'col-3 half-mobile', icon: 'check', label: 'Данные свежие', value: String(c.fresh), hint: 'обновлены за 24 ч' }),
         UI.stat({ class: 'col-3 half-mobile', icon: 'clock', label: 'Нужно обновить', value: String(c.stale), hint: queued ? queued + ' в очереди' : 'старше 24 ч' }),
         UI.stat({ class: 'col-3 half-mobile', icon: 'coins', label: 'Расход на данные', value: fmt.usd(refreshCost), hint: 'октябрь · Batch API −50%' }));
@@ -681,7 +681,7 @@
       const link = id => h('a', { href: '#player-' + id }, D.P[id].short);
       const list = arr => arr.map((id, k) => [k ? (k === arr.length - 1 ? ' и ' : ', ') : '', link(id)]);
       if (running.length) {
-        todayHost.appendChild(UI.callout('info', 'refresh', h('b', null, 'Обновляем к матчам дня: '), list(running), '. Это займёт около минуты, можно продолжать работу.'));
+        todayHost.appendChild(UI.callout('info', 'refresh', h('b', null, 'Обновляем к матчам дня: '), list(running), '. Это займет около минуты, можно продолжать работу.'));
       } else if (need.length) {
         const stale = need.filter(id => D.P[id].fresh === 'stale'), missing = need.filter(id => D.P[id].fresh === 'missing');
         const cost = stale.length * COST.now + missing.length * COST.collect;
@@ -691,7 +691,7 @@
             stale.length ? ['устаревшие данные — ', list(stale)] : null,
             stale.length && missing.length ? '; ' : null,
             missing.length ? [missing.length === 1 ? 'профиль ' : 'профили ', list(missing), missing.length === 1 ? ' не собран' : ' не собраны'] : null,
-            '. Анализ матчей с ними пойдёт с пометкой «неполные данные» и пониженной уверенностью.'),
+            '. Анализ матчей с ними пойдет с пометкой «неполные данные» и пониженной уверенностью.'),
           h('div', { class: 'row', style: 'gap:10px 14px' },
             button('Обновить сейчас · ~' + fmt.usd(cost), { kind: 'primary', size: 'sm', icon: 'refresh', onClick: () => runNow(need) }),
             first && h('span', { class: 'xsmall' }, 'Первый такой матч — в ' + first.time + ', ночной пакет не успеет')))));
@@ -807,7 +807,7 @@
     };
   }
 
-  // Если вкладки всё же не влезли (узкий экран, крупный шрифт) — держим выбранную в поле зрения
+  // Если вкладки все же не влезли (узкий экран, крупный шрифт) — держим выбранную в поле зрения
   function revealTab(el) {
     requestAnimationFrame(() => {
       const b = el.querySelector('[aria-selected="true"]');
@@ -826,7 +826,7 @@
     const busy = jobs[p.id] === 'running';
     const status = h('div', { class: 'players-hero-status' },
       h('div', { class: 'players-hero-st' }, statusChip(p),
-        h('small', null, busy ? (missing ? 'собираем профиль, 1–2 мин' : 'идёт обновление…') : missing ? (jobs[p.id] === 'queued' ? 'сбор в ночном пакете, к 05:00' : 'есть только архив ATP') : 'обновлено ' + ago(p.updated) + ' · ' + fmt.datetime(p.updated))),
+        h('small', null, busy ? (missing ? 'собираем профиль, 1–2 мин' : 'идет обновление…') : missing ? (jobs[p.id] === 'queued' ? 'сбор в ночном пакете, к 05:00' : 'есть только архив ATP') : 'обновлено ' + ago(p.updated) + ' · ' + fmt.datetime(p.updated))),
       missing
         ? button(busy ? 'Собираем…' : 'Как собираем', { kind: 'secondary', size: 'sm', icon: busy ? 'refresh' : null, iconRight: busy ? null : 'arrowDown', disabled: busy, title: 'К карточке сбора профиля ниже', onClick: () => {
             const c = document.querySelector('#players-collect-card'); if (!c) return;
@@ -913,7 +913,7 @@
         h('div', { class: 'stack', style: 'gap:8px' },
           h('div', { class: 'players-formbig', role: 'img', 'aria-label': 'Последние 10 матчей, начиная с последнего: ' + p.form.map(x => x === 'W' ? 'победа' : 'поражение').join(', ') },
             p.form.map(x => h('span', { class: x === 'W' ? 'w' : 'l', 'aria-hidden': 'true' }, x === 'W' ? 'В' : 'П'))),
-          h('div', { class: 'players-hint' }, 'В — победа, П — поражение; слева последний матч (обведён). ' + winsOf(p) + ' побед из 10.')),
+          h('div', { class: 'players-hint' }, 'В — победа, П — поражение; слева последний матч (обведен). ' + winsOf(p) + ' побед из 10.')),
         kvWide([
           ['Последний матч', S.last ? fmt.date(S.last.date) + ' · ' + S.last.event + ', ' + S.last.round : '—'],
           ['Здоровье', chip(S.health[0], S.health[1], S.health[1] === 'good' ? 'check' : 'alert')],
@@ -941,7 +941,7 @@
     const sv = p.serve, rt = p.ret;
     const bpSaved = clamp(Math.round(TOUR.bpSaved + (p.elo.all - 2000) / 30), 55, 72);
     const serveCard = card({
-      class: 'col-7', title: 'Подача и приём', subtitle: '52 недели · против среднего по туру (топ-50)',
+      class: 'col-7', title: 'Подача и прием', subtitle: '52 недели · против среднего по туру (топ-50)',
       actions: [h('div', { class: 'chart-legend' }, h('span', null, h('i', { class: 'box', style: { background: 'var(--s1)' } }), p.short), h('span', null, h('i', { class: 'players-tick-key' }), 'Средний по туру'))],
       body: [
         h('div', { class: 'players-metrics' },
@@ -952,11 +952,11 @@
             metric('Эйсов за матч', sv.aces, TOUR.aces, 15, '', false, 1),
             metric('Двойных за матч', sv.df, TOUR.df, 6, '', true, 1),
             metric('Скорость первой', sv.speed, TOUR.speed, 240, 'км/ч')),
-          h('div', { class: 'players-metrics-col' }, h('div', { class: 'eyebrow' }, 'Приём и брейкпоинты'),
-            metric('Очки на приёме первой', rt.firstRet, TOUR.firstRet, 100, '%'),
-            metric('Очки на приёме второй', rt.secondRet, TOUR.secondRet, 100, '%'),
+          h('div', { class: 'players-metrics-col' }, h('div', { class: 'eyebrow' }, 'Прием и брейкпоинты'),
+            metric('Очки на приеме первой', rt.firstRet, TOUR.firstRet, 100, '%'),
+            metric('Очки на приеме второй', rt.secondRet, TOUR.secondRet, 100, '%'),
             metric('Реализация брейкпоинтов', rt.bpConv, TOUR.bpConv, 100, '%'),
-            metric('Спасённые брейкпоинты', bpSaved, TOUR.bpSaved, 100, '%'))),
+            metric('Спасенные брейкпоинты', bpSaved, TOUR.bpSaved, 100, '%'))),
         h('p', { class: 'players-hint' }, 'Полоса — показатель игрока, вертикальная черта — средний по туру. Стрелка и цвет показывают, лучше или хуже среднего (для двойных ошибок лучше меньше).'),
       ],
     });
@@ -1012,7 +1012,7 @@
         { label: 'Покрытие', render: m => UI.surfaceChip(m.surface) },
         { label: 'Раунд', render: m => m.round },
         { label: 'Соперник', render: m => oppNode(m) },
-        { label: 'Счёт', render: m => m.wo ? h('span', { class: 'muted' }, 'W/O') : h('span', { class: 'mono', style: 'white-space:nowrap' }, m.score) },
+        { label: 'Счет', render: m => m.wo ? h('span', { class: 'muted' }, 'W/O') : h('span', { class: 'mono', style: 'white-space:nowrap' }, m.score) },
         { label: 'Итог', render: resChip },
         { label: 'Эйсы', align: 'r', render: m => m.wo ? '—' : m.aces },
         { label: '1-я подача', align: 'r', render: m => m.wo ? '—' : m.firstPct + '%' },
@@ -1020,10 +1020,10 @@
       list.querySelectorAll('tbody tr').forEach((tr, k) => { if (ms[k].wo) tr.classList.add('players-wo'); });
     }
     panel.appendChild(card({
-      title: 'Последние ' + played.length + ' матчей', subtitle: 'Архив ATP · сверху последний' + (wo.length ? ' · неявка соперника в счёт не идёт' : ''),
+      title: 'Последние ' + played.length + ' матчей', subtitle: 'Архив ATP · сверху последний' + (wo.length ? ' · неявка соперника в счет не идет' : ''),
       actions: [chip('Обновлено ' + fmt.datetime(p.updated), 'outline', 'database')],
       body: [strip, h('div', { class: 'players-flush' }, list)],
-      foot: [h('span', { class: 'small muted', style: 'flex:1;min-width:0' }, 'Полная история — ' + Object.values(p.wlSurface).reduce((a, x) => a + x[0] + x[1], 0) + ' матчей за 2 сезона. Для анализа модель берёт сжатую сводку, а не весь список.'),
+      foot: [h('span', { class: 'small muted', style: 'flex:1;min-width:0' }, 'Полная история — ' + Object.values(p.wlSurface).reduce((a, x) => a + x[0] + x[1], 0) + ' матчей за 2 сезона. Для анализа модель берет сжатую сводку, а не весь список.'),
         button('Показать все', { kind: 'secondary', size: 'sm', icon: 'list', onClick: () => UI.toast('В макете показаны последние 10 матчей', 'info') })],
     }));
   }
@@ -1076,8 +1076,8 @@
       body: h('form', { id: 'players-dispute', class: 'stack', style: 'gap:14px', on: { submit: e => { e.preventDefault(); } } },
         UI.field({ id: 'players-d-what', label: 'Что не так', options: ['Оценка физики', 'Оценка техники', 'Психология', 'Сильные и слабые стороны'] }),
         UI.field({ id: 'players-d-text', label: 'Ваш комментарий', rows: 3, placeholder: 'Например: после смены тренера стал чаще выходить к сетке — «игра у сетки» скорее 8, а не 6.' }),
-        UI.callout('', 'brain', 'Ваша правка сохранится рядом с оценкой Claude с пометкой «вручную». При следующем обновлении Claude проверит её по источникам и покажет, если они расходятся.')),
-      actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Сохранить правку', { kind: 'primary', icon: 'check', onClick: () => { close(); UI.toast('Правка сохранена — учтём при следующем обновлении', 'check'); } })],
+        UI.callout('', 'brain', 'Ваша правка сохранится рядом с оценкой Claude с пометкой «вручную». При следующем обновлении Claude проверит ее по источникам и покажет, если они расходятся.')),
+      actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Сохранить правку', { kind: 'primary', icon: 'check', onClick: () => { close(); UI.toast('Правка сохранена — учтем при следующем обновлении', 'check'); } })],
     });
   }
 
@@ -1094,7 +1094,7 @@
           UI.kv([['Опубликовано', fmt.dateFull(n.date)], ['Найдено', 'веб-поиск Claude, ' + fmt.datetime(p.updated)], ['Влияние', n.impact ? 'учтено в анализе' : 'не учтено']]),
           h('blockquote', { class: 'players-quote' }, n.quote),
           h('p', { class: 'small soft' }, n.why + '.'),
-          UI.callout('', 'link', 'Ссылка и выдержка хранятся вместе с выводом, чтобы потом проверить, на чём модель основала решение. В макете переход на внешний сайт отключён.'),
+          UI.callout('', 'link', 'Ссылка и выдержка хранятся вместе с выводом, чтобы потом проверить, на чем модель основала решение. В макете переход на внешний сайт отключен.'),
         ],
       }) })));
     const searches = p.id === 'sinner' ? 4 : 3;
@@ -1103,7 +1103,7 @@
       actions: [button('Искать сейчас', { kind: 'secondary', size: 'sm', icon: 'search', onClick: () => { UI.toast('Ищем свежие новости: ' + p.short + '… (~' + fmt.usd(0.02) + ')', 'search'); setTimeout(() => UI.toast('Новых новостей нет — последние уже учтены', 'check'), 2200); } })],
       body: h('div', { class: 'players-flush' }, items),
     }));
-    panel.appendChild(UI.callout('', 'info', h('b', null, 'Как Claude решает, влияет ли новость. '), 'Учитываются только подтверждённые факты о здоровье, нагрузке, условиях турнира и мотивации. Слухи из соцсетей без подтверждения турнира или команды помечаются «не влияет» — так решили по итогам разбора ставок (урок ', h('a', { href: '#learning' }, 'L-019'), ').'));
+    panel.appendChild(UI.callout('', 'info', h('b', null, 'Как Claude решает, влияет ли новость. '), 'Учитываются только подтвержденные факты о здоровье, нагрузке, условиях турнира и мотивации. Слухи из соцсетей без подтверждения турнира или команды помечаются «не влияет» — так решили по итогам разбора ставок (урок ', h('a', { href: '#learning' }, 'L-019'), ').'));
   }
 
   // ---------- вкладка «История данных» ----------
@@ -1116,8 +1116,8 @@
     const srcNode = (ic, t) => h('span', { class: 'players-hist-src' }, icon(ic), t);
     const rows = [
       { block: 'Рейтинг и очки ATP', at: imp, how: now ? 'Обновить сейчас' : 'Ночной импорт архива ATP', src: srcNode('database', 'архив ATP'), cost: 0 },
-      { block: 'Матчи, подача и приём', at: imp, how: now ? 'Обновить сейчас' : 'Ночной импорт архива ATP', src: srcNode('database', 'архив ATP'), cost: 0 },
-      { block: 'Эло по покрытиям', at: plus2(imp), how: 'Пересчёт после импорта', src: srcNode('chart', 'расчёт'), cost: 0 },
+      { block: 'Матчи, подача и прием', at: imp, how: now ? 'Обновить сейчас' : 'Ночной импорт архива ATP', src: srcNode('database', 'архив ATP'), cost: 0 },
+      { block: 'Эло по покрытиям', at: plus2(imp), how: 'Пересчет после импорта', src: srcNode('chart', 'расчет'), cost: 0 },
       { block: 'Новости и текущее состояние', at: upd, how: now ? 'Обновить сейчас · Sonnet 5.5' : 'Ночной пакет · Sonnet 5.5, Batch', src: srcNode('globe', 'веб-поиск, 3 запроса'), cost: now ? COST.now : COST.batch },
       { block: 'Игровой профиль, физика, техника', at: now ? NOW : I.staticAt, how: 'Полный сбор профиля · Sonnet 5.5', src: srcNode('brain', 'оценка Claude, 9 источников'), cost: now ? null : COST.collect },
       { block: 'Психология', at: now ? NOW : I.staticAt, how: 'Полный сбор профиля', src: srcNode('brain', 'оценка Claude, 6 источников'), cost: null },
@@ -1162,7 +1162,7 @@
         h('li', null, h('span', { class: 'muted', style: 'display:flex' }, icon('database')), h('span', null, h('b', null, 'Рейтинг, матчи, Эло'), ' — каждую ночь из архива ATP, без ИИ.')),
         h('li', null, h('span', { class: 'muted', style: 'display:flex' }, icon('globe')), h('span', null, h('b', null, 'Новости и состояние'), ' — ночным пакетом, если у игрока скоро матч; перед анализом — если старше 24 ч.')),
         h('li', null, h('span', { class: 'muted', style: 'display:flex' }, icon('brain')), h('span', null, h('b', null, 'Профиль и психология'), ' — раз в 30 дней или после травмы и смены тренера.')),
-        h('li', null, h('span', { class: 'muted', style: 'display:flex' }, icon('layers')), h('span', null, h('b', null, 'В анализ'), ' идёт сжатое досье ≈ 1,8K токенов вместо 12K сырого текста, и оно кэшируется.'))),
+        h('li', null, h('span', { class: 'muted', style: 'display:flex' }, icon('layers')), h('span', null, h('b', null, 'В анализ'), ' идет сжатое досье ≈ 1,8K токенов вместо 12K сырого текста, и оно кэшируется.'))),
     });
     panel.appendChild(h('div', { class: 'grid' }, blocks, h('div', { class: 'col-4 stack', style: 'gap:16px' }, runsCard, rulesCard)));
   }
@@ -1214,9 +1214,9 @@
     }
     const collectCard = h('section', { class: 'card', id: 'players-collect-card', 'aria-label': 'Сбор профиля', style: 'scroll-margin-top: calc(var(--topbar-h) + 16px)' }, h('div', { class: 'card-body players-collect' },
       h('span', { class: 'players-collect-ic' }, icon('database')),
-      h('h3', null, 'Профиль ещё не собран'),
-      h('p', null, 'Из архива ATP уже есть рейтинг, Эло и результаты. Досье — стиль игры, физику и технику, психологию, новости и травмы — Claude ещё не собирал.',
-        opp ? [' Без него анализ матча ', h('a', { href: IN_EXAMPLE.includes(m.id) ? '#analysis' : '#new-' + m.id }, opp.short + ' — ' + p.short), ' сегодня в ' + m.time + ' пройдёт с пометкой «неполные данные» и пониженной уверенностью.'] : null),
+      h('h3', null, 'Профиль еще не собран'),
+      h('p', null, 'Из архива ATP уже есть рейтинг, Эло и результаты. Досье — стиль игры, физику и технику, психологию, новости и травмы — Claude еще не собирал.',
+        opp ? [' Без него анализ матча ', h('a', { href: IN_EXAMPLE.includes(m.id) ? '#analysis' : '#new-' + m.id }, opp.short + ' — ' + p.short), ' сегодня в ' + m.time + ' пройдет с пометкой «неполные данные» и пониженной уверенностью.'] : null),
       h('div', { class: 'row', style: 'justify-content:center' }, collectBtn, batchBtn),
       status,
       stepsEl));
@@ -1236,11 +1236,11 @@
   function renderNotFound(root, pid) {
     UI.setHeader({ title: 'Игрок не найден', crumbs: h('span', null, h('a', { href: '#players' }, 'Игроки'), ' / ', 'карточка игрока') });
     redraw = null;
-    const guess = pid ? pid.replace(/[^a-zа-яё]/gi, ' ').trim() : '';
+    const guess = pid ? pid.replace(/[^a-zа-яе]/gi, ' ').trim() : '';
     root.appendChild(h('section', { class: 'card' }, h('div', { class: 'card-body players-notfound' },
       h('span', { class: 'players-notfound-ic' }, icon('users')),
       h('h3', null, 'Такого игрока нет в базе'),
-      h('p', { class: 'soft', style: 'max-width:52ch' }, pid ? ['По адресу «', h('span', { class: 'mono' }, pid), '» никого не нашли. Возможно, ссылка устарела или игрок ещё не добавлен.'] : 'В адресе не указан игрок.'),
+      h('p', { class: 'soft', style: 'max-width:52ch' }, pid ? ['По адресу «', h('span', { class: 'mono' }, pid), '» никого не нашли. Возможно, ссылка устарела или игрок еще не добавлен.'] : 'В адресе не указан игрок.'),
       h('div', { class: 'row', style: 'justify-content:center' },
         button('К списку игроков', { kind: 'primary', icon: 'chevronLeft', href: '#players' }),
         button('Добавить игрока', { kind: 'secondary', icon: 'plus', onClick: () => addPlayerModal(guess && guess.length > 2 ? guess : '') })))));

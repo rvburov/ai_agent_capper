@@ -25,14 +25,14 @@
   const PERIODS = [
     { id: '30', label: '30 дней', days: 30, ctx: 'за 30 дней', prev: 'к пред. 30 дням' },
     { id: '90', label: '3 месяца', days: 90, ctx: 'за 3 месяца', prev: 'к пред. 3 месяцам' },
-    { id: 'all', label: 'Всё время', days: null, ctx: 'за всё время', prev: null },
+    { id: 'all', label: 'Все время', days: null, ctx: 'за все время', prev: null },
   ];
   const MARKET_SHORT = { p1: 'победа игрока 1', p2: 'победа игрока 2', h1m: 'игрок 1 — 2:0 по сетам', h2p: 'игрок 2 — хотя бы сет', h1p: 'игрок 1 — хотя бы сет' };
   const MARKETS = D.markets.filter(m => D.allLegs.some(l => l.market === m.id));
   const mLabel = id => (D.markets.find(m => m.id === id) || { label: id }).label;
   const SURF_KEYS = Object.keys(D.surfaces);
 
-  // ---------- состояние фильтров (живёт между перерисовками) ----------
+  // ---------- состояние фильтров (живет между перерисовками) ----------
   const DEFAULTS = { period: 'all', market: 'all', surface: 'all' };
   const state = Object.assign({}, DEFAULTS);
   try {
@@ -47,7 +47,7 @@
   const isDefault = () => state.period === DEFAULTS.period && state.market === 'all' && state.surface === 'all';
   const ui = { hypotheses: {}, deep: false };
 
-  // ---------- расчёты (формулы как в data.js) ----------
+  // ---------- расчеты (формулы как в data.js) ----------
   const won = l => (l.result === 'win' ? 1 : 0);
   const marketQ = l => Math.min(0.97, 1 / l.closing * 0.955); // вероятность рынка по закрытию без маржи
   const legClv = l => (l.odds / l.closing - 1) * 100;
@@ -472,7 +472,7 @@
   // ---------- выводы модели ----------
   function insightList(s) {
     const out = [];
-    // 1. Калибровка: самый переоценённый диапазон с достаточной выборкой
+    // 1. Калибровка: самый переоцененный диапазон с достаточной выборкой
     const bins = calibration(s.legs).filter(b => b.n >= 8);
     const worst = bins.reduce((w, b) => (!w || b.p - b.actual > w.p - w.actual ? b : w), null);
     if (worst && worst.p - worst.actual >= 0.04) {
@@ -491,7 +491,7 @@
       const st = D.strategy.stakeTable.find(x => x.range === tot.key);
       const biggest = D.strategy.stakeTable[0].range === tot.key;
       out.push({ id: 'total-' + tot.key, tone: 'bad', ic: 'alert', title: ['Экспрессы с итоговым кэфом ', nowrap(tot.label), ' в минусе'],
-        text: 'ROI ' + fmt.signedPct(tot.roi) + ' на ' + onBets(tot.n) + ' (' + fmt.signedMoney(tot.profit) + '). ' + (st ? (biggest ? 'При этом по таблице стратегии на них идёт самая крупная ставка — ' : 'Ставка по таблице стратегии — ') + st.pct + ' банка.' : ''),
+        text: 'ROI ' + fmt.signedPct(tot.roi) + ' на ' + onBets(tot.n) + ' (' + fmt.signedMoney(tot.profit) + '). ' + (st ? (biggest ? 'При этом по таблице стратегии на них идет самая крупная ставка — ' : 'Ставка по таблице стратегии — ') + st.pct + ' банка.' : ''),
         basis: nBets(tot.n), action: 'bets' });
     }
     // 3. Лучший срез на маленькой выборке
@@ -509,13 +509,13 @@
     if (s.brier.n >= 20) {
       const diff = s.brier.model - s.brier.market;
       out.push({ id: 'brier', tone: 'accent', ic: 'bolt', title: Math.abs(diff) < 0.01 ? 'Модель на уровне закрывающей линии' : diff < 0 ? 'Модель точнее закрывающей линии' : 'Рынок пока точнее модели',
-        text: 'Brier ' + fmt.dec(s.brier.model, 3) + ' против ' + fmt.dec(s.brier.market, 3) + ' у рынка' + (Math.abs(diff) < 0.01 ? ' — разница в пределах шума на ' + onEv(s.brier.n) + '.' : '.') + ' Надёжнее смотреть на CLV: ' + fmt.signedPct(Math.round(s.sum.clv * 10) / 10) + ' в среднем, лучше закрытия в ' + s.sum.clvPos + ' из ' + s.sum.clvN + '.',
+        text: 'Brier ' + fmt.dec(s.brier.model, 3) + ' против ' + fmt.dec(s.brier.market, 3) + ' у рынка' + (Math.abs(diff) < 0.01 ? ' — разница в пределах шума на ' + onEv(s.brier.n) + '.' : '.') + ' Надежнее смотреть на CLV: ' + fmt.signedPct(Math.round(s.sum.clv * 10) / 10) + ' в среднем, лучше закрытия в ' + s.sum.clvPos + ' из ' + s.sum.clvN + '.',
         basis: nEv(s.brier.n), action: 'explain' });
     }
     // 0. Общая оговорка, если данных мало — ставим первой
     if (s.legs.length < 30) {
       out.unshift({ id: 'sample', tone: 'info', ic: 'info', title: 'Выборка слишком мала для выводов',
-        text: 'Под фильтром ' + nBets(s.sum.n) + ' и ' + nEv(s.legs.length) + '. На таком объёме ROI и калибровка почти целиком зависят от везения — опирайтесь на них не раньше 30 событий.',
+        text: 'Под фильтром ' + nBets(s.sum.n) + ' и ' + nEv(s.legs.length) + '. На таком объеме ROI и калибровка почти целиком зависят от везения — опирайтесь на них не раньше 30 событий.',
         basis: nEv(s.legs.length), action: state.period !== 'all' ? 'widen' : s.filtered ? 'clear' : null });
     }
     return out.slice(0, 3);
@@ -526,8 +526,8 @@
     UI.modal({
       title: 'Гипотеза для обучения модели',
       body: [
-        h('p', { class: 'soft small' }, 'ИИ подготовил черновик урока по этому наблюдению. Урок не попадёт в промпт анализа, пока не подтвердится на новых событиях и вы его не одобрите в разделе «Обучение модели».'),
-        UI.field({ id: 'analytics-hyp-text', label: 'Формулировка', rows: 4, value: 'При прогнозе ' + ins.range + ' на фаворита модель завышает вероятность примерно на ' + ins.gap + ' п.п. Снижать оценку на ' + Math.max(2, Math.round(ins.gap / 2)) + ' п.п. перед расчётом валуя.' }),
+        h('p', { class: 'soft small' }, 'ИИ подготовил черновик урока по этому наблюдению. Урок не попадет в промпт анализа, пока не подтвердится на новых событиях и вы его не одобрите в разделе «Обучение модели».'),
+        UI.field({ id: 'analytics-hyp-text', label: 'Формулировка', rows: 4, value: 'При прогнозе ' + ins.range + ' на фаворита модель завышает вероятность примерно на ' + ins.gap + ' п.п. Снижать оценку на ' + Math.max(2, Math.round(ins.gap / 2)) + ' п.п. перед расчетом валуя.' }),
         UI.field({ id: 'analytics-hyp-scope', label: 'Где проверять', value: 'all', options: [{ value: 'all', label: 'Все покрытия и рынки' }, { value: 'fav', label: 'Только П1 и Ф1(−1.5) — ставки на фаворита' }, { value: 'hard', label: 'Только хард' }] }),
         UI.kv([['Основание сейчас', nEv(ins.n)], ['Порог подтверждения', '≥ 20 новых событий'], ['Номер', num]]),
       ],
@@ -543,12 +543,12 @@
       title: 'Brier и CLV простыми словами',
       body: [
         h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'Brier — точность вероятностей'),
-          h('p', { class: 'small soft' }, 'Для каждого события берётся (прогноз − исход)², где исход — 1 или 0, и усредняется. Прогноз 80% на сыгравшее событие даёт 0,04, на не сыгравшее — 0,64. 0 — идеально, 0,25 — как всегда ставить 50%. Ниже — лучше.')),
+          h('p', { class: 'small soft' }, 'Для каждого события берется (прогноз − исход)², где исход — 1 или 0, и усредняется. Прогноз 80% на сыгравшее событие дает 0,04, на не сыгравшее — 0,64. 0 — идеально, 0,25 — как всегда ставить 50%. Ниже — лучше.')),
         h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'Почему сравниваем с рынком'),
           h('p', { class: 'small soft' }, 'Закрывающий кэф — самая точная публичная оценка. Если Brier модели ниже рыночного, модель видит что-то, чего не учла линия. Разница в тысячные доли на сотне событий — пока шум.')),
         h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'CLV — качество цены'),
           h('p', { class: 'small soft' }, 'CLV = ваш кэф / закрывающий − 1. Взяли 1.62, к началу матча стало 1.55 — CLV +4,5%. Результат одной ставки — случайность, а стабильно положительный CLV — устойчивый признак преимущества. Его видно уже через 50–100 ставок, ROI — через сотни.')),
-        UI.callout('info', 'flask', 'Эти же метрики используются при обучении. Новую версию стратегии включают, только если её лог-лосс на отложенной выборке лучше текущего: 95% интервал разницы целиком ниже нуля. Версия ради экономии токенов проходит правило «не хуже с допуском». Brier и CLV — дополнительные проверки, а ROI на паре сотен событий — шум, по нему версии не выбирают.'),
+        UI.callout('info', 'flask', 'Эти же метрики используются при обучении. Новую версию стратегии включают, только если ее лог-лосс на отложенной выборке лучше текущего: 95% интервал разницы целиком ниже нуля. Версия ради экономии токенов проходит правило «не хуже с допуском». Brier и CLV — дополнительные проверки, а ROI на паре сотен событий — шум, по нему версии не выбирают.'),
       ],
       actions: close => [button('Открыть «Обучение модели»', { kind: 'secondary', iconRight: 'chevronRight', href: '#learning', attrs: { class: 'btn secondary', on: { click: close } } }), button('Понятно', { kind: 'primary', onClick: close })],
     });
@@ -560,7 +560,7 @@
     UI.modal({
       title: 'Подробный разбор периода',
       body: [
-        h('p', { class: 'soft small' }, 'ИИ получит сжатую таблицу событий и ставок под текущими фильтрами, правила стратегии и подтверждённые уроки. Вернёт 5–7 наблюдений с указанием выборки и черновики гипотез. Сам по себе разбор ничего не меняет в стратегии.'),
+        h('p', { class: 'soft small' }, 'ИИ получит сжатую таблицу событий и ставок под текущими фильтрами, правила стратегии и подтвержденные уроки. Вернет 5–7 наблюдений с указанием выборки и черновики гипотез. Сам по себе разбор ничего не меняет в стратегии.'),
         UI.kv([
           ['Модель', 'Sonnet 5.5'],
           ['Данные', nBets(s.sum.n) + ', ' + nEv(s.legs.length)],
@@ -589,7 +589,7 @@
       }
       if (ins.action === 'bets') return button('Открыть ставки', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#bets' });
       if (ins.action === 'filter') return button('Показать только ' + ins.label, { kind: 'secondary', size: 'sm', icon: 'filter', onClick: () => { state[ins.dim] = ins.key; update(); scrollToFilters(); UI.toast('Фильтр: ' + ins.label, 'filter'); } });
-      if (ins.action === 'widen') return button('Показать за всё время', { kind: 'secondary', size: 'sm', icon: 'calendar', onClick: () => { state.period = 'all'; update(true); } });
+      if (ins.action === 'widen') return button('Показать за все время', { kind: 'secondary', size: 'sm', icon: 'calendar', onClick: () => { state.period = 'all'; update(true); } });
       if (ins.action === 'clear') return button('Снять фильтры', { kind: 'secondary', size: 'sm', icon: 'refresh', onClick: () => { state.market = 'all'; state.surface = 'all'; update(); } });
       if (ins.action === 'explain') return button('Что это значит', { kind: 'secondary', size: 'sm', icon: 'book', onClick: explainModal });
       return null;
@@ -636,7 +636,7 @@
         }))) : UI.empty('Нет событий за период'),
         (groups.some(g => g.n < SMALL) || missing.length) && h('div', { class: 'stack', style: 'gap:4px' },
           groups.some(g => g.n < SMALL) && smallNote(),
-          missing.length && h('div', { class: 'analytics-foot-note', style: 'padding-left:19px' }, h('span', null, missing.map(k => D.surfaces[k].label).join(', ') + ': событий ' + (missing.includes('indoor') && missing.length === 1 ? 'пока нет — сезон в залах начнётся после Шанхая' : 'за период нет')))),
+          missing.length && h('div', { class: 'analytics-foot-note', style: 'padding-left:19px' }, h('span', null, missing.map(k => D.surfaces[k].label).join(', ') + ': событий ' + (missing.includes('indoor') && missing.length === 1 ? 'пока нет — сезон в залах начнется после Шанхая' : 'за период нет')))),
         howto(h('b', null, 'Как читать: '), 'каждое событие считается отдельной ставкой одного размера — так видно, где прогнозы точнее, без влияния размера ставки. Полоса вправо — плюс, влево — минус.'),
       ],
     });
@@ -650,7 +650,7 @@
       body: [
         groups.length ? roiBars(groups, { selected: state.market }) : UI.empty('Нет событий за период'),
         groups.some(g => g.n < SMALL) && smallNote(),
-        howto(h('b', null, 'Как читать: '), 'Ф1(−1.5) — игрок 1 выигрывает 2:0 по сетам, Ф2(+1.5) — игрок 2 берёт хотя бы сет. Подробности и фильтр — в таблице «Сводка по рынкам» ниже.'),
+        howto(h('b', null, 'Как читать: '), 'Ф1(−1.5) — игрок 1 выигрывает 2:0 по сетам, Ф2(+1.5) — игрок 2 берет хотя бы сет. Подробности и фильтр — в таблице «Сводка по рынкам» ниже.'),
       ],
     });
   }
@@ -671,7 +671,7 @@
           ], rows: groups,
         }))) : UI.empty('Нет событий за период'),
         groups.some(g => g.n < SMALL) && smallNote(),
-        howto(h('b', null, 'Как читать: '), 'высокий винрейт на низких кэфах ещё не прибыль: при кэфе 1.25 нужно угадывать 80% только чтобы выйти в ноль. Сравните винрейт с колонкой «Для нуля» в таблице.'),
+        howto(h('b', null, 'Как читать: '), 'высокий винрейт на низких кэфах еще не прибыль: при кэфе 1.25 нужно угадывать 80% только чтобы выйти в ноль. Сравните винрейт с колонкой «Для нуля» в таблице.'),
       ],
     });
   }
@@ -697,7 +697,7 @@
           ], rows: groups,
         }))) : UI.empty('Нет ставок за период'),
         groups.some(g => g.n < SMALL) && footNote('меньше ' + SMALL + ' ставок — ROI может быть случайным'),
-        howto(h('b', null, 'Как читать: '), 'здесь считаются деньги, а не отдельные события. На экспрессы до 1.70 по таблице стратегии идёт самая крупная ставка (', stakeOf('1.28–1.70'), ' банка), поэтому их ROI сильнее всего влияет на банк.'),
+        howto(h('b', null, 'Как читать: '), 'здесь считаются деньги, а не отдельные события. На экспрессы до 1.70 по таблице стратегии идет самая крупная ставка (', stakeOf('1.28–1.70'), ' банка), поэтому их ROI сильнее всего влияет на банк.'),
       ],
     });
   }
@@ -866,7 +866,7 @@
       title: 'Выгрузить аналитику',
       body: [
         h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Формат'),
-          UI.segmented({ label: 'Формат файла', items: [{ id: 'csv', label: 'CSV' }, { id: 'xlsx', label: 'Excel' }, { id: 'pdf', label: 'PDF-отчёт' }], active: format, onChange: id => { format = id; } })),
+          UI.segmented({ label: 'Формат файла', items: [{ id: 'csv', label: 'CSV' }, { id: 'xlsx', label: 'Excel' }, { id: 'pdf', label: 'PDF-отчет' }], active: format, onChange: id => { format = id; } })),
         h('fieldset', { class: 'analytics-check', style: 'border:0;padding:0;margin:0' },
           h('legend', { class: 'field-label', style: 'margin-bottom:8px' }, 'Что включить'),
           [['analytics-ex-bets', 'Ставки с суммами и результатом', true], ['analytics-ex-legs', 'События экспрессов (кэф, закрытие, прогноз модели)', true], ['analytics-ex-calib', 'Калибровку и Brier по окнам', false]].map(([id, text, on]) =>
@@ -875,7 +875,7 @@
       ],
       actions: close => [
         button('Отмена', { kind: 'ghost', onClick: close }),
-        button('Сформировать файл', { kind: 'primary', icon: 'download', onClick: () => { close(); UI.toast((format === 'pdf' ? 'PDF-отчёт' : format === 'xlsx' ? 'Файл Excel' : 'CSV-файл') + ' сформирован. В макете он не скачивается', 'download'); } }),
+        button('Сформировать файл', { kind: 'primary', icon: 'download', onClick: () => { close(); UI.toast((format === 'pdf' ? 'PDF-отчет' : format === 'xlsx' ? 'Файл Excel' : 'CSV-файл') + ' сформирован. В макете он не скачивается', 'download'); } }),
       ],
     });
   }
@@ -890,7 +890,7 @@
 
   function emptyState(s) {
     const indoor = state.surface === 'indoor';
-    // Есть ли такие ставки за всё время — тогда предлагаем расширить период, а не сбрасывать фильтры
+    // Есть ли такие ставки за все время — тогда предлагаем расширить период, а не сбрасывать фильтры
     const ever = settled().filter(b => (state.surface === 'all' || b.surface === state.surface) && (state.market === 'all' || b.legs.some(l => l.market === state.market)));
     const canWiden = state.period !== 'all' && ever.length > 0;
     const reset = () => { Object.assign(state, DEFAULTS); update(true); };
@@ -898,12 +898,12 @@
       h('span', { class: 'analytics-empty-ic' }, icon('filter')),
       h('h3', null, 'Под фильтр не попало ни одной ставки'),
       h('p', null, indoor
-        ? 'На крытом харде ставок пока не было: сезон в залах начнётся после Шанхая. Первые события появятся здесь в конце октября.'
+        ? 'На крытом харде ставок пока не было: сезон в залах начнется после Шанхая. Первые события появятся здесь в конце октября.'
         : canWiden
           ? s.p.ctx[0].toUpperCase() + s.p.ctx.slice(1) + ' таких ставок нет. Последняя была ' + fmt.date(ever[ever.length - 1].date) + ', всего за сезон — ' + nBets(ever.length) + '.'
           : 'Нет рассчитанных ставок с таким рынком и покрытием. Снимите один из фильтров.'),
       h('div', { class: 'row', style: 'justify-content:center' },
-        canWiden && button('Показать за всё время', { kind: 'primary', icon: 'calendar', onClick: () => { state.period = 'all'; update(true); } }),
+        canWiden && button('Показать за все время', { kind: 'primary', icon: 'calendar', onClick: () => { state.period = 'all'; update(true); } }),
         button('Сбросить фильтры', { kind: canWiden ? 'secondary' : 'primary', icon: 'refresh', onClick: reset })));
   }
 

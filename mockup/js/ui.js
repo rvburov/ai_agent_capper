@@ -301,7 +301,7 @@
   }
   function hideTip() { if (tipEl) tipEl.hidden = true; }
 
-  // Обёртка: перерисовка по ширине контейнера
+  // Обертка: перерисовка по ширине контейнера
   function responsive(draw, height) {
     const box = h('div', { class: 'chart', style: { height: height + 'px' } });
     let lastW = 0;
@@ -529,13 +529,13 @@
 
   // ---------- выпадающие списки ----------
   // Каждый <select> и <input list> на странице автоматически получает одинаковый вид:
-  // кнопка со стрелкой и список (на телефоне — шторка снизу). Исходный элемент остаётся в DOM,
+  // кнопка со стрелкой и список (на телефоне — шторка снизу). Исходный элемент остается в DOM,
   // поэтому код экранов читает и пишет .value и слушает change как раньше.
   const dd = { open: null };
   const SHEET_MQ = window.matchMedia('(max-width: 720px)'); // как у модальных окон: на телефоне — шторка
   const valueDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
   const indexDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex');
-  const norm = s => String(s).toLowerCase().replace(/ё/g, 'е').trim();
+  const norm = s => String(s).toLowerCase().replace(/\u0451/g, 'е').trim();
 
   function fieldLabel(el) {
     if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').replace(/:.*$/, '');
@@ -560,7 +560,7 @@
   }
 
   // Список: items [{value,label,labelNode,disabled}], selected, onPick(item).
-  // focusEl — поле ввода, в котором остаётся фокус (подсказки); без него фокус переходит в сам список.
+  // focusEl — поле ввода, в котором остается фокус (подсказки); без него фокус переходит в сам список.
   function openList(anchor, o) {
     closeDropdown(false);
     const sheet = !o.focusEl && SHEET_MQ.matches;
@@ -624,7 +624,7 @@
       else if (!o.focusEl && e.key === 'End') { e.preventDefault(); setActive(rows.length - 1, 'nearest', -1); }
       else if (e.key === 'Enter' || (e.key === ' ' && !o.focusEl)) { if (active >= 0) { e.preventDefault(); pick(active); } else if (!o.focusEl) { e.preventDefault(); closeDropdown(true); } }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDropdown(true); }
-      else if (e.key === 'Tab') closeDropdown(!o.focusEl); // фокус возвращается на кнопку, и Tab ведёт к следующему полю
+      else if (e.key === 'Tab') closeDropdown(!o.focusEl); // фокус возвращается на кнопку, и Tab ведет к следующему полю
       else if (!o.focusEl && e.key.length === 1 && /\S/.test(e.key)) { // поиск по первым буквам
         const q = norm(e.key), start = active + 1;
         for (let k = 0; k < rows.length; k++) { const i = (start + k) % rows.length; if (norm(o.items[i].label).startsWith(q)) { setActive(i); break; } }
@@ -723,7 +723,7 @@
     input.setAttribute('autocomplete', 'off');
     const source = () => { const dl = document.getElementById(listId); return dl ? Array.from(dl.options).map(op => op.value).filter(Boolean) : []; };
     const isOpen = () => dd.open && dd.open.anchor === input;
-    // all: весь список (поле пустое или в нём уже выбранное значение); иначе — фильтр по набранному
+    // all: весь список (поле пустое или в нем уже выбранное значение); иначе — фильтр по набранному
     function show(all) {
       const q = norm(input.value);
       let items = source().map(v => ({ value: v, label: v }));
