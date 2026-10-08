@@ -18,13 +18,16 @@ from app.schemas.me import (
     NotificationOut,
     NotificationsOut,
     PasswordChangeIn,
+    ProfileUpdateIn,
     RecoveryCodesIn,
     RecoveryCodesOut,
+    RecoveryCodesStatusOut,
     SessionOut,
     TrustedDeviceOut,
 )
 from app.services import account as account_service
 from app.services import devices as devices_service
+from app.services import profile as profile_service
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -40,6 +43,15 @@ def _no_content() -> Response:
 @router.get("")
 async def me(user: CurrentUser) -> MeOut:
     return MeOut.model_validate(user)
+
+
+@router.patch("")
+async def update_me(body: ProfileUpdateIn, user: CurrentUser, db: DbSession) -> MeOut:
+    """Имя и часовой пояс. Пояс — только из базы IANA (zoneinfo), иначе 422."""
+    updated = await profile_service.update_profile(
+        db, user, display_name=body.display_name, tz=body.tz
+    )
+    return MeOut.model_validate(updated)
 
 
 @router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
@@ -98,6 +110,13 @@ async def login_events(
     """Журнал входов за 90 дней, новые сверху."""
     rows = await account_service.list_login_events(db, user.id, limit=limit)
     return [LoginEventOut.from_row(row) for row in rows]
+
+
+@router.get("/recovery-codes")
+async def recovery_codes_status(user: CurrentUser, db: DbSession) -> RecoveryCodesStatusOut:
+    """Сколько резервных кодов осталось. Сами коды не показываются: в БД только хеши."""
+    codes = await profile_service.recovery_codes_status(db, user.id)
+    return RecoveryCodesStatusOut(left=codes.left, total=codes.total, created_at=codes.created_at)
 
 
 @router.post("/recovery-codes")

@@ -197,7 +197,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Me
+         * @description Имя и часовой пояс. Пояс — только из базы IANA (zoneinfo), иначе 422.
+         */
+        patch: operations["update_me_api_me_patch"];
         trace?: never;
     };
     "/api/me/password": {
@@ -301,7 +305,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Recovery Codes Status
+         * @description Сколько резервных кодов осталось. Сами коды не показываются: в БД только хеши.
+         */
+        get: operations["recovery_codes_status_api_me_recovery_codes_get"];
         put?: never;
         /**
          * Reissue Recovery Codes
@@ -1062,6 +1070,17 @@ export interface components {
             new_password: string;
         };
         /**
+         * ProfileUpdateIn
+         * @description Правка профиля: имя и часовой пояс. Поле не передано (или null) — не меняется.
+         *     Остальные поля (email, роль, режим ключа) так не меняются: лишнее поле — 422.
+         */
+        ProfileUpdateIn: {
+            /** Display Name */
+            display_name?: string | null;
+            /** Tz */
+            tz?: string | null;
+        };
+        /**
          * PublicSettingsOut
          * @description Валюта программы (Р17): в ней показываются банки, ставки и прибыль у всех.
          */
@@ -1087,6 +1106,19 @@ export interface components {
         RecoveryCodesOut: {
             /** Recovery Codes */
             recovery_codes: string[];
+        };
+        /**
+         * RecoveryCodesStatusOut
+         * @description Сколько резервных кодов еще не использовано и когда выпущены нынешние.
+         *     Нет кодов — left = total = 0, created_at = null.
+         */
+        RecoveryCodesStatusOut: {
+            /** Left */
+            left: number;
+            /** Total */
+            total: number;
+            /** Created At */
+            created_at: string | null;
         };
         /** RegisterIn */
         RegisterIn: {
@@ -1634,6 +1666,39 @@ export interface operations {
             };
         };
     };
+    update_me_api_me_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     change_password_api_me_password_post: {
         parameters: {
             query?: never;
@@ -1768,6 +1833,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoginEventOut"][];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    recovery_codes_status_api_me_recovery_codes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryCodesStatusOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

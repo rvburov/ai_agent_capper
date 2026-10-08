@@ -2,9 +2,11 @@
 резервные коды, доверенные устройства, уведомления)."""
 
 from datetime import datetime
+from functools import cache
 from typing import Annotated, Literal
+from zoneinfo import available_timezones
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, StringConstraints
 
 from app.core.useragent import device_label
 from app.db.models import LoginEvent
@@ -36,6 +38,60 @@ class MeOut(BaseModel):
     tz: str
     totp_enabled: bool
     created_at: datetime
+
+
+# Не пояса, а служебные файлы базы: «localtime» — пояс самого сервера (на части систем
+# лежит в /usr/share/zoneinfo), «Factory» — заглушка без смещения
+_NOT_TIMEZONES = frozenset({"localtime", "Factory"})
+
+
+@cache
+def _known_timezones() -> frozenset[str]:
+    # Список поясов читается с диска (tzdata) один раз за процесс
+    return frozenset(available_timezones()) - _NOT_TIMEZONES
+
+
+def _check_profile_name(value: str) -> str:
+    # PostgreSQL не хранит символ NUL в тексте: без проверки был бы ответ 500
+    if "\x00" in value:
+        raise ValueError("nul")
+    return value
+
+
+def _check_profile_tz(value: str) -> str:
+    # Только имена из базы поясов IANA: «Europe/Helsinki», а не путь к файлу или «localtime»
+    if value not in _known_timezones():
+        raise ValueError("tz")
+    return value
+
+
+ProfileNameStr = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=2, max_length=100),
+    AfterValidator(_check_profile_name),
+]
+ProfileTimeZoneStr = Annotated[
+    str, StringConstraints(max_length=64), AfterValidator(_check_profile_tz)
+]
+
+
+class ProfileUpdateIn(BaseModel):
+    """Правка профиля: имя и часовой пояс. Поле не передано (или null) — не меняется.
+    Остальные поля (email, роль, режим ключа) так не меняются: лишнее поле — 422."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: ProfileNameStr | None = None
+    tz: ProfileTimeZoneStr | None = None
+
+
+class RecoveryCodesStatusOut(BaseModel):
+    """Сколько резервных кодов еще не использовано и когда выпущены нынешние.
+    Нет кодов — left = total = 0, created_at = null."""
+
+    left: int
+    total: int
+    created_at: datetime | None
 
 
 class PasswordChangeIn(BaseModel):

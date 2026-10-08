@@ -374,6 +374,46 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Update Me",
+        "description": "Имя и часовой пояс. Пояс — только из базы IANA (zoneinfo), иначе 422.",
+        "operationId": "update_me_api_me_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/me/password": {
@@ -559,6 +599,36 @@
       }
     },
     "/api/me/recovery-codes": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Recovery Codes Status",
+        "description": "Сколько резервных кодов осталось. Сами коды не показываются: в БД только хеши.",
+        "operationId": "recovery_codes_status_api_me_recovery_codes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodesStatusOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "me"
@@ -2556,6 +2626,39 @@
         ],
         "title": "PasswordChangeIn"
       },
+      "ProfileUpdateIn": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "tz": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tz"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ProfileUpdateIn",
+        "description": "Правка профиля: имя и часовой пояс. Поле не передано (или null) — не меняется.\nОстальные поля (email, роль, режим ключа) так не меняются: лишнее поле — 422."
+      },
       "PublicSettingsOut": {
         "properties": {
           "currency": {
@@ -2606,6 +2709,38 @@
         ],
         "title": "RecoveryCodesOut",
         "description": "Новые резервные коды. Показываются один раз, в БД — только хеши."
+      },
+      "RecoveryCodesStatusOut": {
+        "properties": {
+          "left": {
+            "type": "integer",
+            "title": "Left"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "left",
+          "total",
+          "created_at"
+        ],
+        "title": "RecoveryCodesStatusOut",
+        "description": "Сколько резервных кодов еще не использовано и когда выпущены нынешние.\nНет кодов — left = total = 0, created_at = null."
       },
       "RegisterIn": {
         "properties": {
