@@ -124,10 +124,23 @@
   // DATA.pendingAnalysis: события, режим, модель, кэфы, банк, букмекер, оценка цены. Без него (прямая ссылка) — пример как есть.
   let REQ, MODE, BK, BANK, FOREIGN, ODDS_EDITED, RUNE_NEW, EST, ID;
   let STEPS, TOTAL_MS, TOTAL, NO_AI, MODELS;
-  let LEGS, TOTAL_ODDS, P_EXP, EV, BASE_PCT, BAND, REC_STAKE, CAL, P_CAL;
+  let LEGS, TOTAL_ODDS, P_EXP, EV, BASE_PCT, BAND, CAL, P_CAL;
   let reqCount = 0;
   const nm = x => (D.P[x] ? D.P[x].short : String(x || '—'));
-  const round10 = n => Math.round(n / 10) * 10;
+  // ---------- валюта программы (Р17) ----------
+  // BANK, суммы ставок и DATA — в рублях демо-данных, на экране — валюта программы. Сумму считаем в валюте программы
+  // с ее шагом (10 рублей или 1 цент), поэтому доля банка и выплата сходятся в любой валюте.
+  const curDec = () => (UI.currency.list[UI.currency.code] || { dec: 0 }).dec;
+  const STEP = () => (curDec() ? 0.01 : 10);                          // шаг суммы ставки в валюте программы
+  const MIN_CUR = () => (curDec() ? 0.5 : 50);                        // минимальная ставка в валюте программы
+  const roundCur = x => { const k = 10 ** curDec(); return Math.round(x * k) / k; };
+  const toStep = x => roundCur(Math.round(x / STEP()) * STEP());
+  const inCur = rub => fmt.moneyNum(rub);                             // рубли демо-данных → сумма как на экране
+  const sameMoney = (a, b) => inCur(a) === inCur(b);
+  const curName = () => UI.currency.label.charAt(0).toLowerCase() + UI.currency.label.slice(1); // «евро», «доллары США»
+  const stakeAt = pct => fmt.fromMoney(toStep(inCur(BANK) * pct / 100)); // сумма для доли банка, в рублях демо-данных
+  const payoutOf = rub => fmt.fromMoney(roundCur(inCur(rub) * TOTAL_ODDS)); // выплата = сумма × итоговый кэф
+  const REC = () => (BASE_PCT ? stakeAt(BASE_PCT) : 0);               // рекомендованная сумма по таблице стратегии
   const calibBin = p => D.calibration.find(b => p >= b.lo && p < b.hi);
 
   // кэфы этого матча из запроса; если игроки введены в обратном порядке — разворачиваем рынки
@@ -191,7 +204,7 @@
     ID = 'A-' + String(142 + Math.max(0, reqCount - 1)).padStart(4, '0');
     D.currentAnalysis = ID;
     MODE = MODES[REQ && REQ.mode] || MODES.precise;
-    BK = (REQ && REQ.bookmaker) || 'Fonbet';
+    BK = (REQ && REQ.bookmaker) || 'bet365';
     BANK = REQ && REQ.bank > 0 ? REQ.bank : D.stats.bank;
     RUNE_NEW = D.P.rune.fresh === 'missing';
     const evs = REQ && Array.isArray(REQ.events) ? REQ.events : [];
@@ -225,7 +238,6 @@
     EV = P_EXP * TOTAL_ODDS - 1;
     BASE_PCT = TOTAL_ODDS <= 1.70 ? 2.75 : TOTAL_ODDS <= 2.20 ? 2.25 : TOTAL_ODDS <= STRAT.totalMax ? 1.75 : 0;
     BAND = TOTAL_ODDS <= 1.70 ? STRAT.stakeTable[0] : TOTAL_ODDS <= 2.20 ? STRAT.stakeTable[1] : TOTAL_ODDS <= STRAT.totalMax ? STRAT.stakeTable[2] : null;
-    REC_STAKE = round10(BANK * BASE_PCT / 100);
     CAL = LEGS.map(l => calibBin(l.p));
     P_CAL = CAL.every(Boolean) ? CAL.reduce((a, b) => a * b.actual, 1) : null;
   }
@@ -243,7 +255,7 @@
     ST.decision = null; ST.stake = null; ST.betId = null; ST.exampleAck = false;
   }
   const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const stake = () => (ST.stake == null ? REC_STAKE : ST.stake);
+  const stake = () => (ST.stake == null ? REC() : ST.stake);
 
   // ---------- форматтеры ----------
   const pr = p => Math.round(p * 100) + '%';
@@ -771,14 +783,14 @@
   }
 
   // ---------- экспресс ----------
-  function stakePct(v) { return v / BANK * 100; }
-  // доля банка для показа: если сумма — округленный шаг стратегии (1 080 ₽ = 2,25%), показываем шаг, а не 2,24% после округления
+  function stakePct(v) { return inCur(v) / inCur(BANK) * 100; }
+  // доля банка для показа: если сумма — округленный шаг стратегии (1 080 при банке 48 000 — это 2,25%), показываем шаг, а не 2,24% после округления
   // доли банка в окне суммы: рекомендованная по таблице стратегии всегда среди вариантов
   const presets = () => [...new Set([1.5, 2, BASE_PCT || 2.25, 2.5, 3])].sort((a, b) => a - b);
-  function sharePct(v) { const pre = presets().find(p => round10(BANK * p / 100) === v); return pctTxt(pre != null ? pre : Math.round(stakePct(v) * 100) / 100); }
+  function sharePct(v) { const pre = presets().find(p => sameMoney(stakeAt(p), v)); return pctTxt(pre != null ? pre : Math.round(stakePct(v) * 100) / 100); }
   function expressCard(root) {
-    const s = stake(), payout = Math.round(s * TOTAL_ODDS);
-    const custom = ST.stake != null && ST.stake !== REC_STAKE;
+    const s = stake(), payout = payoutOf(s), rec = REC();
+    const custom = ST.stake != null && !sameMoney(ST.stake, rec);
     const statusChip = ST.decision === 'saved' ? chip('Ставка сохранена', 'good', 'check') : ST.decision === 'skipped' ? chip('Без ставки', 'outline', 'x') : chip('Ждет решения', 'info', 'clock');
 
     const legs = h('div', { class: 'analysis-legs' }, MX.map(m => {
@@ -796,7 +808,7 @@
     const totals = h('div', { class: 'analysis-totals' },
       h('div', { class: 'analysis-total' }, h('span', null, 'Кэф'), h('b', { class: 'mono' }, fmt.odds(TOTAL_ODDS)), h('small', null, LEGS.map(l => fmt.odds(l.odds)).join(' × '))),
       h('div', { class: 'analysis-total' }, h('span', null, 'Вероятность'), h('b', null, '≈ ' + pr(P_EXP)), h('small', null, LEGS.map(l => fmt.dec(l.p)).join(' × '))),
-      h('div', { class: 'analysis-total' }, h('span', { title: 'Ожидаемый результат (EV) на 1 ₽ ставки' }, 'Перевес'), h('b', null, fmt.signedPct(EV * 100, 1)), h('small', null, '≈ ' + fmt.signedMoney(s * EV))));
+      h('div', { class: 'analysis-total' }, h('span', { title: 'Ожидаемый результат (EV) на ' + fmt.money(fmt.fromMoney(1)) + ' ставки' }, 'Перевес'), h('b', null, fmt.signedPct(EV * 100, 1)), h('small', null, '≈ ' + fmt.signedMoney(s * EV))));
 
     const calNote = P_CAL != null && h('div', { class: 'analysis-calnote' }, icon('target'),
       h('span', null, 'По истории калибровки прогнозы ' + CAL.map(b => Math.round(b.lo * 100) + '–' + Math.round(b.hi * 100) + '%').join(' и ') + ' сбывались в ' + CAL.map(b => pr(b.actual)).join(' и ') + '. С этой поправкой p ≈ ' + pr(P_CAL) + ', перевес ≈ ' + fmt.signedPct((P_CAL * TOTAL_ODDS - 1) * 100, 1) + '.'));
@@ -807,13 +819,14 @@
       STREAK.type === 'win' ? 'Серия побед ' + STREAK.n + ' из 3 нужных для +20%.' : STREAK.type === 'loss' ? 'Поражений подряд ' + STREAK.n + ' из 3 — после трех сумма −40%.' : '');
 
     const calc = h('dl', { class: 'analysis-calc' },
-      h('dt', null, BANK !== D.stats.bank ? 'Банк из вашего ввода' : 'Банк сейчас'), h('dd', null, fmt.money(BANK)),
+      h('dt', null, !sameMoney(BANK, D.stats.bank) ? 'Банк из вашего ввода' : 'Банк сейчас'), h('dd', null, fmt.money(BANK)),
       BAND
         ? [h('dt', null, 'Кэф ' + fmt.odds(TOTAL_ODDS) + ' → ', nw('диапазон ' + BAND.range)), h('dd', null, BAND.pct + ' → ' + pctTxt(BASE_PCT))]
         : [h('dt', null, 'Кэф ' + fmt.odds(TOTAL_ODDS) + ' — ', nw('выше ' + fmt.odds(STRAT.totalMax))), h('dd', null, 'вне таблицы → 0%')],
       h('dt', null, 'Валуй ног (' + MX.map(m => fmt.signedPct(m.pickRow.value * 100, 1)).join(', ') + ')'), h('dd', null, 'без поправки'),
       h('dt', null, 'Адаптация по истории'), h('dd', null, 'без изменений'),
-      h('dt', { class: 'is-sum' }, nw(fmt.money(BANK) + ' × ' + pctTxt(BASE_PCT)), ' = ', nw(fmt.money(BANK * BASE_PCT / 100)), ', ', nw('округление до 10 ₽')), h('dd', { class: 'is-sum' }, fmt.money(REC_STAKE)));
+      h('dt', { class: 'is-sum' }, nw(fmt.money(BANK) + ' × ' + pctTxt(BASE_PCT)), ' = ', nw(fmt.money(fmt.fromMoney(inCur(BANK) * BASE_PCT / 100))),
+        STEP() > 0.01 ? [', ', nw('округление до ' + fmt.money(fmt.fromMoney(STEP())))] : null), h('dd', { class: 'is-sum' }, fmt.money(rec)));
     // расчет суммы свернут: карточка решения короче и целиком видна рядом с матчами
     const calcBox = h('div', { class: 'stack analysis-calc-box', id: 'analysis-calc', style: 'gap:10px', hidden: !ST.calcOpen }, calc, adapt);
     const calcToggle = button('Как посчитана сумма', { kind: 'ghost', size: 'sm', icon: 'info', iconRight: 'chevronDown', attrs: { 'aria-expanded': String(ST.calcOpen), 'aria-controls': 'analysis-calc' }, onClick: () => {
@@ -827,7 +840,7 @@
         h('div', { class: 'eyebrow' }, custom ? 'Сумма · изменена вручную' : 'Рекомендуемая сумма'),
         h('div', { class: 'analysis-stake-value' }, s ? fmt.money(s) : '—'),
         h('div', { class: 'small muted' }, s ? (custom ? sharePct(s) : pctTxt(BASE_PCT)) + ' банка · при выигрыше ' + fmt.money(payout) + ' (' + fmt.signedMoney(payout - s) + ')' : 'Стратегия не дает суммы: экспресс вне ее правил')),
-      custom && REC_STAKE > 0 && button('Вернуть ' + fmt.money(REC_STAKE), { kind: 'ghost', size: 'sm', icon: 'refresh', onClick: () => { ST.stake = null; draw(root); UI.toast('Сумма возвращена к рекомендованной: ' + fmt.money(REC_STAKE), 'refresh'); } }));
+      custom && rec > 0 && button('Вернуть ' + fmt.money(rec), { kind: 'ghost', size: 'sm', icon: 'refresh', onClick: () => { ST.stake = null; draw(root); UI.toast('Сумма возвращена к рекомендованной: ' + fmt.money(REC()), 'refresh'); } }));
 
     let foot;
     if (ST.decision === 'saved') {
@@ -910,43 +923,49 @@
     UI.go('bets');
   }
 
+  // Окно суммы работает в валюте программы: поле, шаг и доли банка — в ней, в DATA сумма уходит в рублях демо-данных
   function stakeModal(root) {
-    let val = stake();
+    const bankCur = inCur(BANK), recCur = inCur(REC()), minCur = MIN_CUR(), dec = curDec();
+    let v = inCur(stake());
     const preview = h('div', { class: 'stack', style: 'gap:10px', 'aria-live': 'polite' });
-    if (!val) val = round10(BANK * 1.5 / 100);
-    const fieldEl = UI.field({ label: 'Сумма ставки', id: 'analysis-stake-input', type: 'number', value: String(val), suffix: '₽', inputmode: 'numeric', hint: REC_STAKE ? 'Рекомендовано ' + fmt.money(REC_STAKE) + ' — ' + pctTxt(BASE_PCT) + ' банка по стратегии ' + STRAT_V : 'Стратегия ' + STRAT_V + ' суммы для кэфа выше ' + fmt.odds(STRAT.totalMax) + ' не дает — сумма на ваш риск', attrs: { min: '50', step: '10' } });
+    if (!v) v = toStep(bankCur * 1.5 / 100);
+    const rub = () => fmt.fromMoney(v);
+    const okVal = () => Number.isFinite(v) && v >= minCur && v <= bankCur;
+    // поле текстовое: число пишется так же, как на экране (1 080 или 10,77), точку и запятую понимаем обе
+    const asText = x => (dec ? fmt.dec(x, 2) : fmt.int(x));
+    const fieldEl = UI.field({ label: 'Сумма ставки', id: 'analysis-stake-input', value: asText(v), suffix: fmt.cur(), inputmode: dec ? 'decimal' : 'numeric', autocomplete: 'off', hint: recCur ? 'Рекомендовано ' + fmt.money(REC()) + ' — ' + pctTxt(BASE_PCT) + ' банка по стратегии ' + STRAT_V : 'Стратегия ' + STRAT_V + ' суммы для кэфа выше ' + fmt.odds(STRAT.totalMax) + ' не дает — сумма на ваш риск', attrs: { maxlength: '12', 'aria-label': 'Сумма ставки, ' + curName() } });
     const input = fieldEl.querySelector('input');
     const segHolder = h('div');
     function drawSeg() {
-      const match = presets().find(p => round10(BANK * p / 100) === val);
-      UI.clear(segHolder).appendChild(UI.segmented({ label: 'Доля банка', items: presets().map(p => ({ id: String(p), label: pctTxt(p) + (p === BASE_PCT ? ' · реком.' : '') })), active: match != null ? String(match) : 'custom', onChange: id => { val = round10(BANK * Number(id) / 100); input.value = String(val); drawPreview(); } }));
+      const match = presets().find(p => toStep(bankCur * p / 100) === v);
+      UI.clear(segHolder).appendChild(UI.segmented({ label: 'Доля банка', items: presets().map(p => ({ id: String(p), label: pctTxt(p) + (p === BASE_PCT ? ' · реком.' : '') })), active: match != null ? String(match) : 'custom', onChange: id => { v = toStep(bankCur * Number(id) / 100); input.value = asText(v); drawPreview(); } }));
       segHolder.firstChild.classList.add('analysis-modal-seg');
     }
     function drawPreview() {
       UI.clear(preview);
-      const ok = Number.isFinite(val) && val >= 50 && val <= BANK;
-      if (!ok) { preview.appendChild(UI.callout('bad', 'alert', val > BANK ? 'Сумма больше банка (' + fmt.money(BANK) + ').' : 'Минимальная ставка — 50 ₽.')); return; }
-      const pct = stakePct(val);
+      if (!okVal()) { preview.appendChild(UI.callout('bad', 'alert', v > bankCur ? 'Сумма больше банка (' + fmt.money(BANK) + ').' : 'Минимальная ставка — ' + fmt.money(fmt.fromMoney(minCur)) + '.')); return; }
+      const pct = v / bankCur * 100, r = rub(), pay = payoutOf(r);
       preview.appendChild(UI.kv([
-        ['Доля банка', sharePct(val)],
-        ['Выплата при выигрыше (@' + fmt.odds(TOTAL_ODDS) + ')', fmt.money(val * TOTAL_ODDS)],
-        ['Чистая прибыль', fmt.signedMoney(val * TOTAL_ODDS - val)],
-        ['При проигрыше', fmt.signedMoney(-val)],
-        ['Ожидаемый результат по оценке модели', '≈ ' + fmt.signedMoney(val * EV)],
+        ['Доля банка', sharePct(r)],
+        ['Выплата при выигрыше (@' + fmt.odds(TOTAL_ODDS) + ')', fmt.money(pay)],
+        ['Чистая прибыль', fmt.signedMoney(pay - r)],
+        ['При проигрыше', fmt.signedMoney(-r)],
+        ['Ожидаемый результат по оценке модели', '≈ ' + fmt.signedMoney(r * EV)],
       ]));
       if (pct > 4) preview.appendChild(UI.callout('bad', 'alert', 'Больше 4% банка — выше любого лимита стратегии. Одна неудачная серия заметно ударит по банку.'));
       else if (pct > 3) preview.appendChild(UI.callout('warn', 'alert', 'Больше 3% банка: стратегия разрешает до 4% только при росте банка на 15% и винрейте от 60% (сейчас ' + fmt.pct(D.stats.winrate) + ').'));
     }
-    input.addEventListener('input', () => { val = Math.round(Number(input.value)); drawSeg(); drawPreview(); });
+    input.addEventListener('input', () => { v = roundCur(parseFloat(String(input.value).replace(/\s/g, '').replace(',', '.'))); drawSeg(); drawPreview(); });
+    input.addEventListener('blur', () => { if (Number.isFinite(v)) input.value = asText(v); });
     drawSeg(); drawPreview();
     UI.modal({
       title: 'Изменить сумму',
       body: close => h('form', { id: 'analysis-stake-form', class: 'stack', style: 'gap:14px', novalidate: true, on: { submit: e => {
         e.preventDefault();
-        if (!(Number.isFinite(val) && val >= 50 && val <= BANK)) { input.focus(); return; }
-        ST.stake = val === REC_STAKE ? null : val;
+        if (!okVal()) { input.focus(); return; }
+        ST.stake = v === recCur ? null : rub();
         close(); draw(root);
-        UI.toast('Сумма изменена: ' + fmt.money(val) + ' (' + sharePct(val) + ' банка)', 'edit');
+        UI.toast('Сумма изменена: ' + fmt.money(rub()) + ' (' + sharePct(rub()) + ' банка)', 'edit');
       } } }, fieldEl, h('div', { class: 'stack', style: 'gap:6px' }, h('span', { class: 'field-label' }, 'Или доля банка'), segHolder), preview),
       actions: close => [
         button('Отмена', { kind: 'secondary', onClick: close }),

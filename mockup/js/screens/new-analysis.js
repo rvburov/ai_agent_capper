@@ -1,4 +1,4 @@
-/* Новый анализ — окно ввода событий. Два способа: текстом в формате Telegram-бота (разбор имитирует Claude Haiku)
+/* Новый анализ — окно ввода событий. Два способа: свободным текстом — матчи и кэфы (разбор имитирует Claude Haiku),
    или формой с подстановкой матчей дня. Справа — «Перед запуском»: свежесть данных игроков, режим анализа,
    цена и время, правила стратегии. Состояние живет в замыкании — черновик не теряется при переходах. */
 (function () {
@@ -23,16 +23,54 @@
   const COLLECT = { cost: 0.05, secs: 40 };   // сбор профиля игрока, которого нет в базе
   const REFRESH = { cost: 0.01, secs: 15 };   // обновление устаревшего профиля
   const PARSE_COST = '≈$' + fmt.dec(0.004, 3);
-  const BOOKMAKERS = ['Fonbet', 'Winline', 'Лига Ставок', 'BetBoom', 'PARI', 'Другой'];
+  // Букмекеры участника (свой список ведет каждый, Р17) — как в «Личном кабинете → Букмекеры»; Pinnacle — эталон рынка
+  const BOOKMAKERS = ['bet365', 'Unibet', 'Pinnacle', 'Другой'];
+  const DEFAULT_BK = BOOKMAKERS[0];
   const ROUNDS = ['1/64 финала', '1/32 финала', '1/16 финала', '1/8 финала', '1/4 финала', '1/2 финала', 'Финал'];
   const SURF_WORDS = [[/крыт|indoor|зал/i, 'indoor'], [/хард|hard/i, 'hard'], [/грунт|clay/i, 'clay'], [/трав|grass/i, 'grass']];
   const TOURS = [...new Set(D.calendar.flatMap(c => c.name.split(' / ')))];
   const LESSONS_ON = D.lessons.filter(l => l.inPrompt).length;
   const LEGS = '2–' + ST.maxLegs; // экспресс из 2–3 событий, ординаров стратегия не допускает
 
-  const EXAMPLE = [
-    'Текущий банк: ' + fmt.int(S.bank) + ' ₽',
-    'Букмекер: Fonbet',
+  // ---------- валюта программы (Р17) ----------
+  // Суммы в DATA — рубли демо-данных; на экране и в полях ввода — валюта программы через UI.fmt.
+  const curDec = () => (UI.currency.list[UI.currency.code] || { dec: 0 }).dec;
+  const amountText = rub => (curDec() ? fmt.dec(fmt.moneyNum(rub), 2) : fmt.int(fmt.moneyNum(rub))); // число для поля ввода, без символа
+  const sameMoney = (a, b) => fmt.moneyNum(a) === fmt.moneyNum(b);
+  const curName = () => UI.currency.label.charAt(0).toLowerCase() + UI.currency.label.slice(1); // «евро», «доллары США»
+  // \b в регулярных выражениях JS не видит границ кириллических слов — для «руб», «евро» он не нужен
+  const CUR_WORDS = [
+    ['RUB', /\u20BD|руб|\brub\b|\d\s*р\.?\s*$/i], // \u20BD — знак рубля
+    ['USD', /\$|\busd\b|доллар/i],
+    ['EUR', /€|\beuro?\b|евро/i],
+  ];
+  // «48 000 руб», «477,14 €», «$519.48», «520 usd» → { value, code }; без валюты — валюта программы
+  function parseAmount(str) {
+    const raw = String(str || '');
+    const hit = CUR_WORDS.find(([, re]) => re.test(raw));
+    let t = raw.replace(/[^\d.,]/g, '');
+    if (!/\d/.test(t)) return null;
+    const lastC = t.lastIndexOf(','), lastD = t.lastIndexOf('.');
+    if (lastC >= 0 && lastD >= 0) { const dp = Math.max(lastC, lastD); t = t.slice(0, dp).replace(/[.,]/g, '') + '.' + t.slice(dp + 1); }
+    else {
+      const sep = lastC >= 0 ? ',' : lastD >= 0 ? '.' : null;
+      if (sep) {
+        const parts = t.split(sep);
+        // одна запятая или точка и 1–2 цифры после нее — дробная часть; иначе разделитель тысяч
+        t = parts.length === 2 && parts[1].length <= 2 ? parts[0] + '.' + parts[1] : parts.join('');
+      }
+    }
+    const value = parseFloat(t);
+    if (!(value > 0)) return null;
+    return { value, code: hit ? hit[0] : UI.currency.code };
+  }
+  // сумма из текста → рубли демо-данных; чужая валюта пересчитывается по курсу программы
+  const amountToRub = a => a.value / UI.currency.list[a.code].rate;
+
+  // Образец текста: банк — в валюте программы, букмекер — из списка участника
+  const example = () => [
+    'Текущий банк: ' + fmt.money(S.bank),
+    'Букмекер: ' + DEFAULT_BK,
     '',
     'События:',
     'Синнер vs Руне, Шанхай, хард',
@@ -43,9 +81,9 @@
     'Кэфы: П1 = 1.34, П2 = 3.35',
     'Фора по сетам: П1(-1.5) = 2.05, П2(+1.5) = 1.72',
   ].join('\n');
-  const TEMPLATE = [
-    'Текущий банк: ' + fmt.int(S.bank) + ' ₽',
-    'Букмекер: Fonbet',
+  const template = () => [
+    'Текущий банк: ' + fmt.money(S.bank),
+    'Букмекер: ' + DEFAULT_BK,
     '',
     'События:',
     'Игрок 1 vs Игрок 2, турнир, покрытие, раунд',
@@ -98,8 +136,8 @@
 
   // ---------- состояние (черновик) ----------
   const state = {
-    tab: 'text', text: EXAMPLE, parsedText: null, parsing: false, parse: null,
-    bank: S.bank, bookmaker: 'Fonbet', events: [], editing: new Set(), mode: 'precise',
+    tab: 'text', text: '', auto: null, parsedText: null, parsing: false, parse: null,
+    bank: S.bank, bookmaker: DEFAULT_BK, events: [], editing: new Set(), mode: 'precise',
     collecting: new Set(), collected: new Set(),
   };
   const freshOf = p => (state.collecting.has(p.id) ? 'collecting' : state.collected.has(p.id) ? 'fresh' : p.fresh);
@@ -155,12 +193,16 @@
     return '';
   }
   function parseText(text) {
-    const res = { bank: null, bookmaker: null, events: [], unknown: [] };
+    const res = { bank: null, bankRaw: null, bookmaker: null, events: [], unknown: [] };
     let cur = null;
     text.split(/\r?\n/).forEach((raw, i) => {
       const line = raw.trim(); if (!line) return;
       let m;
-      if ((m = line.match(/^(?:текущий\s+)?банк\s*[:=-]?\s*([\d\s .,]+)/i))) { const v = parseInt(m[1].replace(/[^\d]/g, ''), 10); if (v) res.bank = v; return; }
+      if ((m = line.match(/^(?:текущий\s+)?банк\s*[:=-]?\s*(.+)$/i))) {
+        const a = parseAmount(m[1]);
+        if (a) { res.bank = amountToRub(a); res.bankRaw = a; } else res.unknown.push({ n: i + 1, text: line });
+        return;
+      }
       if ((m = line.match(/^(?:букмекер|бк|контора)\s*[:=-]\s*(.+)$/i))) { res.bookmaker = m[1].trim(); return; }
       if (/^события\s*:?\s*$/i.test(line)) return;
       if (/^(кэфы?|коэффициенты|исходы?|фора[^:]*)\s*:/i.test(line)) {
@@ -190,12 +232,28 @@
   }
   function applyParse(res) {
     state.events = res.events; state.editing.clear();
-    if (res.bank) state.bank = res.bank;
-    if (res.bookmaker) state.bookmaker = res.bookmaker;
-    state.parse = { bank: res.bank, bookmaker: res.bookmaker, unknown: res.unknown };
+    // банк из текста совпал с учетом с точностью до копейки или цента — берем точное значение из учета;
+    // нет банка или букмекера в тексте — берем из кабинета, а не из прошлого разбора
+    state.bank = res.bank && !sameMoney(res.bank, S.bank) ? res.bank : S.bank;
+    state.bookmaker = res.bookmaker || DEFAULT_BK;
+    state.parse = { bank: res.bank ? state.bank : null, bankRaw: res.bankRaw, bookmaker: res.bookmaker, unknown: res.unknown };
     state.parsedText = state.text;
   }
-  applyParse(parseText(EXAMPLE)); // открываемся в рабочем состоянии: пример уже разобран
+  // Текст, который подставили мы (пример или матч из расписания), пересобирается, если сменилась валюта программы
+  // или банк в учете: суммы в нем всегда в текущей валюте. Текст, который правил пользователь, не трогаем.
+  const autoKey = () => UI.currency.code + '|' + S.bank;
+  function setAutoText(build) { state.text = build(); state.auto = { build, text: state.text, key: autoKey(), bank: S.bank }; }
+  function syncAutoText() {
+    const a = state.auto;
+    if (!a || state.text !== a.text || a.key === autoKey()) return;
+    const wasParsed = state.parsedText === state.text;
+    if (state.bank === a.bank) state.bank = S.bank;
+    if (state.parse && state.parse.bank === a.bank) state.parse.bank = S.bank;
+    setAutoText(a.build);
+    if (wasParsed) state.parsedText = state.text;
+  }
+  setAutoText(example);
+  applyParse(parseText(state.text)); // открываемся в рабочем состоянии: пример уже разобран
 
   function check(ev) {
     const errors = [], bad = new Set();
@@ -237,7 +295,26 @@
       if (i >= 0) { const e = check(evs[i]).errors[0]; reason = 'Событие ' + (i + 1) + ': ' + e.charAt(0).toLowerCase() + e.slice(1); }
       else { const u = players.find(p => p.p && !p.sure); if (u) reason = 'Подтвердите игрока «' + u.name + '»'; }
     }
+    if (!reason) reason = limitReason(cost);
     return { evs, n, players, missing, stale, mode, items, cost, secs, extraCost, extraSecs, reason };
+  }
+
+  // ---------- лимиты ИИ (Р7, Р9, Р13) ----------
+  // Участник на ключе администратора видит свой лимит, администратор — общий лимит своего ключа.
+  // На своем ключе лимитов программы нет: расход идет со счета участника в Anthropic.
+  function aiLimit() {
+    const me = D.me;
+    if (me && me.aiMode === 'own') return { own: true, last4: me.ownKey ? me.ownKey.last4 : '••••' };
+    if (me && me.limit) return { personal: true, spent: me.spent, cap: me.limit.monthly, daily: me.limit.daily, today: me.todayAnalyses, perAnalysis: me.limit.perAnalysis };
+    return { spent: D.admin.budget.spent, cap: D.admin.budget.monthly };
+  }
+  function limitReason(cost) {
+    const L = aiLimit();
+    if (L.own) return null;
+    if (L.personal && L.today >= L.daily) return 'Лимит на сегодня исчерпан: ' + L.daily + ' ' + fmt.plural(L.daily, 'анализ', 'анализа', 'анализов') + ' в день';
+    if (L.personal && cost > L.perAnalysis) return 'Дороже лимита ' + fmt.usd(L.perAnalysis, 0) + ' за анализ — уберите события или выберите режим дешевле';
+    if (L.spent + cost > L.cap) return 'Не хватает месячного лимита ИИ: осталось ' + fmt.usd(Math.max(0, L.cap - L.spent));
+    return null;
   }
 
   // ---------- стили ----------
@@ -574,19 +651,20 @@
     UI.modal({
       title: 'Формат текста', wide: true,
       body: [
-        h('p', { class: 'soft' }, 'Тот же формат, что в Telegram-боте. Порядок важен: сначала строка с игроками, под ней — кэфы этого матча.'),
-        h('pre', { class: 'new-pre mono', style: 'margin:0;padding:12px 14px;border-radius:var(--r-md);background:var(--surface-2);font-size:var(--fs-sm);white-space:pre-wrap;overflow-wrap:anywhere' }, TEMPLATE),
+        h('p', { class: 'soft' }, 'Свободный текст: матчи и кэфы, по строке на событие. Порядок важен: сначала строка с игроками, под ней — кэфы этого матча.'),
+        h('pre', { class: 'new-pre mono', style: 'margin:0;padding:12px 14px;border-radius:var(--r-md);background:var(--surface-2);font-size:var(--fs-sm);white-space:pre-wrap;overflow-wrap:anywhere' }, template()),
         h('ul', { class: 'stack', style: 'gap:8px;margin:0;padding-left:18px;font-size:var(--fs-sm);color:var(--fg-2)' },
           h('li', null, h('b', null, 'Игроки: '), '«Синнер vs Руне», «Синнер — Руне» или «Sinner vs Rune». Достаточно фамилии.'),
           h('li', null, h('b', null, 'После игроков через запятую: '), 'турнир, покрытие и, если знаете, раунд — «Шанхай, хард, 1/8».'),
           h('li', null, h('b', null, 'Кэфы: '), 'П1 и П2 обязательны. Форы по сетам — П1(-1.5), П1(+1.5), П2(-1.5), П2(+1.5).'),
           h('li', null, 'Дробную часть можно писать через точку или запятую: 1.62 или 1,62.'),
           h('li', null, 'Банк и букмекер необязательны — по умолчанию возьмем из кабинета.'),
+          h('li', null, 'Банк — в валюте программы (' + curName() + '). Сумму в другой валюте (' + Object.values(UI.currency.list).map(c => c.sym).join(', ') + ', «руб», «usd», «eur») пересчитаем по курсу программы.'),
           h('li', null, 'Строки, которые не удалось понять, покажем отдельно — ничего не пропадет молча.')),
         UI.callout('info', 'info', 'Разбор делает самая дешевая модель (Claude Haiku 4.5, ' + PARSE_COST + ' за текст). Если имя не совпало с базой, вы увидите это до запуска анализа.'),
       ],
       actions: close => [
-        button('Вставить шаблон', { kind: 'secondary', icon: 'copy', onClick: () => { close(); state.tab = 'text'; state.text = TEMPLATE; renderPanel(); renderSide(); focusLater('#new-text'); } }),
+        button('Вставить шаблон', { kind: 'secondary', icon: 'copy', onClick: () => { close(); state.tab = 'text'; state.text = template(); renderPanel(); renderSide(); focusLater('#new-text'); } }),
         button('Понятно', { kind: 'primary', onClick: close }),
       ],
     });
@@ -814,16 +892,23 @@
     }
     if (!state.parse) { wrap.appendChild(UI.empty('Нажмите «Разобрать» — здесь появятся события, игроки и кэфы.')); return wrap; }
     const n = state.events.length, pr = state.parse;
-    const bankDiff = pr.bank && pr.bank !== S.bank;
+    const bankDiff = pr.bank && !sameMoney(pr.bank, S.bank);
+    const foreign = pr.bank && pr.bankRaw && pr.bankRaw.code !== UI.currency.code; // банк в тексте в другой валюте
     wrap.appendChild(h('div', { class: 'new-result-head' },
       h('div', { style: 'min-width:0' },
         h('h3', null, 'Что распознано'),
         h('div', { class: 'row' },
           chip(evWord(n), n ? 'accent' : 'bad', n ? 'check' : 'alert'),
-          chip('Банк ' + fmt.money(state.bank), bankDiff ? 'warn' : 'outline', bankDiff ? 'alert' : 'wallet'),
+          chip('Банк ' + fmt.money(state.bank), bankDiff || foreign ? 'warn' : 'outline', bankDiff || foreign ? 'alert' : 'wallet'),
           chip(state.bookmaker, 'outline'))),
       h('span', { class: 'xsmall muted', style: 'padding-top:4px' }, 'Haiku 4.5 · ' + PARSE_COST)));
-    if (bankDiff) wrap.appendChild(UI.callout('warn', 'wallet', 'Банк в тексте (' + fmt.money(pr.bank) + ') отличается от учета ставок (' + fmt.money(S.bank) + '). Сумму ставки посчитаем от банка из текста.'));
+    if (bankDiff || foreign) {
+      const IN = { RUB: 'рублях', USD: 'долларах', EUR: 'евро' };
+      const raw = foreign && (UI.currency.list[pr.bankRaw.code].dec ? fmt.dec(pr.bankRaw.value, 2) : fmt.int(pr.bankRaw.value)) + ' ' + UI.currency.list[pr.bankRaw.code].sym;
+      wrap.appendChild(UI.callout('warn', 'wallet',
+        foreign ? 'Банк в тексте указан в ' + IN[pr.bankRaw.code] + ' (' + raw + '), а суммы в программе ведутся в ' + IN[UI.currency.code] + ': по курсу программы это ' + fmt.money(pr.bank) + '. ' : '',
+        bankDiff ? (foreign ? 'Он отличается' : 'Банк в тексте (' + fmt.money(pr.bank) + ') отличается') + ' от учета ставок (' + fmt.money(S.bank) + '). Сумму ставки посчитаем от банка из текста.' : ''));
+    }
     if (pr.unknown.length) {
       wrap.appendChild(UI.callout('bad', 'alert',
         h('div', null, h('b', null, 'Не понял ' + pr.unknown.length + ' ' + fmt.plural(pr.unknown.length, 'строку', 'строки', 'строк') + ':')),
@@ -867,12 +952,12 @@
           h('label', { class: 'field-label', for: 'new-text' }, 'Текст событий'),
           h('div', { class: 'row' },
             button('Формат', { kind: 'ghost', size: 'sm', icon: 'book', onClick: formatModal, title: 'Как писать текст' }),
-            button('Пример', { kind: 'ghost', size: 'sm', icon: 'copy', onClick: () => setText(EXAMPLE, 'Вставлен пример в формате бота') }),
+            button('Пример', { kind: 'ghost', size: 'sm', icon: 'copy', onClick: () => { setText(example(), 'Вставлен пример текста'); state.auto = { build: example, text: state.text, key: autoKey(), bank: S.bank }; } }),
             button('Очистить', { kind: 'ghost', size: 'sm', icon: 'x', onClick: () => setText('') }))),
         ta,
         h('div', { class: 'new-ta-actions' },
           h('div', { class: 'new-ta-status' }, status,
-            h('span', { class: 'xsmall muted', id: 'new-text-hint' }, 'Формат как в Telegram-боте. Разбирает Claude Haiku 4.5, ' + PARSE_COST + ' за текст', UI.isMobile() ? '.' : [' · ', h('kbd', { class: 'new-kbd' }, 'Ctrl'), '+', h('kbd', { class: 'new-kbd' }, 'Enter')])),
+            h('span', { class: 'xsmall muted', id: 'new-text-hint' }, 'Матчи и кэфы, по строке на событие. Разбирает Claude Haiku 4.5, ' + PARSE_COST + ' за текст', UI.isMobile() ? '.' : [' · ', h('kbd', { class: 'new-kbd' }, 'Ctrl'), '+', h('kbd', { class: 'new-kbd' }, 'Enter')])),
           parseBtn)),
       dropzone(),
       resultSection());
@@ -895,10 +980,18 @@
   }
 
   function formPanel() {
-    const bank = UI.field({ label: 'Банк', id: 'new-bank', value: fmt.int(state.bank), suffix: '₽', inputmode: 'numeric', autocomplete: 'off', hint: 'По учету ставок на ' + fmt.date(D.today) + '. Сумма ставки — % от банка', attrs: { 'data-fk': 'bank' } });
-    bank.querySelector('input').addEventListener('input', e => { state.bank = parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0; renderSide(); });
+    // Банк вводится в валюте программы, в черновик уходит в рублях демо-данных (UI.fmt.fromMoney)
+    const bank = UI.field({ label: 'Банк', id: 'new-bank', value: amountText(state.bank), suffix: fmt.cur(), inputmode: curDec() ? 'decimal' : 'numeric', autocomplete: 'off', hint: 'По учету ставок на ' + fmt.date(D.today) + '. Сумма ставки — % от банка', attrs: { 'data-fk': 'bank', 'aria-label': 'Банк, ' + curName() } });
+    const bankIn = bank.querySelector('input');
+    bankIn.addEventListener('input', () => {
+      const a = parseAmount(bankIn.value);
+      const rub = a ? (a.code === UI.currency.code ? fmt.fromMoney(a.value) : amountToRub(a)) : 0;
+      state.bank = rub && sameMoney(rub, S.bank) ? S.bank : rub;
+      renderSide();
+    });
+    bankIn.addEventListener('blur', () => { if (state.bank > 0) bankIn.value = amountText(state.bank); });
     const opts = BOOKMAKERS.includes(state.bookmaker) ? BOOKMAKERS : [state.bookmaker].concat(BOOKMAKERS);
-    const bk = UI.field({ label: 'Букмекер', id: 'new-bk', value: state.bookmaker, options: opts, hint: 'Нужен, чтобы потом сверять закрывающую линию (CLV)', attrs: { 'data-fk': 'bk' } });
+    const bk = UI.field({ label: 'Букмекер', id: 'new-bk', value: state.bookmaker, options: opts, hint: 'Список — ваши букмекеры из личного кабинета. CLV считаем по закрывающему кэфу Pinnacle — эталону рынка', attrs: { 'data-fk': 'bk' } });
     bk.querySelector('select').addEventListener('change', e => { state.bookmaker = e.target.value; renderSide(); });
     const fromText = state.events.some(e => e.raw1 || e.raw2);
     return h('div', { class: 'stack', style: 'gap:16px' },
@@ -937,11 +1030,21 @@
     const costs = h('div', { class: 'new-costs' },
       UI.kv(a.items.map(it => [it.label, usd(it.cost)])),
       h('div', { class: 'new-total', 'aria-live': 'polite' }, h('span', null, 'Итого'), h('span', null, h('b', null, usd(a.cost)), h('span', { class: 'muted' }, ' · ' + fmtTime(a.secs)))));
-    const spent = D.ai.spent, budget = D.ai.budget, after = spent + a.cost;
-    const bud = h('div', { class: 'new-sub', style: 'gap:6px' },
-      h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Бюджет ИИ на ' + D.ai.month), h('span', { class: 'num' }, h('b', null, fmt.usd(spent)), ' из ' + fmt.usd(budget, 0))),
-      UI.meter(after, budget, after / budget > 0.9 ? 'bad' : after / budget > 0.7 ? 'warn' : null),
-      h('div', { class: 'xsmall muted' }, 'После запуска ≈ ' + fmt.usd(after) + '. Профили и правила стратегии берутся из кэша промпта — в ' + D.ai.month.replace(/ь$/, 'е') + ' так пришло ' + D.ai.cacheShare + '% входных токенов.'));
+    const L = aiLimit(), cacheNote = 'Профили и правила стратегии берутся из кэша промпта — в ' + D.ai.month.replace(/ь$/, 'е') + ' так пришло ' + D.ai.cacheShare + '% входных токенов.';
+    let bud;
+    if (L.own) {
+      bud = h('div', { class: 'new-sub', style: 'gap:6px' },
+        h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Свой ключ Claude'), h('span', { class: 'mono' }, 'sk-ant-…' + L.last4)),
+        h('div', { class: 'xsmall muted' }, 'Анализ ≈ ' + fmt.usd(a.cost) + ' спишется с вашего счета Anthropic, лимиты программы на свой ключ не действуют. ' + cacheNote));
+    } else {
+      const after = L.spent + a.cost;
+      bud = h('div', { class: 'new-sub', style: 'gap:6px' },
+        h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, (L.personal ? 'Ваш лимит ИИ на ' : 'Ключ администратора на ') + D.ai.month), h('span', { class: 'num' }, h('b', null, fmt.usd(L.spent)), ' из ' + fmt.usd(L.cap, 0))),
+        UI.meter(after, L.cap, after / L.cap > 0.9 ? 'bad' : after / L.cap > 0.7 ? 'warn' : null),
+        h('div', { class: 'xsmall muted' }, 'После запуска ≈ ' + fmt.usd(after) + (L.personal
+          ? ' · анализов сегодня ' + L.today + ' из ' + L.daily + ' · до ' + fmt.usd(L.perAnalysis, 0) + ' за анализ. '
+          : ' — общий лимит на всех, кто работает на вашем ключе. ') + cacheNote));
+    }
     const launchBtn = button('Запустить анализ', { kind: 'primary', size: 'lg', icon: 'spark', block: true, disabled: !!a.reason, onClick: launch, attrs: { id: 'new-launch', 'data-fk': 'launch' } });
     return UI.card({
       class: 'new-launch-card', title: 'Перед запуском', subtitle: 'Что уйдет в анализ и сколько это стоит',
@@ -1071,15 +1174,15 @@
     if (m) {
       state.tab = 'form'; state.editing.clear(); snapshots.clear();
       state.events = [eventFromToday(m)];
-      // во вкладке «Вставить текстом» — тот же матч в формате бота, чтобы вкладки не расходились
-      state.text = [
-        'Текущий банк: ' + fmt.int(state.bank) + ' ₽', 'Букмекер: ' + state.bookmaker, '', 'События:',
+      // во вкладке «Вставить текстом» — тот же матч текстом, чтобы вкладки не расходились
+      setAutoText(() => [
+        'Текущий банк: ' + fmt.money(state.bank), 'Букмекер: ' + state.bookmaker, '', 'События:',
         P[m.p1].short + ' vs ' + P[m.p2].short + ', ' + m.tournament + ', ' + (D.surfaces[m.surface] ? D.surfaces[m.surface].label.toLowerCase() : 'хард') + ', ' + m.round.replace(' финала', ''),
         'Кэфы: П1 = ' + fmt.odds(m.odds.p1) + ', П2 = ' + fmt.odds(m.odds.p2),
         'Фора по сетам: П1(-1.5) = ' + fmt.odds(m.odds.h1m) + ', П2(+1.5) = ' + fmt.odds(m.odds.h2p),
-      ].join('\n');
+      ].join('\n'));
       state.parsedText = state.text;
-      state.parse = { bank: null, bookmaker: null, unknown: [] };
+      state.parse = { bank: null, bankRaw: null, bookmaker: null, unknown: [] };
       UI.toast('Добавлен матч ' + P[m.p1].short + ' — ' + P[m.p2].short + ' из расписания', 'calendar');
     } else if (param === 'today') {
       state.tab = 'form';
@@ -1092,6 +1195,7 @@
   // ---------- экран ----------
   function render(root, param) {
     applyParam(param);
+    syncAutoText();
     if (io) { io.disconnect(); io = null; }
     slots.clear();
     const panel = h('div', { class: 'new-panel', role: 'tabpanel', id: 'new-panel', 'aria-label': state.tab === 'text' ? 'Вставить текстом' : 'Заполнить форму' });
@@ -1116,7 +1220,7 @@
       h('div', { class: 'page-head new-head' },
         h('div', { style: 'min-width:0' },
           h('h2', null, 'Что разбираем сегодня?'),
-          h('p', { class: 'lead' }, 'Вставьте события так же, как писали боту в Telegram, или заполните форму. До запуска видно, что понял ИИ, чьи данные устарели и сколько стоит анализ.')),
+          h('p', { class: 'lead' }, 'Вставьте матчи и кэфы свободным текстом или заполните форму. До запуска видно, что понял ИИ, чьи данные устарели и сколько стоит анализ.')),
         steps),
       layout,
       bar,

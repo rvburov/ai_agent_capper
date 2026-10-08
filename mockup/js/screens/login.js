@@ -1,13 +1,14 @@
 /* Экран входа (без оболочки приложения): защищенный вход в личный кабинет.
-   Шаги — подмаршруты #login-<шаг>: вход по паролю → код 2FA (или резервный код), восстановление пароля,
-   регистрация по приглашению → настройка 2FA, блокировка после 5 ошибок. Состояние живет в памяти модуля,
-   поэтому смена темы или ширины экрана не сбрасывает введенное. */
+   Шаги — подмаршруты #login-<шаг>: вход по паролю → код 2FA (или резервный код), демо-вход под двумя ролями,
+   сброс пароля кодом от администратора (Р5, Р6), регистрация по коду приглашения (Р4) → настройка 2FA,
+   пауза после 5 неудачных попыток с одного IP. Почты и Telegram нет (Р2, Р3).
+   Состояние живет в памяти модуля, поэтому смена темы или ширины экрана не сбрасывает введенное. */
 (function () {
   'use strict';
   const { h, icon, button } = UI;
 
-  const STEPS = ['login', '2fa', 'backup', 'reset', 'sent', 'invite', 'setup', 'locked'];
-  const TITLES = { login: 'Вход', '2fa': 'Код подтверждения', backup: 'Резервный код', reset: 'Сброс пароля', sent: 'Проверьте почту', invite: 'Регистрация', setup: 'Настройка 2FA', locked: 'Вход заблокирован' };
+  const STEPS = ['login', '2fa', 'backup', 'reset', 'done', 'invite', 'setup', 'locked'];
+  const TITLES = { login: 'Вход', '2fa': 'Код подтверждения', backup: 'Резервный код', reset: 'Сброс пароля', done: 'Пароль изменен', invite: 'Регистрация', setup: 'Настройка 2FA', locked: 'Вход временно закрыт' };
   const MAX_ATTEMPTS = 5;
   const SECRET = 'JK3M Q7XP L2VD 6WRA ZT4N HC5Y B7QE 2MKS';
   const BACKUP_CODES = ['4f7k-2m9q', 'x8c3-vn5d', '7hpt-k2wz', 'm6qa-93rf', 'e2yd-u7jb', 'r5ns-8gxk', 'b9wl-c4tm', 'q3jv-6pzh'];
@@ -18,8 +19,8 @@
     { icon: 'lock', t: 'Пароль — только хеш Argon2id', d: 'Сам пароль не хранится и не попадает в логи' },
     { icon: 'shield', t: 'Двухфакторная аутентификация', d: 'TOTP-коды: Google Authenticator, Яндекс Ключ или 1Password' },
     { icon: 'key', t: 'Сессия в защищенной httpOnly-cookie', d: 'Secure и SameSite: скрипты на странице ее не прочитают' },
-    { icon: 'alert', t: 'Блокировка после 5 неудачных попыток', d: 'Вход закрывается на 15 минут — подбор пароля бесполезен' },
-    { icon: 'telegram', t: 'Уведомление в Telegram', d: 'О каждом входе с нового устройства' },
+    { icon: 'alert', t: 'Пауза после 5 неудачных попыток', d: 'IP-адрес ждет 15 минут, с других устройств вход работает' },
+    { icon: 'bell', t: 'Уведомление о новом устройстве', d: 'На сайте и push — о каждом входе с нового устройства' },
     { icon: 'history', t: 'Журнал входов', d: 'Устройство, город и время — в личном кабинете' },
   ];
 
@@ -31,14 +32,19 @@
     { label: 'Надежный', chip: 'good', icon: 'shield', meter: 'login-good' },
   ];
 
+  // Демо-коды, которые показывают ошибку «код не подходит»
+  const BAD_RESET = 'RST-0000-0000';
+  const BAD_INVITE = 'CAP-0000-0000';
+  const CLI = 'docker compose exec api python -m app.admin.cli';
+
   function fresh() {
     return {
       step: 'login', lastStep: null,
-      email: DATA.user.email, pwd: '', remember: false, attempts: MAX_ATTEMPTS, error: false, emailError: null, pwdError: null,
+      email: DATA.personas.admin.email, pwd: '', remember: false, attempts: MAX_ATTEMPTS, error: false, emailError: null, pwdError: null,
       otp: '', otpError: null, backup: '', backupError: null,
-      resetEmail: null, resetError: null, resent: false,
-      reg: { invite: 'CAP-7Q4M-2KXD', email: '', pwd: '', pwd2: '', agree: false }, regErr: {},
-      setupOtp: '', saved: false, setupErr: {},
+      rs: { email: null, code: '', pwd: '', pwd2: '' }, rsErr: {}, rsDoneEmail: null,
+      reg: { invite: null, name: '', email: '', pwd: '', pwd2: '', age: false, ai: false, train: false }, regErr: {},
+      setupMode: 'reg', regRole: 'member', setupOtp: '', saved: false, setupErr: {},
     };
   }
   let S = fresh();
@@ -112,10 +118,14 @@
   .login-label-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; }
   .login-link { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--accent-ink); text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; border-radius: 4px; }
   .login-link:hover { text-decoration: underline; }
+  /* зона нажатия 44 px, не меняя высоту строки */
+  .login-link { position: relative; }
+  .login-link::before { content: ""; position: absolute; left: -6px; right: -6px; top: 50%; height: 44px; transform: translateY(-50%); }
+  .login-label-row .login-link::before { top: auto; bottom: -6px; transform: none; }
   .login-link svg { width: 16px; height: 16px; flex: none; }
   .login-pw { position: relative; min-width: 0; }
   .login-pw .input { padding-right: 50px; }
-  .login-eye { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border: 0; background: none; border-radius: 8px; color: var(--fg-3); display: grid; place-items: center; cursor: pointer; }
+  .login-eye { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border: 0; background: none; border-radius: 8px; color: var(--fg-3); display: grid; place-items: center; cursor: pointer; }
   .login-eye:hover { background: var(--surface-2); color: var(--fg); }
   .login-eye svg { width: 19px; height: 19px; }
   .login-caps { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--warn-ink); font-weight: 500; }
@@ -125,11 +135,46 @@
   .login-check > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .login-check.invalid input { outline: 2px solid var(--bad); outline-offset: 1px; }
   .login-alt { display: flex; align-items: center; justify-content: center; gap: 6px 12px; flex-wrap: wrap; font-size: var(--fs-sm); }
-  .login-alt.between { justify-content: space-between; }
+  .login-alt.between { justify-content: space-between; row-gap: 24px; }
   .login-note { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-xs); color: var(--fg-3); }
   .login-note svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
   .login-demo { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: var(--r-md); font-size: var(--fs-xs); color: var(--fg-2); }
   .login-demo svg { width: 16px; height: 16px; flex: none; color: var(--fg-3); margin-top: 1px; }
+  .login-demo b { color: var(--fg); font-weight: 600; }
+
+  /* демо-вход под двумя ролями */
+  .login-demoin { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px dashed var(--line-strong); border-radius: var(--r-lg); background: var(--surface-2); min-width: 0; }
+  .login-demoin-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  .login-demoin-head > svg { width: 18px; height: 18px; flex: none; color: var(--fg-3); }
+  .login-demoin-head h2 { font-size: var(--fs-md); font-weight: 600; }
+  .login-demoin-head .demo-pill { margin-left: auto; }
+  .login-demoin-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .role-opt.login-persona { align-items: center; padding: 9px 12px; min-height: 56px; }
+  .login-persona .role-opt-ic { background: var(--accent-soft); }
+  .login-persona .role-opt-text b { font-weight: 600; }
+  .login-persona .role-opt-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .login-persona > svg { width: 18px; height: 18px; flex: none; color: var(--fg-3); }
+  .login-persona:hover > svg { color: var(--accent-ink); }
+  .login-persona:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .login-demoin .login-note { margin: 0; }
+  @media (max-width: 480px) {
+    .login-demoin { padding: 12px; }
+    .role-opt.login-persona { padding: 8px 10px; gap: 10px; }
+    .login-persona > svg, .login-persona-mail { display: none; }
+  }
+
+  /* команда терминала для администратора */
+  .login-cmd { font-size: var(--fs-xs); color: var(--fg-3); display: flex; gap: 8px; align-items: flex-start; }
+  .login-cmd > svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+  .login-cmd code { font-family: var(--font-mono); font-size: .6875rem; color: var(--fg-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 1px 5px; overflow-wrap: anywhere; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+
+  /* уведомление о данных и согласия */
+  .login-data { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); min-width: 0; }
+  .login-data-h { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-sm); }
+  .login-data-h svg { width: 16px; height: 16px; flex: none; color: var(--accent-ink); }
+  .login-data ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); color: var(--fg-2); }
+  .login-consents { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .login-req { color: var(--bad-ink); margin-left: 2px; }
   .btn.login-busy[disabled] { opacity: .85; cursor: progress; }
   .login-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: login-spin .7s linear infinite; flex: none; }
   @keyframes login-spin { to { transform: rotate(360deg); } }
@@ -209,7 +254,6 @@
   .login-secd-t { flex: 1; min-width: 0; }
   .login-secd-t b { display: block; font-weight: 600; }
   .login-secd .login-sec-list { padding: 2px 16px 16px; }
-  .btn.login-demo-btn { border: 1px dashed var(--line-strong); }
   .login-m-foot { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--fg-3); text-align: center; }
   `;
 
@@ -223,9 +267,50 @@
     UI.clear(btn); btn.append(h('span', { class: 'login-spin', 'aria-hidden': 'true' }), h('span', null, label));
   }
   function later(ms, fn) { setTimeout(() => { busy = false; if (ROOT && ROOT.isConnected) fn(); }, ms); }
-  // Успешный вход: сбрасываем состояние экрана и открываем кабинет
-  function enter(msg, ic) { S = fresh(); busy = false; UI.auth.login(); UI.toast(msg, ic || 'check'); }
-  function validEmail(v) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim()); }
+  // Демо-персона по email: olga@example.com — участник, любой другой адрес — администратор
+  function personaFor(email) {
+    const e = String(email || '').trim().toLowerCase();
+    return Object.values(DATA.personas).find(p => p.email === e) || null;
+  }
+  function roleFor(email) { const p = personaFor(email); return p ? p.role : 'admin'; }
+  function roleWord(role, form) { return role === 'member' ? (form === 'gen' ? 'участника' : 'участник') : (form === 'gen' ? 'администратора' : 'администратор'); }
+  // Успешный вход: сбрасываем состояние экрана и открываем «Главную» под нужной ролью
+  function enter(role, msg, ic) {
+    S = fresh(); busy = false;
+    UI.auth.login(role);
+    const p = DATA.personas[role];
+    UI.toast(msg || ('Вход выполнен: ' + p.name + ', ' + roleWord(role)), ic || 'check');
+  }
+  function validEmail(v) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v).trim()); }
+  // Маска кода вида PFX-XXXX-XXXX: заглавные буквы, дефисы ставятся сами
+  function maskCode(pfx, raw) {
+    let t = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!t) return '';
+    if (t.startsWith(pfx)) t = t.slice(pfx.length);
+    else if (pfx.startsWith(t)) return t;
+    t = t.slice(0, 8);
+    return t ? pfx + '-' + t.slice(0, 4) + (t.length > 4 ? '-' + t.slice(4) : '') : pfx;
+  }
+  function codeOk(pfx, v) { return new RegExp('^' + pfx + '-[A-Z0-9]{4}-[A-Z0-9]{4}$').test(v); }
+  // Поле кода с маской: при вводе в конце строки сразу показываем код в правильном виде
+  function codeField(pfx, o) {
+    const f = UI.field({ id: o.id, label: o.label, value: o.value, placeholder: pfx + '-XXXX-XXXX', autocomplete: 'off', error: o.error, hint: o.hint,
+      attrs: Object.assign({ spellcheck: 'false', autocapitalize: 'characters', autocorrect: 'off' }, o.attrs || {}) });
+    const i = f.querySelector('input');
+    i.classList.add('mono');
+    i.addEventListener('input', e => {
+      const atEnd = i.selectionStart === i.value.length;
+      const deleting = e.inputType && e.inputType.startsWith('delete');
+      if (atEnd && !deleting) { const m = maskCode(pfx, i.value); if (m !== i.value) i.value = m; }
+    });
+    i.addEventListener('blur', () => { const m = maskCode(pfx, i.value); if (m !== i.value) { i.value = m; o.onInput(m); } });
+    onInput(f, v => o.onInput(v));
+    return f;
+  }
+  // Строка мелким текстом с командой для сервера (Р6)
+  function cliLine(lead, cmd) {
+    return h('p', { class: 'login-cmd' }, icon('terminal'), h('span', { style: 'min-width:0' }, lead + ' ', h('code', null, CLI + ' ' + cmd + ' --email …')));
+  }
 
   function head(eyebrow, title, sub) {
     return h('div', { class: 'login-head' },
@@ -239,7 +324,8 @@
         h('span', { class: 'login-step-n', 'aria-hidden': 'true' }, i < current ? icon('check') : String(i + 1)),
         h('span', null, label, i < current && h('span', { class: 'sr-only' }, ' — пройден')))));
   }
-  function demoHint(text) { return h('div', { class: 'login-demo' }, icon('flask'), h('span', null, text)); }
+  function demoHint(...text) { return h('div', { class: 'login-demo' }, icon('flask'), h('span', null, text)); }
+  function nb(code) { return h('span', { style: 'white-space:nowrap' }, code); }
   function note(ic, text) { return h('p', { class: 'login-note' }, icon(ic), h('span', null, text)); }
   function markInvalid(fieldEl) { const i = fieldEl.querySelector('input'); if (i) { i.classList.add('invalid'); i.setAttribute('aria-invalid', 'true'); } return fieldEl; }
   // Ввод в поле снимает его ошибку сразу, не дожидаясь повторной отправки
@@ -431,8 +517,8 @@
       h('span', null, text),
       h('span', { class: 'sr-only' }, state === 'ok' ? ' — выполнено' : ' — не выполнено'));
   }
-  function strengthContent() {
-    const p = S.reg.pwd, r = analyze(p, S.reg.email), lv = LEVELS[r.score];
+  function strengthContent(p, email) {
+    const r = analyze(p, email), lv = LEVELS[r.score];
     const m = UI.meter(r.score, 4, lv.meter);
     m.setAttribute('aria-label', 'Надежность пароля'); m.setAttribute('aria-valuetext', lv.label);
     return [
@@ -445,8 +531,7 @@
       h('div', { class: 'field-hint' }, 'Проверка по базе утечек Have I Been Pwned: отправляются только первые 5 символов хеша, сам пароль никуда не уходит.'),
     ];
   }
-  function matchContent() {
-    const { pwd, pwd2 } = S.reg;
+  function matchContent(pwd, pwd2) {
     if (!pwd2) return null;
     return h('ul', { class: 'login-rules' }, pwd2 === pwd ? rule('ok', 'Пароли совпадают') : rule('todo', 'Пока не совпадают'));
   }
@@ -463,15 +548,29 @@
       err && h('div', { class: 'callout bad', role: 'alert', id: 'login-error' }, icon('alert'),
         h('div', { style: 'min-width:0' },
           h('div', null, h('b', null, 'Неверный email или пароль.'), ' Осталось попыток: ' + S.attempts),
-          S.attempts === 1 && h('div', null, 'После следующей ошибки вход закроется на 15 минут, а в Telegram придет уведомление.'))),
+          S.attempts === 1 && h('div', null, 'После следующей ошибки вход с этого IP-адреса закроется на 15 минут.'))),
       email,
       pwField({ id: 'login-password', label: 'Пароль', value: S.pwd, autocomplete: 'current-password', invalid: !!(err || S.pwdError), error: S.pwdError, describedBy: err ? 'login-error' : null, autofocus: true,
         aside: h('a', { class: 'login-link', href: '#login-reset' }, 'Забыли пароль?'), onInput: v => { S.pwd = v; S.pwdError = null; } }),
       check({ id: 'login-remember', checked: S.remember, title: 'Запомнить это устройство на 30 дней', hint: 'Код 2FA здесь не спросим 30 дней. Не отмечайте на чужом компьютере.', onChange: v => { S.remember = v; } }),
       button('Войти', { kind: 'primary', size: 'lg', block: true, type: 'submit', iconRight: 'arrowRight' }),
       h('div', { class: 'login-alt' }, h('span', { class: 'muted' }, 'Нет аккаунта?'), h('a', { class: 'login-link', href: '#login-invite' }, 'Регистрация только по приглашению', icon('chevronRight'))),
-      demoHint('В макете пароль «wrong» покажет ошибку и спишет одну попытку из 5, любой другой пароль ведет к шагу с кодом.'));
+      demoLogin());
     return { node: form };
+  }
+  // Демо-вход: сразу в макет под выбранной ролью, без пароля и 2FA
+  function demoLogin() {
+    const P = DATA.personas;
+    const opt = (role, title) => h('button', { type: 'button', class: ['role-opt', 'login-persona'], 'data-demo-role': role, on: { click: () => enter(role, 'Демо-вход: ' + P[role].name + ', ' + roleWord(role) + '. Данные вымышлены', 'eye') } },
+      h('span', { class: 'role-opt-ic', 'aria-hidden': 'true' }, icon(role === 'admin' ? 'admin' : 'user')),
+      h('span', { class: 'role-opt-text' }, h('b', null, title), h('span', { class: 'small soft' }, P[role].name, h('span', { class: 'login-persona-mail' }, ' · ' + P[role].email))),
+      icon('arrowRight'));
+    return h('section', { class: 'login-demoin', 'aria-labelledby': 'login-demo-title' },
+      h('div', { class: 'login-demoin-head' }, icon('flask'), h('h2', { id: 'login-demo-title' }, 'Демо-вход'), h('span', { class: 'demo-pill' }, 'без пароля и 2FA')),
+      h('div', { class: 'login-demoin-list' },
+        opt('admin', 'Войти как администратор'),
+        opt('member', 'Войти как участник')),
+      note('info', 'Обычный вход в макете тоже работает: ' + P.member.email + ' откроет кабинет участника, другой email — администратора. Пароль «wrong» покажет ошибку.'));
   }
   function submitLogin(e) {
     e.preventDefault();
@@ -494,9 +593,10 @@
   }
 
   function acctRow() {
-    const mail = S.email || DATA.user.email;
+    const mail = (S.email || DATA.personas.admin.email).trim();
+    const p = personaFor(mail);
     return h('div', { class: 'login-acct' },
-      h('span', { class: 'avatar', 'aria-hidden': 'true' }, DATA.user.initials),
+      h('span', { class: 'avatar', 'aria-hidden': 'true' }, p ? p.initials : mail.charAt(0).toUpperCase()),
       h('div', { class: 'login-acct-body' }, h('div', { class: 'xsmall muted' }, 'Входите как'), h('div', { class: 'login-acct-addr', title: mail }, mail)),
       h('a', { class: 'login-link', href: '#login' }, 'Не вы?'));
   }
@@ -514,9 +614,9 @@
       button('Подтвердить и войти', { kind: 'primary', size: 'lg', block: true, type: 'submit', attrs: { id: 'login-2fa-submit' } }),
       h('div', { class: 'login-alt between' },
         h('a', { class: 'login-link', href: '#login' }, icon('chevronLeft'), 'Назад'),
-        h('a', { class: 'login-link', href: '#login-backup' }, icon('key'), 'Использовать резервный код')),
-      note('telegram', 'Если устройство новое, после входа придет уведомление в Telegram: город, браузер и время.'),
-      demoHint('В макете подойдет любой код: введите или вставьте 6 любых цифр — вход произойдет сразу.'));
+        h('a', { class: 'login-link', href: '#login-backup', id: 'login-no-app' }, icon('key'), 'Нет доступа к приложению-аутентификатору')),
+      note('bell', 'Вход с нового устройства появится в центре уведомлений на сайте и придет push, если он включен: город, браузер и время.'),
+      demoHint('В макете подойдут любые 6 цифр — вход произойдет сразу, откроется кабинет ' + roleWord(roleFor(S.email), 'gen') + ' (роль в макете определяется по email).'));
     return { node: form };
   }
   function submit2fa() {
@@ -530,7 +630,7 @@
     busy = true;
     setBusy(document.getElementById('login-2fa-submit'), 'Проверяем код…');
     ROOT.querySelectorAll('.login-otp-box').forEach(b => { b.readOnly = true; });
-    later(650, () => enter('Вход выполнен. Уведомление о входе — в Telegram', 'shield'));
+    later(650, () => enter(roleFor(S.email), null, 'shield'));
   }
 
   function viewBackup() {
@@ -539,14 +639,14 @@
     onInput(f, v => { S.backup = v; S.backupError = null; });
     const form = h('form', { class: 'login-form', novalidate: true, 'aria-labelledby': 'login-title', on: { submit: submitBackup } },
       stepper(['Пароль', 'Резервный код'], 1),
-      head('Шаг 2 из 2', 'Вход по резервному коду', 'Подойдет любой из 8 кодов, которые вы сохранили при настройке 2FA. Каждый срабатывает один раз.'),
+      head('Нет доступа к приложению', 'Вход по резервному коду', 'Подойдет любой из 8 кодов, которые вы сохранили при настройке 2FA. Каждый срабатывает один раз.'),
       acctRow(),
       f,
       button('Войти по резервному коду', { kind: 'primary', size: 'lg', block: true, type: 'submit', icon: 'key' }),
-      UI.callout('info', 'info', 'После входа останется 7 кодов. Новый набор можно создать в личном кабинете, раздел «Безопасность».'),
+      UI.callout('info', 'info', 'После входа останется 7 кодов. Новый набор можно создать в «Личном кабинете → Безопасность».'),
       h('div', { class: 'login-alt between' },
         h('a', { class: 'login-link', href: '#login-2fa' }, icon('chevronLeft'), 'Код из приложения'),
-        h('button', { type: 'button', class: 'login-link', on: { click: recoveryModal } }, 'Нет ни телефона, ни кодов?')),
+        h('button', { type: 'button', class: 'login-link', id: 'login-no-codes', on: { click: recoveryModal } }, 'Нет и резервных кодов?')),
       demoHint('В макете подойдет любой код из 8 букв и цифр.'));
     return { node: form };
   }
@@ -557,129 +657,188 @@
     if (!/^[a-z0-9]{8}$/i.test(v)) { S.backupError = 'Код состоит из 8 букв и цифр, например 4f7k-2m9q'; draw(); focusSel('#login-backup-code'); return; }
     busy = true;
     setBusy(e.target.querySelector('[type=submit]'), 'Проверяем код…');
-    later(550, () => enter('Вход по резервному коду. Осталось кодов: 7 из 8', 'key'));
+    later(550, () => enter(roleFor(S.email), 'Вход по резервному коду. Осталось кодов: 7 из 8', 'key'));
   }
+  // Потеря 2FA и резервных кодов (Р5): сбрасывает администратор, затем 2FA настраивается заново
   function recoveryModal() {
     UI.modal({
-      title: 'Нет ни телефона, ни резервных кодов',
-      body: [
-        h('p', { class: 'soft' }, 'AI Capper — личный сервис без службы поддержки, которая могла бы «поверить на слово». Поэтому восстановление без второго фактора намеренно сделано неудобным:'),
+      title: 'Нет ни приложения, ни резервных кодов',
+      body: close => [
+        h('p', { class: 'soft' }, 'Попросите администратора сбросить 2FA. После сброса при входе настроите его заново.'),
         h('ol', { class: 'login-ol' },
-          h('li', null, 'Владелец сервера запускает команду сброса 2FA в консоли бэкенда.'),
-          h('li', null, 'Все сессии завершаются, старые резервные коды перестают работать.'),
-          h('li', null, 'При следующем входе вы заново настраиваете 2FA и получаете новые коды.')),
-        UI.callout('warn', 'alert', 'Сохраните резервные коды при регистрации — например, в менеджере паролей. Это самый простой способ не оказаться в такой ситуации.'),
+          h('li', null, 'Напишите администратору AI Capper так, как вы обычно с ним связываетесь.'),
+          h('li', null, 'Он нажмет «Сбросить 2FA» в кабинете администратора. Ваши сеансы завершатся, старые резервные коды перестанут работать.'),
+          h('li', null, 'Войдите по email и паролю — сразу откроется настройка 2FA: новый QR-код и 8 новых резервных кодов.')),
+        UI.callout('info', 'info', 'Пароль при этом не меняется. Если забыли и его, попросите у администратора еще и код сброса пароля.'),
+        cliLine('Вы администратор? 2FA сбрасывается командой на сервере:', 'reset-2fa'),
+        h('button', { type: 'button', class: 'login-link', style: 'align-self:flex-start', on: { click: () => { close(); S.setupMode = 'reset'; UI.go('login-setup'); } } },
+          icon('eye'), 'Макет: показать вход после сброса 2FA'),
       ],
       actions: close => [button('Понятно', { kind: 'primary', onClick: close })],
     });
   }
 
+  // «Забыли пароль?» (Р5, Р6): без почты — одноразовый код сброса от администратора, 24 часа
   function viewReset() {
-    const f = UI.field({ id: 'login-reset-email', label: 'Email аккаунта', type: 'email', value: S.resetEmail != null ? S.resetEmail : S.email, autocomplete: 'username', inputmode: 'email', error: S.resetError, attrs: { spellcheck: 'false', autocapitalize: 'off', 'data-autofocus': true } });
-    onInput(f, v => { S.resetEmail = v; S.resetError = null; });
+    const R = S.rs, E = S.rsErr;
+    const mailVal = R.email != null ? R.email : S.email;
+    const mail = UI.field({ id: 'login-rs-email', label: 'Email аккаунта', type: 'email', value: mailVal, autocomplete: 'username', inputmode: 'email', error: E.email, attrs: { spellcheck: 'false', autocapitalize: 'off' } });
+    const code = codeField('RST', { id: 'login-rs-code', label: 'Код сброса', value: R.code, error: E.code, hint: 'Формат RST-XXXX-XXXX: буквы и цифры, дефисы появятся сами.', attrs: { 'data-autofocus': true }, onInput: v => { R.code = v; E.code = null; } });
+    const strength = h('div', { class: 'login-strength' }, strengthContent(R.pwd, mailVal));
+    const match = h('div', { class: 'login-match' }, matchContent(R.pwd, R.pwd2));
+    const refresh = () => {
+      const m = R.email != null ? R.email : S.email;
+      UI.clear(strength); UI.append(strength, [strengthContent(R.pwd, m)]);
+      UI.clear(match); UI.append(match, [matchContent(R.pwd, R.pwd2)]);
+    };
+    onInput(mail, v => { R.email = v; E.email = null; refresh(); });
     const form = h('form', { class: 'login-form', novalidate: true, 'aria-labelledby': 'login-title', on: { submit: submitReset } },
-      head('Восстановление доступа', 'Сброс пароля', 'Пришлем ссылку для нового пароля на email аккаунта. Двухфакторная защита после сброса останется включенной.'),
-      f,
-      button('Отправить ссылку', { kind: 'primary', size: 'lg', block: true, type: 'submit', icon: 'send' }),
-      note('lock', 'Мы не сообщаем, зарегистрирован ли такой email, — так посторонний не сможет проверять адреса.'),
+      head('Восстановление доступа', 'Сброс пароля', null),
+      UI.callout('accent', 'key', h('div', null, h('b', null, 'Напишите администратору'), ' — он выдаст одноразовый код сброса, код действует 24 часа. Введите его ниже вместе с новым паролем.')),
+      mail,
+      code,
+      pwField({ id: 'login-rs-pwd', label: 'Новый пароль', value: R.pwd, autocomplete: 'new-password', invalid: !!E.pwd, error: E.pwd, onInput: v => { R.pwd = v; E.pwd = null; refresh(); }, after: strength }),
+      pwField({ id: 'login-rs-pwd2', label: 'Повторите новый пароль', value: R.pwd2, autocomplete: 'new-password', invalid: !!E.pwd2, error: E.pwd2, onInput: v => { R.pwd2 = v; E.pwd2 = null; refresh(); }, after: match }),
+      button('Сменить пароль', { kind: 'primary', size: 'lg', block: true, type: 'submit', icon: 'lock' }),
+      note('lock', 'После смены пароля все ваши сеансы завершатся. Код 2FA при входе по-прежнему понадобится.'),
+      cliLine('Вы администратор? Пароль восстанавливается командой на сервере:', 'reset-code'),
       h('div', { class: 'login-alt' }, h('a', { class: 'login-link', href: '#login' }, icon('chevronLeft'), 'Вернуться ко входу')),
-      demoHint('В макете письмо не отправляется — экран показывает, как будет выглядеть шаг.'));
+      demoHint('В макете подойдет любой код вида ', nb('RST-XXXX-XXXX'), '. Код ', nb(BAD_RESET), ' покажет ошибку «код не подходит».'));
     return { node: form };
   }
   function submitReset(e) {
     e.preventDefault();
     if (busy) return;
-    const v = S.resetEmail != null ? S.resetEmail : S.email;
-    if (!validEmail(v)) { S.resetError = 'Введите email в формате name@example.com'; draw(); focusSel('#login-reset-email'); return; }
-    S.resetEmail = v.trim();
+    const R = S.rs, E = {};
+    const mail = (R.email != null ? R.email : S.email).trim();
+    R.code = maskCode('RST', R.code);
+    if (!validEmail(mail)) E.email = 'Введите email в формате name@example.com';
+    if (!R.code) E.code = 'Введите код сброса от администратора';
+    else if (!codeOk('RST', R.code)) E.code = 'Код выглядит так: RST-XXXX-XXXX — 8 букв и цифр после RST';
+    if (!analyze(R.pwd, mail).ok) E.pwd = R.pwd ? 'Пароль не проходит требования ниже' : 'Придумайте новый пароль';
+    if (!E.pwd && R.pwd2 !== R.pwd) E.pwd2 = 'Пароли не совпадают';
+    S.rsErr = E;
+    if (Object.values(E).some(Boolean)) { draw(); focusSel('.login-form .input.invalid'); return; }
     busy = true;
-    setBusy(e.target.querySelector('[type=submit]'), 'Отправляем…');
-    later(500, () => UI.go('login-sent'));
+    setBusy(e.target.querySelector('[type=submit]'), 'Проверяем код…');
+    later(550, () => {
+      // Ответ одинаковый для неверного кода и чужого email: посторонний не узнает, есть ли аккаунт
+      if (R.code === BAD_RESET) { S.rsErr = { code: 'Код не подходит: он неверный, уже использован, истек (24 часа) или выдан на другой email. Попросите у администратора новый.' }; draw(); focusSel('#login-rs-code'); return; }
+      S.rsDoneEmail = mail;
+      S.rs = { email: null, code: '', pwd: '', pwd2: '' };
+      UI.go('login-done');
+    });
   }
 
-  function viewSent() {
-    const mail = S.resetEmail || S.email || DATA.user.email;
+  function viewDone() {
+    const mail = S.rsDoneEmail || S.email;
     const node = h('div', { class: 'login-form', role: 'region', 'aria-labelledby': 'login-title' },
-      h('div', { class: 'login-bigic', 'aria-hidden': 'true' }, icon('send')),
-      head(null, 'Проверьте почту', null),
-      h('p', { class: 'soft' }, 'Мы отправили ссылку для сброса пароля на ', h('b', { style: 'color:var(--fg);overflow-wrap:anywhere' }, mail), ', она действует 30 минут.'),
+      h('div', { class: 'login-bigic', 'aria-hidden': 'true' }, icon('check')),
+      head(null, 'Пароль изменен', 'Все сеансы завершены, войдите заново.'),
       h('ul', { class: 'login-bul' },
-        h('li', null, 'Письмо от AI Capper могло попасть в «Спам» или «Промоакции».'),
-        h('li', null, 'Ссылка одноразовая. После смены пароля сессии на других устройствах завершатся.'),
-        h('li', null, 'При входе с новым паролем код 2FA все равно понадобится.')),
-      button('Вернуться ко входу', { kind: 'primary', size: 'lg', block: true, href: '#login', attrs: { 'data-autofocus': true } }),
-      h('div', { class: 'login-alt between' },
-        button(S.resent ? 'Отправлено повторно' : 'Отправить еще раз', { kind: 'ghost', size: 'sm', icon: S.resent ? 'check' : 'refresh', disabled: S.resent, onClick: () => { S.resent = true; draw(); UI.toast('Ссылка отправлена еще раз. Следующий повтор — через 60 секунд', 'send'); } }),
-        h('a', { class: 'login-link', href: '#login-reset' }, 'Изменить email')),
-      demoHint('В макете письмо не отправляется.'));
+        h('li', null, 'Аккаунт: ', h('b', { style: 'color:var(--fg);overflow-wrap:anywhere' }, mail), '.'),
+        h('li', null, 'Код сброса больше не действует — он одноразовый.'),
+        h('li', null, 'При входе понадобится код 2FA из приложения или резервный код.')),
+      button('Войти с новым паролем', { kind: 'primary', size: 'lg', block: true, iconRight: 'arrowRight', attrs: { 'data-autofocus': true },
+        onClick: () => { S.email = mail; S.pwd = ''; S.error = false; S.attempts = MAX_ATTEMPTS; UI.go('login'); } }));
     return { node };
   }
 
+  // Пауза после 5 неудач с одного IP (раздел 7 PLAN.md): с других устройств вход работает,
+  // экран одинаковый и для несуществующих email
   function viewLocked() {
     const node = h('div', { class: 'login-form', role: 'region', 'aria-labelledby': 'login-title' },
       h('div', { class: 'login-bigic bad', 'aria-hidden': 'true' }, icon('lock')),
-      head('Защита от подбора пароля', 'Вход временно закрыт', '5 неверных паролей подряд. Повторить вход можно через 15 минут.'),
+      head('Защита от подбора пароля', 'Вход временно закрыт', '5 неудачных попыток с этого IP-адреса. С него войти можно будет через 15 минут, с других устройств — сразу.'),
       UI.kv([
-        ['Аккаунт', h('span', { style: 'overflow-wrap:anywhere' }, S.email || DATA.user.email)],
-        ['Осталось попыток', '0 из ' + MAX_ATTEMPTS],
-        ['Повторный вход', 'через 15 минут'],
-        ['Уведомление', UI.chip('Отправлено в Telegram', 'good', 'telegram')],
+        ['Email', h('span', { style: 'overflow-wrap:anywhere' }, S.email || DATA.personas.admin.email)],
+        ['Пауза для этого IP', '15 минут'],
+        ['Другие устройства', 'вход работает как обычно'],
+        ['Уведомление', 'владельцу аккаунта — на сайте и push'],
       ]),
-      UI.callout('warn', 'alert', 'Если пароль вводили не вы — смените его: ссылка придет на почту, а сессии на других устройствах завершатся.'),
-      button('Сбросить пароль', { kind: 'primary', size: 'lg', block: true, href: '#login-reset', icon: 'key', attrs: { 'data-autofocus': true } }),
-      button('Снять блокировку (макет)', { kind: 'ghost', block: true, icon: 'refresh', onClick: () => { S.attempts = MAX_ATTEMPTS; S.error = false; UI.go('login'); UI.toast('Счетчик попыток сброшен — только в макете', 'refresh'); } }),
-      demoHint('В макете блокировку можно снять кнопкой выше. В продукте она снимается только по таймеру или после сброса пароля.'));
+      UI.callout('warn', 'alert', h('div', null, 'Если пароль подбирали не вы — после входа смените его в «Личном кабинете → Безопасность» и завершите чужие сеансы. Забыли пароль — попросите у администратора код сброса.')),
+      button('Сбросить пароль по коду', { kind: 'primary', size: 'lg', block: true, href: '#login-reset', icon: 'key', attrs: { 'data-autofocus': true } }),
+      button('Снять паузу (макет)', { kind: 'ghost', block: true, icon: 'refresh', onClick: () => { S.attempts = MAX_ATTEMPTS; S.error = false; UI.go('login'); UI.toast('Счетчик попыток сброшен — только в макете', 'refresh'); } }),
+      demoHint('В макете паузу можно снять кнопкой выше. В продукте она заканчивается сама через 15 минут.'));
     return { node };
   }
 
+  // Регистрация только по коду приглашения (Р4) с согласиями и уведомлением о данных (Р15, GDPR)
+  function activeInvite() { const a = (DATA.admin.invites || []).find(i => i.status === 'active'); return a ? a.code : ''; }
   function viewInvite() {
-    const E = S.regErr;
-    const inv = UI.field({ id: 'login-inv-code', label: 'Код приглашения', value: S.reg.invite, placeholder: 'CAP-XXXX-XXXX', autocomplete: 'off', error: E.invite, hint: 'Пример для макета. Настоящий код приходит в письме-приглашении.', attrs: { spellcheck: 'false', autocapitalize: 'characters', 'data-autofocus': true } });
-    const invInput = inv.querySelector('input');
-    invInput.classList.add('mono'); invInput.style.textTransform = 'uppercase';
-    onInput(inv, v => { S.reg.invite = v; E.invite = null; });
-    const mail = UI.field({ id: 'login-inv-email', label: 'Email', type: 'email', value: S.reg.email, placeholder: 'you@example.com', autocomplete: 'email', inputmode: 'email', error: E.email, hint: 'На него придут ссылки для сброса пароля.', attrs: { spellcheck: 'false', autocapitalize: 'off' } });
-    const strength = h('div', { class: 'login-strength' }, strengthContent());
-    const match = h('div', { class: 'login-match' }, matchContent());
-    const refresh = () => { UI.clear(strength); UI.append(strength, [strengthContent()]); UI.clear(match); UI.append(match, [matchContent()]); };
-    onInput(mail, v => { S.reg.email = v; E.email = null; refresh(); });
+    const E = S.regErr, R = S.reg;
+    if (R.invite == null) R.invite = activeInvite();
+    const inv = codeField('CAP', { id: 'login-inv-code', label: 'Код приглашения', value: R.invite, error: E.invite, hint: 'Код выдает администратор, он действует 7 дней.', attrs: { 'data-autofocus': true }, onInput: v => { R.invite = v; E.invite = null; } });
+    const name = UI.field({ id: 'login-inv-name', label: 'Имя', value: R.name, placeholder: 'Как к вам обращаться', autocomplete: 'name', error: E.name, attrs: { autocapitalize: 'words' } });
+    onInput(name, v => { R.name = v; E.name = null; });
+    const mail = UI.field({ id: 'login-inv-email', label: 'Email', type: 'email', value: R.email, placeholder: 'you@example.com', autocomplete: 'email', inputmode: 'email', error: E.email, hint: 'Это ваш логин для входа.', attrs: { spellcheck: 'false', autocapitalize: 'off' } });
+    const strength = h('div', { class: 'login-strength' }, strengthContent(R.pwd, R.email));
+    const match = h('div', { class: 'login-match' }, matchContent(R.pwd, R.pwd2));
+    const refresh = () => { UI.clear(strength); UI.append(strength, [strengthContent(R.pwd, R.email)]); UI.clear(match); UI.append(match, [matchContent(R.pwd, R.pwd2)]); };
+    onInput(mail, v => { R.email = v; E.email = null; refresh(); });
+    const req = () => h('span', { class: 'login-req', 'aria-hidden': 'true' }, '*');
     const form = h('form', { class: 'login-form', novalidate: true, 'aria-labelledby': 'login-title', on: { submit: submitInvite } },
       stepper(['Аккаунт', 'Защита 2FA'], 0),
-      head('Закрытый доступ', 'Регистрация по приглашению', 'AI Capper — личный сервис. Код приглашения одноразовый и действует 7 дней.'),
+      head('Закрытый доступ', 'Регистрация по приглашению', 'Открытой регистрации нет: нужен одноразовый код от администратора.'),
       inv,
+      name,
       mail,
-      pwField({ id: 'login-inv-pwd', label: 'Пароль', value: S.reg.pwd, autocomplete: 'new-password', invalid: !!E.pwd, error: E.pwd, onInput: v => { S.reg.pwd = v; E.pwd = null; refresh(); }, after: strength }),
-      pwField({ id: 'login-inv-pwd2', label: 'Повторите пароль', value: S.reg.pwd2, autocomplete: 'new-password', invalid: !!E.pwd2, error: E.pwd2, onInput: v => { S.reg.pwd2 = v; E.pwd2 = null; refresh(); }, after: match }),
-      check({ id: 'login-inv-agree', checked: S.reg.agree, error: E.agree, title: 'Понимаю: AI Capper дает аналитику и вероятности, а не гарантию выигрыша', hint: 'Решение о ставке и риск остаются за мной.', onChange: v => { S.reg.agree = v; if (v) E.agree = null; } }),
+      pwField({ id: 'login-inv-pwd', label: 'Пароль', value: R.pwd, autocomplete: 'new-password', invalid: !!E.pwd, error: E.pwd, onInput: v => { R.pwd = v; E.pwd = null; refresh(); }, after: strength }),
+      pwField({ id: 'login-inv-pwd2', label: 'Повторите пароль', value: R.pwd2, autocomplete: 'new-password', invalid: !!E.pwd2, error: E.pwd2, onInput: v => { R.pwd2 = v; E.pwd2 = null; refresh(); }, after: match }),
+      h('section', { class: 'login-data', 'aria-labelledby': 'login-data-h' },
+        h('div', { class: 'login-data-h', id: 'login-data-h' }, icon('database'), 'Ваши данные'),
+        h('ul', null,
+          h('li', null, 'Храним имя, email, ставки, банк, стратегию и журнал входов (90 дней) — для вашей аналитики и защиты входа. Матчи для анализа отправляются модели ИИ (', nb('Claude API'), ').'),
+          h('li', null, 'Ставки, банк и стратегию видите только вы. Администратор видит только расход на ИИ и активность: входы и число анализов.'),
+          h('li', null, 'Сервер в Финляндии, действует GDPR. Выгрузить или удалить свои данные — в «Личном кабинете → Данные».'))),
+      h('div', { class: 'login-consents', role: 'group', 'aria-label': 'Согласия' },
+        check({ id: 'login-inv-age', checked: R.age, error: E.age, title: [h('span', null, 'Мне 18 лет (21, если так требует закон моей страны или штата)', req())], onChange: v => { R.age = v; if (v) E.age = null; } }),
+        check({ id: 'login-inv-ai', checked: R.ai, error: E.ai, title: [h('span', null, 'Понимаю, что прогнозы делает ИИ, они могут быть неточными, решение о ставке принимаю сам', req())], onChange: v => { R.ai = v; if (v) E.ai = null; } }),
+        check({ id: 'login-inv-train', checked: R.train, title: 'Разрешаю использовать мои прогнозы в обезличенном виде для обучения общей модели — можно отозвать в личном кабинете',
+          hint: 'Необязательно. Без согласия прогнозы в общую модель не попадут, а при удалении аккаунта удалятся вместе с ним.', onChange: v => { R.train = v; } }),
+        h('div', { class: 'field-hint' }, req(), ' — обязательно для регистрации')),
       button('Создать аккаунт', { kind: 'primary', size: 'lg', block: true, type: 'submit', iconRight: 'arrowRight' }),
       h('div', { class: 'login-alt' }, h('span', { class: 'muted' }, 'Уже есть аккаунт?'), h('a', { class: 'login-link', href: '#login' }, 'Войти')),
-      demoHint('В макете подойдет любой код вида CAP-XXXX-XXXX. Попробуйте пароль «qwerty123456» — увидите проверку утечек.'));
+      demoHint('В макете подойдет любой код вида ', nb('CAP-XXXX-XXXX'), ', код ', nb(BAD_INVITE), ' покажет ошибку. Попробуйте пароль «qwerty123456» — увидите проверку утечек.'));
     return { node: form };
   }
   function submitInvite(e) {
     e.preventDefault();
     if (busy) return;
     const r = S.reg, E = {};
-    if (!/^CAP-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(r.invite.trim())) E.invite = 'Код выглядит так: CAP-XXXX-XXXX — скопируйте его из письма';
+    r.invite = maskCode('CAP', r.invite);
+    if (!r.invite) E.invite = 'Введите код приглашения от администратора';
+    else if (!codeOk('CAP', r.invite)) E.invite = 'Код выглядит так: CAP-XXXX-XXXX — 8 букв и цифр после CAP';
+    if (r.name.trim().length < 2) E.name = 'Напишите имя — так вас увидит администратор';
     if (!validEmail(r.email)) E.email = 'Введите email в формате name@example.com';
-    if (!analyze(r.pwd, r.email).ok) E.pwd = 'Пароль не проходит требования ниже';
+    if (!analyze(r.pwd, r.email).ok) E.pwd = r.pwd ? 'Пароль не проходит требования ниже' : 'Придумайте пароль';
     if (!E.pwd && r.pwd2 !== r.pwd) E.pwd2 = 'Пароли не совпадают';
-    else if (E.pwd && !r.pwd2) E.pwd2 = null;
-    if (!r.agree) E.agree = 'Отметьте, чтобы продолжить';
+    if (!r.age) E.age = 'Без подтверждения возраста регистрация невозможна';
+    if (!r.ai) E.ai = 'Отметьте, чтобы продолжить';
     S.regErr = E;
-    if (Object.values(E).some(Boolean)) { draw(); focusSel('.input.invalid, .login-check.invalid input'); return; }
+    if (Object.values(E).some(Boolean)) { draw(); focusSel('.login-form .input.invalid, .login-check.invalid input'); return; }
     busy = true;
-    setBusy(e.target.querySelector('[type=submit]'), 'Создаем аккаунт…');
-    later(600, () => { S.email = r.email.trim(); UI.go('login-setup'); UI.toast('Аккаунт создан. Осталось включить 2FA', 'check'); });
+    setBusy(e.target.querySelector('[type=submit]'), 'Проверяем код…');
+    later(600, () => {
+      if (r.invite === BAD_INVITE) { S.regErr = { invite: 'Код не подходит: он неверный, уже использован или истек (7 дней). Попросите у администратора новый.' }; draw(); focusSel('#login-inv-code'); return; }
+      // Роль задается приглашением; в демо-данных все приглашения — для участников
+      const known = (DATA.admin.invites || []).find(i => i.code === r.invite);
+      S.email = r.email.trim(); S.setupMode = 'reg'; S.regRole = known ? known.role : 'member';
+      UI.go('login-setup'); UI.toast('Аккаунт создан. Осталось включить 2FA', 'check');
+    });
   }
 
   function viewSetup() {
     const E = S.setupErr;
     const keyCode = h('code', null, SECRET);
     const mobile = UI.isMobile();
+    const afterReset = S.setupMode === 'reset';
     const form = h('form', { class: 'login-form wide', novalidate: true, 'aria-labelledby': 'login-title', on: { submit: submitSetup } },
-      stepper(['Аккаунт', 'Защита 2FA'], 1),
-      head('Обязательный шаг', 'Включите двухфакторную защиту', 'Даже если пароль утечет, без кода с вашего телефона в кабинет не войти.'),
+      afterReset ? stepper(['Пароль', 'Новая 2FA'], 1) : stepper(['Аккаунт', 'Защита 2FA'], 1),
+      afterReset
+        ? head('2FA сброшена администратором', 'Настройте 2FA заново', 'Старое приложение и резервные коды больше не подходят. Добавьте AI Capper в приложение еще раз и сохраните новые коды.')
+        : head('Обязательный шаг', 'Включите двухфакторную защиту', 'Даже если пароль утечет, без кода с вашего телефона в кабинет не войти.'),
+      afterReset && acctRow(),
       h('div', { class: 'login-secs' },
         h('section', { class: 'login-s', 'aria-labelledby': 'login-s1' },
           h('span', { class: 'login-s-n', 'aria-hidden': 'true' }, '1'),
@@ -710,7 +869,9 @@
               button('Скопировать коды', { kind: 'secondary', size: 'sm', icon: 'copy', onClick: e => copyText(BACKUP_CODES.join('\n'), 'Резервные коды скопированы', e.currentTarget.closest('.login-s-body').querySelector('.login-codes')) })),
             check({ id: 'login-setup-saved', checked: S.saved, error: E.saved, title: 'Я сохранил(а) резервные коды в надежном месте', onChange: v => { S.saved = v; if (v) E.saved = null; } })))),
       button('Готово — войти в кабинет', { kind: 'primary', size: 'lg', block: true, type: 'submit', icon: 'check' }),
-      demoHint('В макете QR-код и ключ — заглушки, а в шаге 2 подойдет любой код из 6 цифр.'));
+      demoHint(afterReset
+        ? 'В макете QR-код и ключ — заглушки, в шаге 2 подойдет любой код из 6 цифр. После «Готово» откроется кабинет ' + roleWord(roleFor(S.email), 'gen') + '.'
+        : 'В макете QR-код и ключ — заглушки, в шаге 2 подойдет любой код из 6 цифр. После «Готово» откроется кабинет демо-участницы ' + DATA.personas.member.name + '.'));
     return { node: form, wide: true };
   }
   function submitSetup(e) {
@@ -723,20 +884,19 @@
     if (E.otp || E.saved) { draw(); focusSel(E.otp ? '.login-otp-box:not(.filled)' : '#login-setup-saved'); return; }
     busy = true;
     setBusy(e.target.querySelector('[type=submit]'), 'Включаем 2FA…');
-    later(600, () => enter('Готово: 2FA включена, вы в личном кабинете', 'shield'));
+    later(600, () => {
+      const role = S.setupMode === 'reset' ? roleFor(S.email) : (S.regRole || 'member');
+      enter(role, S.setupMode === 'reset' ? 'Готово: 2FA настроена заново, вы в личном кабинете' : 'Готово: 2FA включена, вы в личном кабинете', 'shield');
+    });
   }
 
-  const VIEWS = { login: viewLogin, '2fa': view2fa, backup: viewBackup, reset: viewReset, sent: viewSent, invite: viewInvite, setup: viewSetup, locked: viewLocked };
+  const VIEWS = { login: viewLogin, '2fa': view2fa, backup: viewBackup, reset: viewReset, done: viewDone, invite: viewInvite, setup: viewSetup, locked: viewLocked };
 
   // ---------- раскладки ----------
   function secList() {
     return h('ul', { class: 'login-sec-list' }, SEC.map(s => h('li', { class: 'login-sec-item' },
       h('span', { class: 'login-sec-ic', 'aria-hidden': 'true' }, icon(s.icon)),
       h('div', { style: 'min-width:0' }, h('div', { class: 'login-sec-t' }, s.t), h('div', { class: 'login-sec-d' }, s.d)))));
-  }
-  function demoBtn(mobile) {
-    return button('Открыть демо без входа', { kind: 'ghost', size: mobile ? null : 'sm', block: mobile, icon: 'eye', attrs: mobile ? { class: 'btn ghost block login-demo-btn' } : null,
-      onClick: () => enter('Демо без входа: все данные вымышлены', 'eye') });
   }
 
   function desktop(v) {
@@ -754,9 +914,9 @@
           secList()),
         h('div', { class: 'login-brandfoot' }, h('span', null, '© 2026 AI Capper · личный сервис'), h('span', null, 'Соединение только по HTTPS (TLS 1.3)'))),
       h('main', { class: 'login-main' },
-        h('div', { class: 'login-topline' }, demoBtn(false), themeBtn()),
+        h('div', { class: 'login-topline' }, themeBtn()),
         h('div', { class: 'login-center' }, v.node),
-        h('footer', { class: 'login-foot' }, h('span', { class: 'demo-pill' }, 'Макет · демо-данные'), h('span', null, 'Аккаунты, коды и письма в макете вымышлены'))));
+        h('footer', { class: 'login-foot' }, h('span', { class: 'demo-pill' }, 'Макет · демо-данные'), h('span', null, 'Аккаунты и коды в макете вымышлены'))));
   }
 
   function mobile(v) {
@@ -766,7 +926,7 @@
         h('div', { class: 'login-m-top' },
           h('div', { class: 'login-brandrow' }, UI.brandMark(), h('div', { style: 'min-width:0' }, h('div', { class: 'brand-name' }, 'AI Capper'), h('div', { class: 'brand-sub' }, 'личный теннисный аналитик'))),
           themeBtn()),
-        h('p', { class: 'login-m-lead' }, 'Разбор матчей и экспресс от Claude. Система учится на ваших ставках: уроки, стратегия, своя ML-модель.')),
+        h('p', { class: 'login-m-lead' }, 'Claude разбирает матчи и предлагает экспресс. Система учится на ваших ставках: уроки, стратегия, своя ML-модель.')),
       h('main', { class: 'login-m-card' }, v.node),
       h('details', { class: 'login-secd' },
         h('summary', null, icon('shield'),
@@ -774,8 +934,7 @@
           UI.chip('6 мер', 'accent'),
           icon('chevronDown', { class: 'chev' })),
         secList()),
-      demoBtn(true),
-      h('footer', { class: 'login-m-foot' }, h('span', { class: 'demo-pill' }, 'Макет · демо-данные'), h('span', null, 'Аккаунты, коды и письма в макете вымышлены')));
+      h('footer', { class: 'login-m-foot' }, h('span', { class: 'demo-pill' }, 'Макет · демо-данные'), h('span', null, 'Аккаунты и коды в макете вымышлены')));
   }
 
   function draw(focusFirst) {
@@ -797,10 +956,10 @@
       const changed = S.lastStep !== null && S.lastStep !== step;
       if (changed) {
         // уходя с шага, сбрасываем его ошибки и одноразовые поля
-        S.emailError = null; S.pwdError = null; S.otpError = null; S.backupError = null; S.resetError = null;
-        S.regErr = {}; S.setupErr = {}; S.otp = ''; S.backup = '';
+        S.emailError = null; S.pwdError = null; S.otpError = null; S.backupError = null;
+        S.rsErr = {}; S.regErr = {}; S.setupErr = {}; S.otp = ''; S.backup = '';
         if (step !== 'login') S.error = false;
-        if (step !== 'sent') S.resent = false;
+        if (step !== 'setup') S.setupMode = 'reg';
         busy = false;
       }
       S.step = step; S.lastStep = step;

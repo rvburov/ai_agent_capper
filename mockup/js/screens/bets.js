@@ -26,6 +26,14 @@
   const signedPP = v => { const n = Math.round(v); return (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n) + ' п.п.'; };
   const dateLabel = d => (d === TODAY ? 'сегодня' : fmt.date(d));
   const payoutOf = b => (b.status === 'open' ? null : b.stake + b.profit);
+  // Валюта программы (Р17): в DATA суммы в рублях демо-данных, а выплату и прибыль считаем в валюте программы
+  // с ее точностью (рубль или цент) — так сумма × кэф, прибыль и банк после расчета сходятся в любой валюте.
+  const curDec = () => (UI.currency.list[UI.currency.code] || { dec: 0 }).dec;
+  const roundCur = x => { const k = 10 ** curDec(); return Math.round(x * k) / k; };
+  const inCur = rub => fmt.moneyNum(rub);                                 // рубли демо-данных → сумма как на экране
+  const payCur = (stake, k) => roundCur(inCur(stake) * k);                 // выплата в валюте программы
+  const payRub = (stake, k) => fmt.fromMoney(payCur(stake, k));           // она же в рублях демо-данных
+  const nbspCur = t => t.split(' ' + fmt.cur()).join('\u00a0' + fmt.cur()); // символ валюты не отрывается от числа
   const legClv = l => (l.closing ? (l.odds / l.closing - 1) * 100 : null);
   const surfLabel = k => (D.surfaces[k] ? D.surfaces[k].label : k);
 
@@ -491,7 +499,7 @@
         cell('ROI', pctOrDash(s.roi), 'прибыль ÷ оборот', toneCls(s.roi)),
         cell('Средний CLV', pctOrDash(s.clv), s.clvN ? ['лучше закрытия: ', h('span', { class: 'bets-nw' }, s.clvPos + ' из ' + s.clvN)] : 'нет закрывающих кэфов', toneCls(s.clv))),
       h('div', { class: 'bets-sum-note' }, icon('info'),
-        h('span', null, 'CLV — на сколько ваш кэф выше закрывающего, то есть кэфа перед началом матча. Если CLV стабильно в плюсе, модель находит перевес, даже когда отдельные ставки проигрывают.')));
+        h('span', null, 'CLV — на сколько ваш кэф выше закрывающего, то есть кэфа Pinnacle перед началом матча: Pinnacle — эталон рынка. Если CLV стабильно в плюсе, модель находит перевес, даже когда отдельные ставки проигрывают.')));
   }
 
   // ---------- баннер после расчета ----------
@@ -523,7 +531,7 @@
         h('div', { class: 'bets-sec-head' }, h('h3', null, 'В игре')),
         card({ body: UI.empty(h('span', null, 'Открытых ставок нет. ', h('a', { href: '#new' }, 'Запустите анализ матчей дня'), ' — ИИ предложит экспресс.')) }));
     }
-    const stake = sum(open, b => b.stake), pay = sum(open, b => Math.round(b.stake * b.total));
+    const stake = fmt.fromMoney(sum(open, b => inCur(b.stake))), pay = fmt.fromMoney(sum(open, b => payCur(b.stake, b.total)));
     return h('section', { class: 'stack', 'aria-label': 'Ставки в игре' },
       h('div', { class: 'bets-sec-head' }, h('h3', null, 'В игре'), chip(open.length + ' ' + betsWord(open.length), 'info', 'clock'),
         h('span', { class: 'small muted' }, 'на кону ' + fmt.money(stake) + ' · если все зайдет, выплата ' + fmt.money(pay))),
@@ -531,7 +539,7 @@
   }
 
   function openCard(b) {
-    const pay = Math.round(b.stake * b.total);
+    const pay = payRub(b.stake, b.total);
     return h('article', { class: ['card bets-open', justSaved === b.id && 'is-new'], 'aria-label': 'Открытая ставка №' + b.id, 'data-open-bet': String(b.id) },
       h('div', { class: 'bets-open-head' },
         h('div', { style: 'min-width:0' }, h('div', { class: 'bets-open-title' }, betKindLong(b)),
@@ -799,7 +807,7 @@
           }),
           b.status === 'void' && UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счет.'),
           b.status === 'open'
-            ? UI.kv([['Букмекер', b.bookmaker], ['Итоговый кэф', h('span', { class: 'odds' }, fmt.odds(b.total))], ['Выплата при выигрыше', fmt.money(Math.round(b.stake * b.total))]])
+            ? UI.kv([['Букмекер', b.bookmaker], ['Итоговый кэф', h('span', { class: 'odds' }, fmt.odds(b.total))], ['Выплата при выигрыше', fmt.money(payRub(b.stake, b.total))]])
             : betKv(b),
         ];
       },
@@ -855,6 +863,7 @@
   }
 
   // ---------- внесение результата ----------
+  const CLOSE_HINT = 'кэф Pinnacle перед началом матча'; // эталон рынка для всех (Р17)
   const RES_OPTS = [{ id: 'win', label: 'Выиграл', icon: 'check' }, { id: 'loss', label: 'Проиграл', icon: 'x' }, { id: 'void', label: 'Возврат', icon: 'refresh' }];
   const RES_WORD = { win: 'выиграла', loss: 'проиграла', void: 'возврат' };
 
@@ -865,13 +874,15 @@
     const formId = 'bets-settle-' + b.id;
     let saveBtn = null;
 
+    // считаем в валюте программы, в DATA уходит в рублях демо-данных
+    const stakeCur = inCur(b.stake);
     const outcome = () => {
-      if (st.some(s => s.result === 'loss')) return { status: 'loss', payout: 0, profit: -b.stake, eff: null };
+      if (st.some(s => s.result === 'loss')) return { status: 'loss', payout: 0, profit: fmt.fromMoney(-stakeCur), eff: null };
       if (st.some(s => !s.result)) return null;
       if (st.every(s => s.result === 'void')) return { status: 'void', payout: b.stake, profit: 0, eff: null };
       const eff = r2(b.legs.reduce((a, l, i) => a * (st[i].result === 'win' ? l.odds : 1), 1));
-      const payout = Math.round(b.stake * eff);
-      return { status: 'win', payout, profit: payout - b.stake, eff };
+      const pc = payCur(b.stake, eff);
+      return { status: 'win', payout: fmt.fromMoney(pc), profit: fmt.fromMoney(roundCur(pc - stakeCur)), eff };
     };
     const drawSum = () => {
       UI.clear(sumHost);
@@ -930,7 +941,7 @@
         if (!s.result || s.auto) setRes(r, true); else checkConflict();
       });
 
-      const closeF = UI.field({ id: formId + '-close-' + i, label: 'Закрывающий кэф', placeholder: fmt.odds(l.odds), inputmode: 'decimal', hint: 'кэф перед началом матча', attrs: { autocomplete: 'off', maxlength: '5' } });
+      const closeF = UI.field({ id: formId + '-close-' + i, label: 'Закрывающий кэф', placeholder: fmt.odds(l.odds), inputmode: 'decimal', hint: CLOSE_HINT, attrs: { autocomplete: 'off', maxlength: '5' } });
       const closeIn = closeF.querySelector('input'), closeHint = closeF.querySelector('.field-hint');
       closeIn.classList.add('mono');
       closeIn.addEventListener('input', () => {
@@ -941,8 +952,8 @@
         closeIn.classList.toggle('invalid', !!raw && !v && raw.length >= 3);
         if (raw && !v && raw.length >= 3) { closeHint.className = 'field-error'; closeHint.textContent = 'Кэф от 1.01, например ' + fmt.odds(l.odds); return; }
         closeHint.className = 'field-hint';
-        if (v) { const clv = (l.odds / v - 1) * 100; closeHint.append('перед стартом · ', h('b', { class: [toneCls(clv), 'bets-nw'] }, 'CLV ' + fmt.signedPct(clv))); }
-        else closeHint.textContent = 'кэф перед началом матча';
+        if (v) { const clv = (l.odds / v - 1) * 100; closeHint.append('Pinnacle перед стартом · ', h('b', { class: [toneCls(clv), 'bets-nw'] }, 'CLV ' + fmt.signedPct(clv))); }
+        else closeHint.textContent = CLOSE_HINT;
       });
 
       return h('fieldset', { class: 'bets-sleg', style: 'margin:0' },
@@ -962,7 +973,7 @@
       applySettle(b, st, o);
       close();
       UI.rerender();
-      UI.toast(('Ставка №' + b.id + ' рассчитана: ' + (o.status === 'void' ? 'возврат' : fmt.signedMoney(o.profit)) + ', банк ' + fmt.money(S.bank)).replace(/ ₽/g, '\u00a0₽'), o.status === 'loss' ? 'x' : 'check');
+      UI.toast(nbspCur('Ставка №' + b.id + ' рассчитана: ' + (o.status === 'void' ? 'возврат' : fmt.signedMoney(o.profit)) + ', банк ' + fmt.money(S.bank)), o.status === 'loss' ? 'x' : 'check');
     };
 
     UI.modal({

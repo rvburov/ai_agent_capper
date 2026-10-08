@@ -600,7 +600,7 @@
           h('fieldset', { class: 'players-fieldset' }, h('legend', { class: 'field-label' }, 'Когда собрать профиль'),
             h('label', { class: 'check' }, h('input', { type: 'radio', name: 'players-when', value: 'now', checked: true }), h('span', null, h('b', null, 'Сейчас'), ' — ~', fmt.usd(COST.collect), ', 1–2 минуты')),
             h('label', { class: 'check' }, h('input', { type: 'radio', name: 'players-when', value: 'batch' }), h('span', null, h('b', null, 'Ночным пакетом'), ' — ~', usd(COST.collect / 2), ', готово к 05:00 (Batch API, −50%)'))),
-          UI.callout('', 'database', 'Соберем то же, что и в Telegram-боте: личные данные, игровой профиль, физику и технику, психологию, текущее состояние и последние матчи. Статистика берется из архива ATP, новости и оценки — веб-поиском Claude с источниками.'));
+          UI.callout('', 'database', 'Соберем то же, что было в досье старого бота: личные данные, игровой профиль, физику и технику, психологию, текущее состояние и последние матчи. Статистика берется из архива ATP, новости и оценки — веб-поиском Claude с источниками.'));
         return form;
       },
       actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Добавить', { kind: 'primary', type: 'submit', icon: 'plus', attrs: { form: 'players-add-form' } })],
@@ -1038,7 +1038,7 @@
       h('span', { class: 'players-rate-l', title: k }, k), UI.meter(v, 10, v <= 5 ? 'warn' : null), h('span', { class: 'players-rate-v' }, v))));
 
     const note = UI.callout('info', 'info', h('b', null, 'Качественные оценки собирает Claude из источников, с датой. '),
-      'Это разборы матчей, интервью и статистика, а не измерения. В модели у них небольшой вес: вероятность в первую очередь определяют Эло, статистика и рынок. Шкала 1–10, как в шаблонах Telegram-бота: 6–7 — средний профессиональный уровень, 8–9 — элита, 10 — лучший в мире.');
+      'Это разборы матчей, интервью и статистика, а не измерения. В модели у них небольшой вес: вероятность в первую очередь определяют Эло, статистика и рынок. Шкала 1–10, как в шаблонах старого бота: 6–7 — средний профессиональный уровень, 8–9 — элита, 10 — лучший в мире.');
 
     const profileCard = card({ class: 'col-4 players-fill', title: 'Игровой профиль', body: [UI.kv([
       ['Стиль игры', ex.kind || '—'], ['Позиция на корте', ex.pos || '—'], ['Тип подачи', ex.serveType || '—'],
@@ -1121,7 +1121,7 @@
       { block: 'Новости и текущее состояние', at: upd, how: now ? 'Обновить сейчас · Sonnet 5.5' : 'Ночной пакет · Sonnet 5.5, Batch', src: srcNode('globe', 'веб-поиск, 3 запроса'), cost: now ? COST.now : COST.batch },
       { block: 'Игровой профиль, физика, техника', at: now ? NOW : I.staticAt, how: 'Полный сбор профиля · Sonnet 5.5', src: srcNode('brain', 'оценка Claude, 9 источников'), cost: now ? null : COST.collect },
       { block: 'Психология', at: now ? NOW : I.staticAt, how: 'Полный сбор профиля', src: srcNode('brain', 'оценка Claude, 6 источников'), cost: null },
-      { block: 'Личные данные', at: '2026-07-02T12:30', how: 'Перенос из Telegram-бота (JSON)', src: srcNode('upload', 'импорт'), cost: 0 },
+      { block: 'Личные данные', at: '2026-07-02T12:30', how: 'Перенос из старого бота (JSON)', src: srcNode('upload', 'импорт'), cost: 0 },
     ];
     const costTxt = c => c === null ? h('span', { class: 'muted' }, 'в сборе выше') : c === 0 ? h('span', { class: 'muted' }, 'без ИИ') : usd(c);
     let tbl;
@@ -1138,7 +1138,7 @@
         { label: 'Стоимость', align: 'r', render: r => h('span', { class: 'num' }, costTxt(r.cost)) },
       ] });
     }
-    const blocks = card({ class: 'col-8', title: 'Когда и откуда обновлялся каждый блок', subtitle: 'Структура досье — как в шаблонах Telegram-бота', body: h('div', { class: 'players-flush' }, tbl) });
+    const blocks = card({ class: 'col-8', title: 'Когда и откуда обновлялся каждый блок', subtitle: 'Структура досье — как в шаблонах старого бота', body: h('div', { class: 'players-flush' }, tbl) });
 
     // Запуски ИИ за 30 дней: доли пакетов из DATA.ai.runs + свои
     const refreshRuns = D.ai.runs.filter(r => r.type === 'refresh');

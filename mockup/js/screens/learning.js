@@ -75,7 +75,7 @@
   const shrunk = (l, info) => Math.round(info.raw * lessonN(l, info) / (lessonN(l, info) + SHRINK_K));
 
   const VERSION_INFO = {
-    v1: { tokens: 52, changes: ['Инструкции перенесены из Telegram-бота (папка Tennis-Analytics) без изменений', 'Порог вероятности 65%, кэфы 1.13–1.80, до 3 событий в экспрессе'] },
+    v1: { tokens: 52, changes: ['Инструкции перенесены из старого бота (папка Tennis-Analytics) без изменений', 'Порог вероятности 65%, кэфы 1.13–1.80, до 3 событий в экспрессе'] },
     v2: { tokens: 54, changes: ['В досье игрока добавлен Эло по покрытиям', 'Вероятность своей ML-модели передается Claude как второе мнение'] },
     v3: { tokens: 49, changes: ['В инструкции добавлены уроки L-014 и L-017 — поправки с усадкой к нулю', 'В свою ML-модель добавлены признаки из тех же уроков: «левша против правши» и «сеты за 7 дней»'] },
     v4: { tokens: 34, goal: 'save', changes: ['Инструкции на английском, ответ — по-русски', 'Сжатое досье: 18 ключевых цифр на игрока вместо полного профиля', 'Уроки и правила те же, что в v3'] },
@@ -420,7 +420,7 @@
 
   const STEPS = [
     { ic: 'ticket', t: 'Ставка', d: 'Экспресс с вероятностями Claude и своей ML-модели', who: 'вы + ИИ', whoIc: 'user' },
-    { ic: 'trophy', t: 'Результат и закрывающий кэф', d: 'Счет по сетам и кэф перед стартом — из него считается CLV', who: 'вы', whoIc: 'user' },
+    { ic: 'trophy', t: 'Результат и закрывающий кэф', d: 'Счет по сетам и кэф Pinnacle перед стартом — из него считается CLV', who: 'вы', whoIc: 'user' },
     { ic: 'search', t: 'Разбор ошибки', d: 'Claude сверяет прогноз с исходом: невезение или систематическая ошибка', who: 'Sonnet 5.5 · ≈ $0,02', whoIc: 'spark' },
     { ic: 'book', t: 'Гипотеза-урок', d: 'Короткое правило и где оно применимо', who: 'Claude', whoIc: 'spark' },
     { ic: 'flask', t: 'Проверка на истории', d: 'С ' + NEED + ' своих случаев: прогноз с уроком и без, 95% ДИ на истории и на поздних матчах', who: 'код + Batch API', whoIc: 'bolt' },
@@ -555,7 +555,7 @@
         UI.meter(l.evidence, NEED),
         h('span', { class: 'xsmall muted' }, 'Пока не влияет на прогнозы')));
       if (st.notify[l.id]) side.appendChild(chip('Сообщим при ' + NEED + ' случаях', 'info', 'bell'));
-      else side.appendChild(button('Сообщить, когда наберется', { kind: 'secondary', size: 'sm', icon: 'bell', onClick: () => { st.notify[l.id] = true; item.replaceWith(lessonItem(l)); UI.toast('Напомним, когда у ' + l.id + ' будет ' + NEED + ' случаев и пройдет проверка', 'bell'); } }));
+      else side.appendChild(button('Сообщить, когда наберется', { kind: 'secondary', size: 'sm', icon: 'bell', onClick: () => { st.notify[l.id] = true; item.replaceWith(lessonItem(l)); UI.toast('Сообщим на сайте и push-уведомлением, когда у ' + l.id + ' будет ' + NEED + ' случаев и пройдет проверка', 'bell'); } }));
     } else {
       const n = lessonN(l, info);
       const chk = info.check && info.check.length > 1 ? ': ' + info.check[0][0].toLowerCase() + ' ' + info.check[0][1] + ', без урока ' + info.check[1][1] : '';
@@ -827,8 +827,8 @@
         UI.meter(ml.progress, 100)));
     } else if (ml.prev != null) {
       body.push(UI.callout('good', 'check', h('div', { class: 'stack', style: 'gap:8px' },
-        h('span', null, 'Переобучена сегодня в ' + hhmm(ml.at) + ': Brier на валидации ' + fmt.dec(ml.brier, 3) + ' (было ' + fmt.dec(ml.prev, 3) + '). Это плановое переобучение той же модели на новых матчах — оно включается само, если на валидации не хуже с допуском (Brier до +0,005). Новые признаки и c — только с вашего подтверждения.'),
-        button('Вернуть прежнюю модель', { kind: 'secondary', size: 'sm', icon: 'history', onClick: () => {
+        h('span', null, 'Переобучена сегодня в ' + hhmm(ml.at) + ': Brier на валидации ' + fmt.dec(ml.brier, 3) + ' (было ' + fmt.dec(ml.prev, 3) + '). Это плановое переобучение той же модели на новых матчах — оно включается само, если на валидации не хуже с допуском (Brier до +0,005). Новые признаки и c — только ' + (UI.auth.isAdmin ? 'с вашего подтверждения.' : 'с подтверждения администратора.')),
+        UI.auth.isAdmin && button('Вернуть прежнюю модель', { kind: 'secondary', size: 'sm', icon: 'history', onClick: () => {
           ml.brier = ml.prev; ml.prev = null; ml.at = ml.prevAt || ml.at;
           drawMlHead(); drawTiles();
           UI.toast('Вернули модель от ' + fmt.date(ml.at) + ', ' + hhmm(ml.at) + ' · Brier ' + fmt.dec(ml.brier, 3), 'history');
@@ -839,8 +839,11 @@
       class: 'learning-card',
       eyebrow: 'Своя ML-модель',
       title: 'Эло + градиентный бустинг',
-      subtitle: 'Считается на сервере без ИИ — за миллисекунды и бесплатно',
-      actions: [status, button(ml.training ? 'Обучается…' : 'Переобучить', { kind: 'secondary', size: 'sm', icon: 'refresh', disabled: ml.training, onClick: retrain })],
+      subtitle: 'Одна на всех участников. Считается на сервере без ИИ — за миллисекунды и бесплатно',
+      // модель общая (ml_models без user_id): переобучает и откатывает только администратор
+      actions: [status, UI.auth.isAdmin
+        ? button(ml.training ? 'Обучается…' : 'Переобучить', { kind: 'secondary', size: 'sm', icon: 'refresh', disabled: ml.training, onClick: retrain })
+        : chip('Ведет администратор', 'outline', 'admin')],
       body,
     });
   }
@@ -990,16 +993,17 @@
         title: 'Prompt-оптимизация по eval-набору',
         goal: 'Автоматически переписывать инструкции Claude и оставлять варианты, которые снижают лог-лосс.',
         metric: 'Лог-лосс: smoke на ' + SMOKE + ' событиях отсеивает явно плохие варианты, лучший проходит полный прогон на ' + HOLDOUT + '. Плюс токены на анализ.',
-        budget: fmt.usd(POPT_SPENT) + ' из ' + fmt.usd(EXP_BUDGET, 0) + ' в месяц · отдельный ключ, Batch API ночью',
+        budget: fmt.usd(POPT_SPENT) + ' из ' + fmt.usd(EXP_BUDGET, 0) + ' в месяц · отдельный ключ администратора, Batch API ночью',
         extra: h('div', { class: 'stack', style: 'gap:6px' },
           h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Итерация ' + POPT.length + ' из 12'), h('span', { class: 'num', style: 'font-weight:600' }, done + ' посчитано')),
           UI.meter(POPT.length, 12),
           h('p', { class: 'learning-note' }, icon('spark'), h('span', null, 'Лучший вариант (итерация 4) стал кандидатом v4 — см. «Версии стратегии».'))),
         actions: [
-          button(running ? 'Пауза' : 'Продолжить', { kind: 'secondary', size: 'sm', icon: running ? 'pause' : 'play', onClick: () => {
+          // эксперимент идет на отдельном ключе и бюджете администратора — управляет им только он
+          UI.auth.isAdmin ? button(running ? 'Пауза' : 'Продолжить', { kind: 'secondary', size: 'sm', icon: running ? 'pause' : 'play', onClick: () => {
             st.popt = running ? 'paused' : 'running'; draw(); drawTiles();
             UI.toast(running ? 'На паузе: итерация 7 досчитается, новые не начнутся' : 'Продолжаем: следующая итерация ночью через Batch API', running ? 'pause' : 'play');
-          } }),
+          } }) : chip('Ведет администратор', 'outline', 'admin'),
           button('Журнал итераций', { kind: 'ghost', size: 'sm', icon: 'list', onClick: poptModal }),
         ],
       }));

@@ -410,15 +410,19 @@
       s.bets.forEach(b => { byDate[b.date] = (byDate[b.date] || 0) + b.profit; });
       let acc = 0; values = dates.map(d => (acc += byDate[d] || 0)); base = 0;
     }
-    const yf = isBank ? (v => fmt.int(v)) : (v => (v > 0 ? '+' : '') + fmt.int(v));
+    // График — в валюте программы (Р17): значения пересчитываем, шкала идет по круглым суммам в этой валюте.
+    // Подписи без символа валюты, он есть в подзаголовке; копейки и центы — только там, где они есть.
+    const dec = (UI.currency.list[UI.currency.code] || { dec: 0 }).dec;
+    const num = v => (dec && Math.round(v * 100) % 100 !== 0 ? fmt.dec(v, 2) : fmt.int(v));
+    const yf = isBank ? num : (v => (v > 0 ? '+' : '') + num(v));
     let peak = base, maxDD = 0, hi = -Infinity, lo = Infinity;
     values.forEach(v => { peak = Math.max(peak, v); if (isBank) maxDD = Math.min(maxDD, (v - peak) / peak * 100); hi = Math.max(hi, v); lo = Math.min(lo, v); });
     const c = s.sum;
     const chart = declutterX(UI.lineChart({
       labels: dates,
-      series: [{ name: isBank ? 'Банк' : 'Результат', color: 'var(--s1)', values }],
+      series: [{ name: isBank ? 'Банк' : 'Результат', color: 'var(--s1)', values: values.map(fmt.moneyNum) }],
       area: true, areaBase: isBank ? null : 0, endLabel: true, height: mobile ? 210 : 270,
-      refLines: [{ value: base }], yFormat: yf, xFormat: d => fmt.date(d), tipTitle: d => fmt.dateFull(d),
+      refLines: [{ value: fmt.moneyNum(base) }], yFormat: yf, xFormat: d => fmt.date(d), tipTitle: d => fmt.dateFull(d),
       ariaLabel: isBank ? 'Банк по дням ' + s.p.ctx + ': с ' + fmt.money(base) + ' до ' + fmt.money(values[values.length - 1]) : 'Результат отобранных ставок нарастающим итогом: ' + fmt.signedMoney(values[values.length - 1]),
     }));
 
@@ -456,7 +460,7 @@
     return card({
       class: 'analytics-card',
       title: isBank ? 'Банк по дням' : 'Результат отобранных ставок',
-      subtitle: isBank ? s.p.ctx[0].toUpperCase() + s.p.ctx.slice(1) + ', ₽ на конец дня' : 'Нарастающим итогом, ₽ · банк целиком виден без фильтров рынка и покрытия',
+      subtitle: isBank ? s.p.ctx[0].toUpperCase() + s.p.ctx.slice(1) + ', ' + fmt.cur() + ' на конец дня' : 'Нарастающим итогом, ' + fmt.cur() + ' · банк целиком виден без фильтров рынка и покрытия',
       actions: [chip(fmt.signedMoney(c.profit), c.profit > 0 ? 'good' : c.profit < 0 ? 'bad' : 'outline', c.profit > 0 ? 'arrowUp' : c.profit < 0 ? 'arrowDown' : null)],
       body: [
         UI.legend(isBank
@@ -545,13 +549,22 @@
         h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'Brier — точность вероятностей'),
           h('p', { class: 'small soft' }, 'Для каждого события берется (прогноз − исход)², где исход — 1 или 0, и усредняется. Прогноз 80% на сыгравшее событие дает 0,04, на не сыгравшее — 0,64. 0 — идеально, 0,25 — как всегда ставить 50%. Ниже — лучше.')),
         h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'Почему сравниваем с рынком'),
-          h('p', { class: 'small soft' }, 'Закрывающий кэф — самая точная публичная оценка. Если Brier модели ниже рыночного, модель видит что-то, чего не учла линия. Разница в тысячные доли на сотне событий — пока шум.')),
+          h('p', { class: 'small soft' }, 'Закрывающий кэф — самая точная публичная оценка. Эталон рынка у нас — кэф Pinnacle: у него самая низкая маржа. Если Brier модели ниже рыночного, модель видит что-то, чего не учла линия. Разница в тысячные доли на сотне событий — пока шум.')),
         h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'CLV — качество цены'),
-          h('p', { class: 'small soft' }, 'CLV = ваш кэф / закрывающий − 1. Взяли 1.62, к началу матча стало 1.55 — CLV +4,5%. Результат одной ставки — случайность, а стабильно положительный CLV — устойчивый признак преимущества. Его видно уже через 50–100 ставок, ROI — через сотни.')),
+          h('p', { class: 'small soft' }, 'CLV = ваш кэф / закрывающий кэф Pinnacle − 1. Взяли 1.62, к началу матча у Pinnacle стало 1.55 — CLV +4,5%. Результат одной ставки — случайность, а стабильно положительный CLV — устойчивый признак преимущества. Его видно уже через 50–100 ставок, ROI — через сотни.')),
         UI.callout('info', 'flask', 'Эти же метрики используются при обучении. Новую версию стратегии включают, только если ее лог-лосс на отложенной выборке лучше текущего: 95% интервал разницы целиком ниже нуля. Версия ради экономии токенов проходит правило «не хуже с допуском». Brier и CLV — дополнительные проверки, а ROI на паре сотен событий — шум, по нему версии не выбирают.'),
       ],
       actions: close => [button('Открыть «Обучение модели»', { kind: 'secondary', iconRight: 'chevronRight', href: '#learning', attrs: { class: 'btn secondary', on: { click: close } } }), button('Понятно', { kind: 'primary', onClick: close })],
     });
+  }
+
+  // Лимит ИИ по решениям Р7, Р9, Р13: участник на ключе администратора видит свой лимит, администратор — общий
+  // лимит своего ключа; на своем ключе лимитов программы нет. Расходы на Claude всегда в долларах.
+  function aiLimitText() {
+    const me = D.me, m = D.ai.month;
+    if (me && me.aiMode === 'own') return 'Разбор оплачивается с вашего ключа Claude (sk-ant-…' + (me.ownKey ? me.ownKey.last4 : '••••') + '), лимиты программы на него не действуют.';
+    if (me && me.limit) return 'Ваш лимит ИИ на ' + m + ': израсходовано ' + fmt.usd(me.spent) + ' из ' + fmt.usd(me.limit.monthly, 0) + ', осталось ' + fmt.usd(Math.max(0, me.limit.monthly - me.spent)) + '. Ключ администратора.';
+    return 'Ключ администратора на ' + m + ': израсходовано ' + fmt.usd(D.admin.budget.spent) + ' из ' + fmt.usd(D.admin.budget.monthly, 0) + ' — общий лимит на всех участников на этом ключе.';
   }
 
   function deepModal(s) {
@@ -569,7 +582,7 @@
           ['Стоимость', '≈ ' + fmt.usd(cost)],
           ['Время', '≈ 30 с'],
         ]),
-        UI.callout('accent', 'coins', 'Бюджет на ' + D.ai.month + ': потрачено ' + fmt.usd(D.ai.spent) + ' из ' + fmt.usd(D.ai.budget, 0) + '.'),
+        UI.callout('accent', 'coins', aiLimitText()),
       ],
       actions: close => [
         button('Отмена', { kind: 'ghost', onClick: close }),
@@ -809,7 +822,7 @@
             { key: 'share', label: 'Доля', align: 'r', render: it => fmt.pct(it.value / clvs.length * 100, 0) },
           ], rows: items,
         }))),
-        howto(h('b', null, 'Как читать: '), 'CLV — на сколько ваш кэф выше закрывающего (последнего перед матчем). Столбцы правее нуля — вы взяли цену лучше рыночного итога. Стабильно положительный CLV — главный признак, что преимущество не случайно; исход одной ставки — нет.'),
+        howto(h('b', null, 'Как читать: '), 'CLV — на сколько ваш кэф выше закрывающего кэфа Pinnacle (последнего перед матчем). Столбцы правее нуля — вы взяли цену лучше рыночного итога. Стабильно положительный CLV — главный признак, что преимущество не случайно; исход одной ставки — нет.'),
       ],
     });
   }
