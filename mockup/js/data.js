@@ -305,15 +305,15 @@
   const ownSpent = u => round(u.ownSpent || 0, 2);
   const keyUsers = () => people().filter(u => u.aiMode === 'admin' || keySpent(u) > 0);
   const limitOf = u => (u.aiMode === 'admin' && u.role !== 'admin') ? (u.limit || Object.assign({}, admin.defaults)) : null;
+  // Прогноз расхода человека на месяц: на 100% личного лимита анализы останавливаются, на паузе расход не растет
+  const forecastOf = u => {
+    const v = u.aiMode === 'own' ? ownSpent(u) : keySpent(u), L = limitOf(u);
+    return round(L && L.paused ? v : L ? Math.min(L.monthly, pace(v)) : pace(v), 2);
+  };
   function budget() {
     const monthly = admin.budget.monthly, shared = sharedSpent;
     const spent = round(keyUsers().reduce((a, u) => a + keySpent(u), 0) + shared, 2);
-    // На 100% личного лимита анализы участника останавливаются, поэтому прогноз не выше лимита
-    const forecast = round(keyUsers().reduce((a, u) => {
-      const v = keySpent(u), L = limitOf(u);
-      if (u.aiMode !== 'admin' || u.status !== 'active' || (L && L.paused)) return a + v;
-      return a + (L ? Math.min(L.monthly, pace(v)) : pace(v));
-    }, 0) + pace(shared), 2);
+    const forecast = round(keyUsers().reduce((a, u) => a + (u.aiMode !== 'admin' || u.status !== 'active' ? keySpent(u) : forecastOf(u)), 0) + pace(shared), 2);
     return { monthly, shared, spent, forecast, left: round(Math.max(0, monthly - spent), 2), daysLeft: MONTH_DAYS - DAY, share: spent / monthly, fShare: forecast / monthly, alertAt: admin.budget.alertAt };
   }
   Object.defineProperty(admin.budget, 'spent', { enumerable: true, get: () => budget().spent });
@@ -385,7 +385,7 @@
     },
     allLegs, calibration, brierRolling, roiBySurface, roiByMarket, roiByOdds, roiByTotal,
     matchesToday,
-    ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, keySpent, ownSpent, keyUsers, limitOf, budget, access, recordRun, recordSpend, decisions, budgetHint: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes },
+    ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, keySpent, ownSpent, keyUsers, limitOf, budget, forecastOf, access, recordRun, recordSpend, decisions, budgetHint: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes },
     lessons, strategyVersions,
     strategy: { minProb: 65, oddsMin: 1.13, oddsMax: 1.80, maxLegs: 3, totalMax: 3.24, stakeTable: [{ range: '1.28–1.70', pct: '2,5–3%' }, { range: '1.71–2.20', pct: '2–2,5%' }, { range: '2.21–3.24', pct: '1,5–2%' }] },
     playerName: id => (P[id] ? P[id].short : id),
