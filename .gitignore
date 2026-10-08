@@ -33,6 +33,11 @@ legacy/telegram-bot/Tennis-Analytics/Ставки/История-ставок.js
 # Данные учебного трека и бэкапы
 lab/datasets/*.jsonl
 deploy/backup/dumps/
+deploy/backup/dumps-local/
+
+# Локальный запуск (deploy/local.sh): свои пароли и дополнения к compose
+deploy/.env.local
+deploy/docker-compose.local.yml
 
 # Системные файлы и редакторы
 .DS_Store

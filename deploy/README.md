@@ -224,7 +224,17 @@ bash deploy.sh
 
 ## Проверка на своей машине
 
-Весь стек поднимается и без домена: Caddy выпускает для `localhost` свой сертификат.
+Пока сервера нет, это основной способ запуска (PLAN.md, Р19). Проще всего — скриптом, он сам создает пароли и ключи в `deploy/.env.local`, собирает образы, применяет миграции и ждет готовности:
+
+```bash
+bash deploy/local.sh up                            # затем https://localhost
+bash deploy/local.sh admin you@example.com "Имя"   # первый администратор
+bash deploy/local.sh import you@example.com История-ставок.json Игроки --dry-run
+bash deploy/local.sh backup                        # бэкап и проверка восстановления
+bash deploy/local.sh down                          # остановить, данные сохраняются
+```
+
+Свои дополнения к compose (например, другие порты, если 80 или 443 заняты) — в `deploy/docker-compose.local.yml`: скрипт подключает его сам. Вручную, без скрипта, весь стек тоже поднимается без домена: Caddy выпускает для `localhost` свой сертификат.
 
 ```bash
 cp deploy/.env.example deploy/.env    # CAPPER_DOMAIN=localhost, пароли и ключи — см. комментарии;
