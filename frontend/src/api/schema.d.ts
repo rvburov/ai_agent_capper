@@ -783,7 +783,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message";
+            action: "invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit";
             /** Target User Id */
             target_user_id: number | null;
             /** Target Name */
@@ -2553,7 +2553,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 before_id?: number | null;
-                action?: ("invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message")[] | null;
+                action?: ("invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit")[] | null;
             };
             header?: never;
             path?: never;

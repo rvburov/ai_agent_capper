@@ -1,5 +1,6 @@
 """Миграции: схема на месте, строка app_settings есть, upgrade → downgrade → upgrade
-проходит, и после upgrade модели не расходятся с базой.
+проходит, и после upgrade модели не расходятся с базой. Миграция этапа 2 сохраняет
+данные этапа 1 (турниры старого бота получают source = legacy).
 
 Расхождение моделей и миграции ловится двумя способами:
 - compare_metadata, как alembic check: таблицы, колонки, типы, DEFAULT, индексы, FK;
@@ -23,7 +24,8 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.config import Settings
 from app.db.base import Base
@@ -33,6 +35,7 @@ from tests.support import (
     alembic_config,
     create_database,
     drop_database,
+    run_alembic_upgrade,
     temp_database_url,
 )
 
@@ -258,5 +261,148 @@ async def test_migrate_service_creates_schema_and_skips_newer_database(
             async with engine.connect() as conn:
                 kept = await conn.scalar(text("SELECT version_num FROM alembic_version"))
             assert kept == "9999_future" and head != kept
+        finally:
+            await engine.dispose()
+
+
+def _alembic_downgrade(connection: Connection, revision: str) -> None:
+    command.downgrade(alembic_config(connection), revision)
+
+
+async def _refused(conn: AsyncConnection, sql: str) -> bool:
+    """Запрос нарушает ограничение базы (UNIQUE или CHECK)."""
+    savepoint = await conn.begin_nested()
+    try:
+        await conn.execute(text(sql))
+    except IntegrityError:
+        await savepoint.rollback()
+        return True
+    await savepoint.rollback()
+    return False
+
+
+async def test_stage2_migration_keeps_stage1_data(settings: Settings) -> None:
+    """0001 → 0002: турниры старого бота получают source = legacy; новые ограничения
+    действуют; откат до 0001 сохраняет журнал, убирает только кэфы из архива и хеши
+    файлов архивов (следующая загрузка разберет файлы заново); повторный upgrade не
+    выдает турниры архива за турниры бота."""
+    async with _temp_database(settings, "stage") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0001")
+                await conn.execute(
+                    text(
+                        "INSERT INTO tournaments (name, start_date) VALUES"
+                        " ('Уимблдон', '2025-06-30'), ('Рим', '2025-05-07')"
+                    )
+                )
+                await conn.execute(
+                    text("INSERT INTO players (name) VALUES ('Sinner J.'), ('Alcaraz C.')")
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO matches (tournament_id, round, player1_id, player2_id,"
+                        " source, source_ref) VALUES (1, '', 1, 2, 'legacy', 'b1')"
+                    )
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                rows = (
+                    await conn.execute(
+                        text("SELECT name, source, source_ref FROM tournaments ORDER BY id")
+                    )
+                ).all()
+                assert [tuple(r) for r in rows] == [
+                    ("Уимблдон", "legacy", None),
+                    ("Рим", "legacy", None),
+                ]
+                assert await conn.scalar(text("SELECT match_date FROM matches")) is None
+
+                await conn.execute(
+                    text(
+                        "INSERT INTO tournaments (name, source, source_ref)"
+                        " VALUES ('Wimbledon', 'sackmann', '2025-540')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO matches (tournament_id, round, player1_id, player2_id,"
+                        " source, source_ref) SELECT id, 'F', 1, 2, 'sackmann', '2025-540-701'"
+                        " FROM tournaments WHERE source = 'sackmann'"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO ingestion_runs (source, status, details) VALUES"
+                        """ ('sackmann', 'ok', '{"files": {"a.csv": "h1"}, "created": 1}'),"""
+                        """ ('legacy', 'ok', '{"files": {"b.xlsx": "h2"}}')"""
+                    )
+                )
+                assert await _refused(
+                    conn,
+                    "INSERT INTO tournaments (name, source, source_ref)"
+                    " VALUES ('Wimbledon', 'sackmann', '2025-540')",
+                )
+                assert await _refused(
+                    conn, "INSERT INTO tournaments (name, source) VALUES ('X', 'atp')"
+                )
+                # Пустой source_ref у legacy не мешает: NULL в UNIQUE не равны друг другу
+                assert not await _refused(
+                    conn, "INSERT INTO tournaments (name, source) VALUES ('Y', 'legacy')"
+                )
+
+                odds = (
+                    "INSERT INTO odds_snapshots (match_id, market, selection, bookmaker, odds,"
+                    " kind) VALUES (1, 'ML', 1, 'pinnacle', {odds}, '{kind}')"
+                )
+                await conn.execute(text(odds.format(odds="1.5", kind="archive")))
+                await conn.execute(text(odds.format(odds="1.6", kind="user")))
+                # Второй кэф архива на тот же исход и букмекера — нельзя, других видов — можно
+                assert await _refused(conn, odds.format(odds="1.7", kind="archive"))
+                assert not await _refused(conn, odds.format(odds="1.7", kind="user"))
+                assert await _refused(conn, odds.format(odds="1.7", kind="guess"))
+                for action in ("confirm_failed", "player_merge", "player_edit"):
+                    await conn.execute(
+                        text(f"INSERT INTO admin_audit_log (action) VALUES ('{action}')")
+                    )
+                assert await _refused(conn, "INSERT INTO admin_audit_log (action) VALUES ('hack')")
+
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0001")
+            async with engine.begin() as conn:
+                kinds = (await conn.execute(text("SELECT kind FROM odds_snapshots"))).scalars()
+                assert list(kinds) == ["user"]
+                actions = await conn.execute(text("SELECT action FROM admin_audit_log ORDER BY id"))
+                assert list(actions.scalars()) == ["confirm_failed", "player_merge", "player_edit"]
+                # Новые записи — только со старыми действиями
+                assert await _refused(
+                    conn, "INSERT INTO admin_audit_log (action) VALUES ('confirm_failed')"
+                )
+                columns = await conn.run_sync(
+                    lambda sync: {c["name"] for c in inspect(sync).get_columns("tournaments")}
+                )
+                assert "source" not in columns and "source_ref" not in columns
+                details = await conn.execute(
+                    text("SELECT source, details FROM ingestion_runs ORDER BY id")
+                )
+                assert [tuple(r) for r in details] == [
+                    ("sackmann", {"created": 1}),
+                    ("legacy", {"files": {"b.xlsx": "h2"}}),
+                ]
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+                assert await conn.scalar(text("SELECT count(*) FROM admin_audit_log")) == 3
+                rows = (
+                    await conn.execute(
+                        text("SELECT name, source, source_ref FROM tournaments ORDER BY id")
+                    )
+                ).all()
+                assert [tuple(r) for r in rows] == [
+                    ("Уимблдон", "legacy", None),
+                    ("Рим", "legacy", None),
+                    ("Wimbledon", None, None),
+                ]
         finally:
             await engine.dispose()

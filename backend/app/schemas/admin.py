@@ -47,6 +47,9 @@ AuditAction = Literal[
     "create_admin",
     "import",
     "message",
+    "confirm_failed",
+    "player_merge",
+    "player_edit",
 ]
 
 

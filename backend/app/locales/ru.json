@@ -82,7 +82,10 @@
     "currency_change": "Смена валюты",
     "create_admin": "Новый администратор",
     "import": "Импорт истории ставок",
-    "message": "Сообщение участникам"
+    "message": "Сообщение участникам",
+    "confirm_failed": "Неверный код 2FA при подтверждении действия",
+    "player_merge": "Объединение игроков",
+    "player_edit": "Правка игрока"
   },
   "cli": {
     "command_metavar": "<команда>",
@@ -245,6 +248,24 @@
         "profile_duplicate": "  {folder}: это тот же игрок, что и в папке {other}, пропущено",
         "profile_foreign": "  {folder}: у игрока уже есть профиль из источника {source}, он не перезаписан"
       }
+    },
+    "rounds": {
+      "unknown_code": "Неизвестный код раунда «{code}»",
+      "unknown_label": "Неизвестный раунд «{label}»",
+      "label_beyond_draw": "Раунда «{label}» нет в сетке на {draw} игроков",
+      "bad_draw": "Неверный размер сетки: {draw}"
+    },
+    "fetch": {
+      "bad_path": "Неверный путь к файлу источника: «{path}»",
+      "failed": "Не удалось получить {url}: {reason}",
+      "http_status": "сервер ответил {status}",
+      "network": "нет связи ({error})",
+      "too_large": "Файл {url} больше {limit} МБ, загрузка остановлена",
+      "read_failed": "Не удалось прочитать {path}: {error}"
+    },
+    "runs": {
+      "interrupted": "Загрузка прервана",
+      "unexpected": "Загрузка остановилась с ошибкой {error}"
     }
   },
   "config": {

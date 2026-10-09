@@ -293,7 +293,7 @@ async def block_user(
         return await user_out(db, target)
     await _ensure_not_last_admin(db, target)
     if actor is not None and target.role == "admin":
-        await check_totp(db, actor, confirm)
+        await check_totp(db, actor, confirm, action="block", target_user_id=target.id)
     now = utcnow()
     target.status = "blocked"
     target.blocked_at = now
@@ -342,7 +342,7 @@ async def change_role(
     await lock_admin_actions(db)
     target = await _load_target(db, user_id)
     if actor is not None:
-        await check_totp(db, actor, confirm)
+        await check_totp(db, actor, confirm, action="role_change", target_user_id=target.id)
     if target.role == role:
         return await user_out(db, target)
     if role != "admin":
@@ -374,7 +374,7 @@ async def revoke_sessions(
     await lock_admin_actions(db)
     target = await _load_target(db, user_id)
     if actor is not None and target.role == "admin":
-        await check_totp(db, actor, confirm)
+        await check_totp(db, actor, confirm, action="sessions_revoke", target_user_id=target.id)
     count = await revoke_user_sessions(db, target.id)
     await write_audit(
         db,
@@ -416,7 +416,7 @@ async def reset_two_factor(
     if actor is not None:
         if target.role == "admin":
             raise AppError(403, "admin.reset_2fa_terminal_only")
-        await check_totp(db, actor, confirm)
+        await check_totp(db, actor, confirm, action="reset_2fa", target_user_id=target.id)
     target.totp_enabled = False
     target.totp_secret_enc = None
     target.totp_key_version = None
@@ -521,7 +521,7 @@ async def delete_user(
     if confirm_email.strip().lower() != target.email.lower():
         raise AppError(400, "admin.confirm_email_mismatch")
     if actor is not None:
-        await check_totp(db, actor, confirm)
+        await check_totp(db, actor, confirm, action="delete", target_user_id=target.id)
     await _ensure_not_last_admin(db, target)
     name, email, consent = target.display_name, target.email, target.consent_training
     await _erase_personal_data(db, target)

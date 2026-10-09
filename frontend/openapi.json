@@ -1642,7 +1642,10 @@
                       "currency_change",
                       "create_admin",
                       "import",
-                      "message"
+                      "message",
+                      "confirm_failed",
+                      "player_merge",
+                      "player_edit"
                     ],
                     "type": "string"
                   }
@@ -1956,7 +1959,10 @@
               "currency_change",
               "create_admin",
               "import",
-              "message"
+              "message",
+              "confirm_failed",
+              "player_merge",
+              "player_edit"
             ],
             "title": "Action"
           },

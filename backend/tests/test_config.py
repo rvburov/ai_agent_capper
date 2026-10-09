@@ -111,3 +111,35 @@ def test_non_local_dev_with_own_keys_works() -> None:
     assert settings.secret_key_bytes == b"s" * 48
     for origin in ("http://localhost:5173", "http://127.0.0.1:8000", "http://[::1]:5173"):
         assert Settings.model_validate({"public_origin": origin}).env == "dev"
+
+
+def test_data_sources_defaults_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Загрузка архивов (этап 2): адреса, первые годы и час ночного обновления."""
+    settings = Settings.model_validate({"env": "dev"})
+    assert settings.sackmann_base_url == (
+        "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master"
+    )
+    assert settings.tennis_data_base_url == "http://www.tennis-data.co.uk"
+    assert settings.data_first_year == 2000
+    assert settings.tennis_data_first_year == 2013
+    assert settings.data_update_hour_utc == 5
+
+    monkeypatch.setenv("CAPPER_SACKMANN_BASE_URL", "https://mirror.example.com/atp")
+    monkeypatch.setenv("CAPPER_DATA_UPDATE_HOUR_UTC", "23")
+    settings = Settings()
+    assert settings.sackmann_base_url == "https://mirror.example.com/atp"
+    assert settings.data_update_hour_utc == 23
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"data_update_hour_utc": 24},
+        {"data_update_hour_utc": -1},
+        # Файлы tennis-data до 2013 года — в формате .xls, загрузчик их не читает
+        {"tennis_data_first_year": 2012},
+    ],
+)
+def test_data_settings_out_of_range(fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"env": "dev", **fields})

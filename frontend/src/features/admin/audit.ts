@@ -17,11 +17,12 @@ export type AuditGroup = (typeof AUDIT_GROUPS)[number];
 // Каждое действие журнала входит в одну из групп (проверяет audit.test.ts).
 const GROUP_ACTIONS: Record<Exclude<AuditGroup, 'all'>, readonly AuditAction[]> = {
   invite: ['invite', 'invite_revoke'],
-  access: ['reset_code', 'reset_code_revoke', 'reset_2fa', 'sessions_revoke'],
+  access: ['reset_code', 'reset_code_revoke', 'reset_2fa', 'sessions_revoke', 'confirm_failed'],
   people: ['block', 'unblock', 'delete', 'role_change', 'create_admin'],
   money: ['key_change', 'limit_change'],
   settings: ['currency_change', 'message'],
-  import: ['import'],
+  // Правка игроков — тоже команды терминала с общими данными, как импорт (этап 2)
+  import: ['import', 'player_merge', 'player_edit'],
 };
 
 /** Действия группы для запроса ?action=...; для «Все действия» — без фильтра. */
@@ -131,7 +132,8 @@ export function auditDetails(entry: AuditEntry): string {
         matches: count(d.matches_created),
       });
     default:
-      // limit_change, currency_change, message — появятся на этапах 3–4 вместе с их экранами
+      // limit_change, currency_change, message — появятся на этапах 3–4 вместе с их экранами;
+      // confirm_failed, player_merge, player_edit (этап 2) пока без строки подробностей
       return '';
   }
 }

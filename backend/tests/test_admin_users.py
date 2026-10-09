@@ -354,7 +354,11 @@ async def test_wrong_totp_codes_end_admin_session(
 
 
 async def test_parallel_wrong_totp_codes_checked_at_most_limit(
-    make_client: ClientFactory, make_user: UserFactory, login: LoginFn, totp_code: TotpCodeFn
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    totp_code: TotpCodeFn,
+    db: AsyncSession,
 ) -> None:
     """Параллельные запросы не проверят больше CONFIRM_MAX_FAILURES кодов: лишние
     завершают сеанс без проверки кода."""
@@ -373,6 +377,79 @@ async def test_parallel_wrong_totp_codes_checked_at_most_limit(
     assert codes.count("admin.totp_invalid") <= admin_confirm.CONFIRM_MAX_FAILURES - 1
     assert "auth.too_many_codes" in codes
     assert (await admin.client.get("/api/me")).status_code == 401
+    # Каждый запрос, дошедший до проверки кода, оставил запись в журнале
+    failed = await audit_entries(db, "confirm_failed")
+    assert len(failed) == codes.count("admin.totp_invalid") + codes.count("auth.too_many_codes")
+    assert sorted(e.details["attempt"] for e in failed) == list(range(1, len(failed) + 1))
+    for entry in failed:
+        assert entry.details["session_ended"] is (
+            entry.details["attempt"] >= admin_confirm.CONFIRM_MAX_FAILURES
+        )
+
+
+async def test_wrong_totp_code_is_written_to_audit(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    totp_code: TotpCodeFn,
+    db: AsyncSession,
+) -> None:
+    """Неверный код — запись confirm_failed в журнале. Запрос отвечает ошибкой, его
+    транзакция откатывается, а запись остается: она зафиксирована отдельно. Кода в ней нет."""
+    admin = await admin_signed_in(make_client, make_user, login)
+    member = await make_user()
+    url = f"/api/admin/users/{member.id}/role"
+    good = await totp_code(admin.user)
+    wrong = "000000" if good != "000000" else "111111"
+    limit = admin_confirm.CONFIRM_MAX_FAILURES
+
+    # Без кода — не попытка подтверждения, в журнал не пишется
+    response = await admin.client.post(
+        "/api/admin/invites", json={"email": "boss@example.com", "role": "admin"}
+    )
+    assert error_code(response) == "admin.totp_required"
+    assert await audit_entries(db) == []
+    for i in range(1, limit + 1):
+        response = await admin.client.post(url, json={"role": "admin", "totp_code": wrong})
+        assert response.status_code == (403 if i < limit else 401)
+        entries = await audit_entries(db, "confirm_failed")
+        assert len(entries) == i
+        entry = entries[-1]
+        assert entry.actor_id == admin.id
+        assert entry.target_user_id == member.id
+        assert entry.ip == ADMIN_IP
+        assert entry.details == {"action": "role_change", "attempt": i, "session_ended": i == limit}
+        assert wrong not in str(entry.details)
+    # Само действие не выполнено, других записей в журнале нет
+    assert (await _user(db, member.id)).role == "member"
+    assert [e.action for e in await audit_entries(db)] == ["confirm_failed"] * limit
+
+
+async def test_wrong_totp_code_on_own_row_is_written_without_deadlock(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    totp_code: TotpCodeFn,
+    db: AsyncSession,
+) -> None:
+    """Действие над собой: строка администратора заблокирована FOR UPDATE транзакцией
+    запроса, а запись журнала ссылается на нее (actor_id). Запись пишется после отката
+    этой транзакции, поэтому запрос не ждет сам себя."""
+    admin = await admin_signed_in(make_client, make_user, login)
+    await make_user(role="admin")
+    good = await totp_code(admin.user)
+    wrong = "000000" if good != "000000" else "111111"
+    response = await asyncio.wait_for(
+        admin.client.post(
+            f"/api/admin/users/{admin.id}/role", json={"role": "member", "totp_code": wrong}
+        ),
+        timeout=10,
+    )
+    assert response.status_code == 403
+    [entry] = await audit_entries(db, "confirm_failed")
+    assert entry.actor_id == admin.id == entry.target_user_id
+    assert entry.details == {"action": "role_change", "attempt": 1, "session_ended": False}
+    assert (await _user(db, admin.id)).role == "admin"
 
 
 async def test_correct_totp_does_not_count_as_failure(

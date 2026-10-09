@@ -12,7 +12,7 @@ from functools import lru_cache
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import SecretStr, ValidationError, model_validator
+from pydantic import Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.i18n import t
@@ -72,6 +72,17 @@ class Settings(BaseSettings):
     # Адреса и сети прокси (Caddy) через запятую, которым приложение верит в
     # X-Forwarded-For и X-Forwarded-Proto (ProxyHeadersMiddleware в create_app)
     trusted_proxies: str = "127.0.0.1"
+
+    # Архивы матчей и кэфов (этап 2, app/ingest). Адреса меняются, если источник переедет;
+    # без сети те же файлы берутся из папки (--dir у команды загрузки)
+    sackmann_base_url: str = "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master"
+    tennis_data_base_url: str = "http://www.tennis-data.co.uk"
+    # Первый год архива Сакманна и tennis-data (более ранние файлы tennis-data — .xls,
+    # их не берем)
+    data_first_year: int = Field(default=2000, ge=1968)
+    tennis_data_first_year: int = Field(default=2013, ge=2013)
+    # Час (UTC) ночного обновления данных воркером
+    data_update_hour_utc: int = Field(default=5, ge=0, le=23)
 
     # Только для тестов: подключение к служебной базе, из которой создается тестовая
     test_admin_database_url: str = "postgresql://capper:capper@localhost:5432/postgres"

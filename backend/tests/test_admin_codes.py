@@ -136,6 +136,9 @@ async def test_admin_invite_requires_totp(
     )
     assert bad.status_code == 403
     assert error_code(bad) == "admin.totp_invalid"
+    [failed] = await audit_entries(db, "confirm_failed")
+    assert failed.actor_id == admin.id and failed.target_user_id is None
+    assert failed.details == {"action": "invite", "attempt": 1, "session_ended": False}
     malformed = await admin.client.post(
         url, json={"email": "boss@example.com", "role": "admin", "totp_code": "12ab"}
     )

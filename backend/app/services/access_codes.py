@@ -229,7 +229,7 @@ async def create_invite(
     if pending is not None:
         raise AppError(409, "admin.invite_exists")
     if actor is not None and data.role == "admin":
-        await check_totp(db, actor, confirm)
+        await check_totp(db, actor, confirm, action="invite")
 
     limit = await _start_limit(db, data)
     code, digest = await _new_code(db, INVITE)

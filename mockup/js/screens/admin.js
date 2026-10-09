@@ -111,13 +111,16 @@
     set_currency: ['Изменена валюта программы', 'currency'],
     settings: ['Изменены настройки программы', 'sliders'],
     message: ['Сообщение участникам', 'megaphone'],
+    confirm_failed: ['Неверный код 2FA при подтверждении', 'shield'],
+    player_merge: ['Игроки объединены', 'users'],
+    player_edit: ['Изменен игрок', 'user'],
   };
   const actionOf = e => ACTIONS[e.action] || [e.action, 'info'];
   const inGroup = list => e => list.includes(e.action);
   const AUDIT_GROUPS = [
     { id: 'all', label: 'Все действия', test: () => true },
     { id: 'invite', label: 'Приглашения', test: inGroup(['invite', 'invite_revoke']) },
-    { id: 'access', label: 'Пароли, 2FA и сеансы', test: inGroup(['reset_code', 'reset_code_revoke', 'reset_2fa', 'sessions_revoke']) },
+    { id: 'access', label: 'Пароли, 2FA и сеансы', test: inGroup(['reset_code', 'reset_code_revoke', 'reset_2fa', 'sessions_revoke', 'confirm_failed']) },
     { id: 'people', label: 'Блокировка, роли, удаление', test: inGroup(['block', 'unblock', 'delete', 'role_change', 'create_admin']) },
     { id: 'money', label: 'Ключ, бюджет и лимиты', test: inGroup(['key_change', 'limit_change', 'budget_change', 'ai_mode']) },
     { id: 'settings', label: 'Валюта, настройки, сообщения', test: inGroup(['set_currency', 'settings', 'message']) },

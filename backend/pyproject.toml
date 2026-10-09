@@ -25,6 +25,10 @@ dependencies = [
   "httpx>=0.28.1",
   "anthropic>=1.12.1",
   "structlog>=26.1",
+  # Эло, метрики и бутстрэп бэктеста (app/ml); scikit-learn, pandas и scipy не нужны
+  "numpy>=2.5",
+  # Файлы .xlsx tennis-data.co.uk (app/ingest)
+  "openpyxl>=3.1.5",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +38,8 @@ dev = [
   "httpx2>=2.13.1",
   "ruff>=0.16.10",
   "mypy>=2.4",
+  # Типы openpyxl для mypy в строгом режиме
+  "types-openpyxl>=3.1.5.20260827",
 ]
 
 [build-system]

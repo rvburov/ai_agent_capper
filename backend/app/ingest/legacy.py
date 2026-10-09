@@ -758,7 +758,9 @@ class _Importer:
         if near:
             return min(near)[1]
         surface, indoor = parse_surface(surface_raw)
-        created = Tournament(name=raw, surface=surface, indoor=indoor, start_date=day)
+        created = Tournament(
+            name=raw, surface=surface, indoor=indoor, start_date=day, source=SOURCE
+        )
         self.db.add(created)
         await self.db.flush()
         same_name.append(created)

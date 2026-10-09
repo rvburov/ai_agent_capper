@@ -270,6 +270,8 @@ async def test_import_fixture(
     # «Ролан Гаррос» и «Ролан-Гаррос» — один турнир
     assert await count(db, Player) == 14
     assert await count(db, Tournament) == 2
+    tournaments = list(await db.scalars(select(Tournament)))
+    assert all(t.source == "legacy" and t.source_ref is None for t in tournaments)
     matches = list(await db.scalars(select(Match)))
     assert len(matches) == 12
     assert all(m.status == "scheduled" and m.source == "legacy" for m in matches)

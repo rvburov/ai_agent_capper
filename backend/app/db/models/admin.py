@@ -35,6 +35,11 @@ AUDIT_ACTIONS = (
     "create_admin",
     "import",
     "message",
+    # Неверный код 2FA при подтверждении опасного действия (app/services/admin_confirm.py)
+    "confirm_failed",
+    # Ручная правка игроков командами терминала (этап 2)
+    "player_merge",
+    "player_edit",
 )
 
 

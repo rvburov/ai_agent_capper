@@ -9,6 +9,8 @@
 - помощники с префиксом: CliError("ключ") и _ask_secret("ключ") → cli.<ключ>,
   command(имя, "ключ") → cli.help.<ключ>, _tr("ключ") → ingest.legacy.<ключ>,
   ImportFailure("ключ") → ingest.legacy.errors.<ключ>, note_key="ключ" → ingest.legacy.note.<ключ>;
+- полный ключ первым аргументом: IngestError("ключ"), FetchError("ключ") и
+  report.add_warning("ключ") загрузчиков данных (app/ingest/runs.py);
 - notify(kind="вид", variant="вариант") → notifications.<вид>[.<вариант>].title и .body.
 Ключи, собранные из переменной (f"status.{x}"), проверяются по перечислениям Literal.
 """
@@ -43,6 +45,9 @@ PREFIXED_CALLS = {
     "CliError": "cli.",
     "_ask_secret": "cli.",
     "ImportFailure": "ingest.legacy.errors.",
+    "IngestError": "",
+    "FetchError": "",
+    "add_warning": "",
 }
 ERROR_CODE_CALLS = {"AppError", "error_response"}
 ERROR_CODE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")

@@ -37,7 +37,10 @@ BACKHANDS = ("one", "two")
 NEWS_KINDS = ("injury", "withdrawal", "motivation", "other")
 MATCH_STATUSES = ("scheduled", "finished", "retired", "walkover")
 MATCH_SOURCES = ("sackmann", "tennis_data", "api", "web", "legacy")
-ODDS_KINDS = ("user", "opening", "closing", "api")
+# archive — кэф из архива (tennis-data.co.uk): когда снят, неизвестно, поэтому не closing
+ODDS_KINDS = ("user", "opening", "closing", "api", "archive")
+# legacy — турниры из импорта старого бота (этап 1), source_ref у них пустой
+TOURNAMENT_SOURCES = ("sackmann", "tennis_data", "legacy")
 INGESTION_STATUSES = ("running", "ok", "failed")
 
 
@@ -125,13 +128,20 @@ class PlayerNews(Base):
 
 
 class Tournament(CreatedAtMixin, Base):
-    """Турнир: категория, покрытие, зал, формат матчей."""
+    """Турнир: категория, покрытие, зал, формат матчей.
+
+    Повторная загрузка архива находит турнир по UNIQUE(source, source_ref):
+    sackmann — tourney_id («2024-339»), tennis_data — «{год}-{номер ATP}» (только турниры
+    без пары у Сакманна). У турниров старого бота source = legacy и source_ref пустой.
+    """
 
     __tablename__ = "tournaments"
     __table_args__ = (
+        UniqueConstraint("source", "source_ref"),
         Index("ix_tournaments_start_date", "start_date"),
         check_in("surface", SURFACES, "surface"),
         check_in("best_of", (3, 5), "best_of"),
+        check_in("source", TOURNAMENT_SOURCES, "source"),
     )
 
     id: Mapped[BigIntPK]
@@ -143,6 +153,8 @@ class Tournament(CreatedAtMixin, Base):
     best_of: Mapped[int | None] = mapped_column(SmallInteger)
     start_date: Mapped[date | None]
     city: Mapped[str | None] = mapped_column(String(100))
+    source: Mapped[str | None] = mapped_column(String(16))
+    source_ref: Mapped[str | None] = mapped_column(String(64))
 
 
 class Match(CreatedAtMixin, UpdatedAtMixin, Base):
@@ -161,6 +173,7 @@ class Match(CreatedAtMixin, UpdatedAtMixin, Base):
         UniqueConstraint("tournament_id", "round", "player1_id", "player2_id"),
         UniqueConstraint("source", "source_ref"),
         Index("ix_matches_scheduled_at", "scheduled_at"),
+        Index("ix_matches_match_date", "match_date"),
         Index("ix_matches_player1_id", "player1_id"),
         Index("ix_matches_player2_id", "player2_id"),
         CheckConstraint("player1_id <> player2_id", name="distinct_players"),
@@ -181,6 +194,9 @@ class Match(CreatedAtMixin, UpdatedAtMixin, Base):
     tournament_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tournaments.id"))
     round: Mapped[str] = mapped_column(String(16), server_default="")
     scheduled_at: Mapped[datetime | None]
+    # День матча из источника с датами (tennis-data). У матчей только из архива
+    # Сакманна пустой: там есть лишь дата начала турнира
+    match_date: Mapped[date | None]
     player1_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("players.id"))
     player2_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("players.id"))
     winner_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("players.id"))
@@ -217,12 +233,25 @@ class MatchStat(Base):
 
 
 class OddsSnapshot(Base):
-    """Кэф на исход в момент времени: введенный пользователем, открытие, закрытие, API.
-    Закрывающий кэф нужен для CLV."""
+    """Кэф на исход в момент времени: введенный пользователем, открытие, закрытие, API,
+    архив. Закрывающий кэф нужен для CLV.
+
+    Кэф из архива у исхода и букмекера один: повторная загрузка обновляет его
+    (ON CONFLICT по частичному индексу uq_odds_snapshots_archive), а не добавляет строку.
+    """
 
     __tablename__ = "odds_snapshots"
     __table_args__ = (
         Index("ix_odds_snapshots_match_id_market_taken_at", "match_id", "market", "taken_at"),
+        Index(
+            "uq_odds_snapshots_archive",
+            "match_id",
+            "market",
+            "selection",
+            "bookmaker",
+            unique=True,
+            postgresql_where=text("kind = 'archive'"),
+        ),
         check_in("selection", (1, 2), "selection"),
         check_in("kind", ODDS_KINDS, "kind"),
         CheckConstraint("odds >= 1", name="odds_min"),

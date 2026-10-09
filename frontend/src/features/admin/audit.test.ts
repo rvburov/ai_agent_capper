@@ -9,7 +9,8 @@ describe('журнал действий', () => {
     expect(groupActions('all')).toBeUndefined();
     expect(groupActions('invite')).toEqual(['invite', 'invite_revoke']);
     expect(groupActions('people')).toContain('create_admin');
-    expect(groupActions('import')).toEqual(['import']);
+    expect(groupActions('import')).toEqual(['import', 'player_merge', 'player_edit']);
+    expect(groupActions('access')).toContain('confirm_failed');
     // каждое действие сервера попадает ровно в одну группу; новое действие в схеме API
     // без строки здесь не пройдет tsc (Record по всем AuditAction)
     const grouped = AUDIT_GROUPS.flatMap((g) => groupActions(g) ?? []);
@@ -17,7 +18,7 @@ describe('журнал действий', () => {
       invite: true, invite_revoke: true, reset_code: true, reset_code_revoke: true, reset_2fa: true,
       block: true, unblock: true, delete: true, role_change: true, sessions_revoke: true,
       limit_change: true, key_change: true, currency_change: true, create_admin: true, import: true,
-      message: true,
+      message: true, confirm_failed: true, player_merge: true, player_edit: true,
     };
     for (const action of Object.keys(all)) {
       expect(grouped.filter((a) => a === action)).toHaveLength(1);
