@@ -91,7 +91,7 @@ cd backend && ruff check . && ruff format --check . && mypy && pytest
 cd frontend && npm run build
 ```
 
-- Основная ветка — `master`.
+- Ветка в репозитории одна — `master`: коммиты сразу в нее, другие ветки не создаем. Перед отправкой — проверки выше; после отправки CI на `master` должен быть зеленым.
 
 ## Документы
 

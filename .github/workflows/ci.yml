@@ -6,13 +6,17 @@ on:
   pull_request:
   # Запуск вручную на любой ветке: проверить ветку до слияния в master
   workflow_dispatch:
+  # Раз в неделю (понедельник, 04:23 UTC) весь набор на master: новые уязвимости
+  # в зависимостях и свежие базовые образы Docker ловятся, даже если код не менялся
+  schedule:
+    - cron: "23 4 * * 1"
 
 jobs:
   rules:
     name: Правила CLAUDE.md
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - run: bash scripts/check-rules.sh
@@ -53,8 +57,8 @@ jobs:
       CAPPER_TEST_ADMIN_DATABASE_URL: postgresql://capper:capper@localhost:5432/postgres
       CAPPER_REDIS_URL: redis://localhost:6379/0
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -70,19 +74,20 @@ jobs:
 
   # Известные уязвимости в зависимостях (PLAN.md, раздел 7): pip-audit по обоим lock-файлам
   # backend (без установки, по точным версиям) и npm audit по зависимостям сборки frontend.
-  # Обновления зависимостей предлагает Dependabot (.github/dependabot.yml)
+  # Dependabot отключен (ветка в репозитории одна — master): зависимости обновляем сами,
+  # а еженедельный запуск по расписанию сообщает о новых уязвимостях
   audit:
     name: Уязвимости зависимостей
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - run: pip install pip-audit==2.10.1
       - run: pip-audit --require-hashes --disable-pip -r backend/requirements.lock
       - run: pip-audit --require-hashes --disable-pip -r backend/requirements-dev.lock
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
       - run: npm audit --omit=dev --audit-level=high
@@ -95,8 +100,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -104,7 +109,7 @@ jobs:
       - run: npm ci
       # Схема OpenAPI и типы API совпадают с текущим backend: gen:api берет схему из кода
       # backend (сервер и база не нужны) и заново пишет openapi.json и src/api/schema.d.ts
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -162,8 +167,8 @@ jobs:
       E2E_PG_ADMIN_URL: postgresql://capper:capper@localhost:5432/postgres
       E2E_REDIS_URL: redis://localhost:6379/0
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -171,7 +176,7 @@ jobs:
       # Backend как в образе: точные версии с хешами, затем сам пакет без зависимостей
       - run: pip install --require-hashes -r ../backend/requirements.lock
       - run: pip install --no-deps -e ../backend
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -185,7 +190,7 @@ jobs:
           E2E_STATE_DIR: ${{ runner.temp }}/e2e-stack
       - name: Отчет Playwright и логи стека
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-report
           path: |
@@ -205,7 +210,7 @@ jobs:
       run:
         working-directory: deploy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Настройки стека (одноразовые пароли и ключи)
         run: |
           umask 077
