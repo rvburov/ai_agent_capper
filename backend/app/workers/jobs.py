@@ -13,6 +13,14 @@ startup в app.workers.main. Логика задачи — отдельной ф
 - журнал входов старше 90 дней (PLAN.md, раздел 7: срок хранения журналов входов).
 Коды приглашений и сброса не трогаем, даже истекшие: это история действий
 администратора, на них ссылается кабинет («использован», «истек», «отозван»).
+
+Ночное обновление данных (update_data) — те же шаги, что python -m app.ingest.update без
+--full: текущий год архивов Сакманна и tennis-data (в январе и прошлый), привязка матчей
+старого бота, пересчет Эло. После него — проверка свежести: если последняя успешная
+загрузка Сакманна или tennis-data старше 3 дней, всем активным администраторам приходит
+уведомление data_stale, не чаще раза в сутки каждому. Успешной считается загрузка, которая
+получила хотя бы один файл. Привязку и Эло не проверяем: они считаются из уже
+загруженного.
 """
 
 from dataclasses import asdict, dataclass
@@ -20,15 +28,23 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
-from sqlalchemy import delete, or_
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
-from app.db.models import LoginEvent, TrustedDevice, UserSession
+from app.db.models import IngestionRun, LoginEvent, Notification, TrustedDevice, User, UserSession
+from app.ingest.update import run_update
+from app.services.notifications import notify
 
 log = structlog.get_logger(__name__)
 
 LOGIN_EVENTS_RETENTION = timedelta(days=90)
+# Загрузка архива старше — данные для анализа устарели
+STALE_AFTER = timedelta(days=3)
+STALE_SOURCES = ("sackmann", "tennis_data")
+# Не чаще раза в сутки: 23 часа, чтобы ежедневный запуск, сдвинутый на секунды, не
+# пропускал день
+STALE_NOTIFY_EVERY = timedelta(hours=23)
 
 
 @dataclass(frozen=True)
@@ -98,3 +114,91 @@ async def cleanup_auth_records(ctx: dict[Any, Any]) -> dict[str, int]:
     counts = asdict(result)
     log.info("worker.cleanup_auth_records", **counts)
     return counts
+
+
+# --- ночное обновление данных ---
+
+
+async def last_ok_loads(db: AsyncSession) -> dict[str, datetime | None]:
+    """Время окончания последней успешной загрузки каждого архива (None — не было).
+    Считается только запуск, который получил хотя бы один файл (новый или без
+    изменений): запуск «ok» без единого файла (источник отвечает 404 на файл текущего
+    года, пустая папка) данные не обновил."""
+    files = IngestionRun.details["files"]
+    rows = await db.execute(
+        select(IngestionRun.source, func.max(IngestionRun.finished_at))
+        .where(
+            IngestionRun.source.in_(STALE_SOURCES),
+            IngestionRun.status == "ok",
+            func.jsonb_typeof(files) == "object",
+            files != func.jsonb_build_object(),
+        )
+        .group_by(IngestionRun.source)
+    )
+    found: dict[str, datetime | None] = dict.fromkeys(STALE_SOURCES)
+    for source, finished in rows.all():
+        found[source] = finished
+    return found
+
+
+def _when(value: datetime | None) -> str:
+    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M") if value is not None else "—"
+
+
+async def notify_stale_data(db: AsyncSession, *, now: datetime | None = None) -> list[int]:
+    """Уведомление data_stale активным администраторам, если архив давно не загружался
+    (см. docstring модуля). Возвращает id администраторов, кому оно ушло. Делает commit."""
+    now = now or datetime.now(UTC)
+    loads = await last_ok_loads(db)
+    if all(when is not None and now - when <= STALE_AFTER for when in loads.values()):
+        return []
+    admins = (
+        await db.scalars(
+            select(User.id).where(User.role == "admin", User.status == "active").order_by(User.id)
+        )
+    ).all()
+    recent = set(
+        (
+            await db.scalars(
+                select(Notification.user_id).where(
+                    Notification.kind == "data_stale",
+                    Notification.created_at > now - STALE_NOTIFY_EVERY,
+                )
+            )
+        ).all()
+    )
+    sent: list[int] = []
+    for admin_id in admins:
+        if admin_id in recent:
+            continue
+        await notify(
+            db,
+            user_id=admin_id,
+            kind="data_stale",
+            sackmann=_when(loads["sackmann"]),
+            tennis_data=_when(loads["tennis_data"]),
+            days=STALE_AFTER.days,
+        )
+        sent.append(admin_id)
+    await db.commit()
+    return sent
+
+
+async def update_data(ctx: dict[Any, Any]) -> dict[str, Any]:
+    """Задача arq (cron раз в сутки, час — CAPPER_DATA_UPDATE_HOUR_UTC): обновление данных
+    и проверка свежести. Ошибка одного шага не останавливает остальные; итог по шагам —
+    в лог воркера и в ingestion_runs."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    result = await run_update(db_factory=sessionmaker)
+    for step in result.steps:
+        log.info("worker.update_data_step", step=step.step, **step.as_log())
+    async with sessionmaker() as db:
+        notified = await notify_stale_data(db)
+    summary: dict[str, Any] = {
+        "ok": result.ok,
+        "busy": result.busy,
+        "steps": {step.step: step.status for step in result.steps},
+        "data_stale_notified": len(notified),
+    }
+    log.info("worker.update_data", **summary)
+    return summary

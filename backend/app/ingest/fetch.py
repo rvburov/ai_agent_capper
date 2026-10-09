@@ -22,7 +22,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 from urllib.parse import quote
 
 import httpx
@@ -44,7 +44,12 @@ _RETRY_STATUSES = frozenset({429})
 
 class FetchError(IngestError):
     """Файл не получен: нет связи после повторов, ответ 4xx/5xx, слишком большой файл.
-    message — текст для журнала загрузок: адрес в нем без логина и пароля."""
+    message — текст для журнала загрузок: адрес в нем без логина и пароля. status — код
+    ответа HTTP, если сервер ответил (403 у tennis-data — закрыто Cloudflare), иначе None."""
+
+    def __init__(self, key: str, /, *, status: int | None = None, **params: Any) -> None:
+        super().__init__(key, **params)
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -173,7 +178,9 @@ class DataSource:
                 return await self._get(url, shown, relative_path)
             except _Retryable as exc:
                 if attempt > self.retries:
-                    raise FetchError("ingest.fetch.failed", url=shown, reason=exc.reason) from None
+                    raise FetchError(
+                        "ingest.fetch.failed", url=shown, reason=exc.reason, status=exc.status
+                    ) from None
                 log.warning("ingest.fetch_retry", url=shown, attempt=attempt, reason=exc.reason)
                 await asyncio.sleep(self.retry_pause * attempt)
 
@@ -184,11 +191,12 @@ class DataSource:
             async with self._client.stream("GET", url) as response:
                 if response.status_code in _MISSING:
                     return None
-                if response.status_code >= 500 or response.status_code in _RETRY_STATUSES:
-                    raise _Retryable(t("ingest.fetch.http_status", status=response.status_code))
-                if response.status_code >= 400:
-                    reason = t("ingest.fetch.http_status", status=response.status_code)
-                    raise FetchError("ingest.fetch.failed", url=shown, reason=reason)
+                status = response.status_code
+                if status >= 500 or status in _RETRY_STATUSES:
+                    raise _Retryable(t("ingest.fetch.http_status", status=status), status)
+                if status >= 400:
+                    reason = t("ingest.fetch.http_status", status=status)
+                    raise FetchError("ingest.fetch.failed", url=shown, reason=reason, status=status)
                 declared = response.headers.get("content-length", "")
                 if declared.isdigit() and int(declared) > self.max_bytes:
                     raise self._too_large(shown)
@@ -212,6 +220,7 @@ class DataSource:
 class _Retryable(Exception):
     """Сбой, после которого стоит повторить запрос: сеть, 5xx, 429."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, status: int | None = None) -> None:
         super().__init__(reason)
         self.reason = reason
+        self.status = status

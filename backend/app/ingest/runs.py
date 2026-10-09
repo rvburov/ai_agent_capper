@@ -18,7 +18,7 @@
 import asyncio
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
@@ -36,6 +36,12 @@ log = structlog.get_logger(__name__)
 
 INGEST_SOURCES = ("sackmann", "tennis_data", "players_link", "elo")
 MAX_EXAMPLES = 200
+# Ключ pg_try_advisory_lock на все время обновления данных. Его берут команда update и
+# ночная задача воркера, а также отдельные команды, которые меняют архив матчей:
+# загрузчики Сакманна и tennis-data, привязка старого бота, слияние игроков и матчей.
+# Повышение матчей, привязка и слияния рассчитаны на запуск по очереди: вперемешку они
+# создали бы дубли матчей или перевернули бы сторону ставки
+UPDATE_LOCK_KEY = 0x7570646174650001
 # Длина текста ошибки в ingestion_runs.error
 ERROR_LIMIT = 500
 
@@ -207,6 +213,34 @@ async def ingestion_run(
             log.exception("ingest.run_finish_failed", run_id=run.id, source=source)
         raise
     await _finish(db_factory, run, error=None)
+
+
+class UpdateBusy(IngestError):
+    """Блокировку обновления держит другая команда или ночная задача."""
+
+    def __init__(self) -> None:
+        super().__init__("ingest_update.errors.busy")
+
+
+@asynccontextmanager
+async def update_lock(
+    open_session: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+) -> AsyncIterator[None]:
+    """Держать блокировку обновления (UPDATE_LOCK_KEY), пока идет блок. Занята — сразу
+    UpdateBusy, без ожидания. Блокировка сеансовая: ее сеанс держит соединение до конца
+    блока, а работа идет в других сеансах."""
+    async with open_session() as db:
+        locked = await db.scalar(
+            text("SELECT pg_try_advisory_lock(:key)"), {"key": UPDATE_LOCK_KEY}
+        )
+        if not locked:
+            await db.rollback()
+            raise UpdateBusy()
+        try:
+            yield
+        finally:
+            await db.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": UPDATE_LOCK_KEY})
+            await db.rollback()
 
 
 async def last_ok_file_hashes(db: AsyncSession, source: str) -> dict[str, str]:

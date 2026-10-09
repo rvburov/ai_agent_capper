@@ -35,9 +35,10 @@ lab/datasets/*.jsonl
 deploy/backup/dumps/
 deploy/backup/dumps-local/
 
-# Локальный запуск (deploy/local.sh): свои пароли и дополнения к compose
+# Локальный запуск (deploy/local.sh): свои пароли, дополнения к compose, отчеты бэктеста
 deploy/.env.local
 deploy/docker-compose.local.yml
+deploy/reports/
 
 # Системные файлы и редакторы
 .DS_Store

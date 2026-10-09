@@ -37,6 +37,13 @@ x-backend-env: &backend-env
   CAPPER_MASTER_KEYS: ${CAPPER_MASTER_KEYS:?задайте CAPPER_MASTER_KEYS в deploy/.env}
   CAPPER_PUBLIC_ORIGIN: https://${CAPPER_DOMAIN:?задайте CAPPER_DOMAIN в deploy/.env}
   CAPPER_TRUSTED_PROXIES: ${CAPPER_EDGE_SUBNET:-10.203.0.0/24},${CAPPER_EDGE_SUBNET6:-fd00:ca9e:203::/64}
+  # Загрузка архивов матчей (этап 2): час ночного обновления, адреса и первые годы архивов.
+  # Значения по умолчанию — те же, что в backend/app/core/config.py
+  CAPPER_DATA_UPDATE_HOUR_UTC: ${CAPPER_DATA_UPDATE_HOUR_UTC:-5}
+  CAPPER_SACKMANN_BASE_URL: "${CAPPER_SACKMANN_BASE_URL:-https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master}"
+  CAPPER_DATA_FIRST_YEAR: ${CAPPER_DATA_FIRST_YEAR:-2000}
+  CAPPER_TENNIS_DATA_BASE_URL: "${CAPPER_TENNIS_DATA_BASE_URL:-http://www.tennis-data.co.uk}"
+  CAPPER_TENNIS_DATA_FIRST_YEAR: ${CAPPER_TENNIS_DATA_FIRST_YEAR:-2013}
 
 x-backend: &backend
   build:

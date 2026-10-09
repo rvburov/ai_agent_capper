@@ -22,7 +22,7 @@
 ```
 
 - **caddy** — образ из `frontend/Dockerfile`: внутри собранный интерфейс и этот `Caddyfile`. Сертификат Let's Encrypt выпускает и продлевает сам.
-- **api** и **worker** — один образ из `backend/Dockerfile`. API — uvicorn, воркер — arq (`python -m app.workers.main`): ночная очистка сеансов и журнала входов, дальше — анализы и загрузка данных. Оба без root, файловая система только для чтения.
+- **api** и **worker** — один образ из `backend/Dockerfile`. API — uvicorn, воркер — arq (`python -m app.workers.main`): ночная очистка сеансов и журнала входов (03:15 UTC) и обновление данных о матчах (05:25 UTC, час — `CAPPER_DATA_UPDATE_HOUR_UTC`), дальше — анализы. Оба без root, файловая система только для чтения.
 - **postgres** 18 и **redis** 8 — только во внутренней сети docker, наружу не открыты. Данные — в томах `capper_postgres-data` и `capper_redis-data` (у Redis включен AOF).
 - **backup** — ночной `pg_dump`, шифрование age, выгрузка в S3, ежемесячная проверка восстановления.
 - Сеть `edge` (Caddy и API) отдельная: только от ее адресов API верит заголовку `X-Forwarded-For` с IP клиента. Без этого у всех был бы IP Caddy, и лимит попыток входа закрывал бы вход всем.
@@ -136,6 +136,25 @@ rm -rf /home/deploy/import
 
 Повторный запуск дублей не создает.
 
+### Данные о матчах
+
+Первый раз — все годы архивов (Сакманн с 2000 года, tennis-data.co.uk с 2013-го), привязка ставок старого бота к матчам архивов и пересчет Эло, несколько минут:
+
+```bash
+docker compose exec api python -m app.ingest.update --full
+```
+
+Дальше данные обновляет воркер каждую ночь (текущий год, в январе и прошлый). Час обновления, адреса и первые годы архивов задаются в `deploy/.env` (`CAPPER_DATA_UPDATE_HOUR_UTC` и другие, образец — [`.env.example`](.env.example)). Итог каждого шага — в таблице `ingestion_runs`. Если успешной загрузки архива (хотя бы один полученный файл) не было больше 3 дней, администраторы получают уведомление «Архив матчей давно не обновлялся».
+
+tennis-data.co.uk закрыт Cloudflare от программ и может ответить 403. Тогда скачайте файлы `ГОД.xlsx` в браузере со страницы http://www.tennis-data.co.uk/alldata.php, положите их на сервер, как файлы импорта выше (в `/home/deploy/tennis-data`), и загрузите из папки:
+
+```bash
+docker compose run --rm -v /home/deploy/tennis-data:/tennis-data:ro api \
+  python -m app.ingest.update --full --tennis-data-dir /tennis-data
+```
+
+Бэктест модели: `docker compose exec -T api python -m app.ml.backtest --report - > backtest-$(date +%F).md` — отчет в файл, короткий вывод на экран.
+
 ## 8. Бэкапы
 
 | Что | Когда (UTC) | Где |
@@ -225,6 +244,7 @@ bash deploy.sh
 | `docker compose up`: `Cannot read IPv6 setup for bridge` | В ядре нет IPv6. В `deploy/.env` — `CAPPER_EDGE_IPV6=false`, запись AAAA у домена удалить (раздел 2) |
 | Кончается диск | `df -h`, `docker system df`; `docker builder prune` и `docker image prune` |
 | Потерян доступ администратора | `create-admin`, `reset-code`, `reset-2fa`, `unblock` в `app.admin.cli` (раздел 6) |
+| Уведомление «Архив матчей давно не обновлялся» | `docker compose logs worker \| grep update_data` и последние строки `ingestion_runs` (колонка `error`). Запустить вручную — `docker compose exec api python -m app.ingest.update`. Ответ 403 от tennis-data — ручная загрузка (раздел 7, «Данные о матчах»). «В источнике … нет файлов: atp_matches_ГОД.csv» за прошлый год — архив Сакманна отстал больше чем на год (в январе ночное обновление берет и прошлый год). С февраля ночью грузится только текущий год, вручную — `--years` без этого года |
 
 После перезагрузки сервера сервисы поднимаются сами (`restart: unless-stopped`).
 
@@ -242,6 +262,20 @@ bash deploy/local.sh restore --list                # копии для восс�
 bash deploy/local.sh restore latest                # восстановить рабочую базу из копии
 bash deploy/local.sh down                          # остановить, данные сохраняются
 ```
+
+### Данные о матчах и бэктест
+
+```bash
+bash deploy/local.sh data --full                   # первый раз: все годы, привязка старого бота, Эло
+bash deploy/local.sh data                          # обновить текущий год (ночью это делает воркер)
+bash deploy/local.sh backtest                      # отчет — deploy/reports/backtest-<дата>.md
+```
+
+`data` печатает ход работы и итог по шагам: архив Сакманна, tennis-data.co.uk, привязка старого бота, Эло. По каждому — сколько создано, обновлено, пропущено и не сопоставлено и до какой даты дошел архив. Ошибка одного шага не останавливает остальные, но команда завершается с кодом 1. Несопоставленные строки — `bash deploy/local.sh cli players-unmatched`, слить дубль игрока — `players-merge`, запись-копию матча — `matches-merge` (`bash deploy/local.sh cli --help`).
+
+Если tennis-data.co.uk ответит 403 (сайт закрыт Cloudflare от программ), скачайте файлы `2013.xlsx` … `ГОД.xlsx` в браузере со страницы http://www.tennis-data.co.uk/alldata.php в одну папку и загрузите из нее: `bash deploy/local.sh data --full --tennis-data-dir ~/Downloads/tennis-data`. Так же из папки грузится и архив Сакманна (`--sackmann-dir`, файлы `atp_players.csv` и `atp_matches_ГОД.csv`). Папки передаются в контейнер целиком, в свою временную папку каждого запуска, и удаляются из него после загрузки.
+
+`backtest` пишет отчет Markdown в `deploy/reports/` (в git не попадает) и коротко печатает вывод: Эло против рынка без маржи на 2024–2025 годах, ROI по правилам стратегии, проверка приманкой. Результат сохраняется и в базе (`eval_runs`).
 
 `restore` останавливает api и воркер, восстанавливает копию (`restore.sh` перед этим снимает копию текущей базы в `manual/` и спрашивает подтверждение), применяет миграции и запускает сервисы снова. Команды `docker compose exec backup restore.sh ...` из раздела 8 рассчитаны на сервер (проект `capper`, файл `deploy/.env`), для локального стека — только через `local.sh`.
 

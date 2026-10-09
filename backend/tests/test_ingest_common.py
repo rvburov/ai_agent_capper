@@ -326,6 +326,7 @@ async def test_fetch_hides_login_and_password() -> None:
     assert seen[0].headers["Authorization"] == "Basic " + b64encode(b"reader:s3cret").decode()
     assert file is not None and file.url == "https://mirror.example.com/atp/good.csv"
     assert "https://mirror.example.com/atp/bad.csv" in info.value.message
+    assert info.value.status == 500
     retries = [entry for entry in logs if entry["event"] == "ingest.fetch_retry"]
     assert len(retries) == 3
     assert "s3cret" not in info.value.message + repr(logs)
@@ -344,9 +345,11 @@ async def test_fetch_client_error_is_not_retried() -> None:
         return httpx.Response(403)
 
     async with _source(handler) as source:
-        with pytest.raises(FetchError, match="403"):
+        with pytest.raises(FetchError, match="403") as info:
             await source.fetch("atp_players.csv")
     assert calls == 1
+    # Код ответа — отдельным полем: по нему tennis-data узнает закрытие Cloudflare
+    assert info.value.status == 403
 
 
 async def _chunks() -> AsyncIterator[bytes]:

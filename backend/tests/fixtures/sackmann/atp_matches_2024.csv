@@ -1,0 +1,11 @@
+tourney_id,tourney_name,surface,draw_size,tourney_level,tourney_date,match_num,winner_id,winner_seed,winner_entry,winner_name,winner_hand,winner_ht,winner_ioc,winner_age,loser_id,loser_seed,loser_entry,loser_name,loser_hand,loser_ht,loser_ioc,loser_age,score,best_of,round,minutes,w_ace,w_df,w_svpt,w_1stIn,w_1stWon,w_2ndWon,w_SvGms,w_bpSaved,w_bpFaced,l_ace,l_df,l_svpt,l_1stIn,l_1stWon,l_2ndWon,l_SvGms,l_bpSaved,l_bpFaced,winner_rank,winner_rank_points,loser_rank,loser_rank_points
+2024-580,Australian Open,Hard,128,G,20240115,100,206173,,,Jannik Sinner,R,188,ITA,25.1,106233,,,Dominic Thiem,R,190,AUT,27.3,6-4 7-5 6-3,5,R128,120,,,,,,,,,,,,,,,,,,,1,9000,10,3000
+2024-580,Australian Open,Hard,128,G,20240115,300,206173,,,Jannik Sinner,R,188,ITA,25.1,104925,,,Novak Djokovic,R,190,SRB,27.3,6-1 6-2 6-7(6) 6-3,5,SF,120,10,2,90,60,48,18,15,1,2,5,3,95,55,38,20,14,6,9,1,9000,10,3000
+2024-580,Australian Open,Hard,128,G,20240115,701,206173,,,Jannik Sinner,R,188,ITA,25.1,106421,,,Daniil Medvedev,R,190,RUS,27.3,3-6 3-6 6-4 6-4 6-3,5,F,120,x,2,90,60,48,18,15,1,2,5,3,95,55,38,20,14,6,9,1,9000,10,3000
+2024-339,Brisbane,Hard,32,A,20231231,300,105777,,,Grigor Dimitrov,R,188,BUL,25.1,208029,,,Holger Rune,R,190,DEN,27.3,7-6(5) 6-4,3,F,120,,,,,,,,,,,,,,,,,,,1,9000,10,3000
+2024-352,Paris Masters,Hard,48,M,20241028,300,100644,,,Alexander Zverev,R,188,GER,25.1,126203,,,Taylor Fritz,R,190,USA,27.3,6-2 6-2,3,F,120,,,,,,,,,,,,,,,,,,,1,9000,10,3000
+2024-352,Paris Masters,Hard,48,M,20241028,299,126094,,,Andrey Rublev,R,188,RUS,25.1,106421,,,Daniil Medvedev,R,190,RUS,27.3,,3,SF,120,,,,,,,,,,,,,,,,,,,1,9000,10,3000
+2024-352,Paris Masters,Hard,48,M,20241028,300,100644,,,Alexander Zverev,R,188,GER,25.1,208029,,,Holger Rune,R,190,DEN,27.3,6-3 6-3,3,SF,120,,,,,,,,,,,,,,,,,,,1,9000,10,3000
+2024-352,Paris Masters,Hard,48,M,20241028,298,100644,,,Alexander Zverev,R,188,GER,25.1,100644,,,Alexander Zverev,R,190,GER,27.3,6-1 6-1,3,SF,120,,,,,,,,,,,,,,,,,,,1,9000,10,3000
+2024-C-001,Some Challenger,Clay,32,C,20240506,1,207989,,,Carlos Alcaraz,R,188,ESP,25.1,208029,,,Holger Rune,R,190,DEN,27.3,6-1 6-1,3,R32,120,,,,,,,,,,,,,,,,,,,1,9000,10,3000
+2024-352,Paris Masters,Hard,48,M,20241028,297,999777,,,,,188,,25.1,126203,,,Taylor Fritz,R,190,USA,27.3,6-4 6-4,3,R32,120,,,,,,,,,,,,,,,,,,,1,9000,10,3000

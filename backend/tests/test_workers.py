@@ -1,38 +1,64 @@
-"""Воркер arq: ночная очистка сеансов, доверенных устройств и журнала входов, настройки
-воркера, запуск задачи через настоящую очередь, ключи arq с префиксом CAPPER_REDIS_PREFIX
-и проверка здоровья для healthcheck."""
+"""Воркер arq: ночная очистка сеансов, доверенных устройств и журнала входов, ночное
+обновление данных и уведомление data_stale, настройки воркера, запуск задачи через
+настоящую очередь, ключи arq с префиксом CAPPER_REDIS_PREFIX и проверка здоровья для
+healthcheck."""
 
 import asyncio
 import inspect
 import os
+import shutil
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import arq.connections
 import arq.constants
 import arq.cron
 import arq.jobs
 import arq.worker
+import httpx
+import pytest
 from arq.jobs import Job, JobStatus
 from arq.worker import async_check_health, create_worker
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.security.tokens import hash_token, new_token
-from app.db.models import AccessCode, LoginEvent, TrustedDevice, UserSession
+from app.db.models import (
+    AccessCode,
+    IngestionRun,
+    LoginEvent,
+    Notification,
+    PlayerRating,
+    TrustedDevice,
+    UserSession,
+)
 from app.db.session import create_sessionmaker
+from app.ingest import update
 from app.services.sessions import create_session, get_active_session
-from app.workers.jobs import LOGIN_EVENTS_RETENTION, cleanup_auth_data, cleanup_auth_records
+from app.workers import jobs
+from app.workers.jobs import (
+    LOGIN_EVENTS_RETENTION,
+    STALE_AFTER,
+    cleanup_auth_data,
+    cleanup_auth_records,
+    notify_stale_data,
+    update_data,
+)
 from app.workers.main import (
     CLEANUP_HOUR_UTC,
     CLEANUP_MINUTE,
+    DATA_UPDATE_MINUTE,
     WorkerSettings,
     apply_redis_prefix,
     create_queue_pool,
 )
 from tests.support import BACKEND_DIR, UserFactory
+from tests.test_ingest_tennis_data import write_year
+from tests.test_ingest_update import FIXTURES, rows_2024
 
 NOW = datetime(2026, 10, 8, 3, 15, tzinfo=UTC)
 
@@ -189,11 +215,20 @@ async def test_cleanup_job_uses_sessionmaker_from_context(
 
 def test_worker_settings(settings: Settings) -> None:
     assert WorkerSettings.queue_name == f"{settings.redis_prefix}arq:queue"
-    assert WorkerSettings.functions == (cleanup_auth_records,)
+    assert WorkerSettings.functions == (cleanup_auth_records, update_data)
     assert WorkerSettings.cron_jobs is not None
-    (job,) = WorkerSettings.cron_jobs
-    assert job.coroutine is cleanup_auth_records
-    assert (job.hour, job.minute, job.second) == (CLEANUP_HOUR_UTC, CLEANUP_MINUTE, 0)
+    cleanup, data = WorkerSettings.cron_jobs
+    assert cleanup.coroutine is cleanup_auth_records
+    assert (cleanup.hour, cleanup.minute, cleanup.second) == (CLEANUP_HOUR_UTC, CLEANUP_MINUTE, 0)
+    # Обновление данных — раз в сутки в час из настроек, минута не нулевая
+    assert data.coroutine is update_data
+    assert (data.hour, data.minute, data.second) == (
+        settings.data_update_hour_utc,
+        DATA_UPDATE_MINUTE,
+        0,
+    )
+    assert DATA_UPDATE_MINUTE != 0 and data.max_tries == 1
+    assert data.timeout_s is not None and data.timeout_s >= 1800
     assert WorkerSettings.timezone is UTC
     redis_url = settings.redis_url.removeprefix("redis://")
     assert redis_url.startswith(
@@ -322,3 +357,165 @@ async def test_worker_runs_queued_job_and_reports_health(
         await pool.aclose()
 
     assert (await db.execute(select(func.count()).select_from(LoginEvent))).scalar_one() == 0
+
+
+# --- ночное обновление данных и data_stale ---
+
+
+def _load(
+    source: str, finished: datetime | None, status: str = "ok", *, files: bool = True
+) -> IngestionRun:
+    return IngestionRun(
+        source=source,
+        status=status,
+        started_at=(finished or datetime.now(UTC)) - timedelta(minutes=1),
+        finished_at=finished,
+        details={"files": {"2026/2026.xlsx": "0" * 64} if files else {}, "counts": {}},
+    )
+
+
+async def _stale_notes(db: AsyncSession) -> list[Notification]:
+    db.expunge_all()
+    rows = await db.scalars(
+        select(Notification).where(Notification.kind == "data_stale").order_by(Notification.id)
+    )
+    return list(rows)
+
+
+async def test_data_stale_goes_to_active_admins_once_a_day(
+    db: AsyncSession, make_user: UserFactory
+) -> None:
+    admin = await make_user(role="admin")
+    other_admin = await make_user(role="admin")
+    await make_user(role="admin", status="blocked")
+    await make_user()
+    now = datetime.now(UTC)
+    old_load = now - STALE_AFTER - timedelta(hours=1)
+    db.add_all(
+        [
+            _load("sackmann", old_load),
+            # Неудачный запуск свежее, но он не считается
+            _load("sackmann", now - timedelta(hours=2), status="failed"),
+            _load("tennis_data", now - timedelta(days=1)),
+            # Эло и привязка старого бота не проверяются
+            _load("elo", now),
+        ]
+    )
+    await db.commit()
+
+    sent = await notify_stale_data(db, now=now)
+
+    assert sent == [admin.id, other_admin.id]
+    notes = await _stale_notes(db)
+    assert [note.user_id for note in notes] == [admin.id, other_admin.id]
+    note = notes[0]
+    assert note.title == "Архив матчей давно не обновлялся"
+    assert f"архив Сакманна — {old_load.strftime('%Y-%m-%d %H:%M')}" in note.body
+    assert "Больше 3 дней без обновления" in note.body
+    assert note.params["days"] == "3"
+
+    # Повтор в те же сутки — без нового уведомления
+    assert await notify_stale_data(db, now=now + timedelta(hours=1)) == []
+    # Через сутки (точнее, через 23 часа: запуск мог сдвинуться на секунды) — снова
+    await db.execute(
+        text("UPDATE notifications SET created_at = :at WHERE kind = 'data_stale'"),
+        {"at": now - jobs.STALE_NOTIFY_EVERY - timedelta(minutes=1)},
+    )
+    await db.commit()
+    assert await notify_stale_data(db, now=now) == [admin.id, other_admin.id]
+    assert len(await _stale_notes(db)) == 4
+
+
+async def test_data_stale_when_fresh_or_never_loaded(
+    db: AsyncSession, make_user: UserFactory
+) -> None:
+    admin = await make_user(role="admin")
+    now = datetime.now(UTC)
+    db.add_all([_load("sackmann", now - timedelta(days=2)), _load("tennis_data", now)])
+    await db.commit()
+    assert await notify_stale_data(db, now=now) == []
+
+    # tennis-data не загружался ни разу (например, всегда 403): это тоже старые данные
+    await db.execute(text("DELETE FROM ingestion_runs WHERE source = 'tennis_data'"))
+    await db.commit()
+    assert await notify_stale_data(db, now=now) == [admin.id]
+    (note,) = await _stale_notes(db)
+    assert "tennis-data.co.uk — —" in note.body
+
+
+async def test_data_stale_ignores_runs_without_files(
+    db: AsyncSession, make_user: UserFactory
+) -> None:
+    """Запуск «ok», который не получил ни одного файла (источник отвечает 404 на файл
+    текущего года, папка пустая), данные не обновил: свежим он не считается."""
+    admin = await make_user(role="admin")
+    now = datetime.now(UTC)
+    db.add_all(
+        [
+            _load("sackmann", now),
+            _load("tennis_data", now - STALE_AFTER - timedelta(hours=1)),
+            _load("tennis_data", now, files=False),
+        ]
+    )
+    await db.commit()
+    assert await notify_stale_data(db, now=now) == [admin.id]
+
+
+async def test_update_data_job_runs_all_steps_and_checks_freshness(
+    engine: AsyncEngine,
+    db: AsyncSession,
+    make_user: UserFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Задача воркера: те же шаги, что команда update без --full (здесь — из папок, без
+    сети), потом проверка свежести: все загрузки свежие, уведомлений нет."""
+    admin = await make_user(role="admin")
+    sackmann_dir = tmp_path / "sackmann"
+    shutil.copytree(FIXTURES, sackmann_dir)
+    tennis_dir = tmp_path / "tennis-data"
+    write_year(tennis_dir, 2024, rows_2024())
+    seen: dict[str, Any] = {}
+
+    async def fake_run_update(**kwargs: Any) -> update.UpdateResult:
+        seen.update(kwargs)
+        return await update.run_update(
+            **kwargs, years=[2023, 2024], sackmann_dir=sackmann_dir, tennis_data_dir=tennis_dir
+        )
+
+    monkeypatch.setattr(jobs, "run_update", fake_run_update)
+    sessionmaker = create_sessionmaker(engine)
+
+    summary = await update_data({"sessionmaker": sessionmaker})
+
+    # Задача сама не задает ни годов, ни папок: без --full, источники по HTTP из настроек
+    assert seen == {"db_factory": sessionmaker}
+    assert summary == {
+        "ok": True,
+        "busy": False,
+        "steps": {"sackmann": "ok", "tennis_data": "ok", "players_link": "ok", "elo": "ok"},
+        "data_stale_notified": 0,
+    }
+    assert (await db.scalar(select(func.count()).select_from(PlayerRating)) or 0) > 0
+    assert await _stale_notes(db) == []
+
+    # Сакманн упал (нет справочника по HTTP): загрузка устарела на 4 дня — уведомление
+    await db.execute(
+        text("UPDATE ingestion_runs SET finished_at = :at WHERE source = 'sackmann'"),
+        {"at": datetime.now(UTC) - timedelta(days=4)},
+    )
+    await db.commit()
+
+    async def failing_sackmann(**kwargs: Any) -> update.UpdateResult:
+        transport = httpx.MockTransport(lambda request: httpx.Response(404))
+        return await update.run_update(
+            **kwargs, years=[2024], tennis_data_dir=tennis_dir, transport=transport
+        )
+
+    monkeypatch.setattr(jobs, "run_update", failing_sackmann)
+    summary = await update_data({"sessionmaker": sessionmaker})
+    assert summary["ok"] is False
+    assert summary["steps"]["sackmann"] == "failed"
+    assert summary["data_stale_notified"] == 1
+    (note,) = await _stale_notes(db)
+    assert note.user_id == admin.id

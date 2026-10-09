@@ -13,7 +13,9 @@
 очередь — только через create_queue_pool() отсюда.
 
 Время в расписании — UTC. Ночная очистка в 03:15 UTC: после бэкапа (01:30 UTC,
-deploy/backup/crontab) и до утра в Европе.
+deploy/backup/crontab) и до утра в Европе. Обновление данных — в час
+CAPPER_DATA_UPDATE_HOUR_UTC (по умолчанию 5) и 25 минут: после очистки и до утра в
+Европе. Минуты не нулевые: в начале часа запускается больше всего чужих задач.
 """
 
 import argparse
@@ -35,13 +37,17 @@ from arq.worker import Function, check_health, run_worker
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.db.session import create_engine, create_sessionmaker
-from app.workers.jobs import cleanup_auth_records
+from app.workers.jobs import cleanup_auth_records, update_data
 
 # Как часто воркер отмечается в Redis (ключ живет на секунду дольше). Healthcheck
 # контейнера раз в 30 с, поэтому живой воркер всегда успевает отметиться
 HEALTH_CHECK_INTERVAL_SECONDS = 60
 CLEANUP_HOUR_UTC = 3
 CLEANUP_MINUTE = 15
+DATA_UPDATE_MINUTE = 25
+# Ночное обновление идет секунды-минуты (только текущий год), но пересчет Эло по всей
+# истории и медленный источник не должны обрываться на общем пределе задачи
+DATA_UPDATE_TIMEOUT_SECONDS = 3600
 
 
 # Имена ключей arq. В arq 0.28 они — константы модулей (arq.constants), настройки
@@ -137,7 +143,7 @@ async def shutdown(ctx: dict[Any, Any]) -> None:
 class WorkerSettings:
     """Настройки воркера для arq (arq читает атрибуты класса)."""
 
-    functions: Sequence[WorkerCoroutine | Function] = (cleanup_auth_records,)
+    functions: Sequence[WorkerCoroutine | Function] = (cleanup_auth_records, update_data)
     cron_jobs: Sequence[CronJob] | None = (
         cron(
             cleanup_auth_records,
@@ -146,6 +152,15 @@ class WorkerSettings:
             # Повтор той же ночью не нужен: следующая очистка — через сутки
             max_tries=1,
             timeout=600,
+        ),
+        cron(
+            update_data,
+            hour=get_settings().data_update_hour_utc,
+            minute=DATA_UPDATE_MINUTE,
+            # Шаг с ошибкой уже записан в ingestion_runs, повтор — следующей ночью;
+            # о давно не обновленных данных администраторам скажет data_stale
+            max_tries=1,
+            timeout=DATA_UPDATE_TIMEOUT_SECONDS,
         ),
     )
     on_startup: StartupShutdown | None = startup

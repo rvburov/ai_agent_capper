@@ -10,7 +10,8 @@
   command(имя, "ключ") → cli.help.<ключ>, _tr("ключ") → ingest.legacy.<ключ>,
   ImportFailure("ключ") → ingest.legacy.errors.<ключ>, note_key="ключ" → ingest.legacy.note.<ключ>;
 - полный ключ первым аргументом: IngestError("ключ"), FetchError("ключ") и
-  report.add_warning("ключ") загрузчиков данных (app/ingest/runs.py);
+  report.add_warning("ключ") загрузчиков данных (app/ingest/runs.py); вторым —
+  PlayerError(статус, "ключ") команд игроков (app/services/players.py);
 - notify(kind="вид", variant="вариант") → notifications.<вид>[.<вариант>].title и .body.
 Ключи, собранные из переменной (f"status.{x}"), проверяются по перечислениям Literal.
 """
@@ -50,6 +51,8 @@ PREFIXED_CALLS = {
     "add_warning": "",
 }
 ERROR_CODE_CALLS = {"AppError", "error_response"}
+# Полный ключ вторым аргументом (первый — статус HTTP): PlayerError(409, "players.errors.x")
+SECOND_ARG_CALLS = {"PlayerError": ""}
 ERROR_CODE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 
 
@@ -115,6 +118,8 @@ class _KeyCollector(ast.NodeVisitor):
             self._add(first, PREFIXED_CALLS[name])
         if name in ERROR_CODE_CALLS and len(call.args) > 1:
             self._add(call.args[1], "errors.")
+        if name in SECOND_ARG_CALLS and len(call.args) > 1:
+            self._add(call.args[1], SECOND_ARG_CALLS[name])
         func = call.func
         if (
             isinstance(func, ast.Attribute)
@@ -212,6 +217,7 @@ def test_collector_finds_keys_of_every_kind() -> None:
         "config.secret_key_required",
         "devices.unknown",
         "users.deleted",
+        "players.errors.merge_same",
     ):
         assert expected in found, expected
 

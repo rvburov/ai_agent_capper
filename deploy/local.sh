@@ -6,6 +6,13 @@
 #   bash deploy/local.sh cli КОМАНДА ...    любая команда терминала: reset-code, reset-2fa, ...
 #   bash deploy/local.sh import EMAIL ФАЙЛ [ПАПКА_ИГРОКОВ] [--dry-run]
 #                                           импорт истории старого бота
+#   bash deploy/local.sh data [--full] [--years ГОДЫ] [--sackmann-dir ПАПКА]
+#                             [--tennis-data-dir ПАПКА] [--skip-elo]
+#                                           архивы матчей и кэфов, привязка старого бота, Эло;
+#                                           первый раз — с --full. tennis-data.co.uk закрыт от
+#                                           программ: файлы ГОД.xlsx скачать в браузере в папку
+#   bash deploy/local.sh backtest [--test-years 2024,2025]
+#                                           бэктест модели: отчет в deploy/reports/backtest-ДАТА.md
 #   bash deploy/local.sh backup             ночной бэкап вручную и проверка восстановления
 #   bash deploy/local.sh restore latest | --list | <вид>/<файл>
 #                                           восстановить рабочую базу из копии
@@ -138,6 +145,55 @@ cmd_import() {
   dc exec -T api rm -rf /tmp/import
 }
 
+# Папка запуска data в контейнере: у каждого запуска своя, чтобы второй запуск (например,
+# повтор в другом окне) не удалил и не подменил файлы первого
+DATA_TMP=""
+
+data_cleanup() {
+  [[ -n "$DATA_TMP" ]] && dc exec -T api rm -rf "$DATA_TMP" >/dev/null 2>&1 || true
+}
+
+cmd_data() {
+  local args=() name
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --full|--skip-elo) args+=("$1"); shift ;;
+      --years)
+        [[ $# -ge 2 ]] || die "укажите годы: --years 2025 или --years 2020-2026"
+        args+=(--years "$2"); shift 2 ;;
+      --sackmann-dir|--tennis-data-dir)
+        [[ $# -ge 2 ]] || die "укажите папку: $1 ПАПКА"
+        [[ -d "$2" ]] || die "нет папки $2"
+        if [[ -z "$DATA_TMP" ]]; then
+          # /tmp контейнера — tmpfs, docker cp туда не пишет: папки передаются через tar
+          DATA_TMP="$(dc exec -T api mktemp -d /tmp/data.XXXXXX)"
+          [[ "$DATA_TMP" == /tmp/data.* ]] || die "не удалось создать временную папку в контейнере api"
+          trap data_cleanup EXIT
+        fi
+        name="${1#--}"; name="${name%-dir}"
+        dc exec -T api mkdir -p "$DATA_TMP/$name"
+        # COPYFILE_DISABLE: tar на macOS не добавляет служебные файлы ._*
+        COPYFILE_DISABLE=1 tar -C "$2" -cf - . | dc exec -T api tar -C "$DATA_TMP/$name" -xf -
+        args+=("$1" "$DATA_TMP/$name"); shift 2 ;;
+      *) die "неизвестный ключ $1. Справка: bash deploy/local.sh" ;;
+    esac
+  done
+  dc exec -T api python -m app.ingest.update ${args[@]+"${args[@]}"}
+}
+
+cmd_backtest() {
+  local report
+  report="$DEPLOY_DIR/reports/backtest-$(date +%F).md"
+  mkdir -p "$DEPLOY_DIR/reports"
+  # Отчет целиком идет в stdout — в файл на этом компьютере, короткий вывод — на экран
+  if ! dc exec -T api python -m app.ml.backtest --report - "$@" > "$report.tmp"; then
+    rm -f "$report.tmp"
+    die "бэктест не выполнен, причина — в выводе выше"
+  fi
+  mv "$report.tmp" "$report"
+  printf '\nОтчет: %s\n' "$report"
+}
+
 cmd_backup() {
   dc exec backup backup.sh
   dc exec backup restore-check.sh
@@ -173,11 +229,13 @@ case "${1:-}" in
   admin) shift; cmd_admin "$@" ;;
   cli) shift; dc exec api python -m app.admin.cli "$@" ;;
   import) shift; cmd_import "$@" ;;
+  data) shift; cmd_data "$@" ;;
+  backtest) shift; cmd_backtest "$@" ;;
   backup) cmd_backup ;;
   restore) shift; cmd_restore "$@" ;;
   status) dc ps ;;
   logs) shift; dc logs -f --tail 200 "$@" ;;
   down) dc down ;;
   wipe) cmd_wipe ;;
-  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
