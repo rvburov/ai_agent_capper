@@ -50,6 +50,9 @@ AuditAction = Literal[
     "confirm_failed",
     "player_merge",
     "player_edit",
+    "ai_mode_change",
+    "budget_change",
+    "agent_config_change",
 ]
 
 

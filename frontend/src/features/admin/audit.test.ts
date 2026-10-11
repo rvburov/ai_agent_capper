@@ -19,6 +19,7 @@ describe('журнал действий', () => {
       block: true, unblock: true, delete: true, role_change: true, sessions_revoke: true,
       limit_change: true, key_change: true, currency_change: true, create_admin: true, import: true,
       message: true, confirm_failed: true, player_merge: true, player_edit: true,
+      ai_mode_change: true, budget_change: true, agent_config_change: true,
     };
     for (const action of Object.keys(all)) {
       expect(grouped.filter((a) => a === action)).toHaveLength(1);

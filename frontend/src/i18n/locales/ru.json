@@ -796,7 +796,10 @@
         "message": "Сообщение участникам",
         "confirm_failed": "Неверный код 2FA при подтверждении",
         "player_merge": "Игроки объединены",
-        "player_edit": "Изменен игрок"
+        "player_edit": "Изменен игрок",
+        "ai_mode_change": "Изменен режим ключа Claude",
+        "budget_change": "Изменен бюджет на ИИ",
+        "agent_config_change": "Изменены настройки агента"
       },
       "details": {
         "invite": "{{role}}, {{key}}",

@@ -1,7 +1,7 @@
 """Все модели SQLAlchemy. Импорт этого пакета регистрирует таблицы в Base.metadata
 (его читают Alembic и тесты). Файлы по разделам: auth, admin, ai, tennis, betting, learning."""
 
-from app.db.models.admin import AUDIT_ACTIONS, AdminAuditLog, AppSettings
+from app.db.models.admin import AUDIT_ACTIONS, BUDGET_ALERT_PCTS, AdminAuditLog, AppSettings
 from app.db.models.ai import AGENT_RUN_KINDS, KEY_SOURCES, AgentRun, AiLimit, ModelPrice, UserSecret
 from app.db.models.auth import (
     ACCESS_CODE_KINDS,
@@ -22,6 +22,9 @@ from app.db.models.auth import (
     UserSession,
 )
 from app.db.models.betting import (
+    ANALYSIS_ACTIVE_STATUSES,
+    ANALYSIS_DECISIONS,
+    ANALYSIS_INPUT_KINDS,
     ANALYSIS_STATUSES,
     BET_SOURCES,
     BET_STATUSES,
@@ -39,12 +42,14 @@ from app.db.models.learning import EvalRun, Lesson, MlModel
 from app.db.models.tennis import (
     MATCH_SOURCES,
     MATCH_STATUSES,
+    NEWS_KINDS,
     ODDS_KINDS,
     SURFACES,
     TOURNAMENT_SOURCES,
     Dossier,
     IngestionRun,
     Match,
+    MatchAssessment,
     MatchStat,
     OddsSnapshot,
     Player,
@@ -58,10 +63,14 @@ __all__ = [
     "ACCESS_CODE_KINDS",
     "AGENT_RUN_KINDS",
     "AI_MODES",
+    "ANALYSIS_ACTIVE_STATUSES",
+    "ANALYSIS_DECISIONS",
+    "ANALYSIS_INPUT_KINDS",
     "ANALYSIS_STATUSES",
     "AUDIT_ACTIONS",
     "BET_SOURCES",
     "BET_STATUSES",
+    "BUDGET_ALERT_PCTS",
     "DEFAULT_TZ",
     "KEY_SOURCES",
     "LEDGER_KINDS",
@@ -70,6 +79,7 @@ __all__ = [
     "LOGIN_RESULTS",
     "MATCH_SOURCES",
     "MATCH_STATUSES",
+    "NEWS_KINDS",
     "NOTIFICATION_KINDS",
     "ODDS_KINDS",
     "ROLES",
@@ -92,6 +102,7 @@ __all__ = [
     "Lesson",
     "LoginEvent",
     "Match",
+    "MatchAssessment",
     "MatchStat",
     "MlModel",
     "ModelPrice",

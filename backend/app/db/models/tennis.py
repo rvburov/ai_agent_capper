@@ -34,13 +34,17 @@ SURFACES = ("hard", "clay", "grass", "carpet")
 RATING_SURFACES = (*SURFACES, "all")
 HANDS = ("R", "L", "A", "U")
 BACKHANDS = ("one", "two")
-NEWS_KINDS = ("injury", "withdrawal", "motivation", "other")
+# result — свежий результат матча из веб-поиска: в matches не пишется, чтобы Эло не
+# посчитало матч дважды, когда его загрузит tennis-data (подробности — в details)
+NEWS_KINDS = ("injury", "withdrawal", "motivation", "other", "result")
 MATCH_STATUSES = ("scheduled", "finished", "retired", "walkover")
-MATCH_SOURCES = ("sackmann", "tennis_data", "api", "web", "legacy")
+# user — матч из ввода участника (этап 3), source_ref детерминированный
+MATCH_SOURCES = ("sackmann", "tennis_data", "api", "web", "legacy", "user")
 # archive — кэф из архива (tennis-data.co.uk): когда снят, неизвестно, поэтому не closing
 ODDS_KINDS = ("user", "opening", "closing", "api", "archive")
-# legacy — турниры из импорта старого бота (этап 1), source_ref у них пустой
-TOURNAMENT_SOURCES = ("sackmann", "tennis_data", "legacy")
+# legacy — турниры из импорта старого бота (этап 1), source_ref у них пустой;
+# user — турнир из ввода участника (этап 3)
+TOURNAMENT_SOURCES = ("sackmann", "tennis_data", "legacy", "user")
 INGESTION_STATUSES = ("running", "ok", "failed")
 
 
@@ -77,6 +81,9 @@ class Player(CreatedAtMixin, UpdatedAtMixin, Base):
     birth_date: Mapped[date | None]
     sackmann_id: Mapped[int | None] = mapped_column(unique=True)
     provider_id: Mapped[str | None] = mapped_column(String(64))
+    # Когда новости игрока последний раз искали (с находками или без): по нему шаг
+    # новостей не повторяет платный поиск раньше news_ttl_hours
+    news_checked_at: Mapped[datetime | None]
 
 
 class PlayerProfile(Base):
@@ -109,7 +116,9 @@ class PlayerRating(Base):
 
 
 class PlayerNews(Base):
-    """Новость об игроке (травма, снятие, мотивация): общий кэш новостей для всех."""
+    """Новость об игроке (травма, снятие, мотивация, свежий результат): общий кэш новостей
+    для всех. agent_run_id — вызов Claude, который ее нашел; details — подробности
+    результата (соперник, счет, турнир, дата)."""
 
     __tablename__ = "player_news"
     __table_args__ = (
@@ -125,6 +134,10 @@ class PlayerNews(Base):
     source_url: Mapped[str]
     source_name: Mapped[str | None] = mapped_column(String(200))
     fetched_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    agent_run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
+    details: Mapped[dict[str, Any] | None]
 
 
 class Tournament(CreatedAtMixin, Base):
@@ -162,7 +175,7 @@ class Match(CreatedAtMixin, UpdatedAtMixin, Base):
 
     Повторная загрузка не должна плодить копии матча. Матч с турниром узнается по
     UNIQUE(tournament_id, round, player1_id, player2_id). У матча без турнира (только
-    legacy и web) этот ключ не работает: NULL в PostgreSQL не равны друг другу. Поэтому
+    legacy, web и user) этот ключ не работает: NULL в PostgreSQL не равны друг другу. Поэтому
     у него обязателен source_ref — id записи в источнике, по нему действует
     UNIQUE(source, source_ref) и ON CONFLICT загрузчика. Примеры source_ref: legacy —
     id события старого бота, sackmann — tourney_id-match_num.
@@ -185,7 +198,8 @@ class Match(CreatedAtMixin, UpdatedAtMixin, Base):
         check_in("best_of", (3, 5), "best_of"),
         check_in("source", MATCH_SOURCES, "source"),
         CheckConstraint(
-            "tournament_id IS NOT NULL OR (source IN ('legacy', 'web') AND source_ref IS NOT NULL)",
+            "tournament_id IS NOT NULL"
+            " OR (source IN ('legacy', 'web', 'user') AND source_ref IS NOT NULL)",
             name="tournament_or_source_ref",
         ),
     )
@@ -282,6 +296,37 @@ class Dossier(CreatedAtMixin, Base):
     sha256: Mapped[Hash64] = mapped_column(unique=True)
     feature_set: Mapped[str] = mapped_column(String(32))
     news_version: Mapped[str | None] = mapped_column(String(64))
+
+
+class MatchAssessment(CreatedAtMixin, Base):
+    """Проверенная кодом оценка матча от Claude по одному досье. Общая для всех: в досье нет
+    кэфов, банка и других личных данных. Свежая оценка с тем же ключом (досье, модель,
+    effort, версия промпта и схемы) используется повторно без вызова Claude."""
+
+    __tablename__ = "match_assessments"
+    __table_args__ = (
+        UniqueConstraint(
+            "dossier_id",
+            "model",
+            "effort",
+            "prompt_version",
+            "schema_version",
+            name="uq_match_assessments_key",
+        ),
+    )
+
+    id: Mapped[BigIntPK]
+    dossier_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("dossiers.id", ondelete="CASCADE")
+    )
+    model: Mapped[str] = mapped_column(String(64))
+    effort: Mapped[str] = mapped_column(String(16))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    schema_version: Mapped[str] = mapped_column(String(32))
+    output: Mapped[dict[str, Any]]
+    agent_run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
 
 
 class IngestionRun(Base):

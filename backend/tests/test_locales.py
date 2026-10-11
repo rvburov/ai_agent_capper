@@ -5,7 +5,8 @@
 разбором AST:
 - t("ключ") и строковые литералы с префиксом раздела локали ("cli.role_done");
 - коды ошибок: AppError(статус, "код"), error_response(статус, "код"), code="код",
-  значения _HTTP_CODES и код по умолчанию в _HTTP_CODES.get — это ключи errors.<код>;
+  ClaudeStepError("код"), значения _HTTP_CODES и код по умолчанию в _HTTP_CODES.get —
+  это ключи errors.<код>;
 - помощники с префиксом: CliError("ключ") и _ask_secret("ключ") → cli.<ключ>,
   command(имя, "ключ") → cli.help.<ключ>, _tr("ключ") → ingest.legacy.<ключ>,
   ImportFailure("ключ") → ingest.legacy.errors.<ключ>, note_key="ключ" → ingest.legacy.note.<ключ>;
@@ -49,6 +50,8 @@ PREFIXED_CALLS = {
     "IngestError": "",
     "FetchError": "",
     "add_warning": "",
+    # Сбой шага Claude: код — ключ errors.<код> (app/agent/errors.py)
+    "ClaudeStepError": "errors.",
 }
 ERROR_CODE_CALLS = {"AppError", "error_response"}
 # Полный ключ вторым аргументом (первый — статус HTTP): PlayerError(409, "players.errors.x")

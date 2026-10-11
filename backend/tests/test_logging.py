@@ -147,3 +147,44 @@ def test_sql_parameters_in_db_errors_are_hidden() -> None:
     assert "UPDATE users SET password_hash" in rendered
     assert f"[parameters: {REDACTED}]" in rendered
     assert create_engine("postgresql+asyncpg://u:p@localhost/db").sync_engine.hide_parameters
+
+
+def test_claude_usage_fields_are_logged_but_keys_are_not() -> None:
+    """Счетчики токенов и источник ключа в логах расхода видны, сам ключ — нет."""
+    event = {
+        "event": "agent.call",
+        "input_tokens": 1200,
+        "output_tokens": 340,
+        "cache_read_tokens": 25000,
+        "cache_write_tokens": 16500,
+        "cache_write_5m_tokens": 16500,
+        "cache_write_1h_tokens": 0,
+        "cache_read_input_tokens": 25000,
+        "cache_creation_input_tokens": 16500,
+        "thinking_tokens": 200,
+        "max_tokens": 16000,
+        "key_source": "own",
+        "api_key": "sk-ant-api03-SECRETKEY",
+        "x_api_key": "sk-ant-api03-SECRETKEY",
+        "key": "sk-ant-api03-SECRETKEY",
+        "detail": "401 for key sk-ant-api03-SECRETKEY",
+    }
+    out = redact_secrets(None, "info", dict(event))
+    for name in (
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "cache_write_5m_tokens",
+        "cache_write_1h_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "thinking_tokens",
+        "max_tokens",
+        "key_source",
+    ):
+        assert out[name] == event[name], name
+    assert out["api_key"] == out["x_api_key"] == out["key"] == REDACTED
+    assert "SECRETKEY" not in json.dumps(out, ensure_ascii=False)
+    # Другие поля со словом tokens по-прежнему скрыты
+    assert redact_secrets(None, "info", {"session_tokens": "abc"})["session_tokens"] == REDACTED

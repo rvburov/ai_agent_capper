@@ -98,7 +98,9 @@ python -m app.workers.main              # фоновые задачи arq и р�
 python -m app.db.migrate                # alembic upgrade head, как сервис migrate в compose
 ```
 
-Игроки: `players-find`, `players-merge --from ID --into ID [--yes]`, `players-edit ID [--name-ru] [--add-alias] [--remove-alias]`, `players-link-legacy [--dry-run]`, `players-unmatched`, а для записей-копий одного матча — `matches-merge --from ID --into ID [--yes]` (`python -m app.admin.cli <команда> --help`). Слияние и правка игроков пишут в журнал действий `player_merge` и `player_edit`. После слияния игроков копии матчей tennis-data, которые у игрока совпали с матчами Сакманна (та же пара в окне турнира), сливаются в матчи Сакманна сами; неоднозначные команда показывает — их сливают `matches-merge`.
+Игроки: `players-find`, `players-merge --from ID --into ID [--yes]`, `players-edit ID [--name-ru] [--add-alias] [--remove-alias]`, `players-link-legacy [--dry-run]`, `players-unmatched`, а для записей-копий одного матча — `matches-merge --from ID --into ID [--yes]` (`python -m app.admin.cli <команда> --help`). Слияние и правка игроков пишут в журнал действий `player_merge` и `player_edit`.
+
+Агент: `agent-config` показывает настройки агента (модели, effort, лимиты токенов, новости), `agent-config --set ИМЯ=ЗНАЧЕНИЕ [--set ...] [--reset ИМЯ ...]` меняет их поверх значений по умолчанию и пишет в журнал действий `agent_config_change`; `prices` показывает цены моделей Claude ($ за 1 млн токенов). После слияния игроков копии матчей tennis-data, которые у игрока совпали с матчами Сакманна (та же пара в окне турнира), сливаются в матчи Сакманна сами; неоднозначные команда показывает — их сливают `matches-merge`.
 
 Расписание воркера (UTC): 03:15 — очистка сеансов, доверенных устройств и журнала входов; 05:25 (час — `CAPPER_DATA_UPDATE_HOUR_UTC`) — `update_data`: те же шаги, что `python -m app.ingest.update` без `--full`, затем проверка свежести. Если успешной загрузки Сакманна или tennis-data не было больше 3 дней, активные администраторы получают уведомление `data_stale`, не чаще раза в сутки.
 
@@ -152,6 +154,8 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 | `services/players.py` | поиск, слияние и правка игроков, слияние матчей |
 | `ml/elo.py`, `ml/market.py`, `ml/metrics.py` | Эло по покрытиям, снятие маржи, лог-лосс, Brier, ECE, бутстрэп |
 | `ml/backtest.py`, `ml/report.py` | бэктест и отчет Markdown |
+| `ml/sets.py`, `ml/strategy.py` | модель сетов (форы ±1.5), правила стратегии v3: валуй, экспресс, сумма ставки, поправка Claude (Р22) |
+| `services/dossier.py`, `services/bank.py` | досье матча для Claude (0 токенов), банк, пик и просадка по журналу |
 
 ## Где что лежит
 

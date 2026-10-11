@@ -482,6 +482,12 @@ async def _erase_personal_data(db: AsyncSession, user: User) -> None:
         delete(UserSecret).where(UserSecret.user_id == uid),
         delete(AiLimit).where(AiLimit.user_id == uid),
         delete(Notification).where(Notification.user_id == uid),
+        # Уведомления администраторов об этом участнике (просьба вернуть ключ, его лимит)
+        # несут его имя в params: удаляются вместе с его данными
+        delete(Notification).where(
+            Notification.kind.in_(("ai_mode_request", "limit_80", "limit_100")),
+            Notification.params["subject"].astext == str(uid),
+        ),
         delete(PushSubscription).where(PushSubscription.user_id == uid),
         delete(LoginEvent).where(LoginEvent.user_id == uid),
         delete(UserSession).where(UserSession.user_id == uid),

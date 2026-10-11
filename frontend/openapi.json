@@ -1645,7 +1645,10 @@
                       "message",
                       "confirm_failed",
                       "player_merge",
-                      "player_edit"
+                      "player_edit",
+                      "ai_mode_change",
+                      "budget_change",
+                      "agent_config_change"
                     ],
                     "type": "string"
                   }
@@ -1962,7 +1965,10 @@
               "message",
               "confirm_failed",
               "player_merge",
-              "player_edit"
+              "player_edit",
+              "ai_mode_change",
+              "budget_change",
+              "agent_config_change"
             ],
             "title": "Action"
           },

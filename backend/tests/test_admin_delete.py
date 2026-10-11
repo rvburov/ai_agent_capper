@@ -431,3 +431,50 @@ async def test_delete_last_admin_is_refused(make_user: UserFactory, db: AsyncSes
     await db.rollback()
     user = await db.get_one(User, target_id, populate_existing=True)
     assert user.status == "active"
+
+
+async def test_delete_member_drops_admin_notifications_about_them(
+    make_user: UserFactory, db: AsyncSession
+) -> None:
+    """Р15: уведомления администраторов об участнике (просьба вернуть ключ, его лимит)
+    несут его имя в params и удаляются вместе с его данными; о других — остаются."""
+    admin = await make_user(role="admin")
+    member = await make_user(email="olga@example.com")
+    other = await make_user(email="ivan@example.com")
+    admin_id, member_id, other_id = admin.id, member.id, other.id
+
+    def note(kind: str, subject: str) -> Notification:
+        return Notification(
+            user_id=admin_id,
+            kind=kind,
+            title="t",
+            body="b",
+            params={"subject": subject, "name": "Ольга"},
+        )
+
+    db.add_all(
+        [
+            note("ai_mode_request", str(member_id)),
+            note("limit_80", str(member_id)),
+            note("limit_100", str(member_id)),
+            note("limit_80", str(other_id)),
+            note("ai_mode_request", str(other_id)),
+            note("budget_80", "budget"),
+        ]
+    )
+    await db.commit()
+
+    await admin_users.delete_user(
+        db, member_id, confirm_email="olga@example.com", actor=None, ip=None
+    )
+    left = sorted(
+        (row.kind, row.params["subject"])
+        for row in await db.scalars(
+            select(Notification)
+            .where(Notification.user_id == admin_id)
+            .execution_options(populate_existing=True)
+        )
+    )
+    assert left == sorted(
+        [("ai_mode_request", str(other_id)), ("budget_80", "budget"), ("limit_80", str(other_id))]
+    )

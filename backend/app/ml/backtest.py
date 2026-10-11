@@ -77,6 +77,13 @@ from app.ml.metrics import (
 )
 from app.ml.report import bookmaker_name, reference_warning, render_markdown, summary_lines
 
+# Правила отбора живут в app/ml/strategy.py; StrategyRules, candidates и pick_parlay
+# доступны и отсюда (as — явный реэкспорт для mypy)
+from app.ml.strategy import StrategyRules as StrategyRules
+from app.ml.strategy import candidates as candidates
+from app.ml.strategy import parlay_total
+from app.ml.strategy import pick_parlay as pick_parlay
+
 MARKET = "ML"
 ODDS_KIND = "archive"
 # Меньше событий для калибровки — калибровка не применяется (предупреждение в отчете)
@@ -101,20 +108,6 @@ class BacktestError(Exception):
 
 
 # --- настройки ---
-
-
-@dataclass(frozen=True)
-class StrategyRules:
-    """Правила отбора событий (Стратегия-ставок.md, шаг 4). Кэфы — Decimal: граница
-    1.80 × 1.80 = 3.24 в плавающей точке дала бы 3.2400000000000003 и ставку бы отсекла."""
-
-    min_p: float = 0.65
-    min_odds: Decimal = Decimal("1.13")
-    max_odds: Decimal = Decimal("1.80")
-    triple_min_p: float = 0.70
-    triple_max_odds: Decimal = Decimal("1.60")
-    double_total: tuple[Decimal, Decimal] = (Decimal("1.28"), Decimal("3.24"))
-    triple_total: tuple[Decimal, Decimal] = (Decimal("1.44"), Decimal("4.10"))
 
 
 @dataclass(frozen=True)
@@ -405,6 +398,7 @@ class Outcome:
     p: float
     odds: Decimal
     won: bool
+    market: str = MARKET
 
     @property
     def edge(self) -> float:
@@ -640,61 +634,7 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
-# --- ставки по правилам стратегии ---
-
-
-def _qualifies(outcome: Outcome, rules: StrategyRules, require_value: bool) -> bool:
-    return (
-        outcome.p >= rules.min_p
-        and rules.min_odds <= outcome.odds <= rules.max_odds
-        and (outcome.edge > 1.0 or not require_value)
-    )
-
-
-def _by_edge(outcome: Outcome) -> tuple[float, int, int]:
-    return (-outcome.edge, outcome.match_id, outcome.selection)
-
-
-def candidates(
-    outcomes: Iterable[Outcome], rules: StrategyRules, *, require_value: bool = True
-) -> list[Outcome]:
-    """Подходящие исходы (p ≥ 0,65, кэф 1.13–1.80, перевес p·кэф > 1, если он требуется),
-    не больше одного из матча (с наибольшим перевесом), по убыванию перевеса."""
-    best: dict[int, Outcome] = {}
-    for outcome in outcomes:
-        if not _qualifies(outcome, rules, require_value):
-            continue
-        current = best.get(outcome.match_id)
-        if current is None or _by_edge(outcome) < _by_edge(current):
-            best[outcome.match_id] = outcome
-    return sorted(best.values(), key=_by_edge)
-
-
-def _total(legs: Sequence[Outcome]) -> Decimal:
-    total = Decimal(1)
-    for leg in legs:
-        total *= leg.odds
-    return total
-
-
-def pick_parlay(
-    outcomes: Iterable[Outcome], rules: StrategyRules, *, require_value: bool = True
-) -> tuple[Outcome, ...] | None:
-    """Экспресс дня по шагу 4 стратегии: меньше 2 кандидатов — ставки нет; три лучших
-    по перевесу кандидата с p ≥ 0,70 и кэфом ≤ 1.60 с итогом 1.44–4.10 — экспресс из 3;
-    иначе два лучших по перевесу с итогом 1.28–3.24 — экспресс из 2; иначе ставки нет."""
-    pool = candidates(outcomes, rules, require_value=require_value)
-    if len(pool) < 2:
-        return None
-    strong = [o for o in pool if o.p >= rules.triple_min_p and o.odds <= rules.triple_max_odds]
-    if len(strong) >= 3:
-        low, high = rules.triple_total
-        if low <= _total(strong[:3]) <= high:
-            return tuple(strong[:3])
-    low, high = rules.double_total
-    if low <= _total(pool[:2]) <= high:
-        return tuple(pool[:2])
-    return None
+# --- ставки по правилам стратегии (отбор — app/ml/strategy.py) ---
 
 
 def _bet_result(
@@ -704,7 +644,7 @@ def _bet_result(
     bets: Sequence[Sequence[Outcome]],
     config: BacktestConfig,
 ) -> BetResult:
-    totals = [_total(legs) for legs in bets]
+    totals = [parlay_total(legs) for legs in bets]
     won = [all(leg.won for leg in legs) for legs in bets]
     returns = [float(total) if ok else 0.0 for total, ok in zip(totals, won, strict=True)]
     legs: dict[int, int] = defaultdict(int)

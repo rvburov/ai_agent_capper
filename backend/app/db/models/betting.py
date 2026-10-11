@@ -2,6 +2,7 @@
 банка (PLAN.md, раздел 5). Видит только сам участник (Р14)."""
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -9,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     Index,
+    Numeric,
     SmallInteger,
     String,
     Text,
@@ -28,12 +30,35 @@ from app.db.base import (
     Money,
     Odds,
     UpdatedAtMixin,
+    UsdCost,
+    UsdLimit,
     check_in,
     check_probability,
 )
+from app.db.models.ai import KEY_SOURCES
 
 STRATEGY_STATUSES = ("candidate", "active", "archived")
-ANALYSIS_STATUSES = ("created", "queued", "running", "done", "failed", "cancelled")
+# created и running — статусы до этапа 3 (импорт старого бота пишет done); путь анализа
+# этапа 3: needs_confirmation → queued → building_dossier → modelling → llm_review →
+# composing → done, плюс failed и cancelled (PLAN.md, раздел 3)
+ANALYSIS_STATUSES = (
+    "created",
+    "queued",
+    "running",
+    "done",
+    "failed",
+    "cancelled",
+    "parsing",
+    "needs_confirmation",
+    "building_dossier",
+    "modelling",
+    "llm_review",
+    "composing",
+)
+# Анализ в работе у воркера: держит резерв бюджета, его проверяет задача-уборщик
+ANALYSIS_ACTIVE_STATUSES = ("queued", "building_dossier", "modelling", "llm_review", "composing")
+ANALYSIS_INPUT_KINDS = ("text", "form")
+ANALYSIS_DECISIONS = ("bet", "skip")
 BET_STATUSES = ("open", "won", "lost", "void")
 BET_SOURCES = ("app", "legacy")
 LEG_RESULTS = ("win", "loss", "void")
@@ -76,21 +101,78 @@ class StrategyVersion(CreatedAtMixin, Base):
     approved_at: Mapped[datetime | None]
 
 
-class Analysis(CreatedAtMixin, Base):
-    """Запрос участника на анализ: введенный текст, разбор и статус выполнения."""
+class Analysis(CreatedAtMixin, UpdatedAtMixin, Base):
+    """Запрос участника на анализ: ввод (текст или форма), разбор, подтвержденные события,
+    статус выполнения, чекпойнты и деньги.
+
+    parsed — сырой ответ разбора, confirmed — события, которые подтвердил участник.
+    key_source фиксируется при запуске: на чьем ключе идет анализ. started_at — запуск,
+    по которому анализ идет в «анализы за день»: первый, а после запусков на своем ключе —
+    первый перезапуск на ключе администратора; attempt — номер запуска.
+    checkpoint — что уже сделано: повторный запуск после сбоя не платит второй раз.
+    cost_usd — расход анализа по agent_runs (источник правды — agent_runs.cost_usd);
+    budget_reserved_usd — резерв бюджета на время работы (снимается по окончании),
+    cost_cap_usd — потолок анализа, estimate_usd — оценка стоимости при запуске.
+    updated_at обновляется при каждом изменении: по нему уборщик находит зависшие анализы.
+    """
 
     __tablename__ = "analyses"
-    __table_args__ = (check_in("status", ANALYSIS_STATUSES, "status"),)
+    __table_args__ = (
+        Index(
+            "ix_analyses_admin_key_started_at",
+            "user_id",
+            "started_at",
+            postgresql_where=text("key_source = 'admin'"),
+        ),
+        Index(
+            "ix_analyses_active_updated_at",
+            "status",
+            "updated_at",
+            postgresql_where=text(
+                "status IN ({})".format(", ".join(f"'{s}'" for s in ANALYSIS_ACTIVE_STATUSES))
+            ),
+        ),
+        check_in("status", ANALYSIS_STATUSES, "status"),
+        check_in("input_kind", ANALYSIS_INPUT_KINDS, "input_kind"),
+        check_in("key_source", KEY_SOURCES, "key_source"),
+        check_in("decision", ANALYSIS_DECISIONS, "decision"),
+        CheckConstraint(
+            "cost_usd >= 0 AND budget_reserved_usd >= 0 AND cost_cap_usd >= 0"
+            " AND estimate_usd >= 0",
+            name="money_non_negative",
+        ),
+    )
 
     id: Mapped[BigIntPK]
     user_id: Mapped[int] = mapped_column(BigInteger, _user_fk())
     input_text: Mapped[str]
+    input_kind: Mapped[str] = mapped_column(String(8), server_default="text")
     parsed: Mapped[dict[str, Any] | None]
-    status: Mapped[str] = mapped_column(String(16), server_default="created")
+    confirmed: Mapped[dict[str, Any] | None]
+    # Банк и букмекер из ввода участника (банк — в валюте программы)
+    bank_input: Mapped[Money | None]
+    bookmaker: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(24), server_default="created")
     strategy_version_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("strategy_versions.id", ondelete="SET NULL")
     )
     prompt_version: Mapped[str | None] = mapped_column(String(64))
+    key_source: Mapped[str | None] = mapped_column(String(8))
+    started_at: Mapped[datetime | None]
+    attempt: Mapped[int] = mapped_column(SmallInteger, server_default="0")
+    # Ключ локали ошибки (errors.<код>), ее параметры и шаг, на котором анализ остановился
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    error_params: Mapped[dict[str, Any] | None]
+    failed_step: Mapped[str | None] = mapped_column(String(24))
+    checkpoint: Mapped[dict[str, Any]] = mapped_column(server_default=text("'{}'::jsonb"))
+    # Итог: экспресс, сумма ставки, предупреждения
+    result: Mapped[dict[str, Any] | None]
+    cost_usd: Mapped[UsdCost] = mapped_column(server_default="0")
+    budget_reserved_usd: Mapped[UsdLimit] = mapped_column(server_default="0")
+    cost_cap_usd: Mapped[UsdLimit | None]
+    estimate_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    # Решение участника по итогу: поставил или пропустил
+    decision: Mapped[str | None] = mapped_column(String(8))
     error: Mapped[str | None]
     finished_at: Mapped[datetime | None]
 
@@ -129,6 +211,7 @@ class Prediction(CreatedAtMixin, Base):
         check_probability("p_final"),
         check_probability("q_market_at_pred"),
         CheckConstraint("eval_run_id IS NULL OR is_eval", name="eval_run_is_eval"),
+        CheckConstraint("odds_at_pred >= 1", name="odds_at_pred_min"),
     )
 
     id: Mapped[BigIntPK]
@@ -164,6 +247,10 @@ class Prediction(CreatedAtMixin, Base):
     p_final: Mapped[float | None]
     # Вероятность рынка без маржи в момент прогноза
     q_market_at_pred: Mapped[float | None]
+    # Кэф и букмекер, по которым код считал валуй, и сам валуй (p_final * кэф - 1)
+    odds_at_pred: Mapped[Odds | None]
+    bookmaker_at_pred: Mapped[str | None] = mapped_column(String(64))
+    value_at_pred: Mapped[float | None]
     rationale: Mapped[str | None]
     agent_run_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("agent_runs.id", ondelete="SET NULL")

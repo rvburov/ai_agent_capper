@@ -7,6 +7,11 @@
     python -m app.admin.cli unblock --email admin@example.com
     python -m app.admin.cli set-admin-key [--key-stdin] [--skip-check]
 
+Claude (этап 3):
+
+    python -m app.admin.cli agent-config [--set ИМЯ=ЗНАЧЕНИЕ ...] [--reset ИМЯ ...]
+    python -m app.admin.cli prices
+
 Игроки (этап 2, app/services/players.py):
 
     python -m app.admin.cli players-find Синнер [--limit 10]
@@ -19,7 +24,8 @@
 
 Пароль и ключ вводятся без отображения (getpass) или одной строкой из stdin
 (--password-stdin, --key-stdin) — так их не видно в истории команд и в списке процессов.
-Каждая команда, которая меняет пользователей или игроков, пишет admin_audit_log
+Каждая команда, которая меняет пользователей, игроков или настройки агента, пишет
+admin_audit_log
 с actor_id = NULL и details.source = "terminal". players-link-legacy — загрузка
 данных: ее итог пишется в ingestion_runs, а не в журнал администратора. matches-merge
 (слить запись-копию матча) в журнал не пишет: такого действия в журнале нет.
@@ -41,6 +47,9 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent import config as agent_config
+from app.agent.client import close_client
+from app.agent.runs import list_prices
 from app.core.errors import AppError
 from app.core.i18n import t
 from app.core.security.passwords import check_new_password, hash_password_async
@@ -49,6 +58,7 @@ from app.db.session import get_session
 from app.ingest import players_link
 from app.ingest.runs import IngestError, update_lock
 from app.services import access_codes, admin_key, admin_users, players
+from app.services.app_settings import get_app_settings
 
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _NAME_MAX_LENGTH = 100
@@ -191,6 +201,92 @@ async def _set_admin_key(args: argparse.Namespace) -> None:
     async with get_session() as db:
         last4 = await admin_key.save_admin_key(db, key, verified=verified, actor=None, ip=None)
     _say(t("cli.key_saved" if verified else "cli.key_saved_unchecked", last4=last4))
+
+
+# --- Claude (этап 3) ---
+
+
+def _setting_text(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, tuple | list):
+        return ", ".join(str(item) for item in value) or "—"
+    return str(value)
+
+
+async def _agent_config(args: argparse.Namespace) -> None:
+    changes: dict[str, Any] = {}
+    for item in args.set or []:
+        name, sep, value = item.partition("=")
+        name = name.strip()
+        if not sep or not name:
+            raise CliError("agent_config.set_format", item=item)
+        changes[name] = agent_config.parse_setting(name, value.strip())
+    reset = [name.strip() for name in args.reset or []]
+    async with get_session() as db:
+        if changes or reset:
+            config = await agent_config.save_agent_config(
+                db, changes=changes, reset=reset, actor_id=None
+            )
+            _say(t("cli.agent_config.saved"))
+        else:
+            config = await agent_config.load_agent_config(db)
+        overrides = set((await get_app_settings(db)).agent_config or {})
+    _say(t("cli.agent_config.title"))
+    for name in agent_config.SETTING_NAMES:
+        value = _setting_text(getattr(config, name))
+        if name in overrides:
+            default = _setting_text(getattr(agent_config.DEFAULT_CONFIG, name))
+            _say(t("cli.agent_config.row_changed", name=name, value=value, default=default))
+        else:
+            _say(t("cli.agent_config.row", name=name, value=value))
+
+
+async def _prices(args: argparse.Namespace) -> None:
+    async with get_session() as db:
+        rows = await list_prices(db)
+    if not rows:
+        _say(t("cli.prices.none"))
+        return
+    header = [
+        t(f"cli.prices.columns.{name}")
+        for name in (
+            "model",
+            "valid_from",
+            "input",
+            "output",
+            "cache_read",
+            "cache_write_5m",
+            "cache_write_1h",
+            "search",
+            "long",
+        )
+    ]
+    table = [
+        [
+            row.model,
+            row.valid_from.strftime("%Y-%m-%d %H:%M"),
+            *(
+                f"{value.normalize():f}"
+                for value in (
+                    row.input,
+                    row.output,
+                    row.cache_read,
+                    row.cache_write_5m,
+                    row.cache_write_1h,
+                    row.search_price,
+                )
+            ),
+            (
+                f"> {row.long_input_threshold} × {row.long_multiplier.normalize():f}"
+                if row.long_input_threshold is not None and row.long_multiplier is not None
+                else "—"
+            ),
+        ]
+        for row in rows
+    ]
+    _say(t("cli.prices.title"))
+    _say(_table(header, table))
 
 
 # --- игроки (этап 2) ---
@@ -571,14 +667,41 @@ def build_parser() -> argparse.ArgumentParser:
     key.add_argument("--skip-check", action="store_true", help=t("cli.help.skip_check"))
     key.set_defaults(handler=_set_admin_key)
 
+    config = command("agent-config", "agent_config")
+    config.add_argument(
+        "--set",
+        action="append",
+        metavar=t("cli.agent_config.set_metavar"),
+        help=t("cli.help.agent_config_set"),
+    )
+    config.add_argument(
+        "--reset",
+        action="append",
+        metavar=t("cli.agent_config.reset_metavar"),
+        help=t("cli.help.agent_config_reset"),
+    )
+    config.set_defaults(handler=_agent_config)
+
+    prices = command("prices", "prices")
+    prices.set_defaults(handler=_prices)
+
     _add_player_commands(command)
     return parser
+
+
+async def _run(args: argparse.Namespace) -> None:
+    """Команда и закрытие пула соединений Claude в одном цикле событий: после asyncio.run
+    закрыть его уже нельзя (проверка ключа в set-admin-key)."""
+    try:
+        await args.handler(args)
+    finally:
+        await close_client()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        asyncio.run(args.handler(args))
+        asyncio.run(_run(args))
     except CliError as exc:
         print(exc.message, file=sys.stderr)
         return 1

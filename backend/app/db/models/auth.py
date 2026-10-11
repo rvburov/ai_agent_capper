@@ -41,6 +41,13 @@ NOTIFICATION_KINDS = (
     "new_device",
     "admin_message",
     "login_failures",
+    # Этап 3: сбой ключа Claude, просьба вернуть ключ администратора и решение по ней (Р12),
+    # общий бюджет ключа администратора на месяц израсходован на порог или целиком
+    "ai_key_failed",
+    "ai_mode_request",
+    "ai_mode_decision",
+    "budget_80",
+    "budget_100",
 )
 DEFAULT_TZ = "Europe/Helsinki"
 

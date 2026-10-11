@@ -9,6 +9,7 @@ from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     Index,
+    Integer,
     LargeBinary,
     Numeric,
     String,
@@ -49,7 +50,12 @@ class UserSecret(CreatedAtMixin, UpdatedAtMixin, Base):
 
 class AiLimit(Base):
     """Лимиты участника на ключе администратора (Р9, Р13). Пустой allowed_models —
-    доступны все модели из настроек. paused — анализы на ключе администратора остановлены."""
+    доступны все модели из настроек. paused — анализы на ключе администратора остановлены.
+
+    own_per_analysis_usd — потолок одного анализа на своем ключе (участник ставит сам).
+    return_requested_at — участник на своем ключе просит вернуть ключ администратора (Р12),
+    решение за администратором.
+    """
 
     __tablename__ = "ai_limits"
     __table_args__ = (
@@ -57,6 +63,7 @@ class AiLimit(Base):
             "monthly_usd >= 0 AND daily_analyses >= 0 AND per_analysis_usd >= 0",
             name="non_negative",
         ),
+        CheckConstraint("own_per_analysis_usd > 0", name="own_per_analysis_positive"),
     )
 
     user_id: Mapped[int] = mapped_column(
@@ -69,6 +76,8 @@ class AiLimit(Base):
         ARRAY(Text), server_default=text("'{}'::text[]")
     )
     paused: Mapped[bool] = mapped_column(server_default=text("false"))
+    own_per_analysis_usd: Mapped[UsdLimit] = mapped_column(server_default="1")
+    return_requested_at: Mapped[datetime | None]
     updated_by: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )
@@ -128,7 +137,11 @@ class AgentRun(CreatedAtMixin, Base):
 
 class ModelPrice(Base):
     """Цены моделей в долларах за 1 млн токенов и за один веб-поиск: по ним код
-    считает agent_runs.cost_usd. Новая цена — новая строка с valid_from."""
+    считает agent_runs.cost_usd. Новая цена — новая строка с valid_from.
+
+    Вторая ступень цены (Haiku 5.5): если весь вход запроса (вход, запись и чтение кэша)
+    больше long_input_threshold токенов, все цены токенов умножаются на long_multiplier.
+    """
 
     __tablename__ = "model_prices"
 
@@ -140,3 +153,5 @@ class ModelPrice(Base):
     cache_write_5m: Mapped[Decimal] = mapped_column(Numeric(10, 4))
     cache_write_1h: Mapped[Decimal] = mapped_column(Numeric(10, 4))
     search_price: Mapped[Decimal] = mapped_column(Numeric(10, 4))
+    long_input_threshold: Mapped[int | None] = mapped_column(Integer)
+    long_multiplier: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))

@@ -19,8 +19,8 @@ const GROUP_ACTIONS: Record<Exclude<AuditGroup, 'all'>, readonly AuditAction[]> 
   invite: ['invite', 'invite_revoke'],
   access: ['reset_code', 'reset_code_revoke', 'reset_2fa', 'sessions_revoke', 'confirm_failed'],
   people: ['block', 'unblock', 'delete', 'role_change', 'create_admin'],
-  money: ['key_change', 'limit_change'],
-  settings: ['currency_change', 'message'],
+  money: ['key_change', 'limit_change', 'ai_mode_change', 'budget_change'],
+  settings: ['currency_change', 'message', 'agent_config_change'],
   // Правка игроков — тоже команды терминала с общими данными, как импорт (этап 2)
   import: ['import', 'player_merge', 'player_edit'],
 };

@@ -34,6 +34,7 @@ from arq.cron import CronJob
 from arq.typing import StartupShutdown, WorkerCoroutine
 from arq.worker import Function, check_health, run_worker
 
+from app.agent.client import close_client
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.db.session import create_engine, create_sessionmaker
@@ -135,6 +136,7 @@ async def startup(ctx: dict[Any, Any]) -> None:
 
 
 async def shutdown(ctx: dict[Any, Any]) -> None:
+    await close_client()
     engine = ctx.get("engine")
     if engine is not None:
         await engine.dispose()

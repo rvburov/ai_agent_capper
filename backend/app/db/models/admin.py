@@ -40,7 +40,14 @@ AUDIT_ACTIONS = (
     # Ручная правка игроков командами терминала (этап 2)
     "player_merge",
     "player_edit",
+    # Этап 3: режим ключа участника (Р12), общий бюджет и лимиты по умолчанию,
+    # настройки агента (команда agent-config)
+    "ai_mode_change",
+    "budget_change",
+    "agent_config_change",
 )
+# Порог предупреждения о расходе, % от лимита или бюджета
+BUDGET_ALERT_PCTS = (50, 70, 80, 90)
 
 
 class AppSettings(Base):
@@ -50,6 +57,10 @@ class AppSettings(Base):
 
     Ключ Claude администратора хранится зашифрованным (aad: app_settings.anthropic_key:1),
     наружу показываются только последние 4 символа.
+
+    agent_config — только измененные настройки агента поверх значений по умолчанию из кода
+    (app/agent/config.py). budget_alert_pct — порог предупреждения о расходе (limit_80,
+    budget_80). eval_budget_usd — отдельный бюджет проверок (eval) на месяц (Р22).
     """
 
     __tablename__ = "app_settings"
@@ -63,6 +74,8 @@ class AppSettings(Base):
             name="non_negative",
         ),
         CheckConstraint("per_analysis_soft_usd <= per_analysis_hard_usd", name="soft_le_hard"),
+        check_in("budget_alert_pct", BUDGET_ALERT_PCTS, "budget_alert_pct"),
+        CheckConstraint("eval_budget_usd >= 0", name="eval_budget_non_negative"),
     )
 
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, autoincrement=False)
@@ -77,6 +90,9 @@ class AppSettings(Base):
     default_daily_analyses: Mapped[int] = mapped_column(server_default="3")
     per_analysis_soft_usd: Mapped[UsdLimit] = mapped_column(server_default="0.5")
     per_analysis_hard_usd: Mapped[UsdLimit] = mapped_column(server_default="1")
+    agent_config: Mapped[dict[str, Any]] = mapped_column(server_default=text("'{}'::jsonb"))
+    budget_alert_pct: Mapped[int] = mapped_column(SmallInteger, server_default="80")
+    eval_budget_usd: Mapped[UsdLimit] = mapped_column(server_default="25")
     updated_by: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )

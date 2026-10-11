@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
+from app.agent.client import close_client
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await close_client()
         await redis.aclose()
         await engine.dispose()
 

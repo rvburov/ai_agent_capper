@@ -1,6 +1,7 @@
 """Миграции: схема на месте, строка app_settings есть, upgrade → downgrade → upgrade
 проходит, и после upgrade модели не расходятся с базой. Миграция этапа 2 сохраняет
-данные этапа 1 (турниры старого бота получают source = legacy).
+данные этапа 1 (турниры старого бота получают source = legacy), миграция этапа 3 —
+данные этапа 2 (откат переводит новые статусы анализов в старые и не теряет строк).
 
 Расхождение моделей и миграции ловится двумя способами:
 - compare_metadata, как alembic check: таблицы, колонки, типы, DEFAULT, индексы, FK;
@@ -61,6 +62,7 @@ EXPECTED_TABLES = {
     "match_stats",
     "odds_snapshots",
     "dossiers",
+    "match_assessments",
     "analyses",
     "predictions",
     "bets",
@@ -86,7 +88,7 @@ async def test_all_tables_exist(engine: AsyncEngine) -> None:
         extension = (
             await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'"))
         ).scalar()
-    assert len(EXPECTED_TABLES) == 33
+    assert len(EXPECTED_TABLES) == 34
     assert names == EXPECTED_TABLES | {"alembic_version"}
     assert set(Base.metadata.tables) == EXPECTED_TABLES
     assert extension == 1
@@ -404,5 +406,264 @@ async def test_stage2_migration_keeps_stage1_data(settings: Settings) -> None:
                     ("Рим", "legacy", None),
                     ("Wimbledon", None, None),
                 ]
+        finally:
+            await engine.dispose()
+
+
+async def test_stage3_migration_keeps_stage2_data(settings: Settings) -> None:
+    """0002 → 0003: старые анализы и уведомления остаются, новые колонки получают значения
+    по умолчанию, цены моделей на месте. Новые ограничения действуют. Откат до 0002
+    не оставляет строк, которые старые ограничения не дали бы обновить: новые статусы
+    анализов — в старые, уведомления новых видов и результаты из поиска удаляются, матчи
+    и турниры из ввода — в источники этапа 2, журнал администратора остается как есть.
+    Повторный upgrade не дублирует цены и возвращает вторую ступень цены Haiku 5.5."""
+    async with _temp_database(settings, "stage3") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0002")
+                await conn.execute(
+                    text("INSERT INTO users (email) VALUES ('m@example.com'), ('o@example.com')")
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO analyses (user_id, input_text, status) VALUES"
+                        " (1, 'Синнер — Алькарас 1.80', 'done')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO ai_limits (user_id, monthly_usd, daily_analyses,"
+                        " per_analysis_usd) VALUES (1, 10, 3, 1)"
+                    )
+                )
+                await conn.execute(
+                    text("INSERT INTO players (name) VALUES ('Sinner J.'), ('Alcaraz C.')")
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                row = (
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT status, input_kind, attempt, checkpoint, cost_usd,"
+                                " budget_reserved_usd, key_source, started_at FROM analyses"
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                assert dict(row) == {
+                    "status": "done",
+                    "input_kind": "text",
+                    "attempt": 0,
+                    "checkpoint": {},
+                    "cost_usd": Decimal("0"),
+                    "budget_reserved_usd": Decimal("0"),
+                    "key_source": None,
+                    "started_at": None,
+                }
+                limit = await conn.scalar(text("SELECT own_per_analysis_usd FROM ai_limits"))
+                assert limit == Decimal("1.00")
+                app = (
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT agent_config, budget_alert_pct, eval_budget_usd"
+                                " FROM app_settings"
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                assert dict(app) == {
+                    "agent_config": {},
+                    "budget_alert_pct": 80,
+                    "eval_budget_usd": Decimal("25.00"),
+                }
+                prices = (
+                    await conn.execute(
+                        text(
+                            "SELECT model, input, output, cache_read, cache_write_5m,"
+                            " cache_write_1h, search_price, long_input_threshold,"
+                            " long_multiplier FROM model_prices ORDER BY model"
+                        )
+                    )
+                ).all()
+                assert [tuple(p) for p in prices] == [
+                    (
+                        "claude-haiku-4-5",
+                        Decimal("1.0000"),
+                        Decimal("5.0000"),
+                        Decimal("0.1000"),
+                        Decimal("1.2500"),
+                        Decimal("2.0000"),
+                        Decimal("0.0100"),
+                        None,
+                        None,
+                    ),
+                    (
+                        "claude-haiku-5-5",
+                        Decimal("0.1000"),
+                        Decimal("0.5000"),
+                        Decimal("0.0100"),
+                        Decimal("0.1250"),
+                        Decimal("0.2000"),
+                        Decimal("0.0100"),
+                        100000,
+                        Decimal("5.00"),
+                    ),
+                    (
+                        "claude-opus-5-5",
+                        Decimal("4.0000"),
+                        Decimal("20.0000"),
+                        Decimal("0.2000"),
+                        Decimal("5.0000"),
+                        Decimal("8.0000"),
+                        Decimal("0.0100"),
+                        None,
+                        None,
+                    ),
+                    (
+                        "claude-sonnet-5-5",
+                        Decimal("2.0000"),
+                        Decimal("10.0000"),
+                        Decimal("0.1000"),
+                        Decimal("2.5000"),
+                        Decimal("4.0000"),
+                        Decimal("0.0100"),
+                        None,
+                        None,
+                    ),
+                ]
+
+                for status in ("needs_confirmation", "modelling", "parsing"):
+                    await conn.execute(
+                        text(
+                            "INSERT INTO analyses (user_id, input_text, status)"
+                            f" VALUES (1, 'x', '{status}')"
+                        )
+                    )
+                assert await _refused(
+                    conn,
+                    "INSERT INTO analyses (user_id, input_text, status) VALUES (1, 'x', 'hack')",
+                )
+                assert await _refused(
+                    conn, "UPDATE analyses SET budget_reserved_usd = -1 WHERE id = 1"
+                )
+                assert await _refused(conn, "UPDATE analyses SET key_source = 'guest'")
+                assert await _refused(conn, "UPDATE ai_limits SET own_per_analysis_usd = 0")
+                assert await _refused(conn, "UPDATE app_settings SET budget_alert_pct = 75")
+                # Матч из ввода участника: без турнира, но с source_ref; турнир из ввода
+                await conn.execute(
+                    text(
+                        "INSERT INTO matches (player1_id, player2_id, source, source_ref)"
+                        " VALUES (1, 2, 'user', 'user:2026-10-14:1:2')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO tournaments (name, source, source_ref)"
+                        " VALUES ('Кубок Кремля', 'user', 'user:2026:kremlin')"
+                    )
+                )
+                assert await _refused(
+                    conn,
+                    "INSERT INTO matches (player1_id, player2_id, source) VALUES (1, 2, 'user')",
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO player_news (player_id, published_at, kind, summary,"
+                        " source_url, details) VALUES (1, now(), 'result', 'Победа 6:3 6:4',"
+                        """ 'https://www.atptour.com/x', '{"score": "6-3 6-4"}')"""
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO notifications (user_id, kind, title)"
+                        " VALUES (1, 'budget_80', 'Бюджет'), (1, 'admin_message', 'Привет')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO admin_audit_log (action, target_user_id)"
+                        " VALUES ('agent_config_change', NULL), ('ai_mode_change', 2)"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO dossiers (match_id, as_of, content, sha256, feature_set)"
+                        " VALUES (1, now(), '{}', repeat('a', 64), 'd1')"
+                    )
+                )
+                assessment = (
+                    "INSERT INTO match_assessments (dossier_id, model, effort, prompt_version,"
+                    " schema_version, output) VALUES (1, 'claude-opus-5-5', 'medium',"
+                    " 'analysis.v1', 'a1', '{}')"
+                )
+                await conn.execute(text(assessment))
+                # Оценка с тем же ключом (досье, модель, effort, версии) — одна
+                assert await _refused(conn, assessment)
+
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0002")
+            async with engine.begin() as conn:
+                statuses = await conn.execute(text("SELECT status FROM analyses ORDER BY id"))
+                assert list(statuses.scalars()) == ["done", "created", "running", "created"]
+                kinds = await conn.execute(text("SELECT kind FROM notifications"))
+                assert list(kinds.scalars()) == ["admin_message"]
+                assert await conn.scalar(text("SELECT count(*) FROM player_news")) == 0
+                match = (await conn.execute(text("SELECT source, source_ref FROM matches"))).one()
+                assert tuple(match) == ("web", "user:2026-10-14:1:2")
+                source = await conn.scalar(
+                    text("SELECT source FROM tournaments WHERE name = 'Кубок Кремля'")
+                )
+                assert source is None
+                actions = await conn.execute(text("SELECT action FROM admin_audit_log ORDER BY id"))
+                assert list(actions.scalars()) == ["agent_config_change", "ai_mode_change"]
+                # Код этапа 2 обновляет оставшиеся строки: отметка «прочитано», матч,
+                # удаление участника (SET NULL в журнале)
+                for sql in (
+                    "UPDATE notifications SET read_at = now()",
+                    "UPDATE matches SET status = 'finished'",
+                    "UPDATE tournaments SET city = 'Москва'",
+                    "DELETE FROM users WHERE id = 2",
+                ):
+                    assert not await _refused(conn, sql), sql
+                # Новые строки — только со старыми значениями (кроме журнала администратора)
+                assert await _refused(
+                    conn,
+                    "INSERT INTO notifications (user_id, kind, title)"
+                    " VALUES (1, 'budget_100', 'x')",
+                )
+                assert await _refused(
+                    conn,
+                    "INSERT INTO analyses (user_id, input_text, status)"
+                    " VALUES (1, 'x', 'modelling')",
+                )
+                assert await _refused(
+                    conn,
+                    "INSERT INTO matches (player1_id, player2_id, source, source_ref)"
+                    " VALUES (1, 2, 'user', 'user:x')",
+                )
+                news = (
+                    "INSERT INTO player_news (player_id, published_at, kind, summary, source_url)"
+                    " VALUES (1, now(), '{kind}', 'x', 'https://www.atptour.com/y')"
+                )
+                assert await _refused(conn, news.format(kind="result"))
+                assert not await _refused(conn, news.format(kind="injury"))
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+                assert await conn.scalar(text("SELECT count(*) FROM model_prices")) == 4
+                threshold = await conn.scalar(
+                    text(
+                        "SELECT long_input_threshold FROM model_prices"
+                        " WHERE model = 'claude-haiku-5-5'"
+                    )
+                )
+                assert threshold == 100000
         finally:
             await engine.dispose()

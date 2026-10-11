@@ -45,9 +45,30 @@ _SENSITIVE_WORDS = frozenset(
         "dsn",
     }
 )
-# Поля с «опасным» словом в имени, которые секретом не являются
+# Поля с «опасным» словом в имени, которые секретом не являются: в том числе счетчики
+# токенов и источник ключа в логах расхода Claude (значение — число или admin/own)
 _SAFE_FIELDS = frozenset(
-    {"status_code", "key_version", "totp_enabled", "error_code", "event", "code_kind"}
+    {
+        "status_code",
+        "key_version",
+        "totp_enabled",
+        "error_code",
+        "event",
+        "code_kind",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "cache_write_5m_tokens",
+        "cache_write_1h_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "thinking_tokens",
+        "prompt_tokens",
+        "total_tokens",
+        "max_tokens",
+        "key_source",
+    }
 )
 _WORD_SPLIT = re.compile(r"[^a-z0-9]+")
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
