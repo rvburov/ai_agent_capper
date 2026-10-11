@@ -9,7 +9,19 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.api.routes import admin, auth, health, me, settings
+from app.api.routes import (
+    admin,
+    admin_ai,
+    ai,
+    analyses,
+    auth,
+    bets,
+    health,
+    me,
+    players,
+    settings,
+    strategy,
+)
 from app.schemas.common import ErrorOut
 
 ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -22,3 +34,9 @@ api_router.include_router(auth.router)
 api_router.include_router(me.router)
 api_router.include_router(settings.router)
 api_router.include_router(admin.router)
+api_router.include_router(ai.router)
+api_router.include_router(admin_ai.router)
+api_router.include_router(analyses.router)
+api_router.include_router(bets.router)
+api_router.include_router(players.router)
+api_router.include_router(strategy.router)

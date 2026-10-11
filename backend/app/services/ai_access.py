@@ -6,8 +6,8 @@
 участника: анализы на ключе администратора по analyses.started_at. started_at ставится
 при первом запуске, а после запусков на своем ключе — при первом перезапуске на ключе
 администратора; повторный запуск на нем started_at не меняет и второй раз не считается.
-Проверки (eval) идут из своего бюджета (app_settings.eval_budget_usd) и в расход месяца
-не входят.
+Проверки (eval и теневые прогоны shadow) идут из своего бюджета
+(app_settings.eval_budget_usd) и в расход месяца не входят.
 
 Резерв: при запуске анализа в analyses.budget_reserved_usd пишется расход анализа плюс
 оценка запуска. Пока анализ в работе (ANALYSIS_ACTIVE_STATUSES), неизрасходованная часть
@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import ColumnElement, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.config import AgentConfig, load_agent_config
+from app.agent.config import AgentConfig, default_per_analysis, load_agent_config
 from app.agent.errors import ClaudeStepError
 from app.core.errors import AppError
 from app.db.models import (
@@ -48,7 +48,7 @@ from app.db.models import (
     User,
     UserSecret,
 )
-from app.services.admin_users import month_start
+from app.services.admin_users import CHECK_RUN_KINDS, month_start
 from app.services.app_settings import SETTINGS_ROW_ID
 from app.services.claude_key import SECRET_KIND
 from app.services.notifications import notify
@@ -191,11 +191,11 @@ def _day_start(now: datetime, tz_name: str) -> datetime:
 
 
 def _month_runs(now: datetime) -> ColumnElement[bool]:
-    """Вызовы на ключе администратора за месяц, без проверок (eval)."""
+    """Вызовы на ключе администратора за месяц, без проверок (eval, shadow)."""
     return and_(
         AgentRun.key_source == "admin",
         AgentRun.created_at >= month_start(now),
-        AgentRun.kind != "eval",
+        AgentRun.kind.not_in(CHECK_RUN_KINDS),
     )
 
 
@@ -217,7 +217,7 @@ async def member_spent(
         AgentRun.user_id == user_id,
         AgentRun.key_source == key_source,
         AgentRun.created_at >= month_start(now),
-        AgentRun.kind != "eval",
+        AgentRun.kind.not_in(CHECK_RUN_KINDS),
     )
     return await _sum(db, stmt)
 
@@ -257,12 +257,13 @@ async def _analyses_today(db: AsyncSession, user: User, now: datetime) -> int:
 def limits_of(row: AiLimit | None, settings: AppSettings) -> Limits:
     """Лимиты участника: строка ai_limits, а если ее нет — значения по умолчанию."""
     if row is None:
+        cap = default_per_analysis(settings)
         return Limits(
             monthly_usd=settings.default_member_limit_usd,
             daily_analyses=settings.default_daily_analyses,
-            per_analysis_usd=settings.per_analysis_hard_usd,
+            per_analysis_usd=cap,
             paused=False,
-            own_per_analysis_usd=settings.per_analysis_hard_usd,
+            own_per_analysis_usd=cap,
             return_requested_at=None,
         )
     return Limits(
@@ -746,7 +747,7 @@ async def budget_overview(db: AsyncSession, now: datetime) -> BudgetOverview:
     eval_spent = await _sum(
         db,
         select(func.sum(AgentRun.cost_usd)).where(
-            AgentRun.kind == "eval", AgentRun.created_at >= start
+            AgentRun.kind.in_(CHECK_RUN_KINDS), AgentRun.created_at >= start
         ),
     )
     return BudgetOverview(

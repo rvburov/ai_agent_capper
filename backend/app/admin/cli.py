@@ -11,6 +11,7 @@ Claude (этап 3):
 
     python -m app.admin.cli agent-config [--set ИМЯ=ЗНАЧЕНИЕ ...] [--reset ИМЯ ...]
     python -m app.admin.cli prices
+    python -m app.admin.cli agent-smoke [--match ID] [--yes]
 
 Игроки (этап 2, app/services/players.py):
 
@@ -41,6 +42,7 @@ import getpass
 import re
 import sys
 from collections.abc import Callable, Sequence
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
@@ -49,6 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import config as agent_config
 from app.agent.client import close_client
+from app.agent.errors import ClaudeStepError
 from app.agent.runs import list_prices
 from app.core.errors import AppError
 from app.core.i18n import t
@@ -57,7 +60,7 @@ from app.db.models import BetLeg, Match, OddsSnapshot, Player, Tournament, User
 from app.db.session import get_session
 from app.ingest import players_link
 from app.ingest.runs import IngestError, update_lock
-from app.services import access_codes, admin_key, admin_users, players
+from app.services import access_codes, admin_key, admin_users, agent_smoke, players
 from app.services.app_settings import get_app_settings
 
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -289,6 +292,82 @@ async def _prices(args: argparse.Namespace) -> None:
     _say(_table(header, table))
 
 
+# --- проверка конвейера на живом ключе (этап 3) ---
+
+
+def _usd(value: Decimal) -> str:
+    return f"{value.quantize(Decimal('0.0001'))}"
+
+
+async def _agent_smoke(args: argparse.Namespace) -> None:
+    async with get_session() as db:
+        config = await agent_config.load_agent_config(db)
+        match = await agent_smoke.smoke_match(db, args.match)
+        estimate = await agent_smoke.estimate_smoke(db, config)
+        _say(t("cli.agent_smoke.estimate", usd=estimate, match=match.id))
+        if not args.yes and not _confirmed("cli.agent_smoke.confirm"):
+            raise CliError("cancelled")
+        report = agent_smoke.SmokeReport()
+        failure: str | None = None
+        try:
+            await agent_smoke.run_smoke(
+                db,
+                match_id=match.id,
+                progress=lambda step: _say(t("cli.agent_smoke.step", step=step)),
+                report=report,
+            )
+        except ClaudeStepError as exc:
+            failure = exc.message
+    header = [
+        t(f"cli.agent_smoke.columns.{name}")
+        for name in (
+            "step",
+            "model",
+            "input",
+            "cache_write",
+            "cache_read",
+            "output",
+            "searches",
+            "cost",
+            "error",
+        )
+    ]
+    rows = [
+        [
+            call.step,
+            call.model,
+            str(call.input_tokens),
+            str(call.cache_write_tokens),
+            str(call.cache_read_tokens),
+            str(call.output_tokens),
+            str(call.web_searches),
+            _usd(call.cost_usd),
+            _dash(call.error),
+        ]
+        for call in report.calls
+    ]
+    _say(t("cli.agent_smoke.title"))
+    _say(_table(header, rows))
+    _say(t("cli.agent_smoke.total", usd=_usd(report.total_usd)))
+    if failure is not None:
+        raise CliError("agent_smoke.failed", message=failure)
+    _say(
+        t(
+            "cli.agent_smoke.summary",
+            events=report.parsed_events,
+            facts=report.news_facts,
+            errors=", ".join(report.news_errors) or "—",
+            match=report.match_id,
+            p_base=f"{report.p_base:.3f}" if report.p_base is not None else "—",
+            p_claude=f"{report.p_claude:.3f}" if report.p_claude is not None else "—",
+        )
+    )
+    if report.second_cache_read > 0:
+        _say(t("cli.agent_smoke.cache", tokens=report.second_cache_read))
+    else:
+        _say(t("cli.agent_smoke.no_cache"))
+
+
 # --- игроки (этап 2) ---
 
 # Сколько примеров (слияний, несопоставленных строк) печатать после привязки
@@ -369,9 +448,9 @@ async def _players_find(args: argparse.Namespace) -> None:
     _say(_table(header, rows))
 
 
-def _confirmed() -> bool:
+def _confirmed(prompt_key: str = "cli.players_merge_confirm") -> bool:
     try:
-        answer = input(t("cli.players_merge_confirm"))
+        answer = input(t(prompt_key))
     except (EOFError, KeyboardInterrupt):
         return False
     return answer.strip().casefold() in _YES
@@ -684,6 +763,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     prices = command("prices", "prices")
     prices.set_defaults(handler=_prices)
+
+    smoke = command("agent-smoke", "agent_smoke")
+    smoke.add_argument("--match", type=int, help=t("cli.help.agent_smoke_match"))
+    smoke.add_argument("--yes", action="store_true", help=t("cli.help.agent_smoke_yes"))
+    smoke.set_defaults(handler=_agent_smoke)
 
     _add_player_commands(command)
     return parser

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Стек для сквозных тестов в браузере (Playwright, frontend/e2e): временная база PostgreSQL
-# с миграциями, свой префикс ключей Redis, API (uvicorn) и собранный фронтенд (vite preview,
-# /api проксируется на API). При остановке база и ключи Redis удаляются.
+# с миграциями, свой префикс ключей Redis, поддельный Claude API (backend/tests/fake_claude.py,
+# ключ Claude не нужен), API (uvicorn), воркер arq (выполняет анализы) и собранный фронтенд
+# (vite preview, /api проксируется на API). При остановке база и ключи Redis удаляются.
 #
 #   bash scripts/e2e-stack.sh [up]           поднять и держать до Ctrl+C или SIGTERM
 #   bash scripts/e2e-stack.sh cli КОМАНДА ...  команда терминала backend (python -m app.admin.cli)
@@ -13,13 +14,18 @@
 # Нужны PostgreSQL (роль с правом CREATEDB) и Redis, как для тестов backend, и зависимости
 # backend (backend/.venv или пакеты в python3). Настройки — переменные окружения:
 #   E2E_API_PORT=8000  E2E_WEB_PORT=4173      порты API и фронтенда
+#   E2E_FAKE_CLAUDE_PORT                       порт поддельного Claude (по умолчанию порт API + 99);
+#                      сбой шага для теста: POST http://127.0.0.1:ПОРТ/_fake/fail
+#                      {"step": "analysis", "error": "overloaded", "times": 3}, сброс — /_fake/reset
 #   E2E_PG_ADMIN_URL   служебная база, из которой создается временная
 #                      (по умолчанию CAPPER_TEST_ADMIN_DATABASE_URL или capper:capper@localhost)
 #   E2E_REDIS_URL      Redis (по умолчанию CAPPER_REDIS_URL или redis://localhost:6379/0)
-#   E2E_STATE_DIR      логи api.log и web.log и собранный фронтенд (по умолчанию во временной папке)
+#   E2E_STATE_DIR      логи (api, worker, fake_claude, web) и собранный фронтенд (по умолчанию
+#                      во временной папке)
 #   E2E_SKIP_BUILD=1   не собирать фронтенд заново, взять сборку из E2E_STATE_DIR
 #   E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD  администратор, которого стек создает при запуске
-#                      (для ручной проверки; тесты создают своих через cli)
+#                      (для ручной проверки; тесты создают своих через cli); ключ администратора
+#                      Claude — фальшивый sk-ant-..., его проверку отвечает поддельный Claude
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,6 +34,7 @@ FRONTEND="$ROOT/frontend"
 
 API_PORT="${E2E_API_PORT:-8000}"
 WEB_PORT="${E2E_WEB_PORT:-4173}"
+FAKE_PORT="${E2E_FAKE_CLAUDE_PORT:-$((API_PORT + 99))}"
 PG_ADMIN_URL="${E2E_PG_ADMIN_URL:-${CAPPER_TEST_ADMIN_DATABASE_URL:-postgresql://capper:capper@localhost:5432/postgres}}"
 REDIS_URL="${E2E_REDIS_URL:-${CAPPER_REDIS_URL:-redis://localhost:6379/0}}"
 # Имена зависят от порта API: два стека на разных портах друг другу не мешают
@@ -37,6 +44,7 @@ STATE_DIR="${E2E_STATE_DIR:-${TMPDIR:-/tmp}/capper-e2e-${API_PORT}}"
 WEB_DIST="$STATE_DIR/dist"
 ADMIN_EMAIL="${E2E_ADMIN_EMAIL:-owner@e2e.test}"
 ADMIN_PASSWORD="${E2E_ADMIN_PASSWORD:-e2e-owner-password-2026}"
+FAKE_ADMIN_KEY="sk-ant-e2e-fake-admin-key-0000"
 
 if [[ -n "${E2E_PYTHON:-}" ]]; then PY="$E2E_PYTHON"
 elif [[ -x "$BACKEND/.venv/bin/python" ]]; then PY="$BACKEND/.venv/bin/python"
@@ -60,6 +68,8 @@ backend_env() {
   export CAPPER_HIBP_ENABLED=false
   export CAPPER_TRUSTED_PROXIES=127.0.0.1
   export CAPPER_SECRET_KEY="" CAPPER_MASTER_KEYS=""
+  # Claude API — поддельный сервер этого стека (http разрешен везде, кроме prod)
+  export CAPPER_ANTHROPIC_BASE_URL="http://127.0.0.1:$FAKE_PORT"
 }
 
 # Создать (drop=0) или удалить (drop=1) временную базу через служебную
@@ -116,12 +126,14 @@ wait_url() {
 
 API_PID=""
 WEB_PID=""
+WORKER_PID=""
+FAKE_PID=""
 cleanup() {
   local code=$?
   trap - EXIT INT TERM
   say "останавливаю стек"
-  for pid in $WEB_PID $API_PID; do kill -TERM "$pid" 2>/dev/null || true; done
-  for pid in $WEB_PID $API_PID; do wait "$pid" 2>/dev/null || true; done
+  for pid in $WEB_PID $API_PID $WORKER_PID $FAKE_PID; do kill -TERM "$pid" 2>/dev/null || true; done
+  for pid in $WEB_PID $API_PID $WORKER_PID $FAKE_PID; do wait "$pid" 2>/dev/null || true; done
   db_admin 1 || say "не удалось удалить базу $DB_NAME"
   redis_clear || say "не удалось удалить ключи $REDIS_PREFIX* в Redis"
   exit "$code"
@@ -130,6 +142,7 @@ cleanup() {
 cmd_up() {
   port_busy "$API_PORT" && die "порт $API_PORT занят (другой стек или uvicorn?)"
   port_busy "$WEB_PORT" && die "порт $WEB_PORT занят (другой стек или vite?)"
+  port_busy "$FAKE_PORT" && die "порт $FAKE_PORT занят (другой стек или поддельный Claude?)"
   mkdir -p "$STATE_DIR"
   backend_env
   trap cleanup EXIT
@@ -142,9 +155,22 @@ cmd_up() {
   (cd "$BACKEND" && "$PY" -m alembic upgrade head) >"$STATE_DIR/migrate.log" 2>&1 \
     || { cat "$STATE_DIR/migrate.log" >&2; die "миграции не применились"; }
 
+  say "поддельный Claude API на http://127.0.0.1:$FAKE_PORT (лог: $STATE_DIR/fake_claude.log)"
+  (cd "$BACKEND" && exec "$PY" -m uvicorn tests.fake_claude:app --host 127.0.0.1 \
+    --port "$FAKE_PORT" --no-access-log) >"$STATE_DIR/fake_claude.log" 2>&1 &
+  FAKE_PID=$!
+  wait_url "http://127.0.0.1:$FAKE_PORT/_fake/calls" "$FAKE_PID" "$STATE_DIR/fake_claude.log"
+
   say "администратор из терминала: $ADMIN_EMAIL"
   (cd "$BACKEND" && printf '%s\n' "$ADMIN_PASSWORD" \
     | "$PY" -m app.admin.cli create-admin --email "$ADMIN_EMAIL" --name "Владелец" --password-stdin)
+  (cd "$BACKEND" && printf '%s\n' "$FAKE_ADMIN_KEY" \
+    | "$PY" -m app.admin.cli set-admin-key --key-stdin) >"$STATE_DIR/admin-key.log" 2>&1 \
+    || { cat "$STATE_DIR/admin-key.log" >&2; die "ключ администратора не сохранен"; }
+
+  say "воркер arq (лог: $STATE_DIR/worker.log)"
+  (cd "$BACKEND" && exec "$PY" -m app.workers.main) >"$STATE_DIR/worker.log" 2>&1 &
+  WORKER_PID=$!
 
   say "API на http://127.0.0.1:$API_PORT (лог: $STATE_DIR/api.log)"
   (cd "$BACKEND" && exec "$PY" -m uvicorn app.main:app --host 127.0.0.1 --port "$API_PORT" \
@@ -166,8 +192,9 @@ cmd_up() {
   wait_url "http://localhost:$WEB_PORT/api/health" "$WEB_PID" "$STATE_DIR/web.log"
 
   say "готово: http://localhost:$WEB_PORT, вход $ADMIN_EMAIL"
-  # Ждем, пока не остановят или пока не упадет один из серверов
-  while kill -0 "$API_PID" 2>/dev/null && kill -0 "$WEB_PID" 2>/dev/null; do
+  # Ждем, пока не остановят или пока не упадет один из процессов
+  while kill -0 "$API_PID" 2>/dev/null && kill -0 "$WEB_PID" 2>/dev/null \
+    && kill -0 "$WORKER_PID" 2>/dev/null && kill -0 "$FAKE_PID" 2>/dev/null; do
     sleep 1 &
     wait $! || true
   done
@@ -183,6 +210,6 @@ cmd_cli() {
 case "${1:-up}" in
   up) cmd_up ;;
   cli) shift; cmd_cli "$@" ;;
-  -h|--help|help) sed -n '2,23p' "${BASH_SOURCE[0]}" ;;
+  -h|--help|help) sed -n '2,28p' "${BASH_SOURCE[0]}" ;;
   *) die "неизвестная команда: $1 (up, cli)" ;;
 esac

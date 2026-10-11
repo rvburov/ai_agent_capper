@@ -191,6 +191,44 @@ async def test_invite_email_taken_and_duplicate(
     assert negative.status_code == 422
 
 
+async def test_invite_limit_bounds_match_member_limits(
+    make_client: ClientFactory, make_user: UserFactory, login: LoginFn, db: AsyncSession
+) -> None:
+    # Границы стартового лимита — как у лимитов участника и в форме приглашения:
+    # в месяц $1–500, анализов в день 1–30, на анализ от $0,10 и не выше месячного лимита
+    admin = await admin_signed_in(make_client, make_user, login)
+    bad_limits = [
+        {"monthly_usd": 0, "daily_analyses": 3, "per_analysis_usd": "0.50"},
+        {"monthly_usd": 501, "daily_analyses": 3, "per_analysis_usd": 1},
+        {"monthly_usd": 10, "daily_analyses": 0, "per_analysis_usd": 1},
+        {"monthly_usd": 10, "daily_analyses": 31, "per_analysis_usd": 1},
+        {"monthly_usd": 10, "daily_analyses": 3, "per_analysis_usd": "0.05"},
+    ]
+    for number, limit in enumerate(bad_limits):
+        response = await admin.client.post(
+            "/api/admin/invites", json={"email": f"bound{number}@example.com", "limit": limit}
+        )
+        assert response.status_code == 422, limit
+    above = await admin.client.post(
+        "/api/admin/invites",
+        json={
+            "email": "above@example.com",
+            "limit": {"monthly_usd": 5, "daily_analyses": 3, "per_analysis_usd": 6},
+        },
+    )
+    assert above.status_code == 400
+    assert error_code(above) == "ai.cap_above_month"
+    assert await _codes(db) == []
+    edge = await admin.client.post(
+        "/api/admin/invites",
+        json={
+            "email": "edge@example.com",
+            "limit": {"monthly_usd": 1, "daily_analyses": 30, "per_analysis_usd": 1},
+        },
+    )
+    assert edge.status_code == 201
+
+
 async def test_invite_email_with_nul_is_rejected(
     make_client: ClientFactory, make_user: UserFactory, login: LoginFn, db: AsyncSession
 ) -> None:

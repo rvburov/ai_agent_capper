@@ -658,10 +658,584 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ai/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Budget
+         * @description Режим ключа, лимит и расход за месяц (UTC), анализы сегодня, потолок анализа,
+         *     свой ключ (последние 4 символа) и причина, по которой анализ сейчас не запустится.
+         *     Администратору — еще общий бюджет ключа администратора.
+         */
+        get: operations["budget_api_ai_budget_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ai-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Own Key
+         * @description Свой ключ: проверяется запросами к Claude API (список моделей и доступ к моделям
+         *     из настроек), сохраняется только проверенный, режим становится own. Не прошел —
+         *     400 ai.key_format / ai.key_rejected / ai.key_models, 502 ai.key_check_failed,
+         *     503 ai.key_unavailable. Администратору — 409 ai.admin_key_only.
+         */
+        put: operations["save_own_key_api_me_ai_key_put"];
+        post?: never;
+        /**
+         * Delete Own Key
+         * @description Удаляет свой ключ с сервера. Участник остается на своем ключе: анализы не
+         *     запустятся, пока он не сохранит новый или администратор не вернет ключ администратора.
+         */
+        delete: operations["delete_own_key_api_me_ai_key_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ai-key/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Own Key
+         * @description Проверяет сохраненный ключ и записывает итог. Нет ключа — 404 ai.no_own_key,
+         *     нет связи с Anthropic — 503 ai.key_unavailable.
+         */
+        post: operations["check_own_key_api_me_ai_key_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ai-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Ai Mode
+         * @description Переход на свой ключ (нужен проверенный ключ, иначе 409 ai.no_own_key). Вернуться
+         *     на ключ администратора так нельзя (403 ai.return_needs_admin): только просьбой.
+         */
+        put: operations["set_ai_mode_api_me_ai_mode_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ai-mode/return-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Return
+         * @description Просьба вернуть ключ администратора (Р12): уведомление администраторам. Повторная
+         *     просьба уведомлений не дублирует.
+         */
+        post: operations["request_return_api_me_ai_mode_return_request_post"];
+        /**
+         * Cancel Return Request
+         * @description Отмена просьбы: уведомления у администраторов убираются. Просьбы нет — ничего.
+         */
+        delete: operations["cancel_return_request_api_me_ai_mode_return_request_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ai-cap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Own Cap
+         * @description Свой потолок одного анализа на своем ключе, от $0,10 до $20 (400 ai.own_cap_range).
+         */
+        put: operations["set_own_cap_api_me_ai_cap_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Admin Key
+         * @description Последние 4 символа ключа, когда проверен, состояние и сколько людей на ключе.
+         */
+        get: operations["get_admin_key_api_admin_ai_key_get"];
+        /**
+         * Replace Admin Key
+         * @description Замена ключа: код 2FA, затем проверка ключа и доступа к моделям, сохранение и
+         *     журнал key_change. Без totp_code — 422; неверный код — 403 admin.totp_invalid
+         *     (Anthropic не спрашиваем). Ключ не прошел — 400 ai.key_format / ai.key_rejected /
+         *     ai.key_models, 502 ai.key_check_failed, 503 ai.key_unavailable: принятый код при этом
+         *     уже потрачен, для новой попытки нужен следующий.
+         */
+        put: operations["replace_admin_key_api_admin_ai_key_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Budget
+         * @description Бюджет месяца (UTC), потрачено, резервы, прогноз, сумма личных лимитов, порог
+         *     уведомления; отдельно — бюджет проверочных прогонов.
+         */
+        get: operations["get_budget_api_admin_ai_budget_get"];
+        /**
+         * Update Budget
+         * @description Бюджет на месяц ($1–5000) и порог уведомления (50, 70, 80 или 90%); журнал
+         *     budget_change. Бюджет меньше потраченного за месяц — 400 ai.budget_below_spent.
+         */
+        put: operations["update_budget_api_admin_ai_budget_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Limits
+         * @description Лимиты по умолчанию и по каждому участнику: режим, лимит, пауза, расход за месяц,
+         *     анализы сегодня и за месяц, просьба вернуть ключ администратора.
+         */
+        get: operations["get_limits_api_admin_ai_limits_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/limits/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Limit
+         * @description Лимит участника на ключе администратора и пауза; журнал limit_change. В месяц
+         *     $1–500, анализов в день 1–30, на анализ от $0,10 до месячного лимита (иначе 422 или
+         *     400 ai.cap_above_month). У администратора личного лимита нет — 409 ai.admin_no_limit.
+         */
+        put: operations["update_limit_api_admin_ai_limits__user_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Defaults
+         * @description Лимиты по умолчанию для новых участников; у зарегистрированных не меняются, потолок
+         *     анализов администратора и мягкий потолок — тоже. Границы — как у лимита участника.
+         */
+        put: operations["update_defaults_api_admin_ai_defaults_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{user_id}/ai-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide Ai Mode
+         * @description Решение по просьбе вернуть ключ администратора (Р12): approve — участник снова на
+         *     ключе администратора (с limit — с этим лимитом), reject — остается на своем.
+         *     При одобрении свой ключ участника удаляется с сервера. Уведомление участнику, журнал
+         *     ai_mode_change. Просьбы нет — 409 ai.no_return_request; администратор — 409
+         *     ai.return_not_needed.
+         */
+        post: operations["decide_ai_mode_api_admin_users__user_id__ai_mode_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analyses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Analyses
+         * @description Свои анализы, новые сверху. Следующая страница — before=next_cursor.
+         */
+        get: operations["list_analyses_api_analyses_get"];
+        put?: never;
+        /**
+         * Create Analysis
+         * @description Новый анализ: текст — разбор Claude (2–5 с, не больше 30 в час), форма — пустой
+         *     черновик. Нет доступа к Claude — 409 с кодом причины (errors.ai.*).
+         */
+        post: operations["create_analysis_api_analyses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analyses/{analysis_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Analysis */
+        get: operations["get_analysis_api_analyses__analysis_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analyses/{analysis_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Analysis
+         * @description «Перед запуском» без Claude: игроки, маржа, коридор стратегии, цена, время и
+         *     доступ. Без событий в теле — по уже подтвержденным.
+         */
+        post: operations["preview_analysis_api_analyses__analysis_id__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analyses/{analysis_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Analysis
+         * @description Запуск: события (1–5), банк и букмекер. Повторный запуск после сбоя или отмены —
+         *     без событий: продолжает с упавшего шага, оплаченные шаги не повторяются. Нет
+         *     доступа — 409 с кодом причины, неверные события — 422 errors.analysis.*.
+         */
+        post: operations["run_analysis_api_analyses__analysis_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analyses/{analysis_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Analysis */
+        post: operations["cancel_analysis_api_analyses__analysis_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analyses/{analysis_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Decision
+         * @description «Не ставить» (skip) или снять решение (null).
+         */
+        put: operations["set_decision_api_analyses__analysis_id__decision_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analyses/{analysis_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Analysis Events
+         * @description Ход анализа: снимок из базы, затем события шагов; конец — done, failed,
+         *     cancelled. Анализ не в работе — только снимок. Heartbeat раз в 15 с, retry 3 с.
+         */
+        get: operations["analysis_events_api_analyses__analysis_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Place Bet
+         * @description Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не
+         *     меняется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref
+         *     возвращает ту же ставку.
+         */
+        post: operations["place_bet_api_bets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/bank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Bank
+         * @description Банк по учету: баланс, пик, просадка, стартовый банк, итог 7 дней, адаптации.
+         */
+        get: operations["my_bank_api_me_bank_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/bookmakers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Bookmakers
+         * @description Букмекеры участника из ставок и анализов, частые первыми.
+         */
+        get: operations["my_bookmakers_api_me_bookmakers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/players": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Find Players
+         * @description До 10 игроков, похожих на запрос. Пустой или длинный запрос — 422
+         *     players.errors.*.
+         */
+        get: operations["find_players_api_players_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/strategy/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Active Strategy
+         * @description Активная версия; ее еще нет (не было анализов) — значения v3 по умолчанию.
+         */
+        get: operations["active_strategy_api_strategy_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AccessOut
+         * @description Можно ли запустить: причина отказа — код ошибки errors.<reason_code>.
+         */
+        AccessOut: {
+            /** Allowed */
+            allowed: boolean;
+            /** Reason Code */
+            reason_code: string | null;
+            /** Reason Params */
+            reason_params: {
+                [key: string]: unknown;
+            };
+            /** Mode */
+            mode: ("admin" | "own") | "shared";
+            /** Monthly Usd */
+            monthly_usd: number | null;
+            /** Spent Usd */
+            spent_usd: number;
+            /** Left Usd */
+            left_usd: number | null;
+            /** Daily */
+            daily: number | null;
+            /** Today */
+            today: number;
+            /** Per Analysis Usd */
+            per_analysis_usd: number;
+            /** Own Key Last4 */
+            own_key_last4: string | null;
+        };
+        /**
+         * AdaptationOut
+         * @description Правило адаптации суммы (Р22): включено ли в стратегии и действует ли сейчас.
+         */
+        AdaptationOut: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "dd10" | "dd20" | "up15" | "week_loss" | "week_win";
+            /** Enabled */
+            enabled: boolean;
+            /** Active */
+            active: boolean;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * AdminActionIn
          * @description Блокировка и завершение сеансов: код 2FA нужен, только если цель — администратор
@@ -670,6 +1244,82 @@ export interface components {
         AdminActionIn: {
             /** Totp Code */
             totp_code?: string | null;
+        };
+        /**
+         * AdminBudgetOut
+         * @description Общий бюджет ключа администратора на месяц (UTC).
+         *
+         *     spent_usd — все вызовы на ключе администратора без проверочных прогонов,
+         *     background_usd — из них общие задачи без участника. reserved_usd — резерв
+         *     анализов, которые идут сейчас. forecast_usd — прогноз на конец месяца по темпу.
+         *     members_limits_usd — сумма месячных лимитов участников на ключе администратора.
+         *     eval_* — отдельный бюджет проверочных прогонов (eval и теневые, Р22).
+         */
+        AdminBudgetOut: {
+            /**
+             * Month Start
+             * Format: date-time
+             */
+            month_start: string;
+            /** Days In Month */
+            days_in_month: number;
+            /** Days Left */
+            days_left: number;
+            /** Budget Usd */
+            budget_usd: number;
+            /** Spent Usd */
+            spent_usd: number;
+            /** Background Usd */
+            background_usd: number;
+            /** Reserved Usd */
+            reserved_usd: number;
+            /** Left Usd */
+            left_usd: number;
+            /** Forecast Usd */
+            forecast_usd: number;
+            /** Members Limits Usd */
+            members_limits_usd: number;
+            /** Alert Pct */
+            alert_pct: number;
+            /** Eval Budget Usd */
+            eval_budget_usd: number;
+            /** Eval Spent Usd */
+            eval_spent_usd: number;
+        };
+        /**
+         * AdminKeyIn
+         * @description Новый ключ администратора и текущий код 2FA (смена ключа — опасное действие).
+         */
+        AdminKeyIn: {
+            /** Key */
+            key: string;
+            /** Totp Code */
+            totp_code: string;
+        };
+        /**
+         * AdminKeyOut
+         * @description Ключ администратора: ok — проверен, unverified — сохранен, но не проверен или
+         *     Anthropic перестал его принимать, missing — не задан. users_on_key — сколько
+         *     активных пользователей сейчас на ключе администратора.
+         */
+        AdminKeyOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "unverified" | "missing";
+            /** Last4 */
+            last4: string | null;
+            /** Verified At */
+            verified_at: string | null;
+            /** Users On Key */
+            users_on_key: number;
+        };
+        /** AdminLimitsOut */
+        AdminLimitsOut: {
+            defaults: components["schemas"]["LimitDefaultsOut"];
+            /** Members */
+            members: components["schemas"]["MemberLimitOut"][];
         };
         /**
          * AdminUserDetailOut
@@ -761,6 +1411,186 @@ export interface components {
             limit: components["schemas"]["LimitOut"] | null;
         };
         /**
+         * AiBudgetOut
+         * @description Лимит и расход участника на ИИ (экраны «Ключ Claude» и «Новый анализ»).
+         *
+         *     mode — режим участника, key_source — чей ключ платит. Месяц — по UTC с month_start,
+         *     «анализов сегодня» — с полуночи в поясе участника. monthly_usd, left_usd и
+         *     daily_analyses пустые, если личного лимита нет (свой ключ, администратор).
+         *     spent_usd — расход за месяц на ключе этого режима, reserved_usd — резерв анализов,
+         *     которые идут сейчас. per_analysis_usd — потолок одного анализа в этом режиме,
+         *     own_cap_usd — свой потолок на своем ключе. avg_analysis_usd — средняя цена
+         *     законченного анализа за месяц на ключе этого режима (пусто — анализов нет).
+         *     reason_code — почему новый анализ сейчас не запустится (ключ errors.<код> и
+         *     reason_params), пусто — запустится. budget — общий бюджет, только администратору.
+         */
+        AiBudgetOut: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "shared" | "own";
+            /**
+             * Key Source
+             * @enum {string}
+             */
+            key_source: "admin" | "own";
+            /** Has Key */
+            has_key: boolean;
+            /**
+             * Month Start
+             * Format: date-time
+             */
+            month_start: string;
+            /** Monthly Usd */
+            monthly_usd: number | null;
+            /** Spent Usd */
+            spent_usd: number;
+            /** Reserved Usd */
+            reserved_usd: number;
+            /** Left Usd */
+            left_usd: number | null;
+            /** Daily Analyses */
+            daily_analyses: number | null;
+            /** Analyses Today */
+            analyses_today: number;
+            /** Analyses Month */
+            analyses_month: number;
+            /** Per Analysis Usd */
+            per_analysis_usd: number;
+            /** Soft Cap Usd */
+            soft_cap_usd: number;
+            /** Paused */
+            paused: boolean;
+            /** Alert Pct */
+            alert_pct: number;
+            own_key: components["schemas"]["OwnKeyInfoOut"] | null;
+            /** Own Cap Usd */
+            own_cap_usd: number;
+            /** Avg Analysis Usd */
+            avg_analysis_usd: number | null;
+            /** Return Requested At */
+            return_requested_at: string | null;
+            /** Reason Code */
+            reason_code: string | null;
+            /** Reason Params */
+            reason_params: {
+                [key: string]: unknown;
+            };
+            budget: components["schemas"]["AdminBudgetOut"] | null;
+        };
+        /**
+         * AiModeIn
+         * @description Режим ключа. Участник сам переходит только на own; вернуться на ключ
+         *     администратора — просьбой (POST /me/ai-mode/return-request).
+         */
+        AiModeIn: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "shared" | "own";
+        };
+        /**
+         * AnalysisCreateIn
+         * @description Новый анализ: текст (разбор Claude) или пустая форма (без Claude).
+         */
+        AnalysisCreateIn: {
+            /**
+             * Input Kind
+             * @default text
+             * @enum {string}
+             */
+            input_kind: "text" | "form";
+            /** Text */
+            text?: string | null;
+        };
+        /** AnalysisListItem */
+        AnalysisListItem: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "created" | "queued" | "running" | "done" | "failed" | "cancelled" | "parsing" | "needs_confirmation" | "building_dossier" | "modelling" | "llm_review" | "composing";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Input Kind
+             * @enum {string}
+             */
+            input_kind: "text" | "form";
+            /** Matches */
+            matches: string[];
+            /** Decision */
+            decision: ("bet" | "skip") | null;
+            /** Cost Usd */
+            cost_usd: number;
+        };
+        /** AnalysisListOut */
+        AnalysisListOut: {
+            /** Items */
+            items: components["schemas"]["AnalysisListItem"][];
+            /** Next Cursor */
+            next_cursor: number | null;
+        };
+        /** AnalysisOut */
+        AnalysisOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "created" | "queued" | "running" | "done" | "failed" | "cancelled" | "parsing" | "needs_confirmation" | "building_dossier" | "modelling" | "llm_review" | "composing";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Input Kind
+             * @enum {string}
+             */
+            input_kind: "text" | "form";
+            /** Input Text */
+            input_text: string;
+            /** Attempt */
+            attempt: number;
+            draft: components["schemas"]["DraftOut"] | null;
+            /** Steps */
+            steps: components["schemas"]["StepOut"][];
+            totals: components["schemas"]["TotalsOut"];
+            error: components["schemas"]["ErrorInfoOut"] | null;
+            result: components["schemas"]["ResultOut"] | null;
+            /** Decision */
+            decision: ("bet" | "skip") | null;
+            /** Bet Id */
+            bet_id: number | null;
+            /** Key Source */
+            key_source: ("admin" | "own") | null;
+            /** Estimate Usd */
+            estimate_usd: number | null;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Bank */
+            bank: string | null;
+            /** Bookmaker */
+            bookmaker: string | null;
+            /** Strategy Version */
+            strategy_version: string | null;
+        };
+        /**
          * AuditOut
          * @description Запись журнала. actor_id пустой и actor_name "" — действие из терминала.
          *     Удаленный автор или участник — имя «Удаленный пользователь» (имя стерто по Р15).
@@ -796,12 +1626,264 @@ export interface components {
             ip: string | null;
         };
         /**
+         * BankOut
+         * @description Банк по учету: баланс, в игре, капитал, пик и просадка (0..1), стартовый банк
+         *     (пополнения минус выводы), рост к нему, итог 7 дней, винрейт и адаптации.
+         */
+        BankOut: {
+            /** Currency */
+            currency: string;
+            /** Empty */
+            empty: boolean;
+            /** Balance */
+            balance: string;
+            /** In Play */
+            in_play: string;
+            /** Equity */
+            equity: string;
+            /** Peak */
+            peak: string;
+            /** Drawdown */
+            drawdown: string;
+            /** Invested */
+            invested: string;
+            /** Growth */
+            growth: string | null;
+            /** Week Change */
+            week_change: string | null;
+            /** Winrate */
+            winrate: string | null;
+            /** Settled Bets */
+            settled_bets: number;
+            /** Drawdown Level */
+            drawdown_level: ("dd10" | "dd20") | null;
+            /** Adaptations */
+            adaptations: components["schemas"]["AdaptationOut"][];
+        };
+        /** BetIn */
+        BetIn: {
+            /** Analysis Id */
+            analysis_id: number;
+            /** Stake */
+            stake: number | string;
+            /** Bookmaker */
+            bookmaker: string;
+            /** Legs */
+            legs: components["schemas"]["BetLegIn"][];
+            /** Client Ref */
+            client_ref: string;
+        };
+        /**
+         * BetLegIn
+         * @description Нога ставки: прогноз анализа и кэф, по которому участник поставил.
+         */
+        BetLegIn: {
+            /** Prediction Id */
+            prediction_id: number;
+            /** Odds Taken */
+            odds_taken: number | string;
+        };
+        /** BetLegOut */
+        BetLegOut: {
+            /** Id */
+            id: number;
+            /** Prediction Id */
+            prediction_id: number | null;
+            /** Match Id */
+            match_id: number;
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Selection */
+            selection: number;
+            /** Odds Taken */
+            odds_taken: string;
+        };
+        /** BetOut */
+        BetOut: {
+            /** Id */
+            id: number;
+            /** Analysis Id */
+            analysis_id: number | null;
+            /**
+             * Placed At
+             * Format: date-time
+             */
+            placed_at: string;
+            /** Bookmaker */
+            bookmaker: string;
+            /** Stake */
+            stake: string;
+            /** Currency */
+            currency: string;
+            /** Total Odds */
+            total_odds: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "won" | "lost" | "void";
+            /** Legs */
+            legs: components["schemas"]["BetLegOut"][];
+            /** Client Ref */
+            client_ref: string | null;
+        };
+        /**
+         * BudgetIn
+         * @description Общий бюджет ключа администратора ($1–5000, не меньше потраченного за месяц),
+         *     порог предупреждения о расходе и (по желанию) бюджет проверочных прогонов.
+         */
+        BudgetIn: {
+            /** Monthly Usd */
+            monthly_usd: number | string;
+            /**
+             * Alert Pct
+             * @enum {integer}
+             */
+            alert_pct: 50 | 70 | 80 | 90;
+            /** Eval Budget Usd */
+            eval_budget_usd?: number | string | null;
+        };
+        /**
+         * ComparisonRow
+         * @description Строка «Сравнение игроков»: key — что сравниваем (elo_rank, elo_surface, form10,
+         *     load14, serve_first, serve_second, return, tiebreaks, h2h), better — у кого лучше.
+         */
+        ComparisonRow: {
+            /** Key */
+            key: string;
+            /** Left */
+            left: number | string | null;
+            /** Right */
+            right: number | string | null;
+            /** Sub Left */
+            sub_left: number | string | null;
+            /** Sub Right */
+            sub_right: number | string | null;
+            /** Better */
+            better: ("left" | "right") | null;
+        };
+        /**
+         * ConfirmIn
+         * @description Подтвержденный ввод для «Перед запуском» и запуска. events null — взять уже
+         *     подтвержденные (повторный запуск после сбоя или отмены).
+         */
+        ConfirmIn: {
+            /** Events */
+            events?: components["schemas"]["EventIn"][] | null;
+            /** Bank */
+            bank?: number | string | null;
+            /** Bookmaker */
+            bookmaker?: string | null;
+        };
+        /** CorridorOut */
+        CorridorOut: {
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Selection */
+            selection: number;
+            /** Odds */
+            odds: string;
+        };
+        /** CostsOut */
+        CostsOut: {
+            /** Tokens */
+            tokens: number;
+            /** Cache Share */
+            cache_share: number;
+            /** Searches */
+            searches: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Estimate Usd */
+            estimate_usd: number | null;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Models */
+            models: string[];
+        };
+        /**
          * CsrfOut
          * @description CSRF-токен: то же значение, что в cookie csrf. Его шлют в заголовке X-CSRF-Token.
          */
         CsrfOut: {
             /** Csrf Token */
             csrf_token: string;
+        };
+        /**
+         * DecisionIn
+         * @description Решение по итогу: skip — не ставить, null — снять решение («Все-таки поставить»).
+         *     «Поставил» записывает сохранение ставки (POST /bets).
+         */
+        DecisionIn: {
+            /** Decision */
+            decision?: "skip" | null;
+        };
+        /** DraftEventOut */
+        DraftEventOut: {
+            /** Position */
+            position: number;
+            /** Line No */
+            line_no: number | null;
+            /** Raw1 */
+            raw1: string;
+            /** Raw2 */
+            raw2: string;
+            player1: components["schemas"]["PlayerPick"];
+            player2: components["schemas"]["PlayerPick"];
+            tournament: components["schemas"]["TournamentOut"] | null;
+            /** Surface */
+            surface: ("hard" | "clay" | "grass" | "carpet") | null;
+            /** Best Of */
+            best_of: number;
+            /** Round */
+            round: string;
+            odds: components["schemas"]["OddsPairsOut"];
+            /** Bookmaker */
+            bookmaker: string | null;
+            /** Warnings */
+            warnings: components["schemas"]["TextKey"][];
+        };
+        /**
+         * DraftOut
+         * @description Что понял разбор (или пустая форма). bank — банк из текста в валюте программы;
+         *     bank_note_key — почему банк не взят или расходится с учетом.
+         */
+        DraftOut: {
+            /** Bank */
+            bank: string | null;
+            /** Currency */
+            currency: string;
+            /** Ledger Bank */
+            ledger_bank: string | null;
+            /** Bank Note Key */
+            bank_note_key: string | null;
+            /** Bookmaker */
+            bookmaker: string | null;
+            /** Events */
+            events: components["schemas"]["DraftEventOut"][];
+            /** Unknown Lines */
+            unknown_lines: components["schemas"]["UnknownLineOut"][];
+            /** Parse Cost Usd */
+            parse_cost_usd: number;
+            /** Warnings */
+            warnings: components["schemas"]["TextKey"][];
+        };
+        /** DrawdownOut */
+        DrawdownOut: {
+            /** Start */
+            start: string;
+            /** Max Pct */
+            max_pct: string;
+            /** Max Legs */
+            max_legs: number | null;
+            /** Max Leg Odds */
+            max_leg_odds: string | null;
         };
         /** ErrorDetail */
         ErrorDetail: {
@@ -827,11 +1909,159 @@ export interface components {
             code: string;
         };
         /**
+         * ErrorInfoOut
+         * @description Почему анализ остановился: code — ключ errors.<code>, step — шаг (kind).
+         */
+        ErrorInfoOut: {
+            /** Code */
+            code: string;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Step */
+            step: string | null;
+        };
+        /**
          * ErrorOut
          * @description Тело любого ответа с ошибкой: {"error": {"code", "message", ...}}.
          */
         ErrorOut: {
             error: components["schemas"]["ErrorDetail"];
+        };
+        /**
+         * EstimateOut
+         * @description Оценка до запуска: цена, время, у скольких игроков новости устарели, сколько
+         *     матчей возьмут готовую оценку Claude (бесплатно).
+         */
+        EstimateOut: {
+            /** Cost Usd */
+            cost_usd: number;
+            /** Seconds */
+            seconds: number;
+            /** News Players */
+            news_players: number;
+            /** Reused Matches */
+            reused_matches: number;
+        };
+        /**
+         * EventIn
+         * @description Событие, которое подтвердил участник. Игроки — id из базы (подсказки GET /players
+         *     или черновик разбора). Турнир — id из черновика или название (новый турнир).
+         */
+        EventIn: {
+            /** Player1 Id */
+            player1_id?: number | null;
+            /** Player2 Id */
+            player2_id?: number | null;
+            /** Tournament Id */
+            tournament_id?: number | null;
+            /** Tournament Name */
+            tournament_name?: string | null;
+            /** Surface */
+            surface?: ("hard" | "clay" | "grass" | "carpet") | null;
+            /** Best Of */
+            best_of?: (3 | 5) | null;
+            /**
+             * Round
+             * @default
+             */
+            round: string;
+            odds: components["schemas"]["OddsPairsIn"];
+            /** Bookmaker */
+            bookmaker?: string | null;
+            /** Line No */
+            line_no?: number | null;
+        };
+        /** ExpressLeg */
+        ExpressLeg: {
+            /** Prediction Id */
+            prediction_id: number;
+            /** Match Id */
+            match_id: number;
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Selection */
+            selection: number;
+            /** P */
+            p: number;
+            /** Odds */
+            odds: string;
+        };
+        /** ExpressOut */
+        ExpressOut: {
+            /** Legs */
+            legs: components["schemas"]["ExpressLeg"][];
+            /** Total Odds */
+            total_odds: string;
+            /** P Express */
+            p_express: number;
+            /** Ev */
+            ev: number;
+            stake: components["schemas"]["StakeOut"];
+            /** Rules */
+            rules: components["schemas"]["RuleCheck"][];
+        };
+        /** FactorOut */
+        FactorOut: {
+            /** Player */
+            player: number;
+            /**
+             * Effect
+             * @enum {string}
+             */
+            effect: "plus" | "minus";
+            /** Text */
+            text: string;
+            /** Ref */
+            ref: string;
+            /** Source Url */
+            source_url: string | null;
+            /** Source Name */
+            source_name: string | null;
+            /** Date */
+            date: string | null;
+        };
+        /**
+         * FairOut
+         * @description Рынок без маржи: вероятность исхода по паре кэфов.
+         */
+        FairOut: {
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Selection */
+            selection: number;
+            /** Q */
+            q: number;
+        };
+        /** FlagsOut */
+        FlagsOut: {
+            /** P1 */
+            p1: ("injury" | "fatigue" | "form" | "motivation")[];
+            /** P2 */
+            p2: ("injury" | "fatigue" | "form" | "motivation")[];
+        };
+        /** FormOut */
+        FormOut: {
+            /** P1 */
+            p1: ("W" | "L")[];
+            /** P2 */
+            p2: ("W" | "L")[];
+        };
+        /** GrowthOut */
+        GrowthOut: {
+            /** Bank Up */
+            bank_up: string;
+            /** Min Winrate */
+            min_winrate: string;
+            /** Max Pct */
+            max_pct: string;
         };
         /** HealthOut */
         HealthOut: {
@@ -958,6 +2188,46 @@ export interface components {
             status: "active" | "used" | "expired" | "revoked";
         };
         /**
+         * KeyModelOut
+         * @description Модель из настроек агента и доступна ли она ключу.
+         */
+        KeyModelOut: {
+            /** Model */
+            model: string;
+            /** Available */
+            available: boolean;
+        };
+        /**
+         * LimitDefaultsOut
+         * @description Лимиты по умолчанию для новых участников (Р13): у зарегистрированных не меняются.
+         *     per_analysis_usd — потолок анализа нового участника (и потолок своего ключа по
+         *     умолчанию), это не жесткий потолок программы: его лимиты по умолчанию не меняют.
+         *     soft_cap_usd — мягкий потолок анализа программы (предупреждение о цене).
+         */
+        LimitDefaultsOut: {
+            /** Monthly Usd */
+            monthly_usd: number;
+            /** Daily Analyses */
+            daily_analyses: number;
+            /** Per Analysis Usd */
+            per_analysis_usd: number;
+            /** Soft Cap Usd */
+            soft_cap_usd: number;
+        };
+        /**
+         * LimitIn
+         * @description Лимит участника на ключе администратора: в месяц ($1–500), анализов в день
+         *     (1–30), на анализ (от $0,10 до месячного лимита).
+         */
+        LimitIn: {
+            /** Monthly Usd */
+            monthly_usd: number | string;
+            /** Daily Analyses */
+            daily_analyses: number;
+            /** Per Analysis Usd */
+            per_analysis_usd: number | string;
+        };
+        /**
          * LimitOut
          * @description Лимит участника на ключе администратора (ai_limits).
          */
@@ -970,6 +2240,21 @@ export interface components {
             per_analysis_usd: number;
             /** Paused */
             paused: boolean;
+        };
+        /**
+         * LimitPatchIn
+         * @description Правка лимита участника: поле не передано (или null) — не меняется. Потолок на
+         *     анализ не выше месячного лимита — с учетом действующего, если месяц не передан.
+         */
+        LimitPatchIn: {
+            /** Monthly Usd */
+            monthly_usd?: number | string | null;
+            /** Daily Analyses */
+            daily_analyses?: number | null;
+            /** Per Analysis Usd */
+            per_analysis_usd?: number | string | null;
+            /** Paused */
+            paused?: boolean | null;
         };
         /**
          * LoginEventOut
@@ -1017,6 +2302,81 @@ export interface components {
             user?: components["schemas"]["MeOut"] | null;
         };
         /**
+         * MarketRow
+         * @description Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф
+         *     участника, валуй p_final·кэф − 1 и уровень, попал ли в экспресс, почему нет
+         *     (note_key — ключ analysis.leg.*).
+         */
+        MarketRow: {
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Selection */
+            selection: number;
+            /** Prediction Id */
+            prediction_id: number | null;
+            /** P Base */
+            p_base: number;
+            /** P Claude */
+            p_claude: number;
+            /** P Final */
+            p_final: number;
+            /** Q Market */
+            q_market: number | null;
+            /** Odds */
+            odds: string | null;
+            /** Value */
+            value: number | null;
+            /** Tier */
+            tier: string;
+            /** In Express */
+            in_express: boolean;
+            /** Note Key */
+            note_key: string | null;
+        };
+        /** MatchResult */
+        MatchResult: {
+            /** Match Id */
+            match_id: number;
+            player1: components["schemas"]["PlayerSide"];
+            player2: components["schemas"]["PlayerSide"];
+            /** Tournament */
+            tournament: string | null;
+            /** Surface */
+            surface: string;
+            /** Round */
+            round: string;
+            /** Best Of */
+            best_of: number;
+            /** Data As Of */
+            data_as_of: string | null;
+            /**
+             * Confidence
+             * @enum {string}
+             */
+            confidence: "low" | "medium" | "high";
+            /** Explanation */
+            explanation: string;
+            /** Divergence Note */
+            divergence_note: string;
+            /** Highlight */
+            highlight: boolean;
+            flags: components["schemas"]["FlagsOut"];
+            /** Factors */
+            factors: components["schemas"]["FactorOut"][];
+            /** Comparison */
+            comparison: components["schemas"]["ComparisonRow"][];
+            form: components["schemas"]["FormOut"];
+            /** Markets */
+            markets: components["schemas"]["MarketRow"][];
+            /** Reused From */
+            reused_from: string | null;
+            /** News State */
+            news_state: string | null;
+        };
+        /**
          * MeOut
          * @description Вошедший пользователь.
          */
@@ -1052,6 +2412,68 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * MemberLimitOut
+         * @description Строка таблицы «Лимиты участников». Р14: только расход на ИИ и активность.
+         *
+         *     limit — действующий лимит на ключе администратора (у участника на своем ключе он
+         *     вступит в силу при возврате); пусто у администратора: у него нет личного лимита.
+         *     spent_month_usd — расход за месяц на ключе администратора, own_spent_month_usd —
+         *     на своем ключе (вне общего бюджета); без проверочных прогонов. analyses_today — на
+         *     ключе администратора с полуночи в поясе участника. return_requested_at — участник
+         *     просит вернуть ключ администратора (Р12).
+         */
+        MemberLimitOut: {
+            /** Id */
+            id: number;
+            /** Display Name */
+            display_name: string;
+            /** Email */
+            email: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "blocked" | "deleted";
+            /**
+             * Ai Mode
+             * @enum {string}
+             */
+            ai_mode: "shared" | "own";
+            limit: components["schemas"]["LimitOut"] | null;
+            /** Own Cap Usd */
+            own_cap_usd: number;
+            /** Own Key Last4 */
+            own_key_last4: string | null;
+            /** Spent Month Usd */
+            spent_month_usd: number;
+            /** Own Spent Month Usd */
+            own_spent_month_usd: number;
+            /** Analyses Today */
+            analyses_today: number;
+            /** Analyses Month */
+            analyses_month: number;
+            /** Return Requested At */
+            return_requested_at: string | null;
+        };
+        /**
+         * ModeDecisionIn
+         * @description Решение по просьбе вернуть ключ администратора. limit — лимит на ключе
+         *     администратора при одобрении (не задан — остается прежний).
+         */
+        ModeDecisionIn: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "reject";
+            limit?: components["schemas"]["LimitIn"] | null;
+        };
         /** NotificationOut */
         NotificationOut: {
             /** Id */
@@ -1079,12 +2501,231 @@ export interface components {
             /** Unread */
             unread: number;
         };
+        /**
+         * OddsPairsIn
+         * @description Кэфы события: пара [на игрока 1, на игрока 2] по рынку, null — кэфа нет.
+         */
+        OddsPairsIn: {
+            /** Ml */
+            ML: (number | string | null)[];
+            /**
+             * Hcp -1.5
+             * @default [
+             *       null,
+             *       null
+             *     ]
+             */
+            "HCP_-1.5": (number | string | null)[];
+            /**
+             * Hcp +1.5
+             * @default [
+             *       null,
+             *       null
+             *     ]
+             */
+            "HCP_+1.5": (number | string | null)[];
+        };
+        /** OddsPairsOut */
+        OddsPairsOut: {
+            /** Ml */
+            ML: (string | null)[];
+            /** Hcp -1.5 */
+            "HCP_-1.5": (string | null)[];
+            /** Hcp +1.5 */
+            "HCP_+1.5": (string | null)[];
+        };
+        /**
+         * OwnCapIn
+         * @description Свой потолок одного анализа на своем ключе, от $0,10 до $20.
+         */
+        OwnCapIn: {
+            /** Per Analysis Usd */
+            per_analysis_usd: number | string;
+        };
+        /** OwnCapOut */
+        OwnCapOut: {
+            /** Per Analysis Usd */
+            per_analysis_usd: number;
+        };
+        /**
+         * OwnKeyIn
+         * @description Новый свой ключ: сохраняется, только если прошел проверку.
+         */
+        OwnKeyIn: {
+            /** Key */
+            key: string;
+        };
+        /**
+         * OwnKeyInfoOut
+         * @description Свой ключ участника: последние 4 символа, когда проверен, последняя ошибка.
+         */
+        OwnKeyInfoOut: {
+            /** Last4 */
+            last4: string | null;
+            /** Verified At */
+            verified_at: string | null;
+            /** Last Error */
+            last_error: string | null;
+        };
+        /**
+         * OwnKeyOut
+         * @description Свой ключ участника и его режим. check — итог проверки в этом запросе (пусто,
+         *     если ключ не проверяли), models — доступность моделей по этой проверке.
+         *     last_error — код последней ошибки ключа (например rejected:401, ai.billing).
+         */
+        OwnKeyOut: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "shared" | "own";
+            /** Has Key */
+            has_key: boolean;
+            /** Last4 */
+            last4: string | null;
+            /** Verified At */
+            verified_at: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Check */
+            check: ("ok" | "rejected" | "error" | "models") | null;
+            /** Models */
+            models: components["schemas"]["KeyModelOut"][];
+        };
         /** PasswordChangeIn */
         PasswordChangeIn: {
             /** Current Password */
             current_password: string;
             /** New Password */
             new_password: string;
+        };
+        /** PlayerBrief */
+        PlayerBrief: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Name Ru */
+            name_ru: string | null;
+            /** Country */
+            country: string | null;
+            /** Elo Rank */
+            elo_rank: number | null;
+            /** Last Match */
+            last_match: string | null;
+        };
+        /** PlayerCandidate */
+        PlayerCandidate: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Country */
+            country: string | null;
+            /** Score */
+            score: number;
+        };
+        /**
+         * PlayerHitOut
+         * @description Найденный игрок: сходство 0…1, по какому полю найден, матчей в базе, место по Эло
+         *     и последний матч.
+         */
+        PlayerHitOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Name Ru */
+            name_ru: string | null;
+            /** Country */
+            country: string | null;
+            /** Score */
+            score: number;
+            /** Matched */
+            matched: string;
+            /** Matches */
+            matches: number;
+            /** Elo Rank */
+            elo_rank: number | null;
+            /** Last Match */
+            last_match: string | null;
+        };
+        /**
+         * PlayerPick
+         * @description Игрок из текста: matched — найден (сходство ≥ 0,9), check — проверьте
+         *     (0,7–0,9), missing — нет в базе. candidates — до 3 похожих.
+         */
+        PlayerPick: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "matched" | "check" | "missing";
+            /** Raw */
+            raw: string;
+            player: components["schemas"]["PlayerBrief"] | null;
+            /** Score */
+            score: number | null;
+            /** Candidates */
+            candidates: components["schemas"]["PlayerCandidate"][];
+        };
+        /** PlayerSide */
+        PlayerSide: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Country */
+            country: string | null;
+            /** Elo Rank */
+            elo_rank: number | null;
+        };
+        /** PreviewEvent */
+        PreviewEvent: {
+            /** Position */
+            position: number;
+            /** Margin Ml */
+            margin_ml: number | null;
+            /** Margin Hcp */
+            margin_hcp: number | null;
+            /** Market P */
+            market_p: components["schemas"]["FairOut"][];
+            /** In Corridor */
+            in_corridor: components["schemas"]["CorridorOut"][];
+            /** Players */
+            players: components["schemas"]["PreviewPlayer"][];
+            /** Reused */
+            reused: boolean;
+            /** Problems */
+            problems: components["schemas"]["TextKey"][];
+        };
+        /** PreviewOut */
+        PreviewOut: {
+            /** Events */
+            events: components["schemas"]["PreviewEvent"][];
+            /** Problems */
+            problems: components["schemas"]["TextKey"][];
+            estimate: components["schemas"]["EstimateOut"];
+            access: components["schemas"]["AccessOut"];
+            /** Data To */
+            data_to: string | null;
+        };
+        /** PreviewPlayer */
+        PreviewPlayer: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Country */
+            country: string | null;
+            /** Elo Rank */
+            elo_rank: number | null;
+            /** News Fresh */
+            news_fresh: boolean;
+            /** News Checked At */
+            news_checked_at: string | null;
+            /** Last Match */
+            last_match: string | null;
         };
         /**
          * ProfileUpdateIn
@@ -1096,6 +2737,29 @@ export interface components {
             display_name?: string | null;
             /** Tz */
             tz?: string | null;
+        };
+        /**
+         * ProgressEventOut
+         * @description Событие потока SSE GET /analyses/{id}/events (поле data).
+         */
+        ProgressEventOut: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "snapshot" | "step" | "status" | "done" | "failed" | "cancelled";
+            /** Analysis Id */
+            analysis_id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "created" | "queued" | "running" | "done" | "failed" | "cancelled" | "parsing" | "needs_confirmation" | "building_dossier" | "modelling" | "llm_review" | "composing";
+            step: components["schemas"]["StepOut"] | null;
+            /** Steps */
+            steps: components["schemas"]["StepOut"][] | null;
+            totals: components["schemas"]["TotalsOut"];
+            error: components["schemas"]["ErrorInfoOut"] | null;
         };
         /**
          * PublicSettingsOut
@@ -1219,6 +2883,28 @@ export interface components {
             /** New Password */
             new_password: string;
         };
+        /** ResultOut */
+        ResultOut: {
+            /** Matches */
+            matches: components["schemas"]["MatchResult"][];
+            express: components["schemas"]["ExpressOut"] | null;
+            /** No Express Key */
+            no_express_key: string | null;
+            /** Warnings */
+            warnings: components["schemas"]["TextKey"][];
+            costs: components["schemas"]["CostsOut"];
+        };
+        /**
+         * ReturnRequestOut
+         * @description Когда отправлена просьба вернуть ключ администратора.
+         */
+        ReturnRequestOut: {
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+        };
         /** RoleChangeIn */
         RoleChangeIn: {
             /**
@@ -1228,6 +2914,17 @@ export interface components {
             role: "admin" | "member";
             /** Totp Code */
             totp_code: string;
+        };
+        /** RuleCheck */
+        RuleCheck: {
+            /** Ok */
+            ok: boolean;
+            /** Key */
+            key: string;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
         };
         /**
          * SessionOut
@@ -1256,6 +2953,54 @@ export interface components {
              */
             current: boolean;
         };
+        /** StakeBandOut */
+        StakeBandOut: {
+            /** Low */
+            low: string;
+            /** High */
+            high: string;
+            /** Pct */
+            pct: string;
+        };
+        /**
+         * StakeOut
+         * @description Сумма ставки и шаги расчета (app/ml/strategy.py, stake). amount null — суммы
+         *     нет, reason — почему. bank_source: ledger — банк по учету, input — из ввода.
+         */
+        StakeOut: {
+            /** Amount */
+            amount: string | null;
+            /** Currency */
+            currency: string;
+            /** Bank */
+            bank: string;
+            /**
+             * Bank Source
+             * @enum {string}
+             */
+            bank_source: "ledger" | "input" | "none";
+            /** Total Odds */
+            total_odds: string;
+            /** Pct */
+            pct: string;
+            /** Steps */
+            steps: components["schemas"]["StakeStepOut"][];
+            /** Reason */
+            reason: string | null;
+            /** Drawdown Level */
+            drawdown_level: string | null;
+        };
+        /** StakeStepOut */
+        StakeStepOut: {
+            /** Kind */
+            kind: string;
+            /** Pct */
+            pct: string;
+            /** Params */
+            params: {
+                [key: string]: string;
+            };
+        };
         /** StatusOut */
         StatusOut: {
             /**
@@ -1263,6 +3008,137 @@ export interface components {
              * @constant
              */
             status: "ok";
+        };
+        /**
+         * StepOut
+         * @description Шаг хода анализа. match_id — у шагов новостей и Claude (по матчу).
+         */
+        StepOut: {
+            /** Index */
+            index: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "parse" | "players" | "news" | "dossier" | "model" | "claude" | "compose";
+            /** Match Id */
+            match_id: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "running" | "done" | "failed" | "skipped";
+            /** Model */
+            model: string | null;
+            /** Elapsed Ms */
+            elapsed_ms: number;
+            /** Tokens */
+            tokens: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Web Searches */
+            web_searches: number;
+            /** Detail Key */
+            detail_key: string | null;
+            /** Detail Params */
+            detail_params: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * StrategyOut
+         * @description Активная версия стратегии; id null — версии еще нет, показаны значения v3.
+         */
+        StrategyOut: {
+            /** Id */
+            id: number | null;
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Prompt Version */
+            prompt_version: string | null;
+            /** Created At */
+            created_at: string | null;
+            params: components["schemas"]["StrategyParamsOut"];
+        };
+        /** StrategyParamsOut */
+        StrategyParamsOut: {
+            /** Markets */
+            markets: string[];
+            /** Min P */
+            min_p: number;
+            /** Triple Min P */
+            triple_min_p: number;
+            /** Leg Odds */
+            leg_odds: string[];
+            /** Triple Max Leg Odds */
+            triple_max_leg_odds: string;
+            /** Double Total */
+            double_total: string[];
+            /** Triple Total */
+            triple_total: string[];
+            /** Require Value */
+            require_value: boolean;
+            /** Cover Min P */
+            cover_min_p: number;
+            /** Form Min Wins Last5 */
+            form_min_wins_last5: number;
+            /** Stake Bands */
+            stake_bands: components["schemas"]["StakeBandOut"][];
+            /** Value Adjust */
+            value_adjust: components["schemas"]["ValueAdjustOut"][];
+            /** Drawdown */
+            drawdown: components["schemas"]["DrawdownOut"][];
+            /** Claude Max Shift */
+            claude_max_shift: number;
+            /** Claude Highlight */
+            claude_highlight: number;
+            /** Rounding */
+            rounding: {
+                [key: string]: string;
+            };
+            /** Min Stake */
+            min_stake: {
+                [key: string]: string;
+            };
+            /** Max Pct */
+            max_pct: string;
+            growth: components["schemas"]["GrowthOut"];
+            week: components["schemas"]["WeekOut"];
+            /** Adapt */
+            adapt: {
+                [key: string]: boolean;
+            };
+        };
+        /**
+         * TextKey
+         * @description Текст ключом локали: key — полный ключ (analysis.draft.player_check), params —
+         *     значения для подстановки.
+         */
+        TextKey: {
+            /** Key */
+            key: string;
+            /**
+             * Params
+             * @default {}
+             */
+            params: {
+                [key: string]: unknown;
+            };
+        };
+        /** TotalsOut */
+        TotalsOut: {
+            /** Elapsed Ms */
+            elapsed_ms: number;
+            /** Tokens */
+            tokens: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Step */
+            step: number;
+            /** Steps */
+            steps: number;
         };
         /**
          * TotpConfirmIn
@@ -1302,6 +3178,23 @@ export interface components {
             otpauth_uri: string;
             /** Qr Svg */
             qr_svg: string;
+        };
+        /**
+         * TournamentOut
+         * @description Турнир события: id — найденный в базе турнир этого года (null — будет создан при
+         *     запуске), остальное — из него или из последнего выпуска турнира.
+         */
+        TournamentOut: {
+            /** Id */
+            id: number | null;
+            /** Name */
+            name: string;
+            /** Category */
+            category: string | null;
+            /** Surface */
+            surface: ("hard" | "clay" | "grass" | "carpet") | null;
+            /** Best Of */
+            best_of: number | null;
         };
         /**
          * TrustedDeviceOut
@@ -1347,6 +3240,13 @@ export interface components {
              */
             remember_device: boolean;
         };
+        /** UnknownLineOut */
+        UnknownLineOut: {
+            /** Line No */
+            line_no: number;
+            /** Text */
+            text: string;
+        };
         /**
          * UserDeleteIn
          * @description Удаление участника (Р15): email участника для подтверждения и код 2FA.
@@ -1356,6 +3256,24 @@ export interface components {
             confirm_email: string;
             /** Totp Code */
             totp_code: string;
+        };
+        /** ValueAdjustOut */
+        ValueAdjustOut: {
+            /** Min Value */
+            min_value: string | null;
+            /** Add */
+            add: string;
+        };
+        /** WeekOut */
+        WeekOut: {
+            /** Loss */
+            loss: string;
+            /** Loss Max Pct */
+            loss_max_pct: string;
+            /** Win */
+            win: string;
+            /** Win Add */
+            win_add: string;
         };
     };
     responses: never;
@@ -2568,6 +4486,921 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditOut"][];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    budget_api_ai_budget_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiBudgetOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    save_own_key_api_me_ai_key_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnKeyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnKeyOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    delete_own_key_api_me_ai_key_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnKeyOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    check_own_key_api_me_ai_key_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnKeyOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    set_ai_mode_api_me_ai_mode_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiModeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnKeyOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    request_return_api_me_ai_mode_return_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReturnRequestOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    cancel_return_request_api_me_ai_mode_return_request_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    set_own_cap_api_me_ai_cap_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnCapIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnCapOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_admin_key_api_admin_ai_key_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKeyOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    replace_admin_key_api_admin_ai_key_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminKeyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKeyOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_budget_api_admin_ai_budget_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminBudgetOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    update_budget_api_admin_ai_budget_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BudgetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminBudgetOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_limits_api_admin_ai_limits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLimitsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    update_limit_api_admin_ai_limits__user_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LimitPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberLimitOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    update_defaults_api_admin_ai_defaults_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LimitIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LimitDefaultsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    decide_ai_mode_api_admin_users__user_id__ai_mode_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModeDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberLimitOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_analyses_api_analyses_get: {
+        parameters: {
+            query?: {
+                before?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisListOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    create_analysis_api_analyses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalysisCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_analysis_api_analyses__analysis_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    preview_analysis_api_analyses__analysis_id__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ConfirmIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    run_analysis_api_analyses__analysis_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ConfirmIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    cancel_analysis_api_analyses__analysis_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    set_decision_api_analyses__analysis_id__decision_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    analysis_events_api_analyses__analysis_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Last-Event-ID"?: string | null;
+            };
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Поток SSE: в data — JSON ProgressEventOut, первым — снимок */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["ProgressEventOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    place_bet_api_bets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    my_bank_api_me_bank_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    my_bookmakers_api_me_bookmakers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    find_players_api_players_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerHitOut"][];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    active_strategy_api_strategy_active_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

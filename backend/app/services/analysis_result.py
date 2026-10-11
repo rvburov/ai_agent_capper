@@ -1,0 +1,584 @@
+"""Итог анализа: прогнозы по 6 исходам каждого матча, экспресс, сумма ставки и вид
+результата для экрана (analyses.result).
+
+Числа считает код (app/ml/strategy.py): Р22 — поправка Claude ограничена ±10 п.п. от
+p_base и согласована; исходы с кэфами участника; экспресс по правилам v3 с лимитом
+просадки; сумма — от банка по учету, а если журнал пуст или банк из ввода другой — от
+банка из ввода (с предупреждением). В predictions.p_claude — исходное число Claude.
+"""
+
+import math
+from collections.abc import Sequence
+from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.agent.schemas import MatchAssessmentOut
+from app.core.errors import AppError
+from app.db.models import (
+    AgentRun,
+    Analysis,
+    Dossier,
+    MatchAssessment,
+    MlModel,
+    PlayerNews,
+    Prediction,
+)
+from app.ml.elo import MODEL_ID
+from app.ml.market import devig_pair
+from app.ml.sets import MARKET_MINUS, MARKETS, Probs3
+from app.ml.strategy import (
+    DrawdownLevel,
+    Final3,
+    Leg,
+    StrategyParams,
+    apply_claude,
+    candidates,
+    leg_issues,
+    legs_for_match,
+    parlay_issues,
+    parlay_total,
+    pick_parlay,
+    selection_blocks,
+    stake,
+    value,
+    value_tier,
+)
+from app.services.analysis_input import ConfirmedEvent, PlayerFacts, player_facts, short_odds
+from app.services.app_settings import get_app_settings
+from app.services.bank import BankState, bank_state, drawdown_level
+from app.services.dossier import FEATURE_SET
+
+ODDS_STEP = Decimal("0.001")
+P_DIGITS = 6
+# Проверки экспресса для экрана: ключ analysis.rules.<имя> (app/ml/strategy.py, issues)
+RULE_KEYS = (
+    "legs_count",
+    "same_match",
+    "odds_low",
+    "odds_high",
+    "p_low",
+    "no_value",
+    "cover_p_low",
+    "triple_p",
+    "triple_odds",
+    "total_low",
+    "total_high",
+    "form",
+    "injury",
+    "fatigue",
+    "drawdown_legs",
+    "drawdown_odds",
+)
+
+
+@dataclass(frozen=True)
+class ComposeInput:
+    """Что нужно итогу: анализ, события, чекпойнты матчей, параметры стратегии, банк и
+    букмекер из ввода, предупреждения шагов."""
+
+    analysis: Analysis
+    events: Sequence[ConfirmedEvent]
+    entries: dict[int, dict[str, Any]]
+    params: StrategyParams
+    bank_input: Decimal | None
+    bookmaker: str | None
+    warnings: Sequence[dict[str, Any]]
+
+
+@dataclass
+class _Match:
+    event: ConfirmedEvent
+    out: MatchAssessmentOut
+    content: dict[str, Any]
+    final: Final3
+    fair: dict[tuple[str, int], float]
+    legs: list[Leg]
+    form: tuple[list[str], list[str]]
+    entry: dict[str, Any]
+
+
+def clip01(value_: float) -> float:
+    return min(1.0, max(0.0, float(value_)))
+
+
+def fair_probs(odds: dict[str, list[Decimal | None]]) -> dict[tuple[str, int], float]:
+    """Рынок без маржи по парам: П1/П2 и взаимные форы (П1(−1.5) с П2(+1.5))."""
+    fair: dict[tuple[str, int], float] = {}
+    ml = odds.get("ML", [None, None])
+    if ml[0] is not None and ml[1] is not None and ml[0] > 1 and ml[1] > 1:
+        q = devig_pair(ml[0], ml[1])
+        fair[("ML", 1)], fair[("ML", 2)] = q, 1.0 - q
+    minus = odds.get("HCP_-1.5", [None, None])
+    plus = odds.get("HCP_+1.5", [None, None])
+    for side, other in ((1, 2), (2, 1)):
+        a, b = minus[side - 1], plus[other - 1]
+        if a is not None and b is not None and a > 1 and b > 1:
+            q = devig_pair(a, b)
+            fair[("HCP_-1.5", side)], fair[("HCP_+1.5", other)] = q, 1.0 - q
+    return fair
+
+
+def form_of(content: dict[str, Any], key: str) -> list[str]:
+    """Исходы последних матчей игрока из досье (W/L), от последнего."""
+    block = (content.get(key) or {}).get("form") or {}
+    return [str(item.get("r")) for item in block.get("m") or [] if item.get("r") in ("W", "L")]
+
+
+def _better(left: Any, right: Any, *, high: bool = True) -> str | None:
+    if not isinstance(left, int | float) or not isinstance(right, int | float) or left == right:
+        return None
+    return "left" if (left > right) == high else "right"
+
+
+def _share(won: Any, lost: Any) -> float | None:
+    if not isinstance(won, int) or not isinstance(lost, int) or won + lost == 0:
+        return None
+    return round(won / (won + lost), 2)
+
+
+def comparison(
+    content: dict[str, Any], ranks: tuple[int | None, int | None]
+) -> list[dict[str, Any]]:
+    """Строки «Сравнение игроков» из досье и места по Эло."""
+    p1, p2 = content.get("p1") or {}, content.get("p2") or {}
+    rows: list[dict[str, Any]] = []
+
+    def row(
+        key: str,
+        left: Any,
+        right: Any,
+        sub: tuple[Any, Any] = (None, None),
+        better: str | None = None,
+    ) -> None:
+        rows.append(
+            {
+                "key": key,
+                "left": left,
+                "right": right,
+                "sub_left": sub[0],
+                "sub_right": sub[1],
+                "better": better,
+            }
+        )
+
+    row("elo_rank", ranks[0], ranks[1], better=_better(ranks[0], ranks[1], high=False))
+    e1, e2 = p1.get("elo") or {}, p2.get("elo") or {}
+    row(
+        "elo_surface",
+        e1.get("surf"),
+        e2.get("surf"),
+        (e1.get("n_surf"), e2.get("n_surf")),
+        _better(e1.get("surf"), e2.get("surf")),
+    )
+    f1, f2 = p1.get("form") or {}, p2.get("form") or {}
+    row(
+        "form10",
+        f"{f1.get('w10', 0)}-{f1.get('l10', 0)}",
+        f"{f2.get('w10', 0)}-{f2.get('l10', 0)}",
+        (f"{f1.get('w5', 0)}-{f1.get('l5', 0)}", f"{f2.get('w5', 0)}-{f2.get('l5', 0)}"),
+        _better(f1.get("w10"), f2.get("w10")),
+    )
+    l1, l2 = p1.get("load") or {}, p2.get("load") or {}
+    row("load14", l1.get("m14"), l2.get("m14"), (l1.get("rest"), l2.get("rest")))
+    s1, s2 = p1.get("serve") or {}, p2.get("serve") or {}
+    for key, name in (
+        ("serve_first", "first_won"),
+        ("serve_second", "second_won"),
+        ("return", "return_won"),
+    ):
+        row(key, s1.get(name), s2.get(name), better=_better(s1.get(name), s2.get(name)))
+    share1 = _share(s1.get("tb_w"), s1.get("tb_l"))
+    share2 = _share(s2.get("tb_w"), s2.get("tb_l"))
+    row(
+        "tiebreaks",
+        f"{s1.get('tb_w') or 0}-{s1.get('tb_l') or 0}",
+        f"{s2.get('tb_w') or 0}-{s2.get('tb_l') or 0}",
+        (share1, share2),
+        _better(share1, share2),
+    )
+    h2h = content.get("h2h") or {}
+    surf = h2h.get("surf") or {}
+    row(
+        "h2h",
+        h2h.get("p1", 0),
+        h2h.get("p2", 0),
+        (surf.get("p1", 0), surf.get("p2", 0)),
+        _better(h2h.get("p1"), h2h.get("p2")),
+    )
+    return rows
+
+
+def rule_checks(
+    legs: Sequence[Leg], params: StrategyParams, level: DrawdownLevel | None
+) -> list[dict[str, Any]]:
+    """Проверка экспресса по правилам v3 для экрана (ok — правило выполнено)."""
+    issues = set(parlay_issues(legs, params, level))
+    shown = [
+        key
+        for key in RULE_KEYS
+        if (key not in ("triple_p", "triple_odds") or len(legs) == 3)
+        and (key not in ("drawdown_legs", "drawdown_odds") or level is not None)
+        and (key != "cover_p_low" or any(leg.market == MARKET_MINUS for leg in legs))
+    ]
+    return [
+        {"ok": key not in issues, "key": f"analysis.rules.{key}", "params": {}} for key in shown
+    ]
+
+
+async def run_costs(db: AsyncSession, analysis: Analysis) -> dict[str, Any]:
+    """Строка расходов: токены, доля входа из кэша, поиски, стоимость, длительность."""
+    row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(AgentRun.input_tokens), 0),
+                func.coalesce(func.sum(AgentRun.cache_write_tokens), 0),
+                func.coalesce(func.sum(AgentRun.cache_read_tokens), 0),
+                func.coalesce(func.sum(AgentRun.output_tokens), 0),
+                func.coalesce(func.sum(AgentRun.web_searches), 0),
+                func.coalesce(func.sum(AgentRun.cost_usd), 0),
+                func.coalesce(func.sum(AgentRun.duration_ms), 0),
+            ).where(AgentRun.analysis_id == analysis.id)
+        )
+    ).one()
+    values: list[Any] = list(row)
+    fresh, written, read, output, searches = (int(values[n] or 0) for n in range(5))
+    models = sorted(
+        set(await db.scalars(select(AgentRun.model).where(AgentRun.analysis_id == analysis.id)))
+    )
+    prompt = fresh + written + read
+    return {
+        "tokens": prompt + output,
+        "cache_share": round(read / prompt, 3) if prompt else 0.0,
+        "searches": searches,
+        "cost_usd": float(Decimal(values[5] or 0)),
+        "estimate_usd": float(analysis.estimate_usd) if analysis.estimate_usd is not None else None,
+        "duration_ms": int(values[6] or 0),
+        "models": models,
+    }
+
+
+def _bank(
+    state: BankState, bank_input: Decimal | None
+) -> tuple[Decimal, str, dict[str, Any] | None]:
+    """Банк для суммы: учет; журнал пуст или банк из ввода другой — банк из ввода."""
+    if bank_input is not None and (state.empty or bank_input != state.balance):
+        warning = None
+        if not state.empty:
+            warning = {
+                "key": "analysis.warnings.bank_differs",
+                "params": {"input": str(bank_input), "ledger": str(state.balance)},
+            }
+        return bank_input, "input", warning
+    if state.empty:
+        return Decimal(0), "none", None
+    return state.balance, "ledger", None
+
+
+async def _load_match(
+    db: AsyncSession, data: ComposeInput, event: ConfirmedEvent
+) -> tuple[_Match, MatchAssessment, Dossier]:
+    assert event.match_id is not None
+    entry = data.entries[event.match_id]
+    assessment = await db.get(MatchAssessment, entry["assessment_id"])
+    dossier = await db.get(Dossier, entry["dossier_id"])
+    if assessment is None or dossier is None:
+        raise AppError(409, "analysis.match_missing", position=event.position)
+    out = MatchAssessmentOut.model_validate(assessment.output)
+    p_base = Probs3(**entry["p_base"])
+    p_claude = Probs3(clip01(out.p1_win), clip01(out.p1_cover), clip01(out.p2_cover))
+    final = apply_claude(p_base, p_claude, data.params)
+    content = dossier.content
+    form = (form_of(content, "p1"), form_of(content, "p2"))
+    blocks = {
+        1: selection_blocks([r == "W" for r in form[0][:5]], out.flags.p1, data.params),
+        2: selection_blocks([r == "W" for r in form[1][:5]], out.flags.p2, data.params),
+    }
+    legs = legs_for_match(event.match_id, final.p_final, event.odds, data.params, blocks=blocks)
+    item = _Match(event, out, content, final, fair_probs(event.odds), legs, form, entry)
+    return item, assessment, dossier
+
+
+def _predictions(
+    data: ComposeInput,
+    item: _Match,
+    assessment: MatchAssessment,
+    dossier: Dossier,
+    ml_model: str | None,
+) -> dict[tuple[str, int], Prediction]:
+    """Прогнозы матча по 6 исходам (только INSERT)."""
+    event = item.event
+    assert event.match_id is not None
+    base = item.final.p_base.markets()
+    claude = item.final.p_claude.markets()
+    final = item.final.p_final.markets()
+    bookmaker = event.bookmaker or data.bookmaker
+    rows: dict[tuple[str, int], Prediction] = {}
+    for market in MARKETS:
+        for selection in (1, 2):
+            price = event.odds.get(market, [None, None])[selection - 1]
+            p_final = final[(market, selection)]
+            rows[(market, selection)] = Prediction(
+                user_id=data.analysis.user_id,
+                analysis_id=data.analysis.id,
+                match_id=event.match_id,
+                market=market,
+                selection=selection,
+                as_of=dossier.as_of,
+                dossier_id=dossier.id,
+                features=item.entry.get("features") or {},
+                feature_set=FEATURE_SET,
+                strategy_version_id=data.analysis.strategy_version_id,
+                ml_model_id=ml_model,
+                llm_model=assessment.model,
+                effort=assessment.effort,
+                prompt_version=assessment.prompt_version,
+                p_base=clip01(base[(market, selection)]),
+                p_claude=clip01(claude[(market, selection)]),
+                p_final=clip01(p_final),
+                q_market_at_pred=item.fair.get((market, selection)),
+                odds_at_pred=price,
+                bookmaker_at_pred=(bookmaker or None) if price is not None else None,
+                value_at_pred=value(p_final, price) if price is not None else None,
+                rationale=item.out.explanation,
+                agent_run_id=assessment.agent_run_id,
+            )
+    return rows
+
+
+def _market_rows(
+    item: _Match,
+    predictions: dict[tuple[str, int], Prediction],
+    in_express: set[tuple[int, str, int]],
+    params: StrategyParams,
+    level: DrawdownLevel | None,
+) -> list[dict[str, Any]]:
+    event = item.event
+    legs = {(leg.market, leg.selection): leg for leg in item.legs}
+    base = item.final.p_base.markets()
+    claude = item.final.p_claude.markets()
+    final = item.final.p_final.markets()
+    rows: list[dict[str, Any]] = []
+    match_key = int(event.match_id or 0)
+    # «В матче есть исход выгоднее» — только если другой исход этого матча в экспрессе;
+    # иначе исход по правилам подходит, но в экспресс не вошел (экспресса нет или он
+    # собран из других матчей)
+    match_in_express = any(key[0] == match_key for key in in_express)
+    for market in MARKETS:
+        for selection in (1, 2):
+            price = event.odds.get(market, [None, None])[selection - 1]
+            p_final = final[(market, selection)]
+            gain = value(p_final, price) if price is not None else None
+            key = (match_key, market, selection)
+            leg = legs.get((market, selection))
+            note: str | None = None
+            if price is None:
+                note = "analysis.leg.no_odds"
+            elif leg is not None and key not in in_express:
+                issues = leg_issues(leg, params, level)
+                if issues:
+                    note = f"analysis.leg.{issues[0]}"
+                elif match_in_express:
+                    note = "analysis.leg.not_best"
+                else:
+                    note = "analysis.leg.not_picked"
+            fair = item.fair.get((market, selection))
+            rows.append(
+                {
+                    "market": market,
+                    "selection": selection,
+                    "prediction_id": predictions[(market, selection)].id,
+                    "p_base": round(base[(market, selection)], P_DIGITS),
+                    "p_claude": round(clip01(claude[(market, selection)]), P_DIGITS),
+                    "p_final": round(p_final, P_DIGITS),
+                    "q_market": round(fair, P_DIGITS) if fair is not None else None,
+                    "odds": str(short_odds(price)) if price is not None else None,
+                    "value": round(gain, P_DIGITS) if gain is not None else None,
+                    "tier": value_tier(gain) if gain is not None else "none",
+                    "in_express": key in in_express,
+                    "note_key": note,
+                }
+            )
+    return rows
+
+
+def _side(player_id: int, facts: dict[int, PlayerFacts]) -> dict[str, Any]:
+    found = facts.get(player_id)
+    return {
+        "id": player_id,
+        "name": found.name if found else "",
+        "country": found.country if found else None,
+        "elo_rank": found.elo_rank if found else None,
+    }
+
+
+def _match_view(
+    item: _Match,
+    markets: list[dict[str, Any]],
+    facts: dict[int, PlayerFacts],
+    sources: dict[str, PlayerNews],
+) -> dict[str, Any]:
+    event = item.event
+    out = item.out
+    factors = []
+    for factor in out.factors:
+        news = sources.get(factor.ref)
+        factors.append(
+            {
+                "player": factor.player,
+                "effect": factor.effect,
+                "text": factor.text,
+                "ref": factor.ref,
+                "source_url": news.source_url if news else None,
+                "source_name": news.source_name if news else None,
+                "date": news.published_at.date().isoformat() if news else None,
+            }
+        )
+    rank1 = facts[event.player1_id].elo_rank if event.player1_id in facts else None
+    rank2 = facts[event.player2_id].elo_rank if event.player2_id in facts else None
+    return {
+        "match_id": event.match_id,
+        "player1": _side(event.player1_id, facts),
+        "player2": _side(event.player2_id, facts),
+        "tournament": (item.content.get("match") or {}).get("tour") or event.tournament_name,
+        "surface": event.surface,
+        "round": event.round,
+        "best_of": event.best_of,
+        "data_as_of": item.content.get("data_to"),
+        "confidence": out.confidence,
+        "explanation": out.explanation,
+        "divergence_note": out.divergence_note,
+        "highlight": item.final.needs_note,
+        "flags": {"p1": list(out.flags.p1), "p2": list(out.flags.p2)},
+        "factors": factors,
+        "comparison": comparison(item.content, (rank1, rank2)),
+        "form": {"p1": item.form[0][:10], "p2": item.form[1][:10]},
+        "markets": markets,
+        "reused_from": item.entry.get("reused_from"),
+        "news_state": item.entry.get("news"),
+    }
+
+
+def _express_view(
+    express: Sequence[Leg],
+    predictions: dict[tuple[int, str, int], Prediction],
+    *,
+    bank: Decimal,
+    bank_source: str,
+    state: BankState,
+    params: StrategyParams,
+    level: DrawdownLevel | None,
+    currency: str,
+) -> dict[str, Any]:
+    total = parlay_total(express)
+    calc = stake(bank, total, list(express), params, state.signals(), currency)
+    p_express = math.prod(leg.p for leg in express)
+    total_text = str(total.quantize(ODDS_STEP, rounding=ROUND_HALF_UP))
+    return {
+        "legs": [
+            {
+                "prediction_id": predictions[(leg.match_id, leg.market, leg.selection)].id,
+                "match_id": leg.match_id,
+                "market": leg.market,
+                "selection": leg.selection,
+                "p": round(leg.p, P_DIGITS),
+                "odds": str(short_odds(leg.odds)),
+            }
+            for leg in express
+        ],
+        "total_odds": total_text,
+        "p_express": round(p_express, P_DIGITS),
+        "ev": round(p_express * float(total) - 1.0, P_DIGITS),
+        "stake": {
+            "amount": str(calc.amount) if calc.amount is not None else None,
+            "currency": calc.currency,
+            "bank": str(calc.bank),
+            "bank_source": bank_source,
+            "total_odds": total_text,
+            "pct": str(calc.pct),
+            "steps": [
+                {"kind": step.kind, "pct": str(step.pct), "params": step.params}
+                for step in calc.steps
+            ],
+            "reason": calc.reason,
+            "drawdown_level": calc.drawdown_level.key if calc.drawdown_level else None,
+        },
+        "rules": rule_checks(express, params, level),
+    }
+
+
+async def compose(db: AsyncSession, data: ComposeInput) -> dict[str, Any]:
+    """Пишет прогнозы (flush) и возвращает итог для analyses.result. Статус и commit —
+    за вызывающим (одна транзакция с прогнозами)."""
+    params = data.params
+    settings = await get_app_settings(db)
+    state = await bank_state(db, data.analysis.user_id)
+    level = drawdown_level(state, params)
+    ml_model: str | None = await db.scalar(select(MlModel.id).where(MlModel.id == MODEL_ID))
+    facts = await player_facts(
+        db, {pid for event in data.events for pid in (event.player1_id, event.player2_id)}
+    )
+    items: list[_Match] = []
+    predictions: dict[tuple[int, str, int], Prediction] = {}
+    by_match: dict[int, dict[tuple[str, int], Prediction]] = {}
+    for event in data.events:
+        item, assessment, dossier = await _load_match(db, data, event)
+        rows = _predictions(data, item, assessment, dossier, ml_model)
+        db.add_all(rows.values())
+        assert event.match_id is not None
+        by_match[event.match_id] = rows
+        predictions |= {(event.match_id, *key): row for key, row in rows.items()}
+        items.append(item)
+    await db.flush()
+    all_legs = [leg for item in items for leg in item.legs]
+    express = pick_parlay(all_legs, params, drawdown=level)
+    in_express = {(leg.match_id, leg.market, leg.selection) for leg in express or ()}
+    warnings = [dict(item) for item in data.warnings]
+    bank, bank_source, bank_warning = _bank(state, data.bank_input)
+    if bank_warning is not None:
+        warnings.append(bank_warning)
+    express_out: dict[str, Any] | None = None
+    no_express: str | None = None
+    if express is not None:
+        express_out = _express_view(
+            express,
+            predictions,
+            bank=bank,
+            bank_source=bank_source,
+            state=state,
+            params=params,
+            level=level,
+            currency=settings.currency,
+        )
+    else:
+        pool = candidates(all_legs, params, drawdown=level)
+        no_express = "analysis.express.too_few" if len(pool) < 2 else "analysis.express.total_range"
+    refs = [factor.ref for item in items for factor in item.out.factors]
+    news_ids = [int(ref.split(":", 1)[1]) for ref in refs if ref.startswith("news:")]
+    sources = (
+        {
+            f"news:{row.id}": row
+            for row in await db.scalars(select(PlayerNews).where(PlayerNews.id.in_(news_ids)))
+        }
+        if news_ids
+        else {}
+    )
+    matches = [
+        _match_view(
+            item,
+            _market_rows(item, by_match[int(item.event.match_id or 0)], in_express, params, level),
+            facts,
+            sources,
+        )
+        for item in items
+    ]
+    return {
+        "matches": matches,
+        "express": express_out,
+        "no_express_key": no_express,
+        "warnings": warnings,
+        "costs": await run_costs(db, data.analysis),
+    }

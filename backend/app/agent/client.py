@@ -10,13 +10,16 @@
 
 Повторы делает SDK: ошибки сети, 408, 409, 429, 5xx и 529 — до max_retries раз с паузой
 0,5–8 с. Тесты подменяют транспорт через set_http_client_for_tests (SDK работает на httpx2,
-транспорт тоже из httpx2).
+транспорт тоже из httpx2). Адрес API — настройка CAPPER_ANTHROPIC_BASE_URL (по умолчанию
+BASE_URL): локальный прогон без ключа идет в поддельный сервер tests/fake_claude.py.
 """
 
 import asyncio
 import weakref
 
 import anthropic
+
+from app.core.config import get_settings
 
 BASE_URL = "https://api.anthropic.com"
 MAX_RETRIES = 2
@@ -39,7 +42,7 @@ def _base_client() -> anthropic.AsyncAnthropic:
         testing = _test_http_client is not None
         client = anthropic.AsyncAnthropic(
             api_key=_PLACEHOLDER_KEY,
-            base_url=BASE_URL,
+            base_url=get_settings().anthropic_base_url or BASE_URL,
             http_client=_test_http_client or anthropic.DefaultAsyncHttpxClient(),
             max_retries=_test_max_retries if testing else MAX_RETRIES,
         )

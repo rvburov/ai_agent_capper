@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # Час (UTC) ночного обновления данных воркером
     data_update_hour_utc: int = Field(default=5, ge=0, le=23)
 
+    # Адрес Claude API. Меняется только для локальных прогонов без ключа: поддельный
+    # сервер tests/fake_claude.py. В prod — только https (ключ уходит в заголовке)
+    anthropic_base_url: str = "https://api.anthropic.com"
+
     # Только для тестов: подключение к служебной базе, из которой создается тестовая
     test_admin_database_url: str = "postgresql://capper:capper@localhost:5432/postgres"
 
@@ -112,6 +116,8 @@ class Settings(BaseSettings):
             raise ValueError(t("config.public_origin_https"))
         if not self.cookie_secure:
             raise ValueError(t("config.cookie_secure_required"))
+        if not self.anthropic_base_url.startswith("https://"):
+            raise ValueError(t("config.anthropic_base_url_https"))
         return self
 
     def _check_dev_keys(self) -> "Settings":

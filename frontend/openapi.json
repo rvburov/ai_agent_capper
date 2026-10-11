@@ -1688,10 +1688,1398 @@
           }
         }
       }
+    },
+    "/api/ai/budget": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Budget",
+        "description": "Режим ключа, лимит и расход за месяц (UTC), анализы сегодня, потолок анализа,\nсвой ключ (последние 4 символа) и причина, по которой анализ сейчас не запустится.\nАдминистратору — еще общий бюджет ключа администратора.",
+        "operationId": "budget_api_ai_budget_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiBudgetOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/ai-key": {
+      "put": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Save Own Key",
+        "description": "Свой ключ: проверяется запросами к Claude API (список моделей и доступ к моделям\nиз настроек), сохраняется только проверенный, режим становится own. Не прошел —\n400 ai.key_format / ai.key_rejected / ai.key_models, 502 ai.key_check_failed,\n503 ai.key_unavailable. Администратору — 409 ai.admin_key_only.",
+        "operationId": "save_own_key_api_me_ai_key_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnKeyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnKeyOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Delete Own Key",
+        "description": "Удаляет свой ключ с сервера. Участник остается на своем ключе: анализы не\nзапустятся, пока он не сохранит новый или администратор не вернет ключ администратора.",
+        "operationId": "delete_own_key_api_me_ai_key_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnKeyOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/ai-key/check": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Check Own Key",
+        "description": "Проверяет сохраненный ключ и записывает итог. Нет ключа — 404 ai.no_own_key,\nнет связи с Anthropic — 503 ai.key_unavailable.",
+        "operationId": "check_own_key_api_me_ai_key_check_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnKeyOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/ai-mode": {
+      "put": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Set Ai Mode",
+        "description": "Переход на свой ключ (нужен проверенный ключ, иначе 409 ai.no_own_key). Вернуться\nна ключ администратора так нельзя (403 ai.return_needs_admin): только просьбой.",
+        "operationId": "set_ai_mode_api_me_ai_mode_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiModeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnKeyOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/ai-mode/return-request": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Request Return",
+        "description": "Просьба вернуть ключ администратора (Р12): уведомление администраторам. Повторная\nпросьба уведомлений не дублирует.",
+        "operationId": "request_return_api_me_ai_mode_return_request_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnRequestOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Cancel Return Request",
+        "description": "Отмена просьбы: уведомления у администраторов убираются. Просьбы нет — ничего.",
+        "operationId": "cancel_return_request_api_me_ai_mode_return_request_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/ai-cap": {
+      "put": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Set Own Cap",
+        "description": "Свой потолок одного анализа на своем ключе, от $0,10 до $20 (400 ai.own_cap_range).",
+        "operationId": "set_own_cap_api_me_ai_cap_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnCapIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnCapOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ai/key": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Admin Key",
+        "description": "Последние 4 символа ключа, когда проверен, состояние и сколько людей на ключе.",
+        "operationId": "get_admin_key_api_admin_ai_key_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminKeyOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Replace Admin Key",
+        "description": "Замена ключа: код 2FA, затем проверка ключа и доступа к моделям, сохранение и\nжурнал key_change. Без totp_code — 422; неверный код — 403 admin.totp_invalid\n(Anthropic не спрашиваем). Ключ не прошел — 400 ai.key_format / ai.key_rejected /\nai.key_models, 502 ai.key_check_failed, 503 ai.key_unavailable: принятый код при этом\nуже потрачен, для новой попытки нужен следующий.",
+        "operationId": "replace_admin_key_api_admin_ai_key_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminKeyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminKeyOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ai/budget": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Budget",
+        "description": "Бюджет месяца (UTC), потрачено, резервы, прогноз, сумма личных лимитов, порог\nуведомления; отдельно — бюджет проверочных прогонов.",
+        "operationId": "get_budget_api_admin_ai_budget_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBudgetOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Budget",
+        "description": "Бюджет на месяц ($1–5000) и порог уведомления (50, 70, 80 или 90%); журнал\nbudget_change. Бюджет меньше потраченного за месяц — 400 ai.budget_below_spent.",
+        "operationId": "update_budget_api_admin_ai_budget_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BudgetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBudgetOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ai/limits": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Limits",
+        "description": "Лимиты по умолчанию и по каждому участнику: режим, лимит, пауза, расход за месяц,\nанализы сегодня и за месяц, просьба вернуть ключ администратора.",
+        "operationId": "get_limits_api_admin_ai_limits_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLimitsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ai/limits/{user_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Limit",
+        "description": "Лимит участника на ключе администратора и пауза; журнал limit_change. В месяц\n$1–500, анализов в день 1–30, на анализ от $0,10 до месячного лимита (иначе 422 или\n400 ai.cap_above_month). У администратора личного лимита нет — 409 ai.admin_no_limit.",
+        "operationId": "update_limit_api_admin_ai_limits__user_id__put",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LimitPatchIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberLimitOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ai/defaults": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Defaults",
+        "description": "Лимиты по умолчанию для новых участников; у зарегистрированных не меняются, потолок\nанализов администратора и мягкий потолок — тоже. Границы — как у лимита участника.",
+        "operationId": "update_defaults_api_admin_ai_defaults_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LimitIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LimitDefaultsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users/{user_id}/ai-mode": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Decide Ai Mode",
+        "description": "Решение по просьбе вернуть ключ администратора (Р12): approve — участник снова на\nключе администратора (с limit — с этим лимитом), reject — остается на своем.\nПри одобрении свой ключ участника удаляется с сервера. Уведомление участнику, журнал\nai_mode_change. Просьбы нет — 409 ai.no_return_request; администратор — 409\nai.return_not_needed.",
+        "operationId": "decide_ai_mode_api_admin_users__user_id__ai_mode_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModeDecisionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberLimitOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyses": {
+      "post": {
+        "tags": [
+          "analyses"
+        ],
+        "summary": "Create Analysis",
+        "description": "Новый анализ: текст — разбор Claude (2–5 с, не больше 30 в час), форма — пустой\nчерновик. Нет доступа к Claude — 409 с кодом причины (errors.ai.*).",
+        "operationId": "create_analysis_api_analyses_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalysisCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "analyses"
+        ],
+        "summary": "List Analyses",
+        "description": "Свои анализы, новые сверху. Следующая страница — before=next_cursor.",
+        "operationId": "list_analyses_api_analyses_get",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 9223372036854775807,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisListOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyses/{analysis_id}": {
+      "get": {
+        "tags": [
+          "analyses"
+        ],
+        "summary": "Get Analysis",
+        "operationId": "get_analysis_api_analyses__analysis_id__get",
+        "parameters": [
+          {
+            "name": "analysis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Analysis Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyses/{analysis_id}/preview": {
+      "post": {
+        "tags": [
+          "analyses"
+        ],
+        "summary": "Preview Analysis",
+        "description": "«Перед запуском» без Claude: игроки, маржа, коридор стратегии, цена, время и\nдоступ. Без событий в теле — по уже подтвержденным.",
+        "operationId": "preview_analysis_api_analyses__analysis_id__preview_post",
+        "parameters": [
+          {
+            "name": "analysis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Analysis Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ConfirmIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyses/{analysis_id}/run": {
+      "post": {
+        "tags": [
+          "analyses"
+        ],
+        "summary": "Run Analysis",
+        "description": "Запуск: события (1–5), банк и букмекер. Повторный запуск после сбоя или отмены —\nбез событий: продолжает с упавшего шага, оплаченные шаги не повторяются. Нет\nдоступа — 409 с кодом причины, неверные события — 422 errors.analysis.*.",
+        "operationId": "run_analysis_api_analyses__analysis_id__run_post",
+        "parameters": [
+          {
+            "name": "analysis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Analysis Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ConfirmIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyses/{analysis_id}/cancel": {
+      "post": {
+        "tags": [
+          "analyses"
+        ],
+        "summary": "Cancel Analysis",
+        "operationId": "cancel_analysis_api_analyses__analysis_id__cancel_post",
+        "parameters": [
+          {
+            "name": "analysis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Analysis Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyses/{analysis_id}/decision": {
+      "put": {
+        "tags": [
+          "analyses"
+        ],
+        "summary": "Set Decision",
+        "description": "«Не ставить» (skip) или снять решение (null).",
+        "operationId": "set_decision_api_analyses__analysis_id__decision_put",
+        "parameters": [
+          {
+            "name": "analysis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Analysis Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyses/{analysis_id}/events": {
+      "get": {
+        "tags": [
+          "analyses"
+        ],
+        "summary": "Analysis Events",
+        "description": "Ход анализа: снимок из базы, затем события шагов; конец — done, failed,\ncancelled. Анализ не в работе — только снимок. Heartbeat раз в 15 с, retry 3 с.",
+        "operationId": "analysis_events_api_analyses__analysis_id__events_get",
+        "parameters": [
+          {
+            "name": "analysis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Analysis Id"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Поток SSE: в data — JSON ProgressEventOut, первым — снимок",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "$ref": "#/components/schemas/ProgressEventOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bets": {
+      "post": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "Place Bet",
+        "description": "Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не\nменяется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref\nвозвращает ту же ставку.",
+        "operationId": "place_bet_api_bets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/bank": {
+      "get": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "My Bank",
+        "description": "Банк по учету: баланс, пик, просадка, стартовый банк, итог 7 дней, адаптации.",
+        "operationId": "my_bank_api_me_bank_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/bookmakers": {
+      "get": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "My Bookmakers",
+        "description": "Букмекеры участника из ставок и анализов, частые первыми.",
+        "operationId": "my_bookmakers_api_me_bookmakers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response My Bookmakers Api Me Bookmakers Get"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/players": {
+      "get": {
+        "tags": [
+          "players"
+        ],
+        "summary": "Find Players",
+        "description": "До 10 игроков, похожих на запрос. Пустой или длинный запрос — 422\nplayers.errors.*.",
+        "operationId": "find_players_api_players_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlayerHitOut"
+                  },
+                  "title": "Response Find Players Api Players Get"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/strategy/active": {
+      "get": {
+        "tags": [
+          "strategy"
+        ],
+        "summary": "Active Strategy",
+        "description": "Активная версия; ее еще нет (не было анализов) — значения v3 по умолчанию.",
+        "operationId": "active_strategy_api_strategy_active_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AccessOut": {
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "title": "Allowed"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "reason_params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Reason Params"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "admin",
+                  "own"
+                ]
+              },
+              {
+                "type": "string",
+                "const": "shared"
+              }
+            ],
+            "title": "Mode"
+          },
+          "monthly_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Usd"
+          },
+          "spent_usd": {
+            "type": "number",
+            "title": "Spent Usd"
+          },
+          "left_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Left Usd"
+          },
+          "daily": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily"
+          },
+          "today": {
+            "type": "integer",
+            "title": "Today"
+          },
+          "per_analysis_usd": {
+            "type": "number",
+            "title": "Per Analysis Usd"
+          },
+          "own_key_last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Own Key Last4"
+          }
+        },
+        "type": "object",
+        "required": [
+          "allowed",
+          "reason_code",
+          "reason_params",
+          "mode",
+          "monthly_usd",
+          "spent_usd",
+          "left_usd",
+          "daily",
+          "today",
+          "per_analysis_usd",
+          "own_key_last4"
+        ],
+        "title": "AccessOut",
+        "description": "Можно ли запустить: причина отказа — код ошибки errors.<reason_code>."
+      },
+      "AdaptationOut": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "dd10",
+              "dd20",
+              "up15",
+              "week_loss",
+              "week_win"
+            ],
+            "title": "Key"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "enabled",
+          "active",
+          "params"
+        ],
+        "title": "AdaptationOut",
+        "description": "Правило адаптации суммы (Р22): включено ли в стратегии и действует ли сейчас."
+      },
       "AdminActionIn": {
         "properties": {
           "totp_code": {
@@ -1710,6 +3098,172 @@
         "type": "object",
         "title": "AdminActionIn",
         "description": "Блокировка и завершение сеансов: код 2FA нужен, только если цель — администратор\n(с угнанным сеансом без телефона нельзя по одному отключить других администраторов)."
+      },
+      "AdminBudgetOut": {
+        "properties": {
+          "month_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Month Start"
+          },
+          "days_in_month": {
+            "type": "integer",
+            "title": "Days In Month"
+          },
+          "days_left": {
+            "type": "integer",
+            "title": "Days Left"
+          },
+          "budget_usd": {
+            "type": "number",
+            "title": "Budget Usd"
+          },
+          "spent_usd": {
+            "type": "number",
+            "title": "Spent Usd"
+          },
+          "background_usd": {
+            "type": "number",
+            "title": "Background Usd"
+          },
+          "reserved_usd": {
+            "type": "number",
+            "title": "Reserved Usd"
+          },
+          "left_usd": {
+            "type": "number",
+            "title": "Left Usd"
+          },
+          "forecast_usd": {
+            "type": "number",
+            "title": "Forecast Usd"
+          },
+          "members_limits_usd": {
+            "type": "number",
+            "title": "Members Limits Usd"
+          },
+          "alert_pct": {
+            "type": "integer",
+            "title": "Alert Pct"
+          },
+          "eval_budget_usd": {
+            "type": "number",
+            "title": "Eval Budget Usd"
+          },
+          "eval_spent_usd": {
+            "type": "number",
+            "title": "Eval Spent Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "month_start",
+          "days_in_month",
+          "days_left",
+          "budget_usd",
+          "spent_usd",
+          "background_usd",
+          "reserved_usd",
+          "left_usd",
+          "forecast_usd",
+          "members_limits_usd",
+          "alert_pct",
+          "eval_budget_usd",
+          "eval_spent_usd"
+        ],
+        "title": "AdminBudgetOut",
+        "description": "Общий бюджет ключа администратора на месяц (UTC).\n\nspent_usd — все вызовы на ключе администратора без проверочных прогонов,\nbackground_usd — из них общие задачи без участника. reserved_usd — резерв\nанализов, которые идут сейчас. forecast_usd — прогноз на конец месяца по темпу.\nmembers_limits_usd — сумма месячных лимитов участников на ключе администратора.\neval_* — отдельный бюджет проверочных прогонов (eval и теневые, Р22)."
+      },
+      "AdminKeyIn": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "totp_code": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$",
+            "title": "Totp Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "totp_code"
+        ],
+        "title": "AdminKeyIn",
+        "description": "Новый ключ администратора и текущий код 2FA (смена ключа — опасное действие)."
+      },
+      "AdminKeyOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unverified",
+              "missing"
+            ],
+            "title": "Status"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          },
+          "users_on_key": {
+            "type": "integer",
+            "title": "Users On Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "last4",
+          "verified_at",
+          "users_on_key"
+        ],
+        "title": "AdminKeyOut",
+        "description": "Ключ администратора: ok — проверен, unverified — сохранен, но не проверен или\nAnthropic перестал его принимать, missing — не задан. users_on_key — сколько\nактивных пользователей сейчас на ключе администратора."
+      },
+      "AdminLimitsOut": {
+        "properties": {
+          "defaults": {
+            "$ref": "#/components/schemas/LimitDefaultsOut"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/MemberLimitOut"
+            },
+            "type": "array",
+            "title": "Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "defaults",
+          "members"
+        ],
+        "title": "AdminLimitsOut"
       },
       "AdminUserDetailOut": {
         "properties": {
@@ -1918,6 +3472,578 @@
         "title": "AdminUserOut",
         "description": "Строка списка участников. Только учетная запись, расход на ИИ и активность (Р14).\n\nai_spent_month_usd и analyses_month — за текущий месяц (UTC) на ключе администратора.\nlimit пустой, если лимита нет (участник на своем ключе)."
       },
+      "AiBudgetOut": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "own"
+            ],
+            "title": "Mode"
+          },
+          "key_source": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "own"
+            ],
+            "title": "Key Source"
+          },
+          "has_key": {
+            "type": "boolean",
+            "title": "Has Key"
+          },
+          "month_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Month Start"
+          },
+          "monthly_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Usd"
+          },
+          "spent_usd": {
+            "type": "number",
+            "title": "Spent Usd"
+          },
+          "reserved_usd": {
+            "type": "number",
+            "title": "Reserved Usd"
+          },
+          "left_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Left Usd"
+          },
+          "daily_analyses": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Analyses"
+          },
+          "analyses_today": {
+            "type": "integer",
+            "title": "Analyses Today"
+          },
+          "analyses_month": {
+            "type": "integer",
+            "title": "Analyses Month"
+          },
+          "per_analysis_usd": {
+            "type": "number",
+            "title": "Per Analysis Usd"
+          },
+          "soft_cap_usd": {
+            "type": "number",
+            "title": "Soft Cap Usd"
+          },
+          "paused": {
+            "type": "boolean",
+            "title": "Paused"
+          },
+          "alert_pct": {
+            "type": "integer",
+            "title": "Alert Pct"
+          },
+          "own_key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnKeyInfoOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "own_cap_usd": {
+            "type": "number",
+            "title": "Own Cap Usd"
+          },
+          "avg_analysis_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Analysis Usd"
+          },
+          "return_requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Requested At"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "reason_params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Reason Params"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminBudgetOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "key_source",
+          "has_key",
+          "month_start",
+          "monthly_usd",
+          "spent_usd",
+          "reserved_usd",
+          "left_usd",
+          "daily_analyses",
+          "analyses_today",
+          "analyses_month",
+          "per_analysis_usd",
+          "soft_cap_usd",
+          "paused",
+          "alert_pct",
+          "own_key",
+          "own_cap_usd",
+          "avg_analysis_usd",
+          "return_requested_at",
+          "reason_code",
+          "reason_params",
+          "budget"
+        ],
+        "title": "AiBudgetOut",
+        "description": "Лимит и расход участника на ИИ (экраны «Ключ Claude» и «Новый анализ»).\n\nmode — режим участника, key_source — чей ключ платит. Месяц — по UTC с month_start,\n«анализов сегодня» — с полуночи в поясе участника. monthly_usd, left_usd и\ndaily_analyses пустые, если личного лимита нет (свой ключ, администратор).\nspent_usd — расход за месяц на ключе этого режима, reserved_usd — резерв анализов,\nкоторые идут сейчас. per_analysis_usd — потолок одного анализа в этом режиме,\nown_cap_usd — свой потолок на своем ключе. avg_analysis_usd — средняя цена\nзаконченного анализа за месяц на ключе этого режима (пусто — анализов нет).\nreason_code — почему новый анализ сейчас не запустится (ключ errors.<код> и\nreason_params), пусто — запустится. budget — общий бюджет, только администратору."
+      },
+      "AiModeIn": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "own"
+            ],
+            "title": "Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "title": "AiModeIn",
+        "description": "Режим ключа. Участник сам переходит только на own; вернуться на ключ\nадминистратора — просьбой (POST /me/ai-mode/return-request)."
+      },
+      "AnalysisCreateIn": {
+        "properties": {
+          "input_kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "form"
+            ],
+            "title": "Input Kind",
+            "default": "text"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "title": "AnalysisCreateIn",
+        "description": "Новый анализ: текст (разбор Claude) или пустая форма (без Claude)."
+      },
+      "AnalysisListItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "cancelled",
+              "parsing",
+              "needs_confirmation",
+              "building_dossier",
+              "modelling",
+              "llm_review",
+              "composing"
+            ],
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "input_kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "form"
+            ],
+            "title": "Input Kind"
+          },
+          "matches": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matches"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bet",
+                  "skip"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at",
+          "finished_at",
+          "input_kind",
+          "matches",
+          "decision",
+          "cost_usd"
+        ],
+        "title": "AnalysisListItem"
+      },
+      "AnalysisListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisListItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "AnalysisListOut"
+      },
+      "AnalysisOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "cancelled",
+              "parsing",
+              "needs_confirmation",
+              "building_dossier",
+              "modelling",
+              "llm_review",
+              "composing"
+            ],
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "input_kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "form"
+            ],
+            "title": "Input Kind"
+          },
+          "input_text": {
+            "type": "string",
+            "title": "Input Text"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DraftOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/StepOut"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/TotalsOut"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorInfoOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResultOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bet",
+                  "skip"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "bet_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bet Id"
+          },
+          "key_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "admin",
+                  "own"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Source"
+          },
+          "estimate_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimate Usd"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "bank": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank"
+          },
+          "bookmaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bookmaker"
+          },
+          "strategy_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "input_kind",
+          "input_text",
+          "attempt",
+          "draft",
+          "steps",
+          "totals",
+          "error",
+          "result",
+          "decision",
+          "bet_id",
+          "key_source",
+          "estimate_usd",
+          "cost_usd",
+          "bank",
+          "bookmaker",
+          "strategy_version"
+        ],
+        "title": "AnalysisOut"
+      },
       "AuditOut": {
         "properties": {
           "id": {
@@ -2019,6 +4145,608 @@
         "title": "AuditOut",
         "description": "Запись журнала. actor_id пустой и actor_name \"\" — действие из терминала.\nУдаленный автор или участник — имя «Удаленный пользователь» (имя стерто по Р15).\n\nР14: в details нет сведений о ставках, банке и стратегии участника."
       },
+      "BankOut": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "empty": {
+            "type": "boolean",
+            "title": "Empty"
+          },
+          "balance": {
+            "type": "string",
+            "title": "Balance"
+          },
+          "in_play": {
+            "type": "string",
+            "title": "In Play"
+          },
+          "equity": {
+            "type": "string",
+            "title": "Equity"
+          },
+          "peak": {
+            "type": "string",
+            "title": "Peak"
+          },
+          "drawdown": {
+            "type": "string",
+            "title": "Drawdown"
+          },
+          "invested": {
+            "type": "string",
+            "title": "Invested"
+          },
+          "growth": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Growth"
+          },
+          "week_change": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Week Change"
+          },
+          "winrate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winrate"
+          },
+          "settled_bets": {
+            "type": "integer",
+            "title": "Settled Bets"
+          },
+          "drawdown_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dd10",
+                  "dd20"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drawdown Level"
+          },
+          "adaptations": {
+            "items": {
+              "$ref": "#/components/schemas/AdaptationOut"
+            },
+            "type": "array",
+            "title": "Adaptations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currency",
+          "empty",
+          "balance",
+          "in_play",
+          "equity",
+          "peak",
+          "drawdown",
+          "invested",
+          "growth",
+          "week_change",
+          "winrate",
+          "settled_bets",
+          "drawdown_level",
+          "adaptations"
+        ],
+        "title": "BankOut",
+        "description": "Банк по учету: баланс, в игре, капитал, пик и просадка (0..1), стартовый банк\n(пополнения минус выводы), рост к нему, итог 7 дней, винрейт и адаптации."
+      },
+      "BetIn": {
+        "properties": {
+          "analysis_id": {
+            "type": "integer",
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Analysis Id"
+          },
+          "stake": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)"
+              }
+            ],
+            "title": "Stake"
+          },
+          "bookmaker": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Bookmaker"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/BetLegIn"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Legs"
+          },
+          "client_ref": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,64}$",
+            "title": "Client Ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "analysis_id",
+          "stake",
+          "bookmaker",
+          "legs",
+          "client_ref"
+        ],
+        "title": "BetIn"
+      },
+      "BetLegIn": {
+        "properties": {
+          "prediction_id": {
+            "type": "integer",
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Prediction Id"
+          },
+          "odds_taken": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,7}0*$)\\d{0,3}\\.\\d{0,3}0*$)"
+              }
+            ],
+            "title": "Odds Taken"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prediction_id",
+          "odds_taken"
+        ],
+        "title": "BetLegIn",
+        "description": "Нога ставки: прогноз анализа и кэф, по которому участник поставил."
+      },
+      "BetLegOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "prediction_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Id"
+          },
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "market": {
+            "type": "string",
+            "enum": [
+              "ML",
+              "HCP_-1.5",
+              "HCP_+1.5"
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "type": "integer",
+            "title": "Selection"
+          },
+          "odds_taken": {
+            "type": "string",
+            "title": "Odds Taken"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "prediction_id",
+          "match_id",
+          "market",
+          "selection",
+          "odds_taken"
+        ],
+        "title": "BetLegOut"
+      },
+      "BetOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "analysis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Id"
+          },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Placed At"
+          },
+          "bookmaker": {
+            "type": "string",
+            "title": "Bookmaker"
+          },
+          "stake": {
+            "type": "string",
+            "title": "Stake"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "total_odds": {
+            "type": "string",
+            "title": "Total Odds"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "won",
+              "lost",
+              "void"
+            ],
+            "title": "Status"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/BetLegOut"
+            },
+            "type": "array",
+            "title": "Legs"
+          },
+          "client_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "analysis_id",
+          "placed_at",
+          "bookmaker",
+          "stake",
+          "currency",
+          "total_odds",
+          "status",
+          "legs",
+          "client_ref"
+        ],
+        "title": "BetOut"
+      },
+      "BudgetIn": {
+        "properties": {
+          "monthly_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 5000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+              }
+            ],
+            "title": "Monthly Usd"
+          },
+          "alert_pct": {
+            "type": "integer",
+            "enum": [
+              50,
+              70,
+              80,
+              90
+            ],
+            "title": "Alert Pct"
+          },
+          "eval_budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 500.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Budget Usd"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "monthly_usd",
+          "alert_pct"
+        ],
+        "title": "BudgetIn",
+        "description": "Общий бюджет ключа администратора ($1–5000, не меньше потраченного за месяц),\nпорог предупреждения о расходе и (по желанию) бюджет проверочных прогонов."
+      },
+      "ComparisonRow": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "left": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Left"
+          },
+          "right": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Right"
+          },
+          "sub_left": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sub Left"
+          },
+          "sub_right": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sub Right"
+          },
+          "better": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "right"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Better"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "left",
+          "right",
+          "sub_left",
+          "sub_right",
+          "better"
+        ],
+        "title": "ComparisonRow",
+        "description": "Строка «Сравнение игроков»: key — что сравниваем (elo_rank, elo_surface, form10,\nload14, serve_first, serve_second, return, tiebreaks, h2h), better — у кого лучше."
+      },
+      "ConfirmIn": {
+        "properties": {
+          "events": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EventIn"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Events"
+          },
+          "bank": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank"
+          },
+          "bookmaker": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bookmaker"
+          }
+        },
+        "type": "object",
+        "title": "ConfirmIn",
+        "description": "Подтвержденный ввод для «Перед запуском» и запуска. events null — взять уже\nподтвержденные (повторный запуск после сбоя или отмены)."
+      },
+      "CorridorOut": {
+        "properties": {
+          "market": {
+            "type": "string",
+            "enum": [
+              "ML",
+              "HCP_-1.5",
+              "HCP_+1.5"
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "type": "integer",
+            "title": "Selection"
+          },
+          "odds": {
+            "type": "string",
+            "title": "Odds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "market",
+          "selection",
+          "odds"
+        ],
+        "title": "CorridorOut"
+      },
+      "CostsOut": {
+        "properties": {
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "cache_share": {
+            "type": "number",
+            "title": "Cache Share"
+          },
+          "searches": {
+            "type": "integer",
+            "title": "Searches"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "estimate_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimate Usd"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "title": "Duration Ms"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tokens",
+          "cache_share",
+          "searches",
+          "cost_usd",
+          "estimate_usd",
+          "duration_ms",
+          "models"
+        ],
+        "title": "CostsOut"
+      },
       "CsrfOut": {
         "properties": {
           "csrf_token": {
@@ -2032,6 +4760,264 @@
         ],
         "title": "CsrfOut",
         "description": "CSRF-токен: то же значение, что в cookie csrf. Его шлют в заголовке X-CSRF-Token."
+      },
+      "DecisionIn": {
+        "properties": {
+          "decision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "skip"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          }
+        },
+        "type": "object",
+        "title": "DecisionIn",
+        "description": "Решение по итогу: skip — не ставить, null — снять решение («Все-таки поставить»).\n«Поставил» записывает сохранение ставки (POST /bets)."
+      },
+      "DraftEventOut": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "line_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line No"
+          },
+          "raw1": {
+            "type": "string",
+            "title": "Raw1"
+          },
+          "raw2": {
+            "type": "string",
+            "title": "Raw2"
+          },
+          "player1": {
+            "$ref": "#/components/schemas/PlayerPick"
+          },
+          "player2": {
+            "$ref": "#/components/schemas/PlayerPick"
+          },
+          "tournament": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TournamentOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Surface"
+          },
+          "best_of": {
+            "type": "integer",
+            "title": "Best Of"
+          },
+          "round": {
+            "type": "string",
+            "title": "Round"
+          },
+          "odds": {
+            "$ref": "#/components/schemas/OddsPairsOut"
+          },
+          "bookmaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bookmaker"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/TextKey"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "line_no",
+          "raw1",
+          "raw2",
+          "player1",
+          "player2",
+          "tournament",
+          "surface",
+          "best_of",
+          "round",
+          "odds",
+          "bookmaker",
+          "warnings"
+        ],
+        "title": "DraftEventOut"
+      },
+      "DraftOut": {
+        "properties": {
+          "bank": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "ledger_bank": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ledger Bank"
+          },
+          "bank_note_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Note Key"
+          },
+          "bookmaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bookmaker"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/DraftEventOut"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "unknown_lines": {
+            "items": {
+              "$ref": "#/components/schemas/UnknownLineOut"
+            },
+            "type": "array",
+            "title": "Unknown Lines"
+          },
+          "parse_cost_usd": {
+            "type": "number",
+            "title": "Parse Cost Usd"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/TextKey"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bank",
+          "currency",
+          "ledger_bank",
+          "bank_note_key",
+          "bookmaker",
+          "events",
+          "unknown_lines",
+          "parse_cost_usd",
+          "warnings"
+        ],
+        "title": "DraftOut",
+        "description": "Что понял разбор (или пустая форма). bank — банк из текста в валюте программы;\nbank_note_key — почему банк не взят или расходится с учетом."
+      },
+      "DrawdownOut": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "max_pct": {
+            "type": "string",
+            "title": "Max Pct"
+          },
+          "max_legs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Legs"
+          },
+          "max_leg_odds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Leg Odds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "max_pct",
+          "max_legs",
+          "max_leg_odds"
+        ],
+        "title": "DrawdownOut"
       },
       "ErrorDetail": {
         "properties": {
@@ -2106,6 +5092,38 @@
         "title": "ErrorField",
         "description": "Поле с ошибкой проверки (только при code = validation)."
       },
+      "ErrorInfoOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "params",
+          "step"
+        ],
+        "title": "ErrorInfoOut",
+        "description": "Почему анализ остановился: code — ключ errors.<code>, step — шаг (kind)."
+      },
       "ErrorOut": {
         "properties": {
           "error": {
@@ -2118,6 +5136,436 @@
         ],
         "title": "ErrorOut",
         "description": "Тело любого ответа с ошибкой: {\"error\": {\"code\", \"message\", ...}}."
+      },
+      "EstimateOut": {
+        "properties": {
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "seconds": {
+            "type": "integer",
+            "title": "Seconds"
+          },
+          "news_players": {
+            "type": "integer",
+            "title": "News Players"
+          },
+          "reused_matches": {
+            "type": "integer",
+            "title": "Reused Matches"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cost_usd",
+          "seconds",
+          "news_players",
+          "reused_matches"
+        ],
+        "title": "EstimateOut",
+        "description": "Оценка до запуска: цена, время, у скольких игроков новости устарели, сколько\nматчей возьмут готовую оценку Claude (бесплатно)."
+      },
+      "EventIn": {
+        "properties": {
+          "player1_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Player1 Id"
+          },
+          "player2_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Player2 Id"
+          },
+          "tournament_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament Id"
+          },
+          "tournament_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament Name"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Surface"
+          },
+          "best_of": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "enum": [
+                  3,
+                  5
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Of"
+          },
+          "round": {
+            "type": "string",
+            "maxLength": 16,
+            "title": "Round",
+            "default": ""
+          },
+          "odds": {
+            "$ref": "#/components/schemas/OddsPairsIn"
+          },
+          "bookmaker": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bookmaker"
+          },
+          "line_no": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line No"
+          }
+        },
+        "type": "object",
+        "required": [
+          "odds"
+        ],
+        "title": "EventIn",
+        "description": "Событие, которое подтвердил участник. Игроки — id из базы (подсказки GET /players\nили черновик разбора). Турнир — id из черновика или название (новый турнир)."
+      },
+      "ExpressLeg": {
+        "properties": {
+          "prediction_id": {
+            "type": "integer",
+            "title": "Prediction Id"
+          },
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "market": {
+            "type": "string",
+            "enum": [
+              "ML",
+              "HCP_-1.5",
+              "HCP_+1.5"
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "type": "integer",
+            "title": "Selection"
+          },
+          "p": {
+            "type": "number",
+            "title": "P"
+          },
+          "odds": {
+            "type": "string",
+            "title": "Odds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prediction_id",
+          "match_id",
+          "market",
+          "selection",
+          "p",
+          "odds"
+        ],
+        "title": "ExpressLeg"
+      },
+      "ExpressOut": {
+        "properties": {
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/ExpressLeg"
+            },
+            "type": "array",
+            "title": "Legs"
+          },
+          "total_odds": {
+            "type": "string",
+            "title": "Total Odds"
+          },
+          "p_express": {
+            "type": "number",
+            "title": "P Express"
+          },
+          "ev": {
+            "type": "number",
+            "title": "Ev"
+          },
+          "stake": {
+            "$ref": "#/components/schemas/StakeOut"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RuleCheck"
+            },
+            "type": "array",
+            "title": "Rules"
+          }
+        },
+        "type": "object",
+        "required": [
+          "legs",
+          "total_odds",
+          "p_express",
+          "ev",
+          "stake",
+          "rules"
+        ],
+        "title": "ExpressOut"
+      },
+      "FactorOut": {
+        "properties": {
+          "player": {
+            "type": "integer",
+            "title": "Player"
+          },
+          "effect": {
+            "type": "string",
+            "enum": [
+              "plus",
+              "minus"
+            ],
+            "title": "Effect"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "player",
+          "effect",
+          "text",
+          "ref",
+          "source_url",
+          "source_name",
+          "date"
+        ],
+        "title": "FactorOut"
+      },
+      "FairOut": {
+        "properties": {
+          "market": {
+            "type": "string",
+            "enum": [
+              "ML",
+              "HCP_-1.5",
+              "HCP_+1.5"
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "type": "integer",
+            "title": "Selection"
+          },
+          "q": {
+            "type": "number",
+            "title": "Q"
+          }
+        },
+        "type": "object",
+        "required": [
+          "market",
+          "selection",
+          "q"
+        ],
+        "title": "FairOut",
+        "description": "Рынок без маржи: вероятность исхода по паре кэфов."
+      },
+      "FlagsOut": {
+        "properties": {
+          "p1": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "injury",
+                "fatigue",
+                "form",
+                "motivation"
+              ]
+            },
+            "type": "array",
+            "title": "P1"
+          },
+          "p2": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "injury",
+                "fatigue",
+                "form",
+                "motivation"
+              ]
+            },
+            "type": "array",
+            "title": "P2"
+          }
+        },
+        "type": "object",
+        "required": [
+          "p1",
+          "p2"
+        ],
+        "title": "FlagsOut"
+      },
+      "FormOut": {
+        "properties": {
+          "p1": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "W",
+                "L"
+              ]
+            },
+            "type": "array",
+            "title": "P1"
+          },
+          "p2": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "W",
+                "L"
+              ]
+            },
+            "type": "array",
+            "title": "P2"
+          }
+        },
+        "type": "object",
+        "required": [
+          "p1",
+          "p2"
+        ],
+        "title": "FormOut"
+      },
+      "GrowthOut": {
+        "properties": {
+          "bank_up": {
+            "type": "string",
+            "title": "Bank Up"
+          },
+          "min_winrate": {
+            "type": "string",
+            "title": "Min Winrate"
+          },
+          "max_pct": {
+            "type": "string",
+            "title": "Max Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bank_up",
+          "min_winrate",
+          "max_pct"
+        ],
+        "title": "GrowthOut"
       },
       "HealthOut": {
         "properties": {
@@ -2239,7 +5687,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "minimum": 0.0
+                "maximum": 500.0,
+                "minimum": 1.0
               },
               {
                 "type": "string",
@@ -2250,15 +5699,16 @@
           },
           "daily_analyses": {
             "type": "integer",
-            "maximum": 1000.0,
-            "minimum": 0.0,
+            "maximum": 30.0,
+            "minimum": 1.0,
             "title": "Daily Analyses"
           },
           "per_analysis_usd": {
             "anyOf": [
               {
                 "type": "number",
-                "minimum": 0.0
+                "maximum": 500.0,
+                "minimum": 0.1
               },
               {
                 "type": "string",
@@ -2414,6 +5864,100 @@
         "title": "InviteOut",
         "description": "Приглашение без кода: код показывается один раз при создании.\ncreated_by_name пустой — код выдан командой терминала; автор удален —\nподпись «Удаленный пользователь» (его имя стерто по Р15)."
       },
+      "KeyModelOut": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "available"
+        ],
+        "title": "KeyModelOut",
+        "description": "Модель из настроек агента и доступна ли она ключу."
+      },
+      "LimitDefaultsOut": {
+        "properties": {
+          "monthly_usd": {
+            "type": "number",
+            "title": "Monthly Usd"
+          },
+          "daily_analyses": {
+            "type": "integer",
+            "title": "Daily Analyses"
+          },
+          "per_analysis_usd": {
+            "type": "number",
+            "title": "Per Analysis Usd"
+          },
+          "soft_cap_usd": {
+            "type": "number",
+            "title": "Soft Cap Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "monthly_usd",
+          "daily_analyses",
+          "per_analysis_usd",
+          "soft_cap_usd"
+        ],
+        "title": "LimitDefaultsOut",
+        "description": "Лимиты по умолчанию для новых участников (Р13): у зарегистрированных не меняются.\nper_analysis_usd — потолок анализа нового участника (и потолок своего ключа по\nумолчанию), это не жесткий потолок программы: его лимиты по умолчанию не меняют.\nsoft_cap_usd — мягкий потолок анализа программы (предупреждение о цене)."
+      },
+      "LimitIn": {
+        "properties": {
+          "monthly_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 500.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+              }
+            ],
+            "title": "Monthly Usd"
+          },
+          "daily_analyses": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Daily Analyses"
+          },
+          "per_analysis_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 500.0,
+                "minimum": 0.1
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+              }
+            ],
+            "title": "Per Analysis Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "monthly_usd",
+          "daily_analyses",
+          "per_analysis_usd"
+        ],
+        "title": "LimitIn",
+        "description": "Лимит участника на ключе администратора: в месяц ($1–500), анализов в день\n(1–30), на анализ (от $0,10 до месячного лимита)."
+      },
       "LimitOut": {
         "properties": {
           "monthly_usd": {
@@ -2442,6 +5986,72 @@
         ],
         "title": "LimitOut",
         "description": "Лимит участника на ключе администратора (ai_limits)."
+      },
+      "LimitPatchIn": {
+        "properties": {
+          "monthly_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 500.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Usd"
+          },
+          "daily_analyses": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 30.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Analyses"
+          },
+          "per_analysis_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 500.0,
+                "minimum": 0.1
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Analysis Usd"
+          },
+          "paused": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "LimitPatchIn",
+        "description": "Правка лимита участника: поле не передано (или null) — не меняется. Потолок на\nанализ не выше месячного лимита — с учетом действующего, если месяц не передан."
       },
       "LoginEventOut": {
         "properties": {
@@ -2550,6 +6160,258 @@
         "title": "LoginOut",
         "description": "ok — вход завершен (user заполнен); totp_required — нужен код 2FA;\ntotp_setup_required — нужно настроить 2FA (новый аккаунт или 2FA сброшена)."
       },
+      "MarketRow": {
+        "properties": {
+          "market": {
+            "type": "string",
+            "enum": [
+              "ML",
+              "HCP_-1.5",
+              "HCP_+1.5"
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "type": "integer",
+            "title": "Selection"
+          },
+          "prediction_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Id"
+          },
+          "p_base": {
+            "type": "number",
+            "title": "P Base"
+          },
+          "p_claude": {
+            "type": "number",
+            "title": "P Claude"
+          },
+          "p_final": {
+            "type": "number",
+            "title": "P Final"
+          },
+          "q_market": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Market"
+          },
+          "odds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Odds"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "tier": {
+            "type": "string",
+            "title": "Tier"
+          },
+          "in_express": {
+            "type": "boolean",
+            "title": "In Express"
+          },
+          "note_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "market",
+          "selection",
+          "prediction_id",
+          "p_base",
+          "p_claude",
+          "p_final",
+          "q_market",
+          "odds",
+          "value",
+          "tier",
+          "in_express",
+          "note_key"
+        ],
+        "title": "MarketRow",
+        "description": "Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф\nучастника, валуй p_final·кэф − 1 и уровень, попал ли в экспресс, почему нет\n(note_key — ключ analysis.leg.*)."
+      },
+      "MatchResult": {
+        "properties": {
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "player1": {
+            "$ref": "#/components/schemas/PlayerSide"
+          },
+          "player2": {
+            "$ref": "#/components/schemas/PlayerSide"
+          },
+          "tournament": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament"
+          },
+          "surface": {
+            "type": "string",
+            "title": "Surface"
+          },
+          "round": {
+            "type": "string",
+            "title": "Round"
+          },
+          "best_of": {
+            "type": "integer",
+            "title": "Best Of"
+          },
+          "data_as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data As Of"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Confidence"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "divergence_note": {
+            "type": "string",
+            "title": "Divergence Note"
+          },
+          "highlight": {
+            "type": "boolean",
+            "title": "Highlight"
+          },
+          "flags": {
+            "$ref": "#/components/schemas/FlagsOut"
+          },
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/FactorOut"
+            },
+            "type": "array",
+            "title": "Factors"
+          },
+          "comparison": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonRow"
+            },
+            "type": "array",
+            "title": "Comparison"
+          },
+          "form": {
+            "$ref": "#/components/schemas/FormOut"
+          },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/MarketRow"
+            },
+            "type": "array",
+            "title": "Markets"
+          },
+          "reused_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reused From"
+          },
+          "news_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "match_id",
+          "player1",
+          "player2",
+          "tournament",
+          "surface",
+          "round",
+          "best_of",
+          "data_as_of",
+          "confidence",
+          "explanation",
+          "divergence_note",
+          "highlight",
+          "flags",
+          "factors",
+          "comparison",
+          "form",
+          "markets",
+          "reused_from",
+          "news_state"
+        ],
+        "title": "MatchResult"
+      },
       "MeOut": {
         "properties": {
           "id": {
@@ -2617,6 +6479,148 @@
         ],
         "title": "MeOut",
         "description": "Вошедший пользователь."
+      },
+      "MemberLimitOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ],
+            "title": "Role"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "blocked",
+              "deleted"
+            ],
+            "title": "Status"
+          },
+          "ai_mode": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "own"
+            ],
+            "title": "Ai Mode"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LimitOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "own_cap_usd": {
+            "type": "number",
+            "title": "Own Cap Usd"
+          },
+          "own_key_last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Own Key Last4"
+          },
+          "spent_month_usd": {
+            "type": "number",
+            "title": "Spent Month Usd"
+          },
+          "own_spent_month_usd": {
+            "type": "number",
+            "title": "Own Spent Month Usd"
+          },
+          "analyses_today": {
+            "type": "integer",
+            "title": "Analyses Today"
+          },
+          "analyses_month": {
+            "type": "integer",
+            "title": "Analyses Month"
+          },
+          "return_requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Requested At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "display_name",
+          "email",
+          "role",
+          "status",
+          "ai_mode",
+          "limit",
+          "own_cap_usd",
+          "own_key_last4",
+          "spent_month_usd",
+          "own_spent_month_usd",
+          "analyses_today",
+          "analyses_month",
+          "return_requested_at"
+        ],
+        "title": "MemberLimitOut",
+        "description": "Строка таблицы «Лимиты участников». Р14: только расход на ИИ и активность.\n\nlimit — действующий лимит на ключе администратора (у участника на своем ключе он\nвступит в силу при возврате); пусто у администратора: у него нет личного лимита.\nspent_month_usd — расход за месяц на ключе администратора, own_spent_month_usd —\nна своем ключе (вне общего бюджета); без проверочных прогонов. analyses_today — на\nключе администратора с полуночи в поясе участника. return_requested_at — участник\nпросит вернуть ключ администратора (Р12)."
+      },
+      "ModeDecisionIn": {
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LimitIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "title": "ModeDecisionIn",
+        "description": "Решение по просьбе вернуть ключ администратора. limit — лимит на ключе\nадминистратора при одобрении (не задан — остается прежний)."
       },
       "NotificationOut": {
         "properties": {
@@ -2698,6 +6702,324 @@
         ],
         "title": "NotificationsOut"
       },
+      "OddsPairsIn": {
+        "properties": {
+          "ML": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0.0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,7}0*$)\\d{0,3}\\.\\d{0,3}0*$)"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Ml"
+          },
+          "HCP_-1.5": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0.0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,7}0*$)\\d{0,3}\\.\\d{0,3}0*$)"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Hcp -1.5",
+            "default": [
+              null,
+              null
+            ]
+          },
+          "HCP_+1.5": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0.0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,7}0*$)\\d{0,3}\\.\\d{0,3}0*$)"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Hcp +1.5",
+            "default": [
+              null,
+              null
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "ML"
+        ],
+        "title": "OddsPairsIn",
+        "description": "Кэфы события: пара [на игрока 1, на игрока 2] по рынку, null — кэфа нет."
+      },
+      "OddsPairsOut": {
+        "properties": {
+          "ML": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Ml"
+          },
+          "HCP_-1.5": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Hcp -1.5"
+          },
+          "HCP_+1.5": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Hcp +1.5"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ML",
+          "HCP_-1.5",
+          "HCP_+1.5"
+        ],
+        "title": "OddsPairsOut"
+      },
+      "OwnCapIn": {
+        "properties": {
+          "per_analysis_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)"
+              }
+            ],
+            "title": "Per Analysis Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "per_analysis_usd"
+        ],
+        "title": "OwnCapIn",
+        "description": "Свой потолок одного анализа на своем ключе, от $0,10 до $20."
+      },
+      "OwnCapOut": {
+        "properties": {
+          "per_analysis_usd": {
+            "type": "number",
+            "title": "Per Analysis Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "per_analysis_usd"
+        ],
+        "title": "OwnCapOut"
+      },
+      "OwnKeyIn": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "title": "OwnKeyIn",
+        "description": "Новый свой ключ: сохраняется, только если прошел проверку."
+      },
+      "OwnKeyInfoOut": {
+        "properties": {
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "last4",
+          "verified_at",
+          "last_error"
+        ],
+        "title": "OwnKeyInfoOut",
+        "description": "Свой ключ участника: последние 4 символа, когда проверен, последняя ошибка."
+      },
+      "OwnKeyOut": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "own"
+            ],
+            "title": "Mode"
+          },
+          "has_key": {
+            "type": "boolean",
+            "title": "Has Key"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "check": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "rejected",
+                  "error",
+                  "models"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/KeyModelOut"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "has_key",
+          "last4",
+          "verified_at",
+          "last_error",
+          "check",
+          "models"
+        ],
+        "title": "OwnKeyOut",
+        "description": "Свой ключ участника и его режим. check — итог проверки в этом запросе (пусто,\nесли ключ не проверяли), models — доступность моделей по этой проверке.\nlast_error — код последней ошибки ключа (например rejected:401, ai.billing)."
+      },
       "PasswordChangeIn": {
         "properties": {
           "current_password": {
@@ -2719,6 +7041,480 @@
           "new_password"
         ],
         "title": "PasswordChangeIn"
+      },
+      "PlayerBrief": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "name_ru": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Ru"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "elo_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elo Rank"
+          },
+          "last_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Match"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "name_ru",
+          "country",
+          "elo_rank",
+          "last_match"
+        ],
+        "title": "PlayerBrief"
+      },
+      "PlayerCandidate": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "country",
+          "score"
+        ],
+        "title": "PlayerCandidate"
+      },
+      "PlayerHitOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "name_ru": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Ru"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "matched": {
+            "type": "string",
+            "title": "Matched"
+          },
+          "matches": {
+            "type": "integer",
+            "title": "Matches"
+          },
+          "elo_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elo Rank"
+          },
+          "last_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Match"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "name_ru",
+          "country",
+          "score",
+          "matched",
+          "matches",
+          "elo_rank",
+          "last_match"
+        ],
+        "title": "PlayerHitOut",
+        "description": "Найденный игрок: сходство 0…1, по какому полю найден, матчей в базе, место по Эло\nи последний матч."
+      },
+      "PlayerPick": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "matched",
+              "check",
+              "missing"
+            ],
+            "title": "Status"
+          },
+          "raw": {
+            "type": "string",
+            "title": "Raw"
+          },
+          "player": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlayerBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerCandidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "raw",
+          "player",
+          "score",
+          "candidates"
+        ],
+        "title": "PlayerPick",
+        "description": "Игрок из текста: matched — найден (сходство ≥ 0,9), check — проверьте\n(0,7–0,9), missing — нет в базе. candidates — до 3 похожих."
+      },
+      "PlayerSide": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "elo_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elo Rank"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "country",
+          "elo_rank"
+        ],
+        "title": "PlayerSide"
+      },
+      "PreviewEvent": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "margin_ml": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Ml"
+          },
+          "margin_hcp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Hcp"
+          },
+          "market_p": {
+            "items": {
+              "$ref": "#/components/schemas/FairOut"
+            },
+            "type": "array",
+            "title": "Market P"
+          },
+          "in_corridor": {
+            "items": {
+              "$ref": "#/components/schemas/CorridorOut"
+            },
+            "type": "array",
+            "title": "In Corridor"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewPlayer"
+            },
+            "type": "array",
+            "title": "Players"
+          },
+          "reused": {
+            "type": "boolean",
+            "title": "Reused"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/TextKey"
+            },
+            "type": "array",
+            "title": "Problems"
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "margin_ml",
+          "margin_hcp",
+          "market_p",
+          "in_corridor",
+          "players",
+          "reused",
+          "problems"
+        ],
+        "title": "PreviewEvent"
+      },
+      "PreviewOut": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/TextKey"
+            },
+            "type": "array",
+            "title": "Problems"
+          },
+          "estimate": {
+            "$ref": "#/components/schemas/EstimateOut"
+          },
+          "access": {
+            "$ref": "#/components/schemas/AccessOut"
+          },
+          "data_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data To"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events",
+          "problems",
+          "estimate",
+          "access",
+          "data_to"
+        ],
+        "title": "PreviewOut"
+      },
+      "PreviewPlayer": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "elo_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elo Rank"
+          },
+          "news_fresh": {
+            "type": "boolean",
+            "title": "News Fresh"
+          },
+          "news_checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News Checked At"
+          },
+          "last_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Match"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "country",
+          "elo_rank",
+          "news_fresh",
+          "news_checked_at",
+          "last_match"
+        ],
+        "title": "PreviewPlayer"
       },
       "ProfileUpdateIn": {
         "properties": {
@@ -2752,6 +7548,93 @@
         "type": "object",
         "title": "ProfileUpdateIn",
         "description": "Правка профиля: имя и часовой пояс. Поле не передано (или null) — не меняется.\nОстальные поля (email, роль, режим ключа) так не меняются: лишнее поле — 422."
+      },
+      "ProgressEventOut": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "snapshot",
+              "step",
+              "status",
+              "done",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Type"
+          },
+          "analysis_id": {
+            "type": "integer",
+            "title": "Analysis Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "cancelled",
+              "parsing",
+              "needs_confirmation",
+              "building_dossier",
+              "modelling",
+              "llm_review",
+              "composing"
+            ],
+            "title": "Status"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StepOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/TotalsOut"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorInfoOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "analysis_id",
+          "status",
+          "step",
+          "steps",
+          "totals",
+          "error"
+        ],
+        "title": "ProgressEventOut",
+        "description": "Событие потока SSE GET /analyses/{id}/events (поле data)."
       },
       "PublicSettingsOut": {
         "properties": {
@@ -3033,6 +7916,72 @@
         ],
         "title": "ResetIn"
       },
+      "ResultOut": {
+        "properties": {
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/MatchResult"
+            },
+            "type": "array",
+            "title": "Matches"
+          },
+          "express": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExpressOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "no_express_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No Express Key"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/TextKey"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "costs": {
+            "$ref": "#/components/schemas/CostsOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "matches",
+          "express",
+          "no_express_key",
+          "warnings",
+          "costs"
+        ],
+        "title": "ResultOut"
+      },
+      "ReturnRequestOut": {
+        "properties": {
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requested_at"
+        ],
+        "title": "ReturnRequestOut",
+        "description": "Когда отправлена просьба вернуть ключ администратора."
+      },
       "RoleChangeIn": {
         "properties": {
           "role": {
@@ -3055,6 +8004,30 @@
           "totp_code"
         ],
         "title": "RoleChangeIn"
+      },
+      "RuleCheck": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "key",
+          "params"
+        ],
+        "title": "RuleCheck"
       },
       "SessionOut": {
         "properties": {
@@ -3104,6 +8077,138 @@
         "title": "SessionOut",
         "description": "Действующий сеанс. device_label пустой — устройство не распознано."
       },
+      "StakeBandOut": {
+        "properties": {
+          "low": {
+            "type": "string",
+            "title": "Low"
+          },
+          "high": {
+            "type": "string",
+            "title": "High"
+          },
+          "pct": {
+            "type": "string",
+            "title": "Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "low",
+          "high",
+          "pct"
+        ],
+        "title": "StakeBandOut"
+      },
+      "StakeOut": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "bank": {
+            "type": "string",
+            "title": "Bank"
+          },
+          "bank_source": {
+            "type": "string",
+            "enum": [
+              "ledger",
+              "input",
+              "none"
+            ],
+            "title": "Bank Source"
+          },
+          "total_odds": {
+            "type": "string",
+            "title": "Total Odds"
+          },
+          "pct": {
+            "type": "string",
+            "title": "Pct"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/StakeStepOut"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "drawdown_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drawdown Level"
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount",
+          "currency",
+          "bank",
+          "bank_source",
+          "total_odds",
+          "pct",
+          "steps",
+          "reason",
+          "drawdown_level"
+        ],
+        "title": "StakeOut",
+        "description": "Сумма ставки и шаги расчета (app/ml/strategy.py, stake). amount null — суммы\nнет, reason — почему. bank_source: ledger — банк по учету, input — из ввода."
+      },
+      "StakeStepOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "pct": {
+            "type": "string",
+            "title": "Pct"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "pct",
+          "params"
+        ],
+        "title": "StakeStepOut"
+      },
       "StatusOut": {
         "properties": {
           "status": {
@@ -3117,6 +8222,362 @@
           "status"
         ],
         "title": "StatusOut"
+      },
+      "StepOut": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "parse",
+              "players",
+              "news",
+              "dossier",
+              "model",
+              "claude",
+              "compose"
+            ],
+            "title": "Kind"
+          },
+          "match_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed",
+              "skipped"
+            ],
+            "title": "State"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "elapsed_ms": {
+            "type": "integer",
+            "title": "Elapsed Ms"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "web_searches": {
+            "type": "integer",
+            "title": "Web Searches"
+          },
+          "detail_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail Key"
+          },
+          "detail_params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "index",
+          "kind",
+          "match_id",
+          "state",
+          "model",
+          "elapsed_ms",
+          "tokens",
+          "cost_usd",
+          "web_searches",
+          "detail_key",
+          "detail_params"
+        ],
+        "title": "StepOut",
+        "description": "Шаг хода анализа. match_id — у шагов новостей и Claude (по матчу)."
+      },
+      "StrategyOut": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "params": {
+            "$ref": "#/components/schemas/StrategyParamsOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "name",
+          "prompt_version",
+          "created_at",
+          "params"
+        ],
+        "title": "StrategyOut",
+        "description": "Активная версия стратегии; id null — версии еще нет, показаны значения v3."
+      },
+      "StrategyParamsOut": {
+        "properties": {
+          "markets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Markets"
+          },
+          "min_p": {
+            "type": "number",
+            "title": "Min P"
+          },
+          "triple_min_p": {
+            "type": "number",
+            "title": "Triple Min P"
+          },
+          "leg_odds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Leg Odds"
+          },
+          "triple_max_leg_odds": {
+            "type": "string",
+            "title": "Triple Max Leg Odds"
+          },
+          "double_total": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Double Total"
+          },
+          "triple_total": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Triple Total"
+          },
+          "require_value": {
+            "type": "boolean",
+            "title": "Require Value"
+          },
+          "cover_min_p": {
+            "type": "number",
+            "title": "Cover Min P"
+          },
+          "form_min_wins_last5": {
+            "type": "integer",
+            "title": "Form Min Wins Last5"
+          },
+          "stake_bands": {
+            "items": {
+              "$ref": "#/components/schemas/StakeBandOut"
+            },
+            "type": "array",
+            "title": "Stake Bands"
+          },
+          "value_adjust": {
+            "items": {
+              "$ref": "#/components/schemas/ValueAdjustOut"
+            },
+            "type": "array",
+            "title": "Value Adjust"
+          },
+          "drawdown": {
+            "items": {
+              "$ref": "#/components/schemas/DrawdownOut"
+            },
+            "type": "array",
+            "title": "Drawdown"
+          },
+          "claude_max_shift": {
+            "type": "number",
+            "title": "Claude Max Shift"
+          },
+          "claude_highlight": {
+            "type": "number",
+            "title": "Claude Highlight"
+          },
+          "rounding": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Rounding"
+          },
+          "min_stake": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Min Stake"
+          },
+          "max_pct": {
+            "type": "string",
+            "title": "Max Pct"
+          },
+          "growth": {
+            "$ref": "#/components/schemas/GrowthOut"
+          },
+          "week": {
+            "$ref": "#/components/schemas/WeekOut"
+          },
+          "adapt": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Adapt"
+          }
+        },
+        "type": "object",
+        "required": [
+          "markets",
+          "min_p",
+          "triple_min_p",
+          "leg_odds",
+          "triple_max_leg_odds",
+          "double_total",
+          "triple_total",
+          "require_value",
+          "cover_min_p",
+          "form_min_wins_last5",
+          "stake_bands",
+          "value_adjust",
+          "drawdown",
+          "claude_max_shift",
+          "claude_highlight",
+          "rounding",
+          "min_stake",
+          "max_pct",
+          "growth",
+          "week",
+          "adapt"
+        ],
+        "title": "StrategyParamsOut"
+      },
+      "TextKey": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "title": "TextKey",
+        "description": "Текст ключом локали: key — полный ключ (analysis.draft.player_check), params —\nзначения для подстановки."
+      },
+      "TotalsOut": {
+        "properties": {
+          "elapsed_ms": {
+            "type": "integer",
+            "title": "Elapsed Ms"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "step": {
+            "type": "integer",
+            "title": "Step"
+          },
+          "steps": {
+            "type": "integer",
+            "title": "Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "elapsed_ms",
+          "tokens",
+          "cost_usd",
+          "step",
+          "steps"
+        ],
+        "title": "TotalsOut"
       },
       "TotpConfirmIn": {
         "properties": {
@@ -3197,6 +8658,74 @@
         ],
         "title": "TotpSetupOut",
         "description": "Секрет 2FA для приложения-аутентификатора: строкой, адресом otpauth:// и QR-кодом."
+      },
+      "TournamentOut": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Surface"
+          },
+          "best_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "category",
+          "surface",
+          "best_of"
+        ],
+        "title": "TournamentOut",
+        "description": "Турнир события: id — найденный в базе турнир этого года (null — будет создан при\nзапуске), остальное — из него или из последнего выпуска турнира."
       },
       "TrustedDeviceOut": {
         "properties": {
@@ -3296,6 +8825,24 @@
         "title": "TwoFactorIn",
         "description": "Второй шаг входа: код из приложения или один из резервных кодов."
       },
+      "UnknownLineOut": {
+        "properties": {
+          "line_no": {
+            "type": "integer",
+            "title": "Line No"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "line_no",
+          "text"
+        ],
+        "title": "UnknownLineOut"
+      },
       "UserDeleteIn": {
         "properties": {
           "confirm_email": {
@@ -3317,6 +8864,59 @@
         ],
         "title": "UserDeleteIn",
         "description": "Удаление участника (Р15): email участника для подтверждения и код 2FA."
+      },
+      "ValueAdjustOut": {
+        "properties": {
+          "min_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Value"
+          },
+          "add": {
+            "type": "string",
+            "title": "Add"
+          }
+        },
+        "type": "object",
+        "required": [
+          "min_value",
+          "add"
+        ],
+        "title": "ValueAdjustOut"
+      },
+      "WeekOut": {
+        "properties": {
+          "loss": {
+            "type": "string",
+            "title": "Loss"
+          },
+          "loss_max_pct": {
+            "type": "string",
+            "title": "Loss Max Pct"
+          },
+          "win": {
+            "type": "string",
+            "title": "Win"
+          },
+          "win_add": {
+            "type": "string",
+            "title": "Win Add"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loss",
+          "loss_max_pct",
+          "win",
+          "win_add"
+        ],
+        "title": "WeekOut"
       }
     }
   }

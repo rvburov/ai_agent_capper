@@ -1,4 +1,5 @@
-"""Настройки агента: модели, effort, лимиты токенов и поиска, таймауты, оценки стоимости.
+"""Настройки агента: модели, effort, лимиты токенов и поиска, таймауты, оценки стоимости;
+еще потолок анализа новых участников по умолчанию (своей колонки в app_settings нет).
 
 Значения по умолчанию — в AgentConfig (код). Администратор меняет их командой терминала
 agent-config (app/admin/cli.py), измененные значения лежат в app_settings.agent_config.
@@ -7,6 +8,7 @@ agent-config (app/admin/cli.py), измененные значения лежа�
 """
 
 from collections.abc import Mapping, Sequence
+from decimal import Decimal
 from typing import Annotated, Any, Literal, get_origin
 
 import structlog
@@ -101,6 +103,13 @@ class AgentConfig(BaseModel):
     estimate_news_input_tokens: int = Field(default=15000, ge=0, le=1_000_000)
     estimate_news_output_tokens: int = Field(default=1500, ge=0, le=64000)
     estimate_news_searches: int = Field(default=3, ge=0, le=100)
+    # Потолок одного анализа по умолчанию для новых участников (на ключе администратора и
+    # потолок своего ключа, Р13). Меняется в кабинете администратора («Лимиты по
+    # умолчанию»); у зарегистрированных не меняется. Это не жесткий потолок программы
+    # (app_settings.per_analysis_hard_usd): тот действует на анализы администратора.
+    default_per_analysis_usd: Decimal = Field(
+        default=Decimal(1), ge=Decimal("0.10"), le=500, max_digits=10, decimal_places=2
+    )
 
     def models(self) -> tuple[str, ...]:
         """Модели, которые нужны анализу: их проверяет ключ участника и ищут цены."""
@@ -131,6 +140,11 @@ def config_from_overrides(raw: Mapping[str, Any]) -> AgentConfig:
             if not bad & set(known):
                 return DEFAULT_CONFIG
             known = {name: value for name, value in known.items() if name not in bad}
+
+
+def default_per_analysis(settings: AppSettings) -> Decimal:
+    """Потолок анализа по умолчанию для новых участников из настроек программы."""
+    return config_from_overrides(settings.agent_config or {}).default_per_analysis_usd
 
 
 async def load_agent_config(db: AsyncSession) -> AgentConfig:

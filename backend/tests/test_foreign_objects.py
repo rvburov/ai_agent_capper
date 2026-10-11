@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security.tokens import hash_token, new_token
-from app.db.models import Notification, TrustedDevice, UserSession
+from app.db.models import Analysis, Notification, TrustedDevice, UserSession
 from app.main import create_app
 from app.services.notifications import notify
 from app.services.sessions import utcnow
@@ -86,6 +86,23 @@ async def _notification_unread(db: AsyncSession, row_id: int) -> bool:
     return row.read_at is None
 
 
+async def _analysis(env: Env, owner: MadeUser) -> int:
+    row = Analysis(user_id=owner.id, input_text="", input_kind="form", status="needs_confirmation")
+    env.db.add(row)
+    await env.db.commit()
+    return row.id
+
+
+async def _analysis_untouched(db: AsyncSession, row_id: int) -> bool:
+    row = await db.get_one(Analysis, row_id, populate_existing=True)
+    return (row.status, row.attempt, row.decision, row.confirmed) == (
+        "needs_confirmation",
+        0,
+        None,
+        None,
+    )
+
+
 FOREIGN_CASES: dict[tuple[str, str], tuple[Create, Untouched]] = {
     ("DELETE", "/api/me/sessions/{session_id}"): (_session, _session_alive),
     ("DELETE", "/api/me/trusted-devices/{device_id}"): (_device, _device_alive),
@@ -93,6 +110,12 @@ FOREIGN_CASES: dict[tuple[str, str], tuple[Create, Untouched]] = {
         _notification,
         _notification_unread,
     ),
+    ("GET", "/api/analyses/{analysis_id}"): (_analysis, _analysis_untouched),
+    ("GET", "/api/analyses/{analysis_id}/events"): (_analysis, _analysis_untouched),
+    ("POST", "/api/analyses/{analysis_id}/preview"): (_analysis, _analysis_untouched),
+    ("POST", "/api/analyses/{analysis_id}/run"): (_analysis, _analysis_untouched),
+    ("POST", "/api/analyses/{analysis_id}/cancel"): (_analysis, _analysis_untouched),
+    ("PUT", "/api/analyses/{analysis_id}/decision"): (_analysis, _analysis_untouched),
 }
 
 

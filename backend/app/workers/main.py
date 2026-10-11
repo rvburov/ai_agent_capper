@@ -16,6 +16,8 @@
 deploy/backup/crontab) и до утра в Европе. Обновление данных — в час
 CAPPER_DATA_UPDATE_HOUR_UTC (по умолчанию 5) и 25 минут: после очистки и до утра в
 Европе. Минуты не нулевые: в начале часа запускается больше всего чужих задач.
+Анализ (run_analysis) ставит API, у задачи свой предел 15 минут и нет повтора arq;
+уборщик зависших анализов — каждые 5 минут.
 """
 
 import argparse
@@ -33,12 +35,18 @@ from arq.connections import ArqRedis, RedisSettings
 from arq.cron import CronJob
 from arq.typing import StartupShutdown, WorkerCoroutine
 from arq.worker import Function, check_health, run_worker
+from arq.worker import func as job_function
 
 from app.agent.client import close_client
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.db.session import create_engine, create_sessionmaker
-from app.workers.jobs import cleanup_auth_records, update_data
+from app.workers.jobs import (
+    cleanup_auth_records,
+    reap_stuck_analyses,
+    run_analysis,
+    update_data,
+)
 
 # Как часто воркер отмечается в Redis (ключ живет на секунду дольше). Healthcheck
 # контейнера раз в 30 с, поэтому живой воркер всегда успевает отметиться
@@ -49,6 +57,13 @@ DATA_UPDATE_MINUTE = 25
 # Ночное обновление идет секунды-минуты (только текущий год), но пересчет Эло по всей
 # истории и медленный источник не должны обрываться на общем пределе задачи
 DATA_UPDATE_TIMEOUT_SECONDS = 3600
+# Анализ: новости, досье и вызовы Claude с повторами SDK — до 15 минут. Без повтора arq:
+# перезапуск идет с чекпойнта по кнопке участника, оплаченные шаги не повторяются
+ANALYSIS_TIMEOUT_SECONDS = 900
+# Уборщик зависших анализов — каждые 5 минут, со 2-й минуты часа: не совпадает с
+# очисткой (:15) и обновлением данных (:25)
+REAP_MINUTES = frozenset(range(2, 60, 5))
+REAP_TIMEOUT_SECONDS = 60
 
 
 # Имена ключей arq. В arq 0.28 они — константы модулей (arq.constants), настройки
@@ -145,7 +160,12 @@ async def shutdown(ctx: dict[Any, Any]) -> None:
 class WorkerSettings:
     """Настройки воркера для arq (arq читает атрибуты класса)."""
 
-    functions: Sequence[WorkerCoroutine | Function] = (cleanup_auth_records, update_data)
+    functions: Sequence[WorkerCoroutine | Function] = (
+        cleanup_auth_records,
+        update_data,
+        job_function(run_analysis, timeout=ANALYSIS_TIMEOUT_SECONDS, max_tries=1),
+        reap_stuck_analyses,
+    )
     cron_jobs: Sequence[CronJob] | None = (
         cron(
             cleanup_auth_records,
@@ -163,6 +183,12 @@ class WorkerSettings:
             # о давно не обновленных данных администраторам скажет data_stale
             max_tries=1,
             timeout=DATA_UPDATE_TIMEOUT_SECONDS,
+        ),
+        cron(
+            reap_stuck_analyses,
+            minute=set(REAP_MINUTES),
+            max_tries=1,
+            timeout=REAP_TIMEOUT_SECONDS,
         ),
     )
     on_startup: StartupShutdown | None = startup

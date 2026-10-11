@@ -304,8 +304,8 @@ async def test_return_request_and_decision(
     assert "10,00" in decision.body and "1,00" in decision.body
     # Просьба у администраторов отмечена прочитанной
     assert all(n.read_at is not None for n in await _notes(db, other_admin.id))
-    # Свой ключ участника остается: его можно снова включить самому
-    assert await _secret(db, member.id) is not None
+    # Свой ключ участника удален с сервера, как в макете («его ключ отключится»)
+    assert await _secret(db, member.id) is None
 
 
 async def test_return_request_rejected_and_refusals(

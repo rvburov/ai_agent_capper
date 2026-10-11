@@ -24,7 +24,7 @@ import anthropic
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.config import load_agent_config
+from app.agent.config import default_per_analysis, load_agent_config
 from app.core.errors import AppError
 from app.core.security import crypto
 from app.db.models import AiLimit, AppSettings, Notification, User, UserSecret
@@ -82,6 +82,13 @@ async def _secret(db: AsyncSession, user_id: int) -> UserSecret | None:
     return row
 
 
+async def _delete_secret(db: AsyncSession, user_id: int) -> None:
+    """Свой ключ удаляется с сервера: на ключе администратора он не нужен (Р12)."""
+    await db.execute(
+        delete(UserSecret).where(UserSecret.user_id == user_id, UserSecret.kind == SECRET_KIND)
+    )
+
+
 async def _settings(db: AsyncSession, *, lock: bool = True) -> AppSettings:
     stmt = select(AppSettings).where(AppSettings.id == SETTINGS_ROW_ID)
     if lock:
@@ -104,12 +111,13 @@ async def _limit_row(db: AsyncSession, user_id: int) -> AiLimit:
     if row is not None:
         return row
     settings = await _settings(db, lock=False)
+    cap = default_per_analysis(settings)
     row = AiLimit(
         user_id=user_id,
         monthly_usd=settings.default_member_limit_usd,
         daily_analyses=settings.default_daily_analyses,
-        per_analysis_usd=settings.per_analysis_hard_usd,
-        own_per_analysis_usd=settings.per_analysis_hard_usd,
+        per_analysis_usd=cap,
+        own_per_analysis_usd=cap,
     )
     db.add(row)
     await db.flush()
@@ -285,9 +293,7 @@ async def set_ai_mode(
         raise AppError(400, "common.validation")
     if target.role != "admin":
         raise AppError(403, "ai.return_needs_admin")
-    await db.execute(
-        delete(UserSecret).where(UserSecret.user_id == target.id, UserSecret.kind == SECRET_KIND)
-    )
+    await _delete_secret(db, target.id)
     target.ai_mode = "shared"
     await _audit_mode(db, actor_id=target.id, target=target, before="own", ip=ip)
     await db.commit()
@@ -361,9 +367,10 @@ async def decide_return(
     db: AsyncSession, user_id: int, *, approve: bool, actor: User | None, ip: str | None = None
 ) -> None:
     """Решение администратора по просьбе вернуть ключ администратора. Одобрено — режим
-    shared (лимиты — из ai_limits участника); отклонено — режим own остается. В обоих
-    случаях: журнал ai_mode_change и уведомление участнику ai_mode_decision. Просьбы
-    нет — AppError 409."""
+    shared (лимиты — из ai_limits участника), свой ключ удаляется с сервера (как в
+    макете: «его ключ отключится»); отклонено — режим own остается. В обоих случаях:
+    журнал ai_mode_change и уведомление участнику ai_mode_decision. Просьбы нет —
+    AppError 409."""
     target = await _locked_user(db, user_id)
     limit = await _limit_row(db, target.id)
     if limit.return_requested_at is None or target.ai_mode != "own":
@@ -372,6 +379,7 @@ async def decide_return(
     before = target.ai_mode
     actor_id = actor.id if actor is not None else None
     if approve:
+        await _delete_secret(db, target.id)
         target.ai_mode = "shared"
         await _audit_mode(
             db, actor_id=actor_id, target=target, before=before, decision="approved", ip=ip

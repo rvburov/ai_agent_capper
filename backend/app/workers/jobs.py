@@ -21,6 +21,9 @@ startup в app.workers.main. Логика задачи — отдельной ф
 уведомление data_stale, не чаще раза в сутки каждому. Успешной считается загрузка, которая
 получила хотя бы один файл. Привязку и Эло не проверяем: они считаются из уже
 загруженного.
+
+Анализ (run_analysis) и уборщик зависших анализов (reap_stuck_analyses) — тонкие
+обертки над app/services/analysis_run.py; клиент Redis для прогресса — свой на задачу.
 """
 
 from dataclasses import asdict, dataclass
@@ -32,8 +35,10 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
+from app.core.redis import create_redis
 from app.db.models import IngestionRun, LoginEvent, Notification, TrustedDevice, User, UserSession
 from app.ingest.update import run_update
+from app.services import analysis_run
 from app.services.notifications import notify
 
 log = structlog.get_logger(__name__)
@@ -202,3 +207,34 @@ async def update_data(ctx: dict[Any, Any]) -> dict[str, Any]:
     }
     log.info("worker.update_data", **summary)
     return summary
+
+
+# --- анализы (этап 3) ---
+
+
+async def run_analysis(ctx: dict[Any, Any], analysis_id: int, attempt: int | None = None) -> str:
+    """Задача arq: выполнение анализа (app/services/analysis_run.py). Ключ Claude в
+    аргументы не попадает: воркер расшифрует его сам перед вызовом. attempt — номер
+    запуска: задача старого запуска ничего не делает. Возвращает итоговый статус."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    redis = create_redis()
+    try:
+        status = await analysis_run.execute(analysis_id, sessionmaker, redis, attempt=attempt)
+    finally:
+        await redis.aclose()
+    log.info("worker.run_analysis", analysis_id=analysis_id, attempt=attempt, status=status)
+    return status
+
+
+async def reap_stuck_analyses(ctx: dict[Any, Any]) -> int:
+    """Задача arq (cron раз в 5 минут): анализы без движения дольше 15 минут в рабочем
+    статусе — failed (analysis.worker_lost), резерв снимается."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    redis = create_redis()
+    try:
+        reaped = await analysis_run.reap_stuck(sessionmaker, redis)
+    finally:
+        await redis.aclose()
+    if reaped:
+        log.warning("worker.reap_stuck_analyses", analyses=reaped)
+    return len(reaped)

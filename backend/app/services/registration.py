@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.config import default_per_analysis
 from app.core import ratelimit
 from app.core.errors import AppError
 from app.core.security.passwords import check_new_password, hash_password_async
@@ -125,8 +126,10 @@ async def register(
             per_analysis_usd=(
                 invite.limit_per_analysis_usd
                 if invite.limit_per_analysis_usd is not None
-                else defaults.per_analysis_hard_usd
+                else default_per_analysis(defaults)
             ),
+            # Потолок своего ключа — по умолчанию программы, как в макете
+            own_per_analysis_usd=default_per_analysis(defaults),
         )
     )
     invite.used_at = now

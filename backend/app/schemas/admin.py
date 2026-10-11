@@ -17,6 +17,14 @@ from app.schemas.me import AiMode, LoginEventOut, Role, TotpCodeStr, UserStatus
 UsdOut = Annotated[Decimal, PlainSerializer(float, return_type=float, when_used="json")]
 # Лимит в долларах при вводе: не меньше нуля, два знака после запятой (NUMERIC(10, 2))
 UsdLimitIn = Annotated[Decimal, Field(ge=0, max_digits=10, decimal_places=2)]
+# Границы лимита участника — как в формах макета (mockup/js/screens/admin.js: limitFields):
+# в месяц $1–500, анализов в день 1–30, на анализ от $0,10. Потолок анализа не выше
+# месячного лимита проверяет сервис: это зависит от другого поля
+MonthlyLimitIn = Annotated[Decimal, Field(ge=1, le=500, max_digits=10, decimal_places=2)]
+DailyAnalysesIn = Annotated[int, Field(ge=1, le=30)]
+PerAnalysisIn = Annotated[
+    Decimal, Field(ge=Decimal("0.10"), le=500, max_digits=10, decimal_places=2)
+]
 # Email на входе: обрезаются пробелы, проверяется только общий вид name@domain.
 # Символ NUL не пропускается: PostgreSQL не хранит его в тексте, запрос упал бы с 500
 EmailIn = Annotated[
@@ -129,9 +137,9 @@ class UserDeleteIn(BaseModel):
 class InviteLimit(BaseModel):
     """Стартовый лимит из приглашения: попадет в ai_limits при регистрации."""
 
-    monthly_usd: UsdLimitIn
-    daily_analyses: Annotated[int, Field(ge=0, le=1000)]
-    per_analysis_usd: UsdLimitIn
+    monthly_usd: MonthlyLimitIn
+    daily_analyses: DailyAnalysesIn
+    per_analysis_usd: PerAnalysisIn
 
 
 class InviteLimitOut(BaseModel):

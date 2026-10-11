@@ -54,10 +54,17 @@ async def test_list_users_spend_analyses_and_limit(
     member = await make_user(display_name="Ольга")
     own = await make_user(ai_mode="own")
     gone = await make_user(status="deleted")
-    analysis = Analysis(user_id=member.id, input_text="Синнер — Алькарас", status="done")
+    now = utcnow()
+    # Анализ запущен в этом месяце на ключе администратора: он и есть «анализ за месяц»
+    analysis = Analysis(
+        user_id=member.id,
+        input_text="Синнер — Алькарас",
+        status="done",
+        key_source="admin",
+        started_at=now,
+    )
     db.add(analysis)
     await db.flush()
-    now = utcnow()
     month_start = admin_users.month_start(now)
     runs = [
         # Два шага одного анализа и разбор текста — в расходе; анализ один

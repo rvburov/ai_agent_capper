@@ -100,7 +100,7 @@ python -m app.db.migrate                # alembic upgrade head, как серв�
 
 Игроки: `players-find`, `players-merge --from ID --into ID [--yes]`, `players-edit ID [--name-ru] [--add-alias] [--remove-alias]`, `players-link-legacy [--dry-run]`, `players-unmatched`, а для записей-копий одного матча — `matches-merge --from ID --into ID [--yes]` (`python -m app.admin.cli <команда> --help`). Слияние и правка игроков пишут в журнал действий `player_merge` и `player_edit`.
 
-Агент: `agent-config` показывает настройки агента (модели, effort, лимиты токенов, новости), `agent-config --set ИМЯ=ЗНАЧЕНИЕ [--set ...] [--reset ИМЯ ...]` меняет их поверх значений по умолчанию и пишет в журнал действий `agent_config_change`; `prices` показывает цены моделей Claude ($ за 1 млн токенов). После слияния игроков копии матчей tennis-data, которые у игрока совпали с матчами Сакманна (та же пара в окне турнира), сливаются в матчи Сакманна сами; неоднозначные команда показывает — их сливают `matches-merge`.
+Агент: `agent-config` показывает настройки агента (модели, effort, лимиты токенов, новости), `agent-config --set ИМЯ=ЗНАЧЕНИЕ [--set ...] [--reset ИМЯ ...]` меняет их поверх значений по умолчанию и пишет в журнал действий `agent_config_change`; `prices` показывает цены моделей Claude ($ за 1 млн токенов); `agent-smoke` — проверка на живом ключе (подробнее — в разделе «Агент Claude»). После слияния игроков копии матчей tennis-data, которые у игрока совпали с матчами Сакманна (та же пара в окне турнира), сливаются в матчи Сакманна сами; неоднозначные команда показывает — их сливают `matches-merge`.
 
 Расписание воркера (UTC): 03:15 — очистка сеансов, доверенных устройств и журнала входов; 05:25 (час — `CAPPER_DATA_UPDATE_HOUR_UTC`) — `update_data`: те же шаги, что `python -m app.ingest.update` без `--full`, затем проверка свежести. Если успешной загрузки Сакманна или tennis-data не было больше 3 дней, активные администраторы получают уведомление `data_stale`, не чаще раза в сутки.
 
@@ -156,6 +156,43 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 | `ml/backtest.py`, `ml/report.py` | бэктест и отчет Markdown |
 | `ml/sets.py`, `ml/strategy.py` | модель сетов (форы ±1.5), правила стратегии v3: валуй, экспресс, сумма ставки, поправка Claude (Р22) |
 | `services/dossier.py`, `services/bank.py` | досье матча для Claude (0 токенов), банк, пик и просадка по журналу |
+
+## Агент Claude (этап 3, в работе)
+
+Числа считает код, контекст дает Claude: досье матча и базовую вероятность собирает код (0 токенов), Claude разбирает текст, ищет новости и дает поправку к вероятности по JSON-схеме, код ее проверяет и ограничивает (±10 п.п., Р22). Агент в базу не пишет. Шаги и модели:
+
+| Шаг | Модель и effort | Инструменты | Где |
+|---|---|---|---|
+| Разбор текста ввода | Haiku 5.5, `low` | нет | `agent/parse.py`, прямо в `POST /analyses` |
+| Новости игроков (если старше 12 ч) | Sonnet 5.5, `low` | `web_search` (до 3 поисков) и свой `record_news` | `agent/news.py`, в воркере |
+| Оценка матча | Opus 5.5, `medium`, поток | нет | `agent/analysis.py`, в воркере, один вызов на матч |
+
+Модели, effort, лимиты токенов и поисков — в настройках (`app_settings.agent_config` поверх `agent/config.py`, команда `agent-config`), промпты — в `app/prompts/*.md` с номером версии. Каждый вызов Claude пишет строку `agent_runs` (токены, стоимость по `model_prices`, `request_id`); перед вызовом проверяются лимиты и потолок анализа.
+
+| Модуль | Что делает |
+|---|---|
+| `agent/config.py` | настройки агента `AgentConfig`, значения по умолчанию |
+| `agent/client.py` | клиент Claude API: пул соединений на цикл событий, ключ — на каждый вызов |
+| `agent/errors.py` | ошибки SDK → коды `ai.*` (ключ отклонен, перегрузка, тайм-аут, отказ, не по схеме) |
+| `agent/runs.py` | учет вызова: usage, стоимость, худший случай перед вызовом |
+| `agent/prompts.py`, `agent/schemas.py` | промпты с версией и sha256, схемы ответов (разбор, новости, оценка матча) |
+| `services/ai_access.py` | доступ к Claude: режим, лимиты, резерв бюджета под `FOR UPDATE`, проверка перед вызовом, уведомления 80% и 100% |
+| `services/claude_key.py`, `services/ai_keys.py` | проверка и расшифровка ключа, свой ключ участника, режимы (Р7, Р12), лимиты и бюджет администратора |
+| `services/ai_budget.py` | сводки для экранов «Ключ Claude» и «Ключ и бюджет» (`/api/ai/budget`, `/api/me/ai-*`, `/api/admin/ai/*`), замена ключа администратора (сначала код 2FA, потом проверка ключа), лимиты по умолчанию для новых участников |
+| `agent/calls.py` | один вызов Claude: проверка лимитов до вызова, учет после (и неудачного, и снятого по тайм-ауту), usage оборванного потока |
+| `agent/parse.py`, `agent/news.py`, `agent/analysis.py` | шаги Claude: разбор текста, новости (`web_search` + `record_news`), оценка матча до 3 итераций в одном разговоре |
+| `services/analyses.py`, `services/analysis_input.py`, `services/analysis_view.py` | анализ для API: разбор, черновик, «Перед запуском», запуск и резерв, перезапуск, отмена; матчи и кэфы из ввода; вид анализа и события прогресса |
+| `services/analysis_run.py`, `services/analysis_result.py`, `services/progress.py` | выполнение в воркере с чекпойнтами (предел 840 с), прогнозы и экспресс, уборщик зависших анализов; прогресс (Redis Streams, SSE) |
+| `services/bets.py`, `services/strategy_versions.py` | ставка по экспрессу, банк и букмекеры участника; активная версия стратегии v3 |
+| `services/agent_smoke.py` | команда `agent-smoke`: проверка конвейера на живом ключе |
+
+Маршруты ключей и бюджета: `GET /api/ai/budget`; свой ключ — `PUT`/`DELETE /api/me/ai-key`, `POST /api/me/ai-key/check`; режим — `PUT /api/me/ai-mode`, `POST`/`DELETE /api/me/ai-mode/return-request`; свой потолок — `PUT /api/me/ai-cap`; администратор — `GET`/`PUT /api/admin/ai/key` (замена с `totp_code`), `GET`/`PUT /api/admin/ai/budget`, `GET /api/admin/ai/limits`, `PUT /api/admin/ai/limits/{user_id}`, `PUT /api/admin/ai/defaults`, `POST /api/admin/users/{user_id}/ai-mode` (`approve` с лимитом или `reject`). Ключ ни в одном ответе не возвращается — только последние 4 символа. Расход участника и общий бюджет — без проверочных прогонов (`eval`, `shadow`): у них свой бюджет `eval_budget_usd`. «Анализов за месяц» везде считается по `analyses.started_at` на ключе администратора, как «анализы сегодня». Потолок анализа по умолчанию для новых участников — настройка `default_per_analysis_usd` в `agent_config` (ее меняет и `PUT /api/admin/ai/defaults`, и `agent-config`).
+
+Маршруты анализа и ставки: `POST /api/analyses` (разбор текста или пустая форма), `GET /api/analyses`, `GET /api/analyses/{id}`, `POST /api/analyses/{id}/preview` («Перед запуском»), `POST /api/analyses/{id}/run` (запуск; без тела — перезапуск с упавшего шага), `POST /api/analyses/{id}/cancel`, `PUT /api/analyses/{id}/decision`, `GET /api/analyses/{id}/events` (прогресс, SSE), `POST /api/bets`, `GET /api/me/bank`, `GET /api/me/bookmakers`, `GET /api/players?q=`, `GET /api/strategy/active`. Разбор текста — не больше 30 в час на участника. Анализ выполняет воркер (`run_analysis`, предел 15 минут, без повтора arq); уборщик раз в 5 минут переводит в `failed` (`analysis.worker_lost`) анализы без движения дольше 15 минут, в том числе зависший разбор.
+
+Проверка на живом ключе (запустит владелец, когда появится ключ): `python -m app.admin.cli agent-smoke [--match ID] [--yes]` — один разбор образца, новости одного игрока (совместимость `web_search` и `record_news` в одном запросе), два вызова оценки одного матча из базы (второй проверяет чтение кэша); печатает токены, стоимость и чтение кэша, прогнозы и новости не пишет, перед запуском спрашивает подтверждение с оценкой цены (≈ $0,30). В тестах Claude не вызывается: ответы подменяются через транспорт `httpx2` (`tests/claude_mock.py`, `tests/fake_claude.py`).
+
+Локальный прогон без ключа: поддельный сервер Claude `uvicorn tests.fake_claude:app --port 8099` (из `backend/`) и `CAPPER_ANTHROPIC_BASE_URL=http://127.0.0.1:8099` у API и воркера; ключ администратора — любой `sk-ant-...` (`set-admin-key`, проверку ключа тоже отвечает поддельный сервер). Сбои включаются запросом `POST /_fake/fail` (сбросить — `POST /_fake/reset`) или переменной `FAKE_CLAUDE_FAIL`. В prod адрес Claude API — только https.
 
 ## Где что лежит
 

@@ -8,6 +8,7 @@ Anthropic. detail — короткая метка для agent_runs.error и л�
 и текст ошибки Anthropic в detail не попадают.
 """
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -146,6 +147,9 @@ def error_from_exception(exc: BaseException) -> ClaudeStepError:
         return ClaudeStepError("ai.bad_output", detail="response_validation")
     if isinstance(exc, ValidationError):
         return ClaudeStepError("ai.bad_output", detail="schema")
+    if isinstance(exc, json.JSONDecodeError):
+        # Испорченное событие потока SSE (обрыв посреди данных): сбой связи, а не наш запрос
+        return ClaudeStepError("ai.unavailable", detail="stream_decode")
     if isinstance(exc, ValueError):
         # Защита SDK от долгого запроса без потока: ошибка нашего запроса
         return ClaudeStepError("ai.bad_request", detail="client")

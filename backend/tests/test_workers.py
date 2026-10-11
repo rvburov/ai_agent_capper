@@ -38,6 +38,7 @@ from app.db.models import (
 )
 from app.db.session import create_sessionmaker
 from app.ingest import update
+from app.services import analysis_run
 from app.services.sessions import create_session, get_active_session
 from app.workers import jobs
 from app.workers.jobs import (
@@ -46,12 +47,16 @@ from app.workers.jobs import (
     cleanup_auth_data,
     cleanup_auth_records,
     notify_stale_data,
+    reap_stuck_analyses,
+    run_analysis,
     update_data,
 )
 from app.workers.main import (
+    ANALYSIS_TIMEOUT_SECONDS,
     CLEANUP_HOUR_UTC,
     CLEANUP_MINUTE,
     DATA_UPDATE_MINUTE,
+    REAP_MINUTES,
     WorkerSettings,
     apply_redis_prefix,
     create_queue_pool,
@@ -215,9 +220,25 @@ async def test_cleanup_job_uses_sessionmaker_from_context(
 
 def test_worker_settings(settings: Settings) -> None:
     assert WorkerSettings.queue_name == f"{settings.redis_prefix}arq:queue"
-    assert WorkerSettings.functions == (cleanup_auth_records, update_data)
+    cleanup_job, update_job, analysis_job, reaper_job = WorkerSettings.functions
+    assert (cleanup_job, update_job, reaper_job) == (
+        cleanup_auth_records,
+        update_data,
+        reap_stuck_analyses,
+    )
+    # Анализ: свой предел 15 минут и без повтора arq (перезапуск — с чекпойнта)
+    assert isinstance(analysis_job, arq.worker.Function)
+    assert analysis_job.coroutine is run_analysis and analysis_job.name == "run_analysis"
+    assert analysis_job.timeout_s == ANALYSIS_TIMEOUT_SECONDS == 900
+    assert analysis_job.max_tries == 1
+    # Свой предел анализа короче: анализ кончается своим failed, а не снятием задачи
+    assert analysis_run.RUN_DEADLINE_SECONDS < ANALYSIS_TIMEOUT_SECONDS
     assert WorkerSettings.cron_jobs is not None
-    cleanup, data = WorkerSettings.cron_jobs
+    cleanup, data, reaper = WorkerSettings.cron_jobs
+    # Уборщик зависших анализов — каждые 5 минут, не в минуты соседних задач
+    assert reaper.coroutine is reap_stuck_analyses and reaper.max_tries == 1
+    assert reaper.minute == set(REAP_MINUTES) and len(REAP_MINUTES) == 12
+    assert not REAP_MINUTES & {CLEANUP_MINUTE, DATA_UPDATE_MINUTE, 0}
     assert cleanup.coroutine is cleanup_auth_records
     assert (cleanup.hour, cleanup.minute, cleanup.second) == (CLEANUP_HOUR_UTC, CLEANUP_MINUTE, 0)
     # Обновление данных — раз в сутки в час из настроек, минута не нулевая

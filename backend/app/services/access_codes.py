@@ -20,6 +20,7 @@ from sqlalchemy import ColumnElement, and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.agent.config import default_per_analysis
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.i18n import t
@@ -183,12 +184,27 @@ class _Limit:
     per_analysis_usd: Decimal
 
 
+def _usd_text(value: Decimal) -> str:
+    """Сумма для текста ошибки: 8,40 (как ai_access.usd_text; тот модуль импортирует
+    этот через admin_users)."""
+    return f"{value:.2f}".replace(".", ",")
+
+
 async def _start_limit(db: AsyncSession, data: InviteIn) -> _Limit | None:
     """Стартовый лимит приглашения: из запроса или по умолчанию из настроек программы.
     Для своего ключа (own) лимита на ключе администратора нет."""
     if data.ai_mode != "shared":
         return None
     if data.limit is not None:
+        if data.limit.per_analysis_usd > data.limit.monthly_usd:
+            # Как в форме приглашения и в лимитах участника (ai_budget): потолок одного
+            # анализа не выше месячного лимита
+            raise AppError(
+                400,
+                "ai.cap_above_month",
+                cap=_usd_text(data.limit.per_analysis_usd),
+                limit=_usd_text(data.limit.monthly_usd),
+            )
         return _Limit(
             data.limit.monthly_usd, data.limit.daily_analyses, data.limit.per_analysis_usd
         )
@@ -196,7 +212,7 @@ async def _start_limit(db: AsyncSession, data: InviteIn) -> _Limit | None:
     return _Limit(
         defaults.default_member_limit_usd,
         defaults.default_daily_analyses,
-        defaults.per_analysis_hard_usd,
+        default_per_analysis(defaults),
     )
 
 

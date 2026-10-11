@@ -12,6 +12,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes import admin as admin_routes
+from app.api.routes import admin_ai as admin_ai_routes
 from app.db.models import User
 from app.main import create_app
 from tests.helpers_admin import admin_signed_in, error_code, signed_in
@@ -36,11 +37,11 @@ def _url(path: str) -> str:
 def test_every_admin_router_route_is_in_schema() -> None:
     """Маршрут, скрытый из схемы, не попал бы в параметризованный тест прав."""
     in_schema = set(ADMIN_ROUTES)
-    for route in admin_routes.router.routes:
+    for route in [*admin_routes.router.routes, *admin_ai_routes.router.routes]:
         assert isinstance(route, APIRoute)
         for method in route.methods or set():
             assert (method, "/api" + route.path) in in_schema
-    assert len(ADMIN_ROUTES) >= 15
+    assert len(ADMIN_ROUTES) >= 23
 
 
 @pytest.mark.parametrize(("method", "path"), ADMIN_ROUTES, ids=lambda v: str(v))
@@ -109,7 +110,8 @@ def _schema_properties(node: Any, seen: set[str]) -> set[str]:
 def test_admin_user_responses_have_no_private_fields() -> None:
     checked = 0
     for path, operations in _SCHEMA["paths"].items():
-        if not path.startswith("/api/admin/users"):
+        # Участники и их расход на ИИ (лимиты, режим ключа)
+        if not path.startswith(("/api/admin/users", "/api/admin/ai")):
             continue
         for operation in operations.values():
             for code, response in operation["responses"].items():
@@ -121,7 +123,7 @@ def test_admin_user_responses_have_no_private_fields() -> None:
                 leaked = {f for f in fields if any(word in f.lower() for word in _PRIVATE_WORDS)}
                 assert not leaked, (path, leaked)
                 checked += 1
-    assert checked >= 4
+    assert checked >= 12
 
 
 async def test_admin_user_payload_keys(

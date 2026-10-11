@@ -25,7 +25,6 @@ from sqlalchemy import (
     Update,
     and_,
     delete,
-    distinct,
     func,
     or_,
     select,
@@ -81,37 +80,55 @@ DELETED_EMAIL = "deleted-{id}@deleted.invalid"
 # --- чтение: список и карточка ---
 
 
+# Проверочные прогоны (eval и теневые, Р22): у них свой бюджет
+# (app_settings.eval_budget_usd), в расход участника и общий бюджет они не входят
+CHECK_RUN_KINDS = ("eval", "shadow")
+
+
 def month_start(now: datetime) -> datetime:
     """Начало текущего месяца по UTC: с него считаются расход и анализы."""
     now = now.astimezone(UTC)
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
-async def _usage(
+async def month_usage(
     db: AsyncSession, user_ids: Sequence[int], now: datetime
 ) -> dict[int, tuple[Decimal, int]]:
-    """Расход в долларах и число анализов за месяц на ключе администратора.
+    """Расход в долларах и число анализов за месяц на ключе администратора, без
+    проверочных прогонов (как лимиты и общий бюджет в app/services/ai_access.py).
 
-    Анализ — разные analysis_id среди вызовов kind = 'analysis' (у одного анализа
-    несколько шагов, каждый — своя строка agent_runs).
+    Анализы — по analyses.started_at на ключе администратора, как «анализы в день» и
+    /api/ai/budget: в счет входят и анализы, которые упали до вызова Claude или взяли
+    повторную оценку без вызова.
     """
     if not user_ids:
         return {}
-    analyses = func.count(distinct(AgentRun.analysis_id)).filter(AgentRun.kind == "analysis")
-    rows = await db.execute(
-        select(AgentRun.user_id, func.coalesce(func.sum(AgentRun.cost_usd), 0), analyses)
+    start = month_start(now)
+    spent = await db.execute(
+        select(AgentRun.user_id, func.coalesce(func.sum(AgentRun.cost_usd), 0))
         .where(
             AgentRun.user_id.in_(user_ids),
             AgentRun.key_source == "admin",
-            AgentRun.created_at >= month_start(now),
+            AgentRun.created_at >= start,
+            AgentRun.kind.not_in(CHECK_RUN_KINDS),
         )
         .group_by(AgentRun.user_id)
     )
-    return {
-        int(uid): (Decimal(spent), int(count))
-        for uid, spent, count in rows.all()
-        if uid is not None
+    counts = await db.execute(
+        select(Analysis.user_id, func.count())
+        .where(
+            Analysis.user_id.in_(user_ids),
+            Analysis.key_source == "admin",
+            Analysis.started_at >= start,
+        )
+        .group_by(Analysis.user_id)
+    )
+    usage: dict[int, tuple[Decimal, int]] = {
+        int(uid): (Decimal(total), 0) for uid, total in spent.all() if uid is not None
     }
+    for uid, count in counts.all():
+        usage[int(uid)] = (usage.get(int(uid), (Decimal(0), 0))[0], int(count))
+    return usage
 
 
 async def _limits(db: AsyncSession, user_ids: Sequence[int]) -> dict[int, AiLimit]:
@@ -148,7 +165,9 @@ def _user_fields(
         "last_login_at": user.last_login_at,
         "ai_spent_month_usd": spent,
         "analyses_month": analyses,
-        "limit": _limit_out(limit),
+        # У администратора нет личного лимита: строка ai_limits у него может быть
+        # (регистрация по приглашению), но не действует
+        "limit": _limit_out(limit) if user.role != "admin" else None,
     }
 
 
@@ -160,7 +179,7 @@ async def list_users(db: AsyncSession, *, include_deleted: bool = False) -> list
         stmt = stmt.where(User.status != "deleted")
     users = list(await db.scalars(stmt))
     ids = [u.id for u in users]
-    usage = await _usage(db, ids, utcnow())
+    usage = await month_usage(db, ids, utcnow())
     limits = await _limits(db, ids)
     return [
         AdminUserOut.model_validate(_user_fields(u, usage.get(u.id), limits.get(u.id)))
@@ -169,7 +188,7 @@ async def list_users(db: AsyncSession, *, include_deleted: bool = False) -> list
 
 
 async def user_out(db: AsyncSession, user: User) -> AdminUserOut:
-    usage = await _usage(db, [user.id], utcnow())
+    usage = await month_usage(db, [user.id], utcnow())
     limits = await _limits(db, [user.id])
     return AdminUserOut.model_validate(_user_fields(user, usage.get(user.id), limits.get(user.id)))
 
@@ -180,7 +199,7 @@ async def get_user_detail(db: AsyncSession, user_id: int) -> AdminUserDetailOut:
     if user is None:
         raise AppError(404, "common.not_found")
     now = utcnow()
-    usage = await _usage(db, [user.id], now)
+    usage = await month_usage(db, [user.id], now)
     limits = await _limits(db, [user.id])
     idle_since = now - timedelta(days=get_settings().session_idle_days)
     active_sessions = await db.scalar(

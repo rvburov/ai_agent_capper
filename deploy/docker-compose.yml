@@ -109,13 +109,16 @@ services:
     mem_limit: ${CAPPER_API_MEM_LIMIT:-1g}
     cpus: ${CAPPER_API_CPUS:-1.5}
     # IP клиента — из X-Forwarded-For, но только от адресов сети edge (там лишь Caddy, а
-    # шлюз сети — сам сервер). Caddy не верит этому заголовку от клиента и пишет его сам
+    # шлюз сети — сам сервер). Caddy не верит этому заголовку от клиента и пишет его сам.
+    # При остановке открытые потоки прогресса (SSE) закрываются через 5 с: браузер
+    # переподключится сам, а docker не убьет процесс посреди ответа
     command:
       - uvicorn
       - app.main:app
       - --host=0.0.0.0
       - --port=8000
       - --no-server-header
+      - --timeout-graceful-shutdown=5
       - --proxy-headers
       - --forwarded-allow-ips=${CAPPER_EDGE_SUBNET:-10.203.0.0/24},${CAPPER_EDGE_SUBNET6:-fd00:ca9e:203::/64}
     networks: [edge, backend]
