@@ -3,12 +3,14 @@
 
 Вывод в начале отчета формулирует код по числам: где интервал разницы с рынком целиком
 выше нуля — «модель хуже рынка», ниже нуля — «лучше» (с предупреждением искать утечку),
-иначе — «в пределах шума». Так текст не может разойтись с таблицами.
+иначе — «в пределах шума». Так текст не может разойтись с таблицами. Если основной эталон
+рынка (Pinnacle) — меньше порога событий сравнения в целом или в одном из тестовых годов,
+вывод и отчет говорят, что сравнение менее строгое, и показывают состав эталона по годам.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -16,7 +18,7 @@ from app.core.i18n import t
 from app.ml.metrics import COIN_BRIER, COIN_LOG_LOSS, CalibrationBin, Estimate, RoiEstimate
 
 if TYPE_CHECKING:
-    from app.ml.backtest import BacktestResult, BetResult, ScoreSummary
+    from app.ml.backtest import BacktestResult, BetResult, ReferenceMix, ScoreSummary
 
 # Корзина калибровки с меньшим числом событий — шум (LLM_LEARNING.md, 3.1)
 MIN_BIN_EVENTS = 30
@@ -122,6 +124,13 @@ def _skip_name(reason: str) -> str:
     return names.get(reason, reason)
 
 
+def _reference_label(reference: ReferenceMix) -> str:
+    """Эталон рынка для подписей таблиц: букмекеры, по которым оценены события, по
+    порядку («Pinnacle → среднее по рынку»); нет событий — весь порядок."""
+    used = [bookmaker for bookmaker, count in reference.counts.items() if count]
+    return " → ".join(bookmaker_name(bookmaker) for bookmaker in used or reference.order)
+
+
 def _source_name(source: str) -> str:
     names = {
         "sackmann": t("backtest.sources.sackmann"),
@@ -133,12 +142,81 @@ def _source_name(source: str) -> str:
 # --- вывод ---
 
 
+def _reference_others(reference: ReferenceMix, years: Iterable[int] | None = None) -> str:
+    """Запасные эталоны, по которым оценены события (всех тестовых лет или только
+    years): «биржа Betfair — 12, ...»."""
+    counts = reference.counts if years is None else reference.counts_for(years)
+    return ", ".join(
+        t("backtest.warnings.reference_count", name=bookmaker_name(bookmaker), n=count)
+        for bookmaker, count in counts.items()
+        if bookmaker != reference.primary and count
+    )
+
+
+def _reference_years(reference: ReferenceMix, years: Iterable[int]) -> str:
+    """Доля основного эталона по годам: «2024 — 99,0%, 2025 — 3,0%»."""
+    return ", ".join(
+        t("backtest.warnings.reference_year", year=year, share=pct(share))
+        for year in years
+        if (share := reference.year_share(year)) is not None
+    )
+
+
+def reference_warning(reference: ReferenceMix) -> str:
+    """Предупреждение бэктеста: основной эталон (Pinnacle) — меньше порога событий
+    сравнения в целом (доля — по всем годам) или в отдельных годах (эти годы и их
+    запасные эталоны)."""
+    params = {
+        "primary": bookmaker_name(reference.primary),
+        "share": pct(reference.primary_share),
+        "min": pct(reference.min_share, 0),
+    }
+    if reference.overall_strict:
+        weak = reference.weak_years
+        return t(
+            "backtest.warnings.reference_weak_years",
+            **params,
+            years=_reference_years(reference, weak),
+            others=_reference_others(reference, weak),
+        )
+    return t(
+        "backtest.warnings.reference_weak",
+        **params,
+        years=_reference_years(reference, reference.by_year),
+        others=_reference_others(reference),
+    )
+
+
+def _reference_note(reference: ReferenceMix) -> str:
+    """Пусто, если сравнение строгое; иначе — доля основного эталона и запасные (в целом
+    или в годах, где основного мало)."""
+    if reference.strict:
+        return ""
+    params = {
+        "primary": bookmaker_name(reference.primary),
+        "share": pct(reference.primary_share),
+        "min": pct(reference.min_share, 0),
+    }
+    if reference.overall_strict:
+        weak = reference.weak_years
+        return ". " + t(
+            "backtest.verdict.reference_weak_years",
+            **params,
+            years=_reference_years(reference, weak),
+            others=_reference_others(reference, weak),
+        )
+    return ". " + t(
+        "backtest.verdict.reference_weak", **params, others=_reference_others(reference)
+    )
+
+
 def _market_verdict(result: BacktestResult) -> str:
     gap = result.calibrated_gap
+    reference = result.data.reference
     if gap is None:
         return t(
             "backtest.verdict.no_market",
-            bookmaker=bookmaker_name(result.config.ref_bookmaker),
+            bookmakers=", ".join(map(bookmaker_name, reference.order)),
         )
     params: dict[str, Any] = {
         "diff": num(abs(gap.log_loss.value)),
@@ -148,10 +226,12 @@ def _market_verdict(result: BacktestResult) -> str:
         "n": gap.log_loss.n,
     }
     if gap.log_loss.low > 0:
-        return t("backtest.verdict.worse", **params)
-    if gap.log_loss.high < 0:
-        return t("backtest.verdict.better", **params)
-    return t("backtest.verdict.tie", **params)
+        key = "backtest.verdict.worse"
+    elif gap.log_loss.high < 0:
+        key = "backtest.verdict.better"
+    else:
+        key = "backtest.verdict.tie"
+    return t(key, **params) + _reference_note(reference)
 
 
 def _coin_verdict(result: BacktestResult) -> str:
@@ -284,21 +364,8 @@ def _data_section(result: BacktestResult) -> list[str]:
             n=data.test.events,
             with_market=data.test_with_market,
             share=pct(data.market_share),
-            bookmaker=bookmaker_name(config.ref_bookmaker),
         ),
     ]
-    for year, (with_market, total) in data.market_by_year.items():
-        share = with_market / total if total else None
-        lines.append(
-            "  - "
-            + t(
-                "backtest.report.market_year",
-                year=year,
-                with_market=with_market,
-                total=total,
-                share=pct(share),
-            )
-        )
     lines.append("- " + t("backtest.report.bet_events", n=data.bet_events))
     lines.append(
         "- " + t("backtest.report.levels", levels=", ".join(map(level_name, config.levels)))
@@ -320,7 +387,59 @@ def _data_section(result: BacktestResult) -> list[str]:
                     day=_day(source.last_day),
                 )
             )
-    return lines
+    return [*lines, "", *_reference_section(result)]
+
+
+def _reference_section(result: BacktestResult) -> list[str]:
+    """Состав эталона рынка по тестовым годам: сколько событий оценено по каждому
+    букмекеру и доля основного (Pinnacle)."""
+    data = result.data
+    reference = data.reference
+    names = [bookmaker_name(bookmaker) for bookmaker in reference.order]
+    rows = []
+    for year, (with_market, total) in data.market_by_year.items():
+        counts = reference.by_year.get(year, {})
+        rows.append(
+            [
+                str(year),
+                str(total),
+                f"{with_market} ({pct(with_market / total if total else None)})",
+                *[str(counts.get(bookmaker, 0)) for bookmaker in reference.order],
+                pct(reference.year_share(year)),
+            ]
+        )
+    if len(rows) > 1:
+        rows.append(
+            [
+                t("backtest.report.reference_total"),
+                str(data.test.events),
+                f"{data.test_with_market} ({pct(data.market_share)})",
+                *[str(count) for count in reference.counts.values()],
+                pct(reference.primary_share),
+            ]
+        )
+    return [
+        f"### {t('backtest.report.reference_title')}",
+        "",
+        t(
+            "backtest.report.reference_note",
+            order=" → ".join(names),
+            primary=names[0],
+            min=pct(reference.min_share, 0),
+            events=reference.min_year_events,
+        ),
+        "",
+        *_table(
+            [
+                t("backtest.report.col_year"),
+                t("backtest.report.col_events"),
+                t("backtest.report.col_with_reference"),
+                *names,
+                t("backtest.report.col_primary_share", name=names[0]),
+            ],
+            rows,
+        ),
+    ]
 
 
 def _model_section(result: BacktestResult) -> list[str]:
@@ -374,8 +493,7 @@ def _accuracy_section(result: BacktestResult) -> list[str]:
     if result.calibrated is not None and result.market is not None:
         n = str(result.calibrated.n)
         market_name = t(
-            "backtest.report.row_market",
-            bookmaker=bookmaker_name(result.config.ref_bookmaker),
+            "backtest.report.row_market", bookmaker=_reference_label(result.data.reference)
         )
         lines += [t("backtest.report.accuracy_note"), ""]
         lines += _table(
@@ -453,10 +571,7 @@ def _calibration_section(result: BacktestResult) -> list[str]:
     ]
     lines += _table(header, _calibration_rows(result.calibration))
     if result.market_calibration:
-        market = t(
-            "backtest.report.row_market",
-            bookmaker=bookmaker_name(result.config.ref_bookmaker),
-        )
+        market = t("backtest.report.row_market", bookmaker=_reference_label(result.data.reference))
         lines += ["", f"**{market}**", ""]
         lines += _table(header, _calibration_rows(result.market_calibration))
     return lines

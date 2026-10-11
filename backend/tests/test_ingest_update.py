@@ -216,13 +216,22 @@ async def test_update_from_folders_and_repeat(
     assert "== Шаг 1 из 4. Архив Сакманна: годы 2023, 2024, из папки" in text_out
     assert "== Шаг 4 из 4. Пересчет Эло" in text_out
     assert "Данные: Jeff Sackmann / Tennis Abstract, CC BY-NC-SA 4.0" in text_out
+    # Ход работы шагов — с отступом, по файлу и по этапу, сразу, а не только в итоге
+    assert any(line.startswith("  atp_players.csv: получен, ") for line in said)
+    loaded = [line for line in said if line.startswith("  atp_matches_2023.csv: строк ")]
+    assert len(loaded) == 1 and " за " in loaded[0]
+    assert any(line.startswith("  история загружена: матчей ") for line in said)
+    assert any(line.startswith("  рейтинги посчитаны: игроков ") for line in said)
+    elo_rows = step(result, "elo").created
+    written = [line for line in said if line.startswith("  строки записаны: ")]
+    assert written and f"новых и изменившихся {elo_rows}, удалено 0" in written[0]
+    assert said.index(loaded[0]) < said.index(written[0])
     lines = summary_lines(result)
     assert lines[0] == "Итог обновления данных:"
     assert lines[1].startswith("  Архив Сакманна — готово за ")
     assert ", не сопоставлено 1. Последний турнир архива начался 2024-10-28" in lines[1]
-    elo_rows = step(result, "elo").created
     assert lines[4].startswith("  Пересчет Эло — готово за ")
-    assert f"строк рейтинга {elo_rows} (пишутся заново при каждом пересчете)" in lines[4]
+    assert f"строк рейтинга {elo_rows}, из них записано {elo_rows} (остальные" in lines[4]
     assert lines[-1] == "Все шаги прошли"
 
     before = await table_counts(db)
@@ -239,6 +248,9 @@ async def test_update_from_folders_and_repeat(
     assert again.ok
     for name in ("sackmann", "tennis_data", "players_link"):
         assert (step(again, name).created, step(again, name).updated) == (0, 0), name
+    # Эло пересчитано, но ни одна строка рейтинга не изменилась — и не переписана
+    assert (step(again, "elo").created, step(again, "elo").written) == (elo_rows, 0)
+    assert f"строк рейтинга {elo_rows}, из них записано 0 (" in summary_lines(again)[4]
     db.expunge_all()
     assert await table_counts(db) == before
     assert (
@@ -404,6 +416,8 @@ async def test_main_with_folders(
     out = capsys.readouterr().out
     assert code == 0, out
     assert "Итог обновления данных:" in out and out.rstrip().endswith("Все шаги прошли")
+    # Ход работы печатается по файлу, с отступом под строкой шага
+    assert "\n  atp_matches_2024.csv: строк " in out
     assert (await db.scalar(select(func.count()).select_from(Match)) or 0) > 0
 
     # Вместо таблицы tennis-data — веб-страница (проверка Cloudflare): код 1, но Сакманн

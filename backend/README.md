@@ -137,7 +137,7 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
   - `python -m app.ingest.tennis_data [--years 2013-2026] [--dir ПАПКА] [--force]` — дни матчей, кэфы (`odds_snapshots`, вид `archive`) и матчи, которых у Сакманна еще нет;
   - `python -m app.admin.cli players-link-legacy [--dry-run]` — привязка ставок старого бота к матчам архивов;
   - `python -m app.ml.elo` — пересчет Эло по всей истории в `player_ratings` и модель `elo-v1`.
-- Бэктест (`app/ml/backtest.py`, отчет — `app/ml/report.py`): вес покрытия подбирается на 2019–2021, калибровка Платта — на 2022–2023, тест — 2024–2025 (`--test-years`), сравнение с рынком без маржи (Pinnacle, степенной метод), ROI по правилам стратегии, проверка приманкой. Результат пишется в `ml_models` и `eval_runs` (`--no-save` — без записи).
+- Бэктест (`app/ml/backtest.py`, отчет — `app/ml/report.py`): вес покрытия подбирается на 2019–2021, калибровка Платта — на 2022–2023, тест — 2024–2025 (`--test-years`), сравнение с рынком без маржи (эталон по порядку: Pinnacle → биржа Betfair → средний кэф рынка, степенной метод), ROI по правилам стратегии, проверка приманкой. Результат пишется в `ml_models` и `eval_runs` (`--no-save` — без записи).
 
 Модули:
 

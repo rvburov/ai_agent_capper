@@ -10,8 +10,10 @@ LLM_LEARNING.md, разделы 3 и 4).
    назначается по хешу id матча (четность sha256), иначе исход «всегда 1».
 3. Вес покрытия w подбирается по лог-лоссу на tune_years, калибровка Платта (логистическая
    регрессия по logit p, метод Ньютона) — на calib_years. test_years открываются один раз.
-4. На тесте — Эло сырой, Эло после калибровки и рынок (кэфы ref_bookmaker без маржи,
+4. На тесте — Эло сырой, Эло после калибровки и рынок (кэфы эталона без маржи,
    степенной метод) на одних и тех же событиях; бутстрэп-интервалы разницы потерь.
+   Эталон события — первый букмекер из ref_bookmakers (pinnacle → betfair_ex → avg) с
+   кэфами обеих сторон; состав эталона по годам — в отчете и в eval_runs.metrics.
 5. Приманка: исходы заменены монеткой ДО Эло, весь конвейер заново. Лог-лосс на тесте не
    должен быть лучше 0,693 − 0,005, иначе признаки видят исход своего матча.
 6. ROI по правилам стратегии (Стратегия-ставок.md, шаги 4–5; решение Р21): экспресс в
@@ -56,7 +58,7 @@ from app.ml.elo import (
     sort_history,
     upsert_model,
 )
-from app.ml.market import devig_power_matrix
+from app.ml.market import REFERENCE_ORDER, devig_power_matrix, reference_odds
 from app.ml.metrics import (
     COIN_LOG_LOSS,
     CalibrationBin,
@@ -73,7 +75,7 @@ from app.ml.metrics import (
     log_losses,
     roi_with_ci,
 )
-from app.ml.report import render_markdown, summary_lines
+from app.ml.report import bookmaker_name, reference_warning, render_markdown, summary_lines
 
 MARKET = "ML"
 ODDS_KIND = "archive"
@@ -117,13 +119,21 @@ class StrategyRules:
 
 @dataclass(frozen=True)
 class BacktestConfig:
-    """Годы подбора веса покрытия, калибровки и теста; букмекер-эталон и букмекеры для
-    ROI; уровни турниров (только основной тур ATP, решение Р21)."""
+    """Годы подбора веса покрытия, калибровки и теста; эталон рынка и букмекеры для ROI;
+    уровни турниров (только основной тур ATP, решение Р21).
+
+    ref_bookmakers — эталон рынка по порядку: для события берется первый букмекер с
+    кэфами обеих сторон. Первый в списке — основной (острая линия); если его доля ниже
+    min_primary_share среди всех событий сравнения или в одном тестовом году, где таких
+    событий не меньше min_primary_year_events, отчет предупреждает, что сравнение с рынком
+    менее строгое."""
 
     test_years: tuple[int, ...] = (2024, 2025)
     calib_years: tuple[int, ...] = (2022, 2023)
     tune_years: tuple[int, ...] = (2019, 2020, 2021)
-    ref_bookmaker: str = "pinnacle"
+    ref_bookmakers: tuple[str, ...] = REFERENCE_ORDER
+    min_primary_share: float = 0.9
+    min_primary_year_events: int = 100
     bet_bookmakers: tuple[str, ...] = ("avg", "pinnacle", "max")
     seed: int = 20261009
     levels: tuple[str, ...] = ("grand_slam", "masters", "500", "250", "atp", "finals")
@@ -153,7 +163,10 @@ class BacktestConfig:
         return "atp-tour-" + "-".join(str(year) for year in self.test_years)
 
     def validate(self) -> None:
-        """Годы не пересекаются и идут по времени: подбор < калибровка < тест."""
+        """Эталон рынка задан; годы не пересекаются и идут по времени: подбор <
+        калибровка < тест."""
+        if not self.ref_bookmakers:
+            raise BacktestError(t("backtest.errors.no_reference"))
         periods = (self.tune_years, self.calib_years, self.test_years)
         if not all(periods) or any(
             max(earlier) >= min(later) for earlier, later in pairwise(periods)
@@ -325,18 +338,6 @@ def _fit(events: Sequence[_Event], config: BacktestConfig, warnings: list[str]) 
     return _Fit(weight, tuning, len(tune), platt, len(calib))
 
 
-def _ref_odds(
-    book: Mapping[str, OddsPair] | None, bookmaker: str
-) -> tuple[Decimal, Decimal] | None:
-    pair = (book or {}).get(bookmaker)
-    if pair is None:
-        return None
-    odds1, odds2 = pair
-    if odds1 is None or odds2 is None or odds1 <= 1 or odds2 <= 1:
-        return None
-    return odds1, odds2
-
-
 # --- результат ---
 
 
@@ -460,9 +461,100 @@ class Freshness:
 
 
 @dataclass(frozen=True)
+class ReferenceMix:
+    """Состав эталона рынка на тестовых событиях: год → букмекер → событий, оцененных по
+    его кэфам (букмекеры в порядке order, нули тоже). Первый в order — основной эталон.
+
+    Год, где событий сравнения не меньше min_year_events, а доля основного эталона ниже
+    min_share, делает сравнение нестрогим, даже если общая доля выше порога: иначе год
+    почти без Pinnacle (как 2026-й) прятался бы за полными годами. Год с меньшим числом
+    событий на итог почти не влияет и отдельно не проверяется."""
+
+    order: tuple[str, ...]
+    by_year: dict[int, dict[str, int]]
+    min_share: float
+    min_year_events: int = 100
+
+    @property
+    def primary(self) -> str:
+        return self.order[0]
+
+    def counts_for(self, years: Iterable[int]) -> dict[str, int]:
+        """Событий по каждому букмекеру за выбранные тестовые годы."""
+        chosen = [self.by_year.get(year, {}) for year in years]
+        return {
+            bookmaker: sum(year.get(bookmaker, 0) for year in chosen) for bookmaker in self.order
+        }
+
+    @property
+    def counts(self) -> dict[str, int]:
+        """Событий по каждому букмекеру за все тестовые годы."""
+        return self.counts_for(self.by_year)
+
+    @property
+    def total(self) -> int:
+        return sum(self.counts.values())
+
+    def year_total(self, year: int) -> int:
+        """Событий сравнения (с эталоном) в году."""
+        return sum(self.by_year.get(year, {}).values())
+
+    def year_share(self, year: int) -> float | None:
+        """Доля основного эталона среди событий года с эталоном."""
+        total = self.year_total(year)
+        return self.by_year[year].get(self.primary, 0) / total if total else None
+
+    @property
+    def primary_share(self) -> float | None:
+        """Доля основного эталона среди всех событий сравнения; None — сравнения нет."""
+        return self.counts[self.primary] / self.total if self.total else None
+
+    @property
+    def weak_years(self) -> tuple[int, ...]:
+        """Тестовые годы, где событий сравнения не меньше min_year_events, а доля
+        основного эталона ниже min_share."""
+        return tuple(
+            year
+            for year in self.by_year
+            if self.year_total(year) >= self.min_year_events
+            and (share := self.year_share(year)) is not None
+            and share < self.min_share
+        )
+
+    @property
+    def overall_strict(self) -> bool:
+        """Общая доля основного эталона не ниже min_share (или сравнения нет вовсе —
+        тогда предупреждает no_market)."""
+        share = self.primary_share
+        return share is None or share >= self.min_share
+
+    @property
+    def strict(self) -> bool:
+        """Сравнение с рынком строгое: основного эталона не меньше min_share и в целом,
+        и в каждом тестовом году, где событий сравнения не меньше min_year_events."""
+        return self.overall_strict and not self.weak_years
+
+    def as_dict(self) -> dict[str, Any]:
+        """Состав для eval_runs.metrics."""
+        return {
+            "order": list(self.order),
+            "primary": self.primary,
+            "min_primary_share": self.min_share,
+            "min_year_events": self.min_year_events,
+            "primary_share": self.primary_share,
+            "strict": self.strict,
+            "weak_years": list(self.weak_years),
+            "counts": self.counts,
+            "by_year": self.by_year,
+            "primary_share_by_year": {year: self.year_share(year) for year in self.by_year},
+        }
+
+
+@dataclass(frozen=True)
 class DataSummary:
-    """Что было в данных: матчи в расчете Эло, пропуски, события по периодам и доля
-    тестовых событий с кэфами эталонного букмекера (по годам: год → (с кэфами, всего))."""
+    """Что было в данных: матчи в расчете Эло, пропуски, события по периодам, доля
+    тестовых событий с кэфами эталона (по годам: год → (с кэфами, всего)) и состав
+    эталона (reference)."""
 
     matches: int
     skipped: dict[str, int]
@@ -474,6 +566,7 @@ class DataSummary:
     test_with_market: int
     market_by_year: dict[int, tuple[int, int]]
     bet_events: int
+    reference: ReferenceMix
 
     @property
     def market_share(self) -> float | None:
@@ -520,6 +613,7 @@ class BacktestResult:
         data.pop("eval_run_id")
         data["n_events"] = self.n_events
         data["market_share"] = self.data.market_share
+        data["data"]["reference"] = self.data.reference.as_dict()
         data["config"] = {
             **asdict(self.config),
             "eval_set": self.config.eval_set,
@@ -795,16 +889,30 @@ def evaluate(
     raw_all, y_all = _arrays(test, fit.weight)
     cal_all = fit.platt.apply(raw_all)
 
-    with_market = [
-        index
+    # Эталон события — первый букмекер по порядку с кэфами обеих сторон
+    references = [
+        (index, found)
         for index, event in enumerate(test)
-        if _ref_odds(odds.get(event.match.match_id), config.ref_bookmaker) is not None
+        if (found := reference_odds(odds.get(event.match.match_id) or {}, config.ref_bookmakers))
+        is not None
     ]
+    with_market = [index for index, _ in references]
     market_by_year: dict[int, list[int]] = defaultdict(lambda: [0, 0])
+    reference_by_year: dict[int, dict[str, int]] = {}
     for event in test:
-        market_by_year[event.match.day.year][1] += 1
-    for index in with_market:
-        market_by_year[test[index].match.day.year][0] += 1
+        year = event.match.day.year
+        market_by_year[year][1] += 1
+        reference_by_year.setdefault(year, dict.fromkeys(config.ref_bookmakers, 0))
+    for index, (bookmaker, _) in references:
+        year = test[index].match.day.year
+        market_by_year[year][0] += 1
+        reference_by_year[year][bookmaker] += 1
+    reference = ReferenceMix(
+        order=tuple(dict.fromkeys(config.ref_bookmakers)),
+        by_year=dict(sorted(reference_by_year.items())),
+        min_share=config.min_primary_share,
+        min_year_events=config.min_primary_year_events,
+    )
 
     raw = calibrated = market = None
     raw_gap = calibrated_gap = None
@@ -815,10 +923,9 @@ def evaluate(
     if with_market:
         compared = [test[index] for index in with_market]
         rows = np.array(with_market)
-        pairs = [
-            _ref_odds(odds.get(event.match.match_id), config.ref_bookmaker) for event in compared
-        ]
-        q1 = devig_power_matrix([[float(o1), float(o2)] for o1, o2 in filter(None, pairs)])[:, 0]
+        q1 = devig_power_matrix(
+            [[float(odds1), float(odds2)] for _, (_, (odds1, odds2)) in references]
+        )[:, 0]
         flips = np.array([event.flip for event in compared])
         q = np.where(flips, 1.0 - q1, q1)
         y = y_all[rows]
@@ -831,11 +938,13 @@ def evaluate(
         market_calibration = calibration_table(q, y)
         slices = _slices(compared, cal_all[rows], q, y, config)
         headline_ids = {event.match.match_id for event in compared}
+        if not reference.strict:
+            warnings.append(reference_warning(reference))
     else:
         warnings.append(
             t(
                 "backtest.warnings.no_market",
-                bookmaker=config.ref_bookmaker,
+                bookmakers=", ".join(map(bookmaker_name, reference.order)),
                 years=_years_text(config.test_years),
             )
         )
@@ -868,6 +977,7 @@ def evaluate(
         test_with_market=len(with_market),
         market_by_year={year: (pair[0], pair[1]) for year, pair in sorted(market_by_year.items())},
         bet_events=len(bet_events),
+        reference=reference,
     )
     return BacktestResult(
         config=config,
@@ -1021,7 +1131,7 @@ async def run_backtest(
         odds = await load_archive_odds(
             db,
             years=config.test_years,
-            bookmakers={config.ref_bookmaker, *config.bet_bookmakers},
+            bookmakers={*config.ref_bookmakers, *config.bet_bookmakers},
         )
         freshness = await load_freshness(db)
     # Счет занимает секунды (бутстрэп): в отдельном потоке он не держит цикл событий

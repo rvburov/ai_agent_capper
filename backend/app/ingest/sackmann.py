@@ -19,6 +19,11 @@
   дата и кэфы остаются, а пустой турнир tennis-data удаляется. Турнир tennis-data отдает
   матчи только одному турниру Сакманна (_owners), спорное — в отчет.
 
+Запись — пачками, без компиляции запроса на каждую строку: INSERT … RETURNING одним
+подготовленным запросом на все строки файла (executemany), новая статистика подачи — одним
+COPY, а строки, совпавшие с базой, не отправляются совсем (повторная загрузка ничего не
+пишет). Ход работы — строка на каждый файл в progress (команда печатает ее сразу).
+
 Журнал — ingestion_runs (source = sackmann): файлы с sha256, счетчики, пропуски с файлом
 и строкой, несопоставленные строки, свежесть. Аудит администратора загрузка не пишет.
 """
@@ -30,6 +35,7 @@ import csv
 import io
 import re
 import sys
+import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields
@@ -37,11 +43,29 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from sqlalchemy import Boolean, Table, and_, delete, exists, func, or_, select, text, tuple_, update
+import asyncpg
+from sqlalchemy import (
+    Boolean,
+    ColumnElement,
+    Executable,
+    Row,
+    Table,
+    any_,
+    bindparam,
+    delete,
+    exists,
+    func,
+    or_,
+    select,
+    text,
+    tuple_,
+    update,
+)
 from sqlalchemy import literal_column as sql_literal
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.dialects.postgresql import ARRAY, insert
+from sqlalchemy.exc import DataError, DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.core.config import get_settings
 from app.core.i18n import t
@@ -74,7 +98,7 @@ TENNIS_DATA = "tennis_data"
 PLAYERS_FILE = "atp_players.csv"
 # Источники матчей, чьих игроков можно «усыновить»: у них нет sackmann_id
 ADOPT_FROM = ("tennis_data", "web")
-# Строк в одной вставке: в пределах 32 767 параметров запроса asyncpg
+# Строк в одном ORM bulk UPDATE (_bulk_update): обновлений немного, пачка — на всякий случай
 BATCH = 2000
 SCORE_LIMIT = 64
 REF_LIMIT = 64
@@ -138,6 +162,9 @@ _SET_SCORE = re.compile(r"\d+-\d+")
 _INITIAL_KEY = re.compile(r".+ [a-z]")
 _COUNTRY = re.compile(r"[A-Z]{3}")
 _YEARS_PART = re.compile(r"(\d{4})(?:\s*-\s*(\d{4}))?")
+
+# Куда сообщать ход работы: текст по каждому файлу (команда терминала печатает его сразу)
+Progress = Callable[[str], None]
 
 # Почему строка матча не загружена (тексты — ingest_sackmann.skip.*)
 SkipReason = Literal[
@@ -233,6 +260,12 @@ class ParsedFile:
     last_date: date | None
 
 
+# Границы INTEGER в PostgreSQL: id игроков и статистика матчей хранятся в нем. Числа до
+# 9 цифр в них всегда помещаются, их можно не проверять
+INT_MIN, INT_MAX = -(2**31), 2**31 - 1
+_SHORT_DIGITS = 9
+
+
 class _BadValue(ValueError):
     """Битое значение поля строки."""
 
@@ -244,14 +277,19 @@ class _Skip(Exception):
 
 
 def _int(value: str) -> int | None:
-    """Целое из CSV: «12», «12.0» (так пишет pandas). Пусто — None, иначе _BadValue."""
+    """Целое из CSV: «12», «12.0» (так пишет pandas). Пусто — None, иначе _BadValue.
+    Число вне INTEGER базы (больше 2 147 483 647 по модулю) — тоже _BadValue: такое
+    значение — опечатка в файле, а в базу оно не запишется."""
     if not value:
         return None
+    if value.isdecimal() and len(value) <= _SHORT_DIGITS:
+        # Почти все числа файла — короткие и без точки: int без float вдвое быстрее
+        return int(value)
     try:
         number = float(value)
     except ValueError:
         raise _BadValue(value) from None
-    if not number.is_integer():
+    if not number.is_integer() or not INT_MIN <= number <= INT_MAX:
         raise _BadValue(value)
     return int(number)
 
@@ -260,8 +298,15 @@ def _date(value: str) -> date | None:
     """Дата YYYYMMDD. Пусто — None, иначе _BadValue."""
     if not value:
         return None
+    text_value = value.removesuffix(".0")
+    if len(text_value) == 8 and text_value.isascii() and text_value.isdigit():
+        # Обычная дата — без strptime: он медленный, а дат в справочнике 65 тысяч
+        try:
+            return date(int(text_value[:4]), int(text_value[4:6]), int(text_value[6:]))
+        except ValueError:
+            raise _BadValue(value) from None
     try:
-        return datetime.strptime(value.removesuffix(".0"), "%Y%m%d").date()
+        return datetime.strptime(text_value, "%Y%m%d").date()
     except ValueError:
         raise _BadValue(value) from None
 
@@ -293,6 +338,15 @@ def _status(score: str) -> str:
     return "finished"
 
 
+def seconds_text(value: float) -> str:
+    """Секунды для хода работы: «12,3»."""
+    return f"{value:.1f}".replace(".", ",")
+
+
+def _kilobytes(file: FetchedFile) -> int:
+    return max(1, round(len(file.content) / 1024))
+
+
 def _decode(file: FetchedFile, report: IngestReport | None) -> str:
     try:
         return file.content.decode("utf-8-sig")
@@ -302,24 +356,36 @@ def _decode(file: FetchedFile, report: IngestReport | None) -> str:
         return file.content.decode("latin-1")
 
 
-def _reader(path: str, content: str, required: Sequence[str]) -> csv.DictReader[str]:
-    reader = csv.DictReader(io.StringIO(content, newline=""))
-    present = {name.strip() for name in reader.fieldnames or ()}
-    missing = [name for name in required if name not in present]
+def _cells(
+    path: str, content: str, required: Sequence[str]
+) -> Iterator[tuple[int, dict[str, str]]]:
+    """Строки CSV: (номер строки файла, колонка → значение без пробелов по краям). Как
+    csv.DictReader: пустые строки пропускаются, короткая строка дополняется пустыми
+    значениями, лишние значения отбрасываются. Но без второго словаря на строку: в
+    файлах архива сотни тысяч строк."""
+    reader = csv.reader(io.StringIO(content, newline=""))
+    names = [name.strip() for name in next(reader, [])]
+    missing = [name for name in required if name not in names]
     if missing:
         raise IngestError(
             "ingest_sackmann.errors.bad_header", file=path, columns=", ".join(missing)
         )
-    reader.fieldnames = [name.strip() for name in reader.fieldnames or ()]
-    return reader
+    width = len(names)
+    for row in reader:
+        if not row:
+            continue
+        cell = dict(zip(names, map(str.strip, row), strict=False))
+        if len(row) < width:
+            for name in names[len(row) :]:
+                cell[name] = ""
+        yield reader.line_num, cell
 
 
 def parse_players(path: str, content: str) -> dict[int, PlayerInfo]:
     """atp_players.csv → справочник по id Сакманна. Строки без id или без имени
     пропускаются: такой игрок возьмется из строки матча."""
     players: dict[int, PlayerInfo] = {}
-    for raw in _reader(path, content, PLAYER_COLUMNS):
-        cell = {key: (value or "").strip() for key, value in raw.items() if key is not None}
+    for _line, cell in _cells(path, content, PLAYER_COLUMNS):
         name = " ".join(f"{cell.get('name_first', '')} {cell.get('name_last', '')}".split())
         try:
             sackmann_id = _int(cell["player_id"])
@@ -350,27 +416,42 @@ def _row_player(cell: dict[str, str], side: str, sackmann_id: int) -> PlayerInfo
     )
 
 
+# (колонка файла, поле match_stats) победителя и проигравшего: ключи считаются один раз,
+# а не на каждой из 18 ячеек каждой строки
+_STAT_KEYS = tuple(
+    tuple((prefix + column, field_name) for column, field_name in STAT_COLUMNS.items())
+    for prefix in ("w_", "l_")
+)
+
+
 def _stats(
     cell: dict[str, str], bad: list[tuple[str, str]]
 ) -> tuple[dict[str, int | None], dict[str, int | None]] | None:
     """Статистика подачи победителя (w_*) и проигравшего (l_*). Нет ни одного числа — None.
-    Битое или отрицательное число — None в поле и запись в bad."""
+    Битое, отрицательное или не помещающееся в INTEGER число — None в поле и запись в bad."""
     sides: list[dict[str, int | None]] = []
-    for prefix in ("w_", "l_"):
+    found = False
+    for keys in _STAT_KEYS:
         values: dict[str, int | None] = {}
-        for column, field_name in STAT_COLUMNS.items():
-            raw = cell.get(prefix + column, "")
-            try:
-                number = _int(raw)
-            except _BadValue:
-                bad.append((prefix + column, raw))
-                number = None
-            if number is not None and number < 0:
-                bad.append((prefix + column, raw))
-                number = None
+        for key, field_name in keys:
+            raw = cell.get(key, "")
+            number: int | None
+            if raw.isdecimal() and len(raw) <= _SHORT_DIGITS:
+                # Обычное значение — сразу число, без вызова _int
+                number = int(raw)
+            else:
+                try:
+                    number = _int(raw)
+                except _BadValue:
+                    bad.append((key, raw))
+                    number = None
+                if number is not None and number < 0:
+                    bad.append((key, raw))
+                    number = None
             values[field_name] = number
+            found = found or number is not None
         sides.append(values)
-    if all(value is None for side in sides for value in side.values()):
+    if not found:
         return None
     return sides[0], sides[1]
 
@@ -439,26 +520,24 @@ def _match_row(cell: dict[str, str], line: int, bad: list[tuple[str, str]]) -> M
 def parse_matches(path: str, content: str, report: IngestReport | None = None) -> ParsedFile:
     """atp_matches_{год}.csv → годные строки. Пропуски и битые значения пишутся в report
     с файлом и номером строки (report = None — молча, только для свежести)."""
-    reader = _reader(path, content, MATCH_COLUMNS)
     rows: list[MatchRow] = []
     read = 0
     last: date | None = None
-    for raw in reader:
+    for line, cell in _cells(path, content, MATCH_COLUMNS):
         read += 1
-        cell = {key: (value or "").strip() for key, value in raw.items() if key is not None}
         bad: list[tuple[str, str]] = []
         try:
-            row = _match_row(cell, reader.line_num, bad)
+            row = _match_row(cell, line, bad)
         except _Skip as skip:
             if report is not None:
-                _report_skip(report, skip.reason, path, reader.line_num, _describe_raw(cell))
+                _report_skip(report, skip.reason, path, line, _describe_raw(cell))
             continue
         if report is not None:
             for column, value in bad:
                 report.add_warning(
                     "ingest_sackmann.warnings.bad_value",
                     file=path,
-                    line=reader.line_num,
+                    line=line,
                     column=column,
                     value=value,
                 )
@@ -771,6 +850,62 @@ async def _bulk_update(db: AsyncSession, model: type[Base], rows: list[dict[str,
         await db.execute(update(model), list(chunk))
 
 
+def _table(model: type[Base]) -> Table:
+    return cast(Table, model.__table__)
+
+
+def _any(
+    column: ColumnElement[Any] | InstrumentedAttribute[Any], values: Sequence[Any]
+) -> ColumnElement[bool]:
+    """column = ANY(:массив): один параметр вместо тысяч в IN (...). Такой запрос
+    PostgreSQL разбирает быстрее, а пачки по пределу параметров не нужны."""
+    return column == any_(bindparam(None, list(values), type_=ARRAY(column.type)))
+
+
+async def _insert_many(
+    db: AsyncSession, stmt: Executable, rows: Sequence[dict[str, Any]]
+) -> Sequence[Row[*tuple[Any, ...]]]:
+    """Один INSERT ... RETURNING на все строки, строки — параметрами (executemany).
+    SQLAlchemy компилирует запрос один раз и шлет его пачками многострочных VALUES
+    (insertmanyvalues). .values(список) компилировал бы каждую строку заново: на
+    архиве 2000–2026 это занимало большую часть времени загрузки."""
+    if not rows:
+        return []
+    return (await db.execute(stmt, list(rows))).all()
+
+
+async def copy_rows(
+    db: AsyncSession, table: Table, columns: Sequence[str], records: Sequence[tuple[Any, ...]]
+) -> None:
+    """Строки в таблицу одним COPY (asyncpg copy_records_to_table) в транзакции сеанса db:
+    десятки тысяч строк так пишутся в разы быстрее, чем INSERT. Конфликтов COPY не обходит:
+    строки должны быть новыми (вызывающий это уже проверил).
+
+    Ошибки — те же классы SQLAlchemy, что у INSERT (asyncpg сам их не оборачивает):
+    нарушение ограничения — IntegrityError, значение не кодируется в тип колонки (число
+    вне INTEGER и т. п.) — DataError, прочие ошибки базы и драйвера — DBAPIError."""
+    if not records:
+        return
+    connection = await db.connection()
+    driver = (await connection.get_raw_connection()).driver_connection
+    assert driver is not None
+    if not driver.is_in_transaction():
+        # SQLAlchemy открывает транзакцию asyncpg на первом запросе сеанса: COPY без нее
+        # записал бы строки сразу, мимо отката
+        await db.execute(text("SELECT 1"))
+    try:
+        await driver.copy_records_to_table(
+            table.name, records=records, columns=list(columns), schema_name=table.schema
+        )
+    except asyncpg.IntegrityConstraintViolationError as error:
+        raise IntegrityError(f"COPY {table.name}", None, error) from error
+    except (asyncpg.DataError, OverflowError, TypeError, ValueError) as error:
+        # Кодирование значений: у INSERT asyncpg превращает любую такую ошибку в DataError
+        raise DataError(f"COPY {table.name}", None, error) from error
+    except (asyncpg.PostgresError, asyncpg.InterfaceError) as error:
+        raise DBAPIError(f"COPY {table.name}", None, error) from error
+
+
 def _player_changes(state: _PlayerState, info: PlayerInfo) -> dict[str, Any] | None:
     """Новые значения игрока из Сакманна или None, если менять нечего. name_ru и aliases
     люди правят сами: имя только добавляется в aliases (старое — при переименовании).
@@ -844,11 +979,13 @@ class _Loader:
         factory: Callable[[], AsyncSession],
         report: IngestReport,
         force: bool,
+        progress: Progress | None = None,
     ) -> None:
         self.source = source
         self.factory = factory
         self.report = report
         self.force = force
+        self.progress = progress
         self.hashes: dict[str, str] = {}
         self.players_file: FetchedFile | None = None
         self._players: dict[int, PlayerInfo] | None = None
@@ -866,6 +1003,11 @@ class _Loader:
     @property
     def counts(self) -> Counter[str]:
         return self.report.counts
+
+    def _say(self, key: str, **params: Any) -> None:
+        """Ход работы (ingest_sackmann.progress.*): команда печатает его сразу, по файлу."""
+        if self.progress is not None:
+            self.progress(t(f"ingest_sackmann.progress.{key}", **params))
 
     def _created(self, entity: str, count: int) -> None:
         self.report.created += count
@@ -901,15 +1043,34 @@ class _Loader:
                 self.report.add_warning(
                     "ingest_sackmann.warnings.players_missing", file=PLAYERS_FILE
                 )
+                self._say("missing", file=PLAYERS_FILE)
             else:
                 self.report.add_file(self.players_file)
                 players_changed = self.force or (
                     self.hashes.get(self.players_file.path) != self.players_file.sha256
                 )
+                if players_changed:
+                    self._say(
+                        "players_fetched",
+                        file=PLAYERS_FILE,
+                        size=_kilobytes(self.players_file),
+                    )
+                else:
+                    self._say("unchanged", file=PLAYERS_FILE)
             for year in sorted(set(years)):
                 await self._year(year)
             if players_changed:
-                await self._in_transaction(PLAYERS_FILE, self._refresh_players)
+                started = time.monotonic()
+                updated = self.report.counts["players.updated"]
+                if await self._in_transaction(PLAYERS_FILE, self._refresh_players):
+                    self._say(
+                        "players_refreshed",
+                        file=PLAYERS_FILE,
+                        updated=self.report.counts["players.updated"] - updated,
+                        seconds=seconds_text(time.monotonic() - started),
+                    )
+                else:
+                    self._say("failed", file=PLAYERS_FILE)
         finally:
             # Свежесть — и в отчете упавшего запуска: видно, до какого года дошли
             dates = [item["last_tourney_date"] for item in self.years.values() if "matches" in item]
@@ -937,6 +1098,7 @@ class _Loader:
         name = f"atp_matches_{year}.csv"
         file = await self.source.fetch(name)
         if file is None:
+            self._say("missing", file=name)
             self.years[str(year)] = {"missing": True}
             self.missing.append(name)
             self.counts["files.missing"] += 1
@@ -948,6 +1110,12 @@ class _Loader:
             return
         self.report.add_file(file)
         unchanged = not self.force and self.hashes.get(file.path) == file.sha256
+        if unchanged:
+            self._say("unchanged", file=file.path)
+        else:
+            self._say("fetched", file=file.path, size=_kilobytes(file))
+        started = time.monotonic()
+        before = (self.report.created, self.report.updated, self.report.skipped)
         # Неизменившийся файл разбирается молча, только ради свежести в отчете
         report = None if unchanged else self.report
         parsed = parse_matches(file.path, _decode(file, report), report)
@@ -960,8 +1128,19 @@ class _Loader:
         async def load(db: AsyncSession) -> None:
             await self._load_rows(db, file.path, parsed.rows)
 
-        if await self._in_transaction(file.path, load):
-            self.counts["files.processed"] += 1
+        if not await self._in_transaction(file.path, load):
+            self._say("failed", file=file.path)
+            return
+        self.counts["files.processed"] += 1
+        self._say(
+            "loaded",
+            file=file.path,
+            rows=parsed.read,
+            skipped=self.report.skipped - before[2],
+            created=self.report.created - before[0],
+            updated=self.report.updated - before[1],
+            seconds=seconds_text(time.monotonic() - started),
+        )
 
     async def _in_transaction(self, path: str, work: Callable[[AsyncSession], Any]) -> bool:
         """Одна транзакция на файл. Конфликт в базе откатывает только этот файл: отчет
@@ -980,7 +1159,12 @@ class _Loader:
                 setattr(self.report, item.name, getattr(snapshot, item.name))
             self.report.files.pop(path, None)
             cause = getattr(exc.orig, "__cause__", None)
-            constraint = getattr(cause, "constraint_name", None) or type(exc.orig).__name__
+            constraint = (
+                getattr(cause, "constraint_name", None)
+                # Ошибка COPY (copy_rows): исключение asyncpg без обертки драйвера
+                or getattr(exc.orig, "constraint_name", None)
+                or type(exc.orig).__name__
+            )
             self.report.add_warning(
                 "ingest_sackmann.warnings.file_failed", file=path, constraint=constraint
             )
@@ -1018,12 +1202,13 @@ class _Loader:
     ) -> dict[int, int]:
         """Игроки по id Сакманна: найти, «усыновить» или создать, обновить. → id в базе."""
         existing: dict[int, _PlayerState] = {}
-        for part in _chunks(sorted(infos)):
-            result = await db.execute(select(*_PLAYER_COLUMNS).where(Player.sackmann_id.in_(part)))
-            for row in result:
-                state = _player_state(row)
-                assert state.sackmann_id is not None
-                existing[state.sackmann_id] = state
+        result = await db.execute(
+            select(*_PLAYER_COLUMNS).where(_any(Player.sackmann_id, sorted(infos)))
+        )
+        for row in result:
+            state = _player_state(row)
+            assert state.sackmann_id is not None
+            existing[state.sackmann_id] = state
         new = {sid: info for sid, info in infos.items() if sid not in existing}
         if adopt and new:
             adopted = await self._adopt(db, new, path)
@@ -1049,17 +1234,16 @@ class _Loader:
             }
             for info in new.values()
         ]
-        for chunk in _chunks(values):
-            stmt = (
-                insert(Player)
-                .values(list(chunk))
-                .on_conflict_do_nothing(index_elements=[Player.sackmann_id])
-                .returning(Player.id, Player.sackmann_id)
-            )
-            for player_id, sackmann_id in await db.execute(stmt):
-                assert sackmann_id is not None
-                ids[sackmann_id] = player_id
-                self._created("players", 1)
+        players = _table(Player)
+        stmt = (
+            insert(players)
+            .on_conflict_do_nothing(index_elements=[players.c.sackmann_id])
+            .returning(players.c.id, players.c.sackmann_id)
+        )
+        for player_id, sackmann_id in await _insert_many(db, stmt, values):
+            assert sackmann_id is not None
+            ids[sackmann_id] = player_id
+            self._created("players", 1)
         return ids
 
     async def _adopt(
@@ -1216,23 +1400,22 @@ class _Loader:
             item["start_date"] = min(item["start_date"], row.tourney_date)
             item["surface"] = item["surface"] or row.surface
         existing: dict[str, _TourState] = {}
-        for part in _chunks(sorted(wanted)):
-            result = await db.execute(
-                select(*_TOUR_COLUMNS).where(
-                    Tournament.source == SOURCE, Tournament.source_ref.in_(part)
-                )
+        result = await db.execute(
+            select(*_TOUR_COLUMNS).where(
+                Tournament.source == SOURCE, _any(Tournament.source_ref, sorted(wanted))
             )
-            for found in result:
-                existing[found.source_ref] = _TourState(
-                    id=found.id,
-                    name=found.name,
-                    category=found.category,
-                    surface=found.surface,
-                    best_of=found.best_of,
-                    start_date=found.start_date,
-                    indoor=found.indoor,
-                    city=found.city,
-                )
+        )
+        for found in result:
+            existing[found.source_ref] = _TourState(
+                id=found.id,
+                name=found.name,
+                category=found.category,
+                surface=found.surface,
+                best_of=found.best_of,
+                start_date=found.start_date,
+                indoor=found.indoor,
+                city=found.city,
+            )
         ids: dict[str, int] = {}
         updates: list[dict[str, Any]] = []
         inserts: list[dict[str, Any]] = []
@@ -1251,37 +1434,40 @@ class _Loader:
                     setattr(current, key, value)
         await _bulk_update(db, Tournament, updates)
         self._updated("tournaments", len(updates))
-        for chunk in _chunks(inserts):
-            stmt = (
-                insert(Tournament)
-                .values(list(chunk))
-                .on_conflict_do_nothing(index_elements=[Tournament.source, Tournament.source_ref])
-                .returning(Tournament.id, Tournament.source_ref)
+        tours = _table(Tournament)
+        stmt = (
+            insert(tours)
+            .on_conflict_do_nothing(index_elements=[tours.c.source, tours.c.source_ref])
+            .returning(tours.c.id, tours.c.source_ref)
+        )
+        for tour_id, created_ref in await _insert_many(db, stmt, inserts):
+            assert created_ref is not None
+            ids[created_ref] = tour_id
+            self.tours[tour_id] = _TourState(
+                id=tour_id, indoor=None, city=None, **wanted[created_ref]
             )
-            for tour_id, created_ref in await db.execute(stmt):
-                assert created_ref is not None
-                ids[created_ref] = tour_id
-                self.tours[tour_id] = _TourState(
-                    id=tour_id, indoor=None, city=None, **wanted[created_ref]
-                )
-                self._created("tournaments", 1)
+            self._created("tournaments", 1)
         return ids
 
     async def _existing_matches(
         self, db: AsyncSession, tour_ids: Sequence[int], refs: Sequence[str]
     ) -> list[_MatchState]:
-        """Матчи турниров файла и матчи Сакманна с теми же source_ref."""
+        """Матчи турниров файла и матчи Сакманна с теми же source_ref. Сначала — по
+        турнирам (при повторной загрузке так находятся почти все), затем по source_ref —
+        только те, чьих матчей среди найденных нет: один запрос с OR читал бы матчи
+        турниров заново на каждую пачку source_ref."""
         out: dict[int, _MatchState] = {}
-        for chunk in _chunks(refs):
-            result = await db.execute(
-                select(*_MATCH_COLUMNS).where(
-                    or_(
-                        Match.tournament_id.in_(tour_ids),
-                        and_(Match.source == SOURCE, Match.source_ref.in_(chunk)),
-                    )
-                )
-            )
-            for row in result:
+        for row in await db.execute(
+            select(*_MATCH_COLUMNS).where(_any(Match.tournament_id, tour_ids))
+        ):
+            state = _match_state(row)
+            out[state.id] = state
+        found = {match.source_ref for match in out.values() if match.source == SOURCE}
+        rest = [ref for ref in refs if ref not in found]
+        if rest:
+            for row in await db.execute(
+                select(*_MATCH_COLUMNS).where(Match.source == SOURCE, _any(Match.source_ref, rest))
+            ):
                 state = _match_state(row)
                 out[state.id] = state
         return list(out.values())
@@ -1594,25 +1780,26 @@ class _Loader:
         await _bulk_update(db, Match, updates)
         self._updated("matches", len(updates))
         self.counts["matches.promoted"] += len(promoted)
-        for batch in _chunks(new):
-            stmt = (
-                insert(Match)
-                .values([target.values() for target in batch])
-                .on_conflict_do_nothing()
-                .returning(Match.id, Match.source_ref)
+        matches = _table(Match)
+        stmt = (
+            insert(matches).on_conflict_do_nothing().returning(matches.c.id, matches.c.source_ref)
+        )
+        created = {
+            created_ref: match_id
+            for match_id, created_ref in await _insert_many(
+                db, stmt, [target.values() for target in new]
             )
-            created = {
-                created_ref: match_id
-                for match_id, created_ref in await db.execute(stmt)
-                if created_ref is not None
-            }
-            for target in batch:
-                match_id = created.get(target.ref)
-                if match_id is None:
-                    # Пара уже есть в этом раунде турнира под другим id
-                    self._conflict(path, target.row)
-                    continue
-                ids[target.ref] = match_id
+            if created_ref is not None
+        }
+        for target in new:
+            match_id = created.get(target.ref)
+            if match_id is None:
+                # Пара уже есть в этом раунде турнира под другим id
+                self._conflict(path, target.row)
+                continue
+            ids[target.ref] = match_id
+        if new:
+            # Счетчик — только если было что создавать: отчет тот же, что и раньше
             self._created("matches", len(created))
         if ownership is not None:
             await self._report_leftovers(db, path, targets, ids, ownership)
@@ -1640,20 +1827,40 @@ class _Loader:
                     }
                 )
         columns = [*STAT_COLUMNS.values(), "source"]
-        table = MatchStat.__table__
-        for chunk in _chunks(values):
-            base = insert(MatchStat).values(list(chunk))
-            stmt = base.on_conflict_do_update(
-                index_elements=[MatchStat.match_id, MatchStat.player_id],
-                set_={column: base.excluded[column] for column in columns},
-                # Не изменилось — не трогать: повторный запуск дает «обновлено 0»
-                where=tuple_(*(table.c[column] for column in columns)).is_distinct_from(
-                    tuple_(*(base.excluded[column] for column in columns))
-                ),
+        table = _table(MatchStat)
+        # Что уже есть в базе: новые строки пишутся одним COPY, изменившиеся — UPSERT, а
+        # совпавшие не отправляются совсем (повторная загрузка ничего не пишет)
+        current: dict[tuple[int, int], tuple[Any, ...]] = {}
+        result = await db.execute(
+            select(table.c.match_id, table.c.player_id, *(table.c[c] for c in columns)).where(
+                _any(table.c.match_id, sorted({value["match_id"] for value in values}))
             )
-            returning = stmt.returning(sql_literal("xmax = 0", Boolean).label("inserted"))
-            inserted = [bool(flag) for flag in (await db.execute(returning)).scalars()]
-            self._created("stats", sum(inserted))
+        )
+        for match_id, player_id, *stored in result:
+            current[(match_id, player_id)] = tuple(stored)
+        new: list[tuple[Any, ...]] = []
+        changed: list[dict[str, Any]] = []
+        for value in values:
+            stored_values = current.get((value["match_id"], value["player_id"]))
+            if stored_values is None:
+                new.append((value["match_id"], value["player_id"], *(value[c] for c in columns)))
+            elif stored_values != tuple(value[c] for c in columns):
+                changed.append(value)
+        await copy_rows(db, table, ["match_id", "player_id", *columns], new)
+        base = insert(table)
+        stmt = base.on_conflict_do_update(
+            index_elements=[table.c.match_id, table.c.player_id],
+            set_={column: base.excluded[column] for column in columns},
+            # Не изменилось — не трогать: повторный запуск дает «обновлено 0»
+            where=tuple_(*(table.c[column] for column in columns)).is_distinct_from(
+                tuple_(*(base.excluded[column] for column in columns))
+            ),
+        )
+        returning = stmt.returning(sql_literal("xmax = 0", Boolean).label("inserted"))
+        inserted = [bool(flag) for (flag,) in await _insert_many(db, returning, changed)]
+        if values:
+            # Счетчики — только если у файла есть статистика: отчет тот же, что и раньше
+            self._created("stats", len(new) + sum(inserted))
             self._updated("stats", len(inserted) - sum(inserted))
 
     async def _absorb_tennis_data_tournaments(self, db: AsyncSession) -> None:
@@ -1706,23 +1913,32 @@ async def load_sackmann(
     source: DataSource,
     force: bool = False,
     db_factory: Callable[[], AsyncSession] | None = None,
+    progress: Progress | None = None,
 ) -> IngestReport:
     """Загрузить годы архива Сакманна из source; журнал — ingestion_runs (sackmann).
 
     db_factory — фабрика сеансов (async_sessionmaker); без нее загрузчик открывает свой
     движок по настройкам. Конфликт в базе при записи файла не останавливает остальные
-    годы, но в конце дает IngestError (запуск failed, подробности — в отчете).
+    годы, но в конце дает IngestError (запуск failed, подробности — в отчете). progress —
+    куда сообщать ход работы по каждому файлу (получен, не изменился, нет файла, разобран:
+    строк, создано, обновлено, секунды); None — молча (задача воркера).
     """
     if db_factory is None:
         engine = create_engine()
         try:
             return await load_sackmann(
-                years=years, source=source, force=force, db_factory=create_sessionmaker(engine)
+                years=years,
+                source=source,
+                force=force,
+                db_factory=create_sessionmaker(engine),
+                progress=progress,
             )
         finally:
             await engine.dispose()
     async with ingestion_run(db_factory, SOURCE) as run:
-        loader = _Loader(source=source, factory=db_factory, report=run.report, force=force)
+        loader = _Loader(
+            source=source, factory=db_factory, report=run.report, force=force, progress=progress
+        )
         await loader.run(years)
     return run.report
 
@@ -1833,7 +2049,13 @@ async def _main(years: list[int], directory: str | None, force: bool) -> IngestR
         factory = create_sessionmaker(engine)
         # Не одновременно с ночным обновлением и другими командами шагов (runs.update_lock)
         async with update_lock(factory), source:
-            return await load_sackmann(years=years, source=source, force=force, db_factory=factory)
+            return await load_sackmann(
+                years=years,
+                source=source,
+                force=force,
+                db_factory=factory,
+                progress=lambda text_: print("  " + text_, flush=True),
+            )
     finally:
         await engine.dispose()
 

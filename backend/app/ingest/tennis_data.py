@@ -7,30 +7,45 @@
 заголовки; колонки читаются по именам, неизвестные пропускаются, колонок кэфов может
 не быть. Строки группируются в турнир по (год, ATP), с группой работаем так:
 
-1. Привязка к турниру Сакманна. Кандидаты — турниры source = sackmann, начатые не раньше
-   чем за 16 дней до даты строки и не позже чем через 3 дня после нее (турниры Большого
-   шлема начинаются в воскресенье, а у Сакманна дата — понедельник). Строка «голосует»
-   за кандидата, если в нем есть матч той же пары игроков (имя «Фамилия И.» против
-   имен и алиасов игроков матча, app.ingest.names). Турнир группы — кандидат, за
-   которого проголосовала хотя бы половина строк и больше, чем за любого другого.
-   Строки группы сопоставляются только с его матчами; пара, сыгранная дважды (круговой
-   этап и финал), уточняется по раунду. Найденному матчу ставится день (match_date) и
-   кэфы, турниру — зал, город, покрытие и категория, если у Сакманна их нет или
-   категория общая (atp). Счет, статус и победителя не трогаем: главный источник —
-   Сакманн. Строка, пары которой в выбранном турнире нет, идет только в отчет
-   (match_not_found), своего матча для нее нет: чаще всего это расхождение имен, и свой
-   матч стал бы дублем матча Сакманна (Эло и бэктест посчитали бы его дважды).
-2. Привязки нет (архив Сакманна отстает или турнира там нет): свой турнир (source =
-   tennis_data, source_ref = «{год}-{ATP}») и свои матчи (source_ref — хеш года, ATP,
-   метки раунда и имен). В source_ref — номер круга из метки («2nd Round» → 2), а не
-   код R32/R64: код зависит от оценки сетки по строкам группы, а она растет, пока
-   турнир идет. Код раунда у матча обновляется при каждом разборе. Игроки ищутся среди
-   всех игроков базы по ключам «фамилия + инициалы»; из нескольких подходящих берется
-   единственный, у кого есть матчи в пределах двух лет от даты строки; не нашлось
-   никого — создается игрок «И. Фамилия» (позже его «усыновит» загрузка Сакманна).
-   Несколько подходящих — строка в отчет, матч не создается. Строка, пара которой
-   нашлась в турнире Сакманна, но турнир группы не выбран, тоже идет в отчет, а не в
-   свой матч: иначе матч попал бы в базу дважды.
+1. Привязка к турниру Сакманна. Номер ATP в файле бывает общим у двух турниров одной
+   недели (Stockholm и Tokyo 2023) или у строки чужого турнира (финал Montpellier 2020
+   под номером Pune), поэтому турнир Сакманна выбирается для каждой части группы с одним
+   названием турнира (Tournament). Кандидаты — турниры source = sackmann, начатые не
+   раньше чем за 16 дней до даты строки и не позже чем через 3 дня после нее (турниры
+   Большого шлема начинаются в воскресенье, а у Сакманна дата — понедельник). Строка
+   «голосует» за кандидата, если в нем есть матч той же пары игроков. Турнир части —
+   кандидат, за которого проголосовала хотя бы половина ее строк и больше, чем за любого
+   другого. Имя «Фамилия И.» ищется среди игроков турнира (их немного): по ключам имен и
+   алиасов (app.ingest.names), а если так никого — по фамилии, которая целиком и подряд
+   стоит среди слов полного имени (Tomas Barrios Vera для «Barrios M.», Bu Yunchaokete
+   для «Bu Y.»): такой игрок в турнире один — он, из нескольких выбирают инициалы.
+   Строки части сопоставляются с матчами ее турнира; пара, сыгранная дважды (круговой
+   этап и финал), уточняется по раунду. Пары нет — строка ищется в других турнирах
+   Сакманна, которые идут в ее день, с тем же раундом: ровно один такой матч — строка
+   привязывается к нему с предупреждением (у строки чужие номер и название турнира).
+   Найденному матчу ставится день (match_date) и кэфы, турниру — зал, город, покрытие и
+   категория, если у Сакманна их нет или категория общая (atp). Счет, статус и
+   победителя не трогаем: главный источник — Сакманн. Строка без матча идет только в
+   отчет с причиной (игрока нет среди игроков турнира; оба есть, но матча между ними
+   нет; матч уже отдан другой строке; пара найдена несколько раз), своего матча для нее
+   нет: чаще всего это расхождение имен, и свой матч стал бы дублем матча Сакманна (Эло
+   и бэктест посчитали бы его дважды).
+2. Ни одна часть номера не привязана (архив Сакманна отстает или турнира там нет):
+   весь номер — свой турнир (source = tennis_data, source_ref = «{год}-{ATP}») и свои
+   матчи (source_ref — хеш года, ATP, метки раунда и имен). В source_ref — номер круга
+   из метки («2nd Round» → 2), а не код R32/R64: код зависит от оценки сетки по
+   строкам группы, а она растет, пока турнир идет. Код раунда у матча обновляется при
+   каждом разборе. Игроки ищутся среди всех игроков базы строже, чем в турнире:
+   сначала точное совпадение имени tennis-data с алиасом игрока (так человек снимает
+   неоднозначность: players-edit ID --add-alias "Wong C."), затем ключи «фамилия +
+   инициалы»; из нескольких подходящих берется единственный, у кого есть матчи в
+   пределах двух лет от даты строки; не нашлось никого — создается игрок «И. Фамилия»
+   с алиасом «Фамилия И.» (позже его «усыновит» загрузка Сакманна). Несколько
+   подходящих — строка в отчет, матч не создается. Строка, пара которой нашлась в
+   турнире Сакманна, но турнир части не выбран, тоже идет в отчет, а не в свой матч:
+   иначе матч попал бы в базу дважды. Если привязана хоть одна часть номера,
+   непривязанные части идут только в отчет: рядом с привязанными это скорее другое
+   написание, чем турнир, которого у Сакманна нет.
 3. Свои матчи турнира сверяются с файлом. Матч, которого в файле больше нет (строку
    исправили: перепутаны победитель и проигравший, другое имя), удаляется вместе с
    кэфами, если на него ничего не ссылается (ставки, прогнозы, досье, статистика, кэфы
@@ -56,7 +71,10 @@ freshness. Нет файла прошлого года на сайте (там �
 одного файла из запрошенных (пустая или не та папка) — ошибка: остальные годы
 загружаются, а запуск помечается неудачным. Ответ 403 или веб-страница вместо файла
 (сайт закрыт Cloudflare от программ) — ошибка с подсказкой скачать файлы в браузере и
-загрузить их из папки.
+загрузить их из папки. Ход работы по каждому файлу (получен, не изменился, нет файла,
+разобран: строки, записи, секунды) сообщается в progress: команда печатает его сразу, а
+не только итог в конце. Дни матчей, свои матчи и кэфы пишутся одним подготовленным
+запросом на вид со списком параметров (executemany).
 """
 
 import argparse
@@ -70,6 +88,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
+from time import monotonic
 from typing import Any, Literal, get_args
 
 from openpyxl import load_workbook
@@ -79,6 +98,7 @@ from sqlalchemy import (
     Boolean,
     ColumnElement,
     Row,
+    Table,
     and_,
     bindparam,
     delete,
@@ -109,6 +129,7 @@ from app.ingest.runs import (
     last_ok_file_hashes,
     update_lock,
 )
+from app.ingest.sackmann import seconds_text
 
 SOURCE = "tennis_data"
 MARKET = "ML"
@@ -119,9 +140,12 @@ MANUAL_PAGE = "http://www.tennis-data.co.uk/alldata.php"
 # не раньше чем за 16 дней до нее (две недели турнира Большого шлема и запас)
 DAYS_BEFORE_START = 3
 DAYS_AFTER_START = 16
+# Сам турнир, кроме сеток 96 и 128, идет не дольше недели: строку, у которой в файле
+# неверный номер турнира, ищем в других турнирах только в эти дни (_Candidate.plays)
+WEEK_DAYS = 8
 # Из нескольких игроков с подходящим именем берется тот, кто играл в пределах 2 лет
 ACTIVE_YEARS = 2
-# Строк в одном INSERT: 2000 × 7 параметров меньше предела asyncpg (32 767)
+# id в одном DELETE … IN: меньше предела параметров asyncpg (32 767)
 BATCH = 2000
 # Строку заголовков ищем среди первых строк листа
 HEADER_ROWS = 10
@@ -169,7 +193,10 @@ STATUSES = {
 }
 
 UnmatchedKind = Literal[
+    "player_not_in_tournament",
+    "tournament_not_found",
     "match_not_found",
+    "match_taken",
     "match_ambiguous",
     "tournament_ambiguous",
     "in_sackmann",
@@ -178,6 +205,9 @@ UnmatchedKind = Literal[
     "duplicate_row",
 ]
 UNMATCHED_KINDS: tuple[str, ...] = get_args(UnmatchedKind)
+# Шаги хода работы по файлу года (ingest_tennis_data.progress.*)
+ProgressStep = Literal["fetched", "unchanged", "missing", "loaded"]
+PROGRESS_STEPS: tuple[str, ...] = get_args(ProgressStep)
 # Строка запроса к matches (поля по имени)
 type _DbRow = Row[*tuple[Any, ...]]
 
@@ -546,6 +576,12 @@ class TdName:
     weak: frozenset[str]
     tiers: tuple[frozenset[str], ...]
     prefix: str
+    # Фамилия слитно («zapatamiralles») и инициалы («b»): для поиска фамилии среди слов
+    # полного имени игрока турнира (inside)
+    joined: str = ""
+    initials: str = ""
+    # Имя для сравнения с алиасами игрока (PlayerIndex.by_alias)
+    folded: str = ""
 
     @classmethod
     def parse(cls, text: str) -> "TdName":
@@ -561,7 +597,39 @@ class TdName:
             tiers = tuple(tier for tier in (exact, first, rest) if tier)
         else:
             tiers = (weak,)
-        return cls(text, keys, keys - weak, weak, tiers, _name_prefix(text, initials))
+        return cls(
+            text,
+            keys,
+            keys - weak,
+            weak,
+            tiers,
+            _name_prefix(text, initials),
+            surname.replace(" ", ""),
+            initials,
+            fold(text),
+        )
+
+    def inside(self, names: Iterable[tuple[str, ...]]) -> int:
+        """Фамилия целиком и подряд среди слов полного имени игрока, в любом месте:
+        «Barrios M.» — Tomas Barrios Vera, «Hernandez A.» — Juan Alejandro Hernandez
+        Serrano, «Bu Y.» — Bu Yunchaokete (фамилия первой). 2 — еще и первый инициал
+        совпал с началом другого слова имени, 1 — только фамилия, 0 — фамилии нет.
+
+        Первое слово полного имени — обычно имя, а не фамилия: там фамилия считается
+        только с инициалом (китайский порядок, «Bu Y.»). Иначе «Daniel T.» (Taro Daniel)
+        подошел бы игроку Daniel Evans."""
+        found = 0
+        for words in names:
+            for start in range(len(words)):
+                for end in range(start + 1, len(words) + 1):
+                    if "".join(words[start:end]) != self.joined:
+                        continue
+                    rest = words[:start] + words[end:]
+                    if self.initials and any(w.startswith(self.initials[0]) for w in rest):
+                        return 2
+                    if start > 0 or not rest:
+                        found = 1
+        return found
 
     def contradicts(self, player_keys: frozenset[str]) -> bool:
         """Игрок — другой тезка: в файле «Kuznetsov Al.», а у игрока имя начинается с
@@ -642,19 +710,39 @@ class PlayerIndex:
     def __init__(self) -> None:
         self.keys: dict[int, frozenset[str]] = {}
         self.by_key: defaultdict[str, set[int]] = defaultdict(set)
+        # Слова имени и алиасов (fold): фамилия ищется среди них в турнире Сакманна
+        self.words: dict[int, tuple[tuple[str, ...], ...]] = {}
+        # Алиас (fold) → игроки: точное имя tennis-data, которое человек дал игроку
+        # командой players-edit --add-alias, важнее совпадения ключей
+        self.by_alias: defaultdict[str, set[int]] = defaultdict(set)
         # Игроки, среди которых ищется имя своего матча tennis-data
         self.searchable: set[int] = set()
         # Годы, в которые у игрока есть матчи (загружаются по мере надобности)
         self.years: dict[int, set[int]] = {}
         self._names: dict[str, TdName] = {}
 
-    def add(self, player_id: int, names: Iterable[str], *, searchable: bool) -> None:
+    def add(
+        self,
+        player_id: int,
+        names: Iterable[str],
+        *,
+        searchable: bool,
+        aliases: Iterable[str] = (),
+    ) -> None:
+        """names — все имена игрока (имя и алиасы), aliases — те из них, что алиасы."""
         if player_id in self.keys:
             return
-        keys = frozenset(key for name in names if name for key in name_keys(name))
+        given = [name for name in names if name]
+        keys = frozenset(key for name in given for key in name_keys(name))
         self.keys[player_id] = keys
         for key in keys:
             self.by_key[key].add(player_id)
+        self.words[player_id] = tuple(
+            words for words in (tuple(fold(name).split()) for name in given) if words
+        )
+        for alias in aliases:
+            if alias and fold(alias):
+                self.by_alias[fold(alias)].add(player_id)
         if searchable:
             self.searchable.add(player_id)
 
@@ -664,7 +752,8 @@ class PlayerIndex:
         if ids is not None:
             stmt = stmt.where(Player.id.in_(list(ids)))
         for player_id, name, aliases, legacy_only in await db.execute(stmt):
-            self.add(player_id, [name, *(aliases or [])], searchable=not legacy_only)
+            known = list(aliases or [])
+            self.add(player_id, [name, *known], searchable=not legacy_only, aliases=known)
 
     def name(self, text_: str) -> TdName:
         if text_ not in self._names:
@@ -674,9 +763,16 @@ class PlayerIndex:
     def player_keys(self, player_id: int) -> frozenset[str]:
         return self.keys.get(player_id, frozenset())
 
+    def player_words(self, player_id: int) -> tuple[tuple[str, ...], ...]:
+        return self.words.get(player_id, ())
+
     def candidates(self, name: TdName) -> set[int]:
-        """Игроки, подходящие под имя, по первому уровню ключей, где кто-то нашелся.
-        Тезка с другим началом имени (TdName.contradicts) не подходит."""
+        """Игроки, подходящие под имя. Сначала — те, у кого имя tennis-data точно стоит в
+        алиасах; иначе по первому уровню ключей, где кто-то нашелся. Тезка с другим
+        началом имени (TdName.contradicts) по ключам не подходит."""
+        exact = {pid for pid in self.by_alias.get(name.folded, ()) if pid in self.searchable}
+        if exact:
+            return exact
         for tier in name.tiers:
             found = {
                 pid
@@ -744,31 +840,52 @@ class _Found:
 
 @dataclass
 class _Candidate:
-    """Турнир Сакманна с матчами и указателем «ключ имени → матчи»."""
+    """Турнир Сакманна с матчами и указателями по его игрокам: игрок → матчи, ключ
+    имени → игроки, слова имени подряд (слитно) → игроки."""
 
     tournament: Tournament
     start: date
     matches: list[_SackMatch]
-    by_key: dict[str, set[int]]
     draw: int
+    by_player: dict[int, list[int]]
+    by_key: dict[str, set[int]]
+    by_run: dict[str, set[int]]
+    # Имя tennis-data → игроки турнира, которые под него подходят, с уровнем (levels)
+    _levels: dict[str, dict[int, int]] = field(default_factory=dict)
 
     @classmethod
     def build(
         cls, tournament: Tournament, matches: list[_SackMatch], index: PlayerIndex
     ) -> "_Candidate":
         assert tournament.start_date is not None
-        by_key: defaultdict[str, set[int]] = defaultdict(set)
+        by_player: defaultdict[int, list[int]] = defaultdict(list)
         for number, match in enumerate(matches):
             for player_id in (match.player1_id, match.player2_id):
-                for key in index.player_keys(player_id):
-                    by_key[key].add(number)
+                by_player[player_id].append(number)
+        by_key: defaultdict[str, set[int]] = defaultdict(set)
+        by_run: defaultdict[str, set[int]] = defaultdict(set)
+        for player_id in by_player:
+            for key in index.player_keys(player_id):
+                by_key[key].add(player_id)
+            for words in index.player_words(player_id):
+                for start in range(len(words)):
+                    for end in range(start + 1, len(words) + 1):
+                        by_run["".join(words[start:end])].add(player_id)
         sizes = [
             int(match.round[1:])
             for match in matches
             if match.round.startswith("R") and match.round[1:].isdigit()
         ]
         draw = max(sizes, default=rounds.MIN_DRAW)
-        return cls(tournament, tournament.start_date, matches, dict(by_key), draw)
+        return cls(
+            tournament,
+            tournament.start_date,
+            matches,
+            draw,
+            dict(by_player),
+            dict(by_key),
+            dict(by_run),
+        )
 
     def covers(self, day: date) -> bool:
         return (
@@ -777,23 +894,75 @@ class _Candidate:
             <= self.start + timedelta(days=DAYS_AFTER_START)
         )
 
+    def plays(self, day: date) -> bool:
+        """День в пределах самого турнира: неделя (две у сеток 96 и 128) с запасом."""
+        days = DAYS_AFTER_START if self.draw >= rounds.MAX_DRAW else WEEK_DAYS
+        return (
+            self.start - timedelta(days=DAYS_BEFORE_START)
+            <= day
+            <= self.start + timedelta(days=days)
+        )
+
+    def where(self) -> dict[str, Any]:
+        """Турнир Сакманна для примера в отчете."""
+        tour = self.tournament
+        return {
+            "sackmann_tournament": tour.id,
+            "sackmann_ref": tour.source_ref,
+            "sackmann_name": tour.name,
+        }
+
+    def levels(self, name: TdName, index: PlayerIndex) -> dict[int, int]:
+        """Игроки турнира под имя tennis-data: id → 2 (фамилия и инициал) или 1 (фамилия).
+
+        Сначала по ключам имени (TdName.level). Нашелся по ключам игрок с фамилией и
+        инициалом — только ключи: «Novak D.» — Dennis Novak, а не еще и Novak Djokovic.
+        Иначе ищется фамилия, которая целиком и подряд стоит среди слов полного имени
+        (TdName.inside): если по ключам никого и такой игрок в турнире один — он, при любых
+        инициалах; из нескольких берутся те, у кого совпал инициал. Игроков в турнире мало,
+        поэтому так можно, а по всей базе — нет."""
+        cached = self._levels.get(name.text)
+        if cached is not None:
+            return cached
+        strict: dict[int, int] = {}
+        for player_id in sorted({pid for key in name.keys for pid in self.by_key.get(key, ())}):
+            level = name.level(index.player_keys(player_id))
+            if level:
+                strict[player_id] = level
+        loose: dict[int, int] = {}
+        for player_id in sorted(self.by_run.get(name.joined, ())):
+            if player_id in strict or name.contradicts(index.player_keys(player_id)):
+                continue
+            level = name.inside(index.player_words(player_id))
+            if level:
+                loose[player_id] = level
+        if not loose or 2 in strict.values():
+            found = strict
+        elif not strict and len(loose) == 1:
+            found = loose
+        else:
+            found = strict | {pid: level for pid, level in loose.items() if level == 2}
+        self._levels[name.text] = found
+        return found
+
     def find(
         self, winner: TdName, loser: TdName, index: PlayerIndex, claimed: set[int]
     ) -> list[_Found]:
         """Матчи этого турнира с парой (winner, loser) в любом порядке, кроме уже
         занятых другими строками."""
-        around_winner = {n for key in winner.keys for n in self.by_key.get(key, ())}
-        around_loser = {n for key in loser.keys for n in self.by_key.get(key, ())}
+        first_side = self.levels(winner, index)
+        second_side = self.levels(loser, index)
+        around_winner = {n for pid in first_side for n in self.by_player[pid]}
+        around_loser = {n for pid in second_side for n in self.by_player[pid]}
         found: list[_Found] = []
         for number in sorted(around_winner & around_loser):
             match = self.matches[number]
             if match.id in claimed:
                 continue
-            first = index.player_keys(match.player1_id)
-            second = index.player_keys(match.player2_id)
+            first, second = match.player1_id, match.player2_id
             options = [
-                (winner.level(first), loser.level(second), False),
-                (winner.level(second), loser.level(first), True),
+                (first_side.get(first, 0), second_side.get(second, 0), False),
+                (first_side.get(second, 0), second_side.get(first, 0), True),
             ]
             best = max(
                 (option for option in options if min(option[0], option[1]) >= 1),
@@ -885,6 +1054,26 @@ def _batches[T](items: Sequence[T], size: int = BATCH) -> Iterable[Sequence[T]]:
         yield items[start : start + size]
 
 
+def _table(model: type[Base]) -> Table:
+    """Таблица модели для запросов Core: запись списком параметров без разбора ORM на
+    каждую строку."""
+    table = model.__table__
+    assert isinstance(table, Table)
+    return table
+
+
+async def _update_by_id(db: AsyncSession, model: type[Base], rows: list[dict[str, Any]]) -> None:
+    """UPDATE по id одним подготовленным запросом и списком параметров (executemany). У
+    всех словарей одинаковый набор полей, в каждом есть id."""
+    if not rows:
+        return
+    table = _table(model)
+    stmt = update(table).where(table.c.id == bindparam("row_id"))
+    await db.execute(
+        stmt, [{"row_id": row["id"], **{k: v for k, v in row.items() if k != "id"}} for row in rows]
+    )
+
+
 class _YearLoader:
     """Запись одного файла (года) в одной транзакции."""
 
@@ -949,13 +1138,7 @@ class _YearLoader:
         # турниру следующей, где та же пара встретилась снова
         ordered = sorted(groups.items(), key=lambda item: (min(r.day for r in item[1]), item[0]))
         for atp, group in ordered:
-            near = [cand for cand in candidates if any(cand.covers(row.day) for row in group)]
-            chosen = self._choose(group, near)
-            info = _GroupInfo.of(group)
-            if isinstance(chosen, _Candidate):
-                self._link(atp, group, info, chosen)
-            else:
-                await self._own(atp, group, info, near, ambiguous=chosen)
+            await self._group(atp, group, candidates)
         await self._write_match_dates()
         await self._write_own_matches()
         await self._write_odds()
@@ -1023,8 +1206,84 @@ class _YearLoader:
 
     # --- привязка к Сакманну ---
 
+    @staticmethod
+    def _near(candidates: list[_Candidate], rows: Sequence[TdRow]) -> list[_Candidate]:
+        """Турниры Сакманна, в окно которых попадает хоть одна строка."""
+        days = {row.day for row in rows}
+        return [cand for cand in candidates if any(cand.covers(day) for day in days)]
+
+    async def _group(self, atp: int, group: list[TdRow], candidates: list[_Candidate]) -> None:
+        """Строки с одним номером ATP. Номер бывает общим у двух турниров одной недели
+        (Stockholm и Tokyo 2023) или у строки чужого турнира (финал Montpellier 2020 под
+        номером Pune): тогда весь номер доставался турниру большинства, а строки другого
+        турнира уходили в отчет. Поэтому турнир Сакманна выбирается для каждой части
+        номера с одним названием турнира.
+
+        Если ни одна часть не привязана, весь номер, как и раньше, — свой турнир
+        tennis-data «{год}-{ATP}». Если привязана хоть одна, непривязанные части идут
+        только в отчет: свой матч рядом с привязанными скорее дубль матча Сакманна
+        (другое написание названия или имен), чем турнир, которого у Сакманна нет."""
+        parts: defaultdict[str, list[TdRow]] = defaultdict(list)
+        for row in group:
+            parts[fold(row.tournament)].append(row)
+        own: list[TdRow] = []
+        linked: list[_Candidate] = []
+        # Строки частей, которые подошли к двум турнирам Сакманна поровну
+        tied: set[int] = set()
+        for _, part in sorted(
+            parts.items(), key=lambda item: (min(row.day for row in item[1]), item[0])
+        ):
+            near = self._near(candidates, part)
+            chosen = self._choose(part, near)
+            info = _GroupInfo.of(part)
+            if isinstance(chosen, _Candidate):
+                self._link(part, info, chosen, near)
+                linked.append(chosen)
+                continue
+            if chosen:
+                self.report.add_warning(
+                    "ingest_tennis_data.warnings.tournament_ambiguous",
+                    path=self.path,
+                    tournament=info.name,
+                )
+                tied.update(row.line for row in part)
+            own.extend(part)
+        own.sort(key=lambda row: row.line)
+        if own and not linked:
+            await self._own(atp, own, _GroupInfo.of(own), self._near(candidates, own), tied=tied)
+            return
+        near = self._near(candidates, own)
+        refs = ", ".join(sorted({cand.tournament.source_ref or "" for cand in linked}))
+        for row in own:
+            winner, loser = self.index.name(row.winner), self.index.name(row.loser)
+            in_sackmann = self._in_sackmann(row, winner, loser, near)
+            if in_sackmann:
+                kind: UnmatchedKind = "tournament_ambiguous" if row.line in tied else "in_sackmann"
+                self._unmatched(kind, row, match_ids=in_sackmann)
+            else:
+                self._unmatched("tournament_not_found", row, linked=refs)
+        stale = self.own_tournaments.get(f"{self.year}-{atp}")
+        if stale is not None and self.own_match_count[stale.id]:
+            self.report.add_warning(
+                "ingest_tennis_data.warnings.stale_tournament",
+                path=self.path,
+                tournament=_GroupInfo.of(group).name,
+                ref=stale.source_ref,
+            )
+
+    def _in_sackmann(
+        self, row: TdRow, winner: TdName, loser: TdName, near: list[_Candidate]
+    ) -> list[int]:
+        """Свободные матчи пары строки в турнирах Сакманна ее дней."""
+        return sorted(
+            item.match.id
+            for cand in near
+            if cand.covers(row.day)
+            for item in cand.find(winner, loser, self.index, self.claimed)
+        )
+
     def _choose(self, group: list[TdRow], near: list[_Candidate]) -> _Candidate | bool:
-        """Турнир Сакманна для группы. False — нет подходящего, True — двое поровну."""
+        """Турнир Сакманна для части. False — нет подходящего, True — двое поровну."""
         if not near:
             return False
         votes: Counter[int] = Counter()
@@ -1043,24 +1302,36 @@ class _YearLoader:
             return True
         return next(cand for cand in near if cand.tournament.id == best_id)
 
-    def _link(self, atp: int, group: list[TdRow], info: _GroupInfo, cand: _Candidate) -> None:
-        """Строки группы → матчи турнира Сакманна. Строка без пары в нем — только в отчет
-        (match_not_found), свой матч не создается: см. docstring модуля, п. 1."""
+    def _link(
+        self, rows: list[TdRow], info: _GroupInfo, cand: _Candidate, near: list[_Candidate]
+    ) -> None:
+        """Строки части → матчи турнира Сакманна. Строка без пары в нем ищется в других
+        турнирах ее дня (_elsewhere), а не нашлась — только в отчет с причиной
+        (_not_found): свой матч не создается, см. docstring модуля, п. 1."""
         if self._enrich(cand.tournament, info):
             self._count("tournaments.updated", created=False)
-        stale = self.own_tournaments.get(f"{self.year}-{atp}")
-        if stale is not None and self.own_match_count[stale.id]:
-            self.report.add_warning(
-                "ingest_tennis_data.warnings.stale_tournament",
-                path=self.path,
-                tournament=info.name,
-                ref=stale.source_ref,
-            )
-        for row in group:
+        for row in rows:
             winner, loser = self.index.name(row.winner), self.index.name(row.loser)
             found = cand.find(winner, loser, self.index, self.claimed)
             if not found:
-                self._unmatched("match_not_found", row, sackmann_tournament=cand.tournament.id)
+                other = self._elsewhere(row, winner, loser, cand, near)
+                if other is None:
+                    self._not_found(row, winner, loser, cand)
+                    continue
+                elsewhere, item = other
+                self.report.counts["rows.linked_elsewhere"] += 1
+                self.report.add_warning(
+                    "ingest_tennis_data.warnings.row_elsewhere",
+                    path=self.path,
+                    line=row.line,
+                    winner=row.winner,
+                    loser=row.loser,
+                    tournament=cand.tournament.name,
+                    ref=cand.tournament.source_ref,
+                    other=elsewhere.tournament.name,
+                    other_ref=elsewhere.tournament.source_ref,
+                )
+                self._apply_link(row, item)
                 continue
             top = max(item.score for item in found)
             chosen = [item for item in found if item.score == top]
@@ -1072,9 +1343,54 @@ class _YearLoader:
                 chosen = [item for item in chosen if item.match.round == code]
             if len(chosen) != 1:
                 ids = sorted(item.match.id for item in found if item.score == top)
-                self._unmatched("match_ambiguous", row, match_ids=ids)
+                self._unmatched("match_ambiguous", row, match_ids=ids, **cand.where())
                 continue
             self._apply_link(row, chosen[0])
+
+    def _elsewhere(
+        self,
+        row: TdRow,
+        winner: TdName,
+        loser: TdName,
+        cand: _Candidate,
+        near: list[_Candidate],
+    ) -> tuple[_Candidate, _Found] | None:
+        """Пара строки в другом турнире Сакманна, который идет в день строки, и в том же
+        раунде: у строки в файле неверный номер турнира, а название тоже чужое. Только
+        если такой матч ровно один."""
+        found: list[tuple[_Candidate, _Found]] = []
+        for other in near:
+            if other is cand or not other.plays(row.day):
+                continue
+            try:
+                code = rounds.tennis_data_round(row.round_label, other.draw)
+            except ValueError:
+                continue
+            items = [
+                item
+                for item in other.find(winner, loser, self.index, self.claimed)
+                if item.match.round == code
+            ]
+            if items:
+                top = max(item.score for item in items)
+                found += [(other, item) for item in items if item.score == top]
+        return found[0] if len(found) == 1 else None
+
+    def _not_found(self, row: TdRow, winner: TdName, loser: TdName, cand: _Candidate) -> None:
+        """Строка, пары которой в турнире Сакманна нет, — в отчет с точной причиной: имени
+        нет среди игроков турнира; оба игрока есть, но матча между ними нет; матч этой
+        пары уже отдан другой строке файла."""
+        missing = [name.text for name in (winner, loser) if not cand.levels(name, self.index)]
+        if missing:
+            self._unmatched(
+                "player_not_in_tournament", row, missing=", ".join(missing), **cand.where()
+            )
+            return
+        taken = sorted(item.match.id for item in cand.find(winner, loser, self.index, set()))
+        if taken:
+            self._unmatched("match_taken", row, match_ids=taken, **cand.where())
+        else:
+            self._unmatched("match_not_found", row, **cand.where())
 
     def _enrich(self, tournament: Tournament, info: _GroupInfo) -> bool:
         """Зал, город, покрытие и категория турнира Сакманна, если там пусто; категория
@@ -1128,14 +1444,10 @@ class _YearLoader:
         info: _GroupInfo,
         near: list[_Candidate],
         *,
-        ambiguous: bool,
+        tied: set[int],
     ) -> None:
-        if ambiguous:
-            self.report.add_warning(
-                "ingest_tennis_data.warnings.tournament_ambiguous",
-                path=self.path,
-                tournament=info.name,
-            )
+        """Строки без турнира Сакманна → свой турнир и свои матчи (docstring модуля, п. 2).
+        tied — номера строк частей, подошедших к двум турнирам Сакманна поровну."""
         labels = [row.round_label for row in group]
         first_round = sum(1 for label in labels if rounds.round_number(label) == 1)
         draw = rounds.tennis_data_draw_size(labels, first_round)
@@ -1143,15 +1455,10 @@ class _YearLoader:
         unresolved: list[TdRow] = []
         for row in group:
             winner, loser = self.index.name(row.winner), self.index.name(row.loser)
-            in_sackmann = [
-                item.match.id
-                for cand in near
-                if cand.covers(row.day)
-                for item in cand.find(winner, loser, self.index, self.claimed)
-            ]
+            in_sackmann = self._in_sackmann(row, winner, loser, near)
             if in_sackmann:
-                kind: UnmatchedKind = "tournament_ambiguous" if ambiguous else "in_sackmann"
-                self._unmatched(kind, row, match_ids=sorted(in_sackmann))
+                kind: UnmatchedKind = "tournament_ambiguous" if row.line in tied else "in_sackmann"
+                self._unmatched(kind, row, match_ids=in_sackmann)
                 unresolved.append(row)
                 continue
             try:
@@ -1168,11 +1475,18 @@ class _YearLoader:
                 continue
             winner_id = await self.index.resolve(self.db, winner, row.day)
             loser_id = await self.index.resolve(self.db, loser, row.day)
-            ambiguous_ids = [
-                choice.ids for choice in (winner_id, loser_id) if isinstance(choice, _Ambiguous)
+            ambiguous = [
+                (raw, choice)
+                for raw, choice in ((row.winner, winner_id), (row.loser, loser_id))
+                if isinstance(choice, _Ambiguous)
             ]
-            if ambiguous_ids:
-                self._unmatched("player_ambiguous", row, candidates=ambiguous_ids)
+            if ambiguous:
+                self._unmatched(
+                    "player_ambiguous",
+                    row,
+                    name=", ".join(raw for raw, _ in ambiguous),
+                    candidates=[choice.ids for _, choice in ambiguous],
+                )
                 unresolved.append(row)
                 continue
             assert not isinstance(winner_id, _Ambiguous) and not isinstance(loser_id, _Ambiguous)
@@ -1239,7 +1553,7 @@ class _YearLoader:
         player = Player(name=player_display_name(raw)[:200], aliases=[raw])
         self.db.add(player)
         await self.db.flush()
-        self.index.add(player.id, [player.name, raw], searchable=True)
+        self.index.add(player.id, [player.name, raw], searchable=True, aliases=[raw])
         self.index.years[player.id] = {row.day.year}
         self._count("players.created", created=True)
         self.report.add_warning(
@@ -1261,8 +1575,7 @@ class _YearLoader:
             {"id": mid, "match_date": day, "updated_at": now}
             for mid, day in sorted(self.match_dates.items())
         ]
-        for chunk in _batches(changes):
-            await self.db.execute(update(Match), list(chunk))
+        await _update_by_id(self.db, Match, changes)
         for _ in changes:
             self._count("matches.dated", created=False)
 
@@ -1337,15 +1650,16 @@ class _YearLoader:
             if any(getattr(current, key) != value for key, value in values.items()):
                 updates.append({"id": current.id, **values, "updated_at": now})
             ids.append((plan, current.id))
-        for new in _batches(inserts):
-            result = await self.db.execute(
-                insert(Match).values([values for _, values in new]).returning(Match.id)
-            )
-            for (plan, _), mid in zip(new, result.scalars().all(), strict=True):
-                ids.append((plan, mid))
+        if inserts:
+            matches = _table(Match)
+            stmt = insert(matches).returning(matches.c.id, matches.c.source_ref)
+            rows_back = await self.db.execute(stmt, [values for _, values in inserts])
+            # source_ref новых матчей различны (refs выше), по нему и сопоставляем
+            created = {ref: mid for mid, ref in rows_back}
+            for plan, _ in inserts:
+                ids.append((plan, created[plan.ref]))
                 self._count("matches.created", created=True)
-        for changed in _batches(updates):
-            await self.db.execute(update(Match), list(changed))
+        await _update_by_id(self.db, Match, updates)
         for _ in updates:
             self._count("matches.updated", created=False)
         for plan, mid in ids:
@@ -1475,19 +1789,23 @@ class _YearLoader:
             }
             for (mid, selection, bookmaker), (odds, day) in sorted(self.odds.items())
         ]
-        for chunk in _batches(values):
-            base = insert(OddsSnapshot).values(list(chunk))
-            stmt = base.on_conflict_do_update(
-                index_elements=["match_id", "market", "selection", "bookmaker"],
-                index_where=text("kind = 'archive'"),
-                set_={"odds": base.excluded.odds, "taken_at": base.excluded.taken_at},
-                where=or_(
-                    OddsSnapshot.odds != base.excluded.odds,
-                    OddsSnapshot.taken_at != base.excluded.taken_at,
-                ),
-            ).returning(literal_column("xmax = 0", Boolean))
-            for inserted in (await self.db.execute(stmt)).scalars():
-                self._count("odds.created" if inserted else "odds.updated", created=bool(inserted))
+        if not values:
+            return
+        # Один подготовленный запрос на все строки (executemany): SQLAlchemy сам режет
+        # их на пачки, а запрос не собирается заново для каждой пачки
+        odds = _table(OddsSnapshot)
+        base = insert(odds)
+        stmt = base.on_conflict_do_update(
+            index_elements=["match_id", "market", "selection", "bookmaker"],
+            index_where=text("kind = 'archive'"),
+            set_={"odds": base.excluded.odds, "taken_at": base.excluded.taken_at},
+            where=or_(
+                odds.c.odds != base.excluded.odds,
+                odds.c.taken_at != base.excluded.taken_at,
+            ),
+        ).returning(literal_column("xmax = 0", Boolean))
+        for inserted in (await self.db.execute(stmt, values)).scalars():
+            self._count("odds.created" if inserted else "odds.updated", created=bool(inserted))
 
 
 # --- загрузка ---
@@ -1522,7 +1840,12 @@ async def _load(
     source: DataSource,
     force: bool,
     db_factory: Callable[[], AsyncSession],
+    progress: Callable[[str], None] | None,
 ) -> IngestReport:
+    def say(step: ProgressStep, **params: Any) -> None:
+        if progress is not None:
+            progress(t(f"ingest_tennis_data.progress.{step}", **params))
+
     settings = get_settings()
     this_year = _this_year()
     async with ingestion_run(db_factory, SOURCE) as run:
@@ -1555,6 +1878,7 @@ async def _load(
                     ) from None
                 raise
             if file is None:
+                say("missing", path=path)
                 missing.append(path)
                 report.counts["files.missing"] += 1
                 per_year[str(year)] = {"status": "missing"}
@@ -1565,12 +1889,16 @@ async def _load(
                 continue
             found += 1
             if not force and known.get(path) == file.sha256:
+                say("unchanged", path=path)
                 report.add_file(file)
                 report.counts["files.unchanged"] += 1
                 async with db_factory() as db:
                     last = await _last_date_in_db(db, year)
                 per_year[str(year)] = {"status": "unchanged", "last_date": last}
                 continue
+            say("fetched", path=path, size=max(1, round(len(file.content) / 1024)))
+            started = monotonic()
+            before = (report.created, report.updated)
             rows = await asyncio.to_thread(
                 parse_file, file.content, path=path, year=year, report=report
             )
@@ -1581,6 +1909,17 @@ async def _load(
                 await db.commit()
             report.add_file(file)
             report.counts["files.loaded"] += 1
+            say(
+                "loaded",
+                path=path,
+                rows=stats.rows,
+                linked=stats.linked,
+                own=stats.own,
+                unmatched=stats.unmatched,
+                created=report.created - before[0],
+                updated=report.updated - before[1],
+                seconds=seconds_text(monotonic() - started),
+            )
             per_year[str(year)] = {
                 "status": "loaded",
                 "rows": stats.rows,
@@ -1617,17 +1956,26 @@ async def load_tennis_data(
     source: DataSource,
     force: bool = False,
     db_factory: Callable[[], AsyncSession] | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> IngestReport:
     """Загрузка файлов tennis-data за годы (см. docstring модуля), журнал —
     ingestion_runs(source='tennis_data'). db_factory — фабрика сеансов БД; без нее
-    создается свой движок по настройкам. Файл не получен или не разобран — IngestError
-    (запуск помечается failed)."""
+    создается свой движок по настройкам. progress — куда сообщать ход работы по каждому
+    файлу года (получен, не изменился, нет файла, разобран: строки, записи, секунды);
+    None — молча. Файл не получен или не разобран — IngestError (запуск помечается
+    failed)."""
     if db_factory is not None:
-        return await _load(years=years, source=source, force=force, db_factory=db_factory)
+        return await _load(
+            years=years, source=source, force=force, db_factory=db_factory, progress=progress
+        )
     engine = create_engine()
     try:
         return await _load(
-            years=years, source=source, force=force, db_factory=create_sessionmaker(engine)
+            years=years,
+            source=source,
+            force=force,
+            db_factory=create_sessionmaker(engine),
+            progress=progress,
         )
     finally:
         await engine.dispose()
@@ -1670,6 +2018,10 @@ def summary_lines(report: IngestReport, location: str) -> list[str]:
             odds_updated=counts["odds.updated"],
         ),
     ]
+    if counts["rows.linked_elsewhere"]:
+        lines.append(
+            t("ingest_tennis_data.summary.elsewhere", count=counts["rows.linked_elsewhere"])
+        )
     for year, info in sorted(report.freshness.get("years", {}).items()):
         status = info.get("status")
         last = info.get("last_date") or "—"
@@ -1709,7 +2061,10 @@ def summary_lines(report: IngestReport, location: str) -> list[str]:
                     loser=example.get("loser"),
                     date=example.get("date"),
                     tournament=example.get("tournament"),
-                    reason=t(f"ingest_tennis_data.unmatched.{example.get('kind')}"),
+                    reason=t(
+                        f"ingest_tennis_data.unmatched.{example.get('kind')}",
+                        **{key: value for key, value in example.items() if key != "kind"},
+                    ),
                 )
             )
         if unmatched > 20:
@@ -1764,7 +2119,11 @@ async def _run(years: list[int], directory: str | None, force: bool) -> tuple[In
         # Не одновременно с ночным обновлением и другими командами шагов (runs.update_lock)
         async with update_lock(factory), source:
             report = await load_tennis_data(
-                years=years, source=source, force=force, db_factory=factory
+                years=years,
+                source=source,
+                force=force,
+                db_factory=factory,
+                progress=lambda text_: print("  " + text_, flush=True),
             )
             return report, source.location
     finally:

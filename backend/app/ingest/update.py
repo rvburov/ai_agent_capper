@@ -20,7 +20,9 @@
 берут отдельные команды шагов (загрузчики, привязка и слияния игроков и матчей).
 Ошибка шага не останавливает следующие: Эло пересчитается по тому, что есть, но код
 возврата 1. Журнал каждого шага — ingestion_runs (sackmann, tennis_data, players_link,
-elo).
+elo). Ход работы шагов (строка на файл архива, на этап пересчета Эло) команда печатает
+сразу, с отступом под строкой шага: полная загрузка идет минуты, и без него кажется, что
+все зависло. Задача воркера ход работы не печатает.
 """
 
 import argparse
@@ -127,8 +129,10 @@ class StepResult:
     updated: int = 0
     skipped: int = 0
     unmatched: int = 0
-    # Эло: сколько матчей учтено (строки рейтинга каждый раз пишутся заново — created)
+    # Эло: сколько матчей учтено; created — строк рейтинга в таблице, written — сколько из
+    # них записано заново (неизменившиеся строки не переписываются)
     matches: int = 0
+    written: int = 0
     # Текст свежести: последняя дата в архиве (из базы, после шага)
     freshness: str = ""
     error: str | None = None
@@ -241,6 +245,15 @@ class _Updater:
     def _say(self, line: str) -> None:
         if self.echo is not None:
             self.echo(line)
+
+    @property
+    def _progress(self) -> Callable[[str], None] | None:
+        """Ход работы шага (по файлу, по этапу) — с отступом под строкой шага. Без echo
+        (задача воркера) шаги молчат."""
+        echo = self.echo
+        if echo is None:
+            return None
+        return lambda text_: echo("  " + text_)
 
     def _source(self, directory: Path | None, base_url: str) -> DataSource:
         if directory is not None:
@@ -388,6 +401,7 @@ class _Updater:
                 source=source,
                 force=self.plan.force,
                 db_factory=self.factory,
+                progress=self._progress,
             )
         _from_report(result, report)
         result.details = sackmann.summary_lines(report)
@@ -400,6 +414,7 @@ class _Updater:
                 source=source,
                 force=self.plan.force,
                 db_factory=self.factory,
+                progress=self._progress,
             )
             location = source.location
         _from_report(result, report)
@@ -411,8 +426,9 @@ class _Updater:
         result.details = _link_lines(report)
 
     async def _elo(self, result: StepResult) -> None:
-        summary = await elo.rebuild_ratings(db_factory=self.factory)
+        summary = await elo.rebuild_ratings(db_factory=self.factory, progress=self._progress)
         result.created = summary.rows
+        result.written = summary.written
         result.matches = summary.matches
         result.skipped = sum(summary.skipped.values())
         result.details = elo.summary_lines(summary)
@@ -510,6 +526,7 @@ def summary_lines(result: UpdateResult) -> list[str]:
                     seconds=_seconds(step.seconds),
                     matches=step.matches,
                     rows=step.created,
+                    written=step.written,
                     skipped=step.skipped,
                     freshness=step.freshness,
                 )

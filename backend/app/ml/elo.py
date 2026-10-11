@@ -22,7 +22,8 @@ p1 = 1 / (1 + 10^((R2 − R1)/400)), R = (1 − w)·общий + w·покрыт
 следующие круги. День матча без даты известен только приблизительно, поэтому его
 исход показывается с запасом, позже, но не раньше времени.
 
-    rebuild_ratings()  — пересчет по всей истории из БД в player_ratings;
+    rebuild_ratings()  — пересчет по всей истории из БД в player_ratings (пишутся только
+                         строки, которые изменились: write_ratings);
     current_elo(...)   — рейтинг игрока на дату (для анализа матча, этап 3);
     EloEngine          — расчет без БД (бэктест, тесты).
 """
@@ -30,14 +31,15 @@ p1 = 1 / (1 + 10^((R2 − R1)/400)), R = (1 − w)·общий + w·покрыт
 import argparse
 import asyncio
 import sys
+import time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import delete, func, insert, literal, select, text
-from sqlalchemy.dialects.postgresql import JSONB, distinct_on
+from sqlalchemy import BigInteger, Date, Table, bindparam, delete, func, literal, select, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +49,7 @@ from app.db.models import Match, MlModel, PlayerRating, Tournament
 from app.db.session import create_engine, create_sessionmaker
 from app.ingest.rounds import round_order
 from app.ingest.runs import ingestion_run
-from app.ingest.sackmann import PROMOTE_AFTER
+from app.ingest.sackmann import PROMOTE_AFTER, copy_rows, seconds_text
 
 ALL = "all"
 ELO_SURFACES = ("hard", "clay", "grass")
@@ -57,7 +59,7 @@ RESULT_STATUSES = ("finished", "retired")
 MODEL_ID = "elo-v1"
 MODEL_KIND = "elo"
 INGEST_SOURCE = "elo"
-BATCH = 5000
+RATING_COLUMNS = ("player_id", "surface", "as_of", "elo", "matches")
 # Ключ pg_advisory_xact_lock: два пересчета одновременно не идут
 LOCK_KEY = 0x656C6F0000000001
 
@@ -313,15 +315,19 @@ class EloEngine:
         return self.pre_match(0, player1_id, player2_id, rating_surface(surface)).p1
 
     def _apply(self, player1_id: int, player2_id: int, won1: float, surface: str) -> None:
+        # Словари и счетчики — локально, по разу: история из 80 тысяч матчей — это
+        # 160 тысяч вызовов, и лишние обращения к методам заметны (числа те же)
+        ratings, counts, initial = self._ratings, self._matches, self.params.initial
         key1, key2 = (player1_id, surface), (player2_id, surface)
-        rating1, rating2 = self.rating(player1_id, surface), self.rating(player2_id, surface)
+        rating1, rating2 = ratings.get(key1, initial), ratings.get(key2, initial)
+        matches1, matches2 = counts.get(key1, 0), counts.get(key2, 0)
         expected1 = win_probability(rating1, rating2)
-        k1 = self.params.k_factor(self.matches(player1_id, surface))
-        k2 = self.params.k_factor(self.matches(player2_id, surface))
-        self._ratings[key1] = rating1 + k1 * (won1 - expected1)
-        self._ratings[key2] = rating2 - k2 * (won1 - expected1)
-        self._matches[key1] = self.matches(player1_id, surface) + 1
-        self._matches[key2] = self.matches(player2_id, surface) + 1
+        k1 = self.params.k_factor(matches1)
+        k2 = self.params.k_factor(matches2)
+        ratings[key1] = rating1 + k1 * (won1 - expected1)
+        ratings[key2] = rating2 - k2 * (won1 - expected1)
+        counts[key1] = matches1 + 1
+        counts[key2] = matches2 + 1
 
     def update(self, player1_id: int, player2_id: int, winner_id: int, surface: str | None) -> None:
         """Учесть исход матча: общий рейтинг и рейтинг покрытия (если оно известно)."""
@@ -417,7 +423,9 @@ async def load_history(db: AsyncSession) -> History:
 
 @dataclass(frozen=True)
 class EloSummary:
-    """Итог пересчета: сколько матчей учтено и пропущено, игроков, строк player_ratings."""
+    """Итог пересчета: сколько матчей учтено и пропущено, игроков, строк player_ratings
+    (rows — все строки таблицы; written и deleted — сколько строк записано и удалено:
+    неизменившиеся строки не переписываются)."""
 
     run_id: int
     matches: int
@@ -426,6 +434,8 @@ class EloSummary:
     rows: int
     train_from: date | None
     train_to: date | None
+    written: int = 0
+    deleted: int = 0
 
 
 def daily_states(
@@ -438,33 +448,78 @@ def daily_states(
     engine = EloEngine(params)
     states: dict[tuple[int, str, date], tuple[float, int]] = {}
     shown: dict[tuple[int, str], date] = {}
+    # После update рейтинг и счетчик игрока на покрытии всегда есть: читаем словари движка
+    # напрямую, без вызова методов на каждую из 300 тысяч строк
+    ratings, counts = engine._ratings, engine._matches
     for match, reveal in zip(matches, reveal_days(matches), strict=True):
         engine.update(match.player1_id, match.player2_id, match.winner_id, match.surface)
         court = rating_surface(match.surface)
         for player in (match.player1_id, match.player2_id):
             for surface in (ALL, court) if court else (ALL,):
-                day = max(reveal, shown.get((player, surface), reveal))
-                shown[(player, surface)] = day
-                states[(player, surface, day)] = (
-                    engine.rating(player, surface),
-                    engine.matches(player, surface),
-                )
+                key = (player, surface)
+                day = max(reveal, shown.get(key, reveal))
+                shown[key] = day
+                states[(player, surface, day)] = (ratings[key], counts[key])
     return states, engine
 
 
-def _rating_rows(
-    states: dict[tuple[int, str, date], tuple[float, int]],
-) -> Iterator[list[dict[str, Any]]]:
-    batch: list[dict[str, Any]] = []
-    for (player, surface, day), (elo, matches) in states.items():
-        batch.append(
-            {"player_id": player, "surface": surface, "as_of": day, "elo": elo, "matches": matches}
+async def write_ratings(
+    db: AsyncSession, states: dict[tuple[int, str, date], tuple[float, int]]
+) -> tuple[int, int]:
+    """player_ratings = states. Пишутся только отличия: строки, которых в states нет или
+    которые изменились, удаляются, а новые и изменившиеся дописываются одним COPY. Так
+    пересчет без новых матчей ничего не пишет, ночной — только хвост истории, а первый —
+    все строки одним COPY вместо сотен тысяч INSERT. → (записано, удалено)."""
+    table = cast(Table, PlayerRating.__table__)
+    key = (table.c.player_id, table.c.surface, table.c.as_of)
+    stored = {
+        (player, surface, day): (value, matches)
+        for player, surface, day, value, matches in await db.execute(
+            select(*key, table.c.elo, table.c.matches)
         )
-        if len(batch) >= BATCH:
-            yield batch
-            batch = []
-    if batch:
-        yield batch
+    }
+    if not stored:
+        # Первый пересчет: пишется все, сравнивать не с чем
+        fresh = [(*item, *value) for item, value in states.items()]
+        await copy_rows(db, table, RATING_COLUMNS, fresh)
+        return len(fresh), 0
+    # Строки, которых нет или которые изменились. Проход по словарям с поиском по ключу
+    # втрое быстрее разности множеств пар (ключ, значение): 0,3 с против 1 с на 170 тысячах
+    want, have = states.get, stored.get
+    stale = [item for item, value in stored.items() if want(item) != value]
+    if len(stale) == len(stored):
+        await db.execute(delete(table))
+    elif stale:
+        await _delete_keys(db, table, stale)
+    fresh = [(*item, *value) for item, value in states.items() if have(item) != value]
+    await copy_rows(db, table, RATING_COLUMNS, fresh)
+    return len(fresh), len(stale)
+
+
+async def _delete_keys(
+    db: AsyncSession, table: Table, keys: Sequence[tuple[int, str, date]]
+) -> None:
+    """Удалить строки player_ratings по ключам одним запросом: ключи — три массива,
+    DELETE … USING unnest(...). Правка в начале истории меняет больше 100 тысяч строк:
+    так это доли секунды (хеш-соединение), а пачки DELETE … WHERE (…) IN (…) шли
+    около 85 мкс на строку — дольше, чем стереть и записать таблицу заново."""
+    players, surfaces, days = zip(*keys, strict=True)
+    stale = (
+        func.unnest(
+            bindparam("players", list(players), type_=ARRAY(BigInteger)),
+            bindparam("surfaces", list(surfaces), type_=ARRAY(table.c.surface.type)),
+            bindparam("days", list(days), type_=ARRAY(Date)),
+        )
+        .table_valued("player_id", "surface", "as_of")
+        .render_derived(name="stale")
+    )
+    await db.execute(
+        delete(table).where(
+            table.c.player_id == stale.c.player_id,
+            table.c.surface == stale.c.surface,
+            table.c.as_of == stale.c.as_of,
+        )
+    )
 
 
 async def upsert_model(
@@ -503,30 +558,49 @@ async def rebuild_ratings(
     *,
     params: EloParams | None = None,
     db_factory: Callable[[], AsyncSession] | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> EloSummary:
-    """Пересчитать Эло по всей истории из БД: в одной транзакции удалить player_ratings
-    и записать по строке на (игрок, покрытие, день) с состоянием на конец дня; обновить
+    """Пересчитать Эло по всей истории из БД: в одной транзакции привести player_ratings к
+    строке на (игрок, покрытие, день) с состоянием на конец дня (write_ratings); обновить
     ml_models elo-v1. Журнал — ingestion_runs (source = elo).
 
     db_factory — фабрика сеансов (async_sessionmaker); без нее открывается свой движок
-    по настройкам.
+    по настройкам. progress — куда сообщать ход работы по этапам (история загружена,
+    рейтинги посчитаны, строки записаны); None — молча (задача воркера).
     """
     if db_factory is None:
         db_engine = create_engine()
         try:
-            return await rebuild_ratings(params=params, db_factory=create_sessionmaker(db_engine))
+            return await rebuild_ratings(
+                params=params, db_factory=create_sessionmaker(db_engine), progress=progress
+            )
         finally:
             await db_engine.dispose()
+
+    def say(key: str, started: float, **values: Any) -> None:
+        if progress is not None:
+            seconds = seconds_text(time.monotonic() - started)
+            progress(t(f"ml.elo.progress.{key}", seconds=seconds, **values))
+
     elo_params = params or EloParams()
     async with ingestion_run(db_factory, INGEST_SOURCE) as run:
         async with db_factory() as db:
             await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": LOCK_KEY})
+            started = time.monotonic()
             history = await load_history(db)
+            say(
+                "history",
+                started,
+                matches=len(history.matches),
+                skipped=sum(history.skipped.values()),
+            )
+            started = time.monotonic()
             # Расчет по всей истории — CPU на секунду-другую: не держим цикл событий
             states, engine = await asyncio.to_thread(daily_states, history.matches, elo_params)
-            await db.execute(delete(PlayerRating))
-            for batch in _rating_rows(states):
-                await db.execute(insert(PlayerRating), batch)
+            say("computed", started, players=len(engine.players()), rows=len(states))
+            started = time.monotonic()
+            written, deleted = await write_ratings(db, states)
+            say("written", started, written=written, deleted=deleted)
             first = history.matches[0].day if history.matches else None
             last = history.matches[-1].day if history.matches else None
             await upsert_model(
@@ -544,6 +618,8 @@ async def rebuild_ratings(
             report.skip(reason, count)
         report.counts["matches.used"] = len(history.matches)
         report.counts["players"] = len(engine.players())
+        report.counts["rows.written"] = written
+        report.counts["rows.deleted"] = deleted
         report.freshness = {"first_day": first, "last_day": last}
     return EloSummary(
         run_id=run.id,
@@ -553,6 +629,8 @@ async def rebuild_ratings(
         rows=len(states),
         train_from=first,
         train_to=last,
+        written=written,
+        deleted=deleted,
     )
 
 
@@ -640,6 +718,7 @@ def summary_lines(summary: EloSummary) -> list[str]:
     ]
     for reason, count in summary.skipped.items():
         lines.append(t("ml.elo.report.skipped", reason=_skip_text(reason), count=count))
+    lines.append(t("ml.elo.report.written", written=summary.written, deleted=summary.deleted))
     return lines
 
 
@@ -660,7 +739,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Пересчет рейтингов из терминала. Код возврата: 0 — готово, 1 — ошибка."""
     build_parser().parse_args(argv)
     try:
-        summary = asyncio.run(rebuild_ratings())
+        summary = asyncio.run(
+            rebuild_ratings(progress=lambda text_: print("  " + text_, flush=True))
+        )
     except (DBAPIError, OSError):
         # DBAPIError — общий класс ошибок драйвера: нет связи, неверный пароль, нет базы
         # или таблиц. Текст исключения не печатаем: в нем бывает адрес базы с паролем

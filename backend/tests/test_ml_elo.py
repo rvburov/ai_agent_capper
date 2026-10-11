@@ -3,12 +3,12 @@
 
 import asyncio
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import numpy as np
 import pytest
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, delete, event, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.i18n import t
@@ -352,6 +352,122 @@ async def test_rebuild_ratings(db: AsyncSession, factory: async_sessionmaker[Asy
     assert model.params["surface_weight"] == 0.75
     assert model.params["platt"] == {"a": 0.1, "b": 0.9}
     assert model.params["k_num"] == 200.0
+
+
+async def ratings_table(db: AsyncSession) -> list[tuple[Any, ...]]:
+    rows = await db.execute(
+        select(
+            PlayerRating.player_id,
+            PlayerRating.surface,
+            PlayerRating.as_of,
+            PlayerRating.elo,
+            PlayerRating.matches,
+        ).order_by(PlayerRating.player_id, PlayerRating.surface, PlayerRating.as_of)
+    )
+    return [tuple(row) for row in rows]
+
+
+async def test_rebuild_writes_only_changes(
+    db: AsyncSession, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Пересчет пишет только отличия от прошлого: без новых матчей — ничего, матч в конце
+    истории — строки его дня, убранный матч из середины — хвост истории его игроков. Таблица
+    всегда та же, что после пересчета с нуля. Ход работы — строка на этап."""
+    world = small_world()
+    ids = await store_world(db, world)
+    said: list[str] = []
+    first = await rebuild_ratings(db_factory=factory, progress=said.append)
+    assert (first.written, first.deleted) == (first.rows, 0)
+    assert [line.split(":")[0] for line in said] == [
+        "история загружена",
+        "рейтинги посчитаны",
+        "строки записаны",
+    ]
+    assert said[0].startswith(f"история загружена: матчей {first.matches}, не учтено 0 за ")
+    assert said[2].startswith(f"строки записаны: новых и изменившихся {first.rows}, удалено 0")
+    run = await db.scalar(select(IngestionRun).order_by(IngestionRun.id.desc()))
+    assert run is not None and run.details["counts"]["rows.written"] == first.rows
+
+    again = await rebuild_ratings(db_factory=factory)
+    assert (again.rows, again.written, again.deleted) == (first.rows, 0, 0)
+    assert t("ml.elo.report.written", written=0, deleted=0) in elo.summary_lines(again)
+
+    # Матч на следующий день после конца истории: две новые строки на игрока (all и хард)
+    last = max(world.matches, key=order_key)
+    source = await db.get(Match, ids[last.match_id])
+    assert source is not None
+    db.add(
+        Match(
+            tournament_id=source.tournament_id,
+            round="",
+            match_date=last.day + timedelta(days=1),
+            player1_id=source.player1_id,
+            player2_id=source.player2_id,
+            winner_id=source.player2_id,
+            status="finished",
+            source="web",
+            source_ref="web-late",
+        )
+    )
+    await db.commit()
+    added = await rebuild_ratings(db_factory=factory)
+    assert added.deleted == 0 and 0 < added.written <= 4
+    assert added.rows == first.rows + added.written
+
+    # Убранный матч из середины истории: меняется хвост рейтингов его игроков и соперников
+    middle = sorted(world.matches, key=order_key)[len(world.matches) // 2]
+    await db.execute(delete(Match).where(Match.id == ids[middle.match_id]))
+    await db.commit()
+    removed = await rebuild_ratings(db_factory=factory)
+    assert 0 < removed.deleted < first.rows and 0 < removed.written < first.rows
+    after = await ratings_table(db)
+    assert len(after) == removed.rows
+
+    await db.execute(delete(PlayerRating))
+    await db.commit()
+    scratch = await rebuild_ratings(db_factory=factory)
+    assert (scratch.written, scratch.deleted) == (removed.rows, 0)
+    assert await ratings_table(db) == after
+
+
+async def test_rebuild_after_change_at_start_of_history(
+    db: AsyncSession, engine: AsyncEngine, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Смена исхода первого матча истории меняет большинство строк рейтинга, но не все.
+    Устаревшие строки удаляются одним запросом с тремя массивами ключей, а не пачками
+    DELETE … IN по три параметра на строку (на 130 тысячах строк это было 12 с вместо
+    1 с). Таблица та же, что после пересчета с нуля."""
+    world = small_world()
+    ids = await store_world(db, world)
+    first = await rebuild_ratings(db_factory=factory)
+    opening = await db.get(Match, ids[min(world.matches, key=order_key).match_id])
+    assert opening is not None and opening.winner_id is not None
+    opening.winner_id = opening.player1_id + opening.player2_id - opening.winner_id
+    await db.commit()
+
+    deletes: list[Any] = []
+
+    def listen(*args: Any) -> None:
+        statement, parameters = args[2], args[3]
+        if statement.startswith("DELETE FROM player_ratings"):
+            deletes.append(parameters)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", listen)
+    try:
+        changed = await rebuild_ratings(db_factory=factory)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", listen)
+    assert changed.rows == first.rows
+    assert first.rows / 2 < changed.deleted < first.rows
+    assert changed.written == changed.deleted
+    assert len(deletes) == 1 and len(deletes[0]) == 3
+    assert all(len(keys) == changed.deleted for keys in deletes[0])
+    after = await ratings_table(db)
+
+    await db.execute(delete(PlayerRating))
+    await db.commit()
+    await rebuild_ratings(db_factory=factory)
+    assert await ratings_table(db) == after
 
 
 async def test_current_elo_does_not_see_undated_matches(

@@ -1113,6 +1113,8 @@ async def test_bad_rows_are_reported(db: AsyncSession, factory: Factory, tmp_pat
 def test_unmatched_kinds_have_texts() -> None:
     for kind in td.UNMATCHED_KINDS:
         assert has_key(f"ingest_tennis_data.unmatched.{kind}"), kind
+    for step in td.PROGRESS_STEPS:
+        assert has_key(f"ingest_tennis_data.progress.{step}"), step
 
 
 def test_parse_years() -> None:
@@ -1142,9 +1144,13 @@ async def test_main_with_dir(
     assert "X. Newguy" in out
     db.expunge_all()
     assert (await db.get_one(Match, world["m_r32"].id)).match_date == date(2024, 2, 13)
+    # Ход работы печатается по каждому файлу, до итога
+    assert out.index("  2024/2024.xlsx: строк 10,") < out.index("Строк прочитано 11")
     # Повтор: файл без изменений
     assert await run_main("--years", "2024", "--dir", str(tmp_path)) == 0
-    assert "без изменений 1" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "без изменений 1" in out
+    assert "  " + t("ingest_tennis_data.progress.unchanged", path="2024/2024.xlsx") in out
 
 
 async def test_main_waits_for_update_lock(

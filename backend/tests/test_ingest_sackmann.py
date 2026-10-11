@@ -27,6 +27,7 @@ from typing import Any, get_args
 import httpx
 import pytest
 from sqlalchemy import func, insert, select, text
+from sqlalchemy.exc import DataError, DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.i18n import has_key, t
@@ -78,9 +79,16 @@ async def load(
     *,
     directory: Path = FIXTURES,
     force: bool = False,
+    progress: list[str] | None = None,
 ) -> IngestReport:
     async with DataSource.local(directory) as source:
-        return await load_sackmann(years=years, source=source, force=force, db_factory=factory)
+        return await load_sackmann(
+            years=years,
+            source=source,
+            force=force,
+            db_factory=factory,
+            progress=progress.append if progress is not None else None,
+        )
 
 
 async def count(db: AsyncSession, model: type[Base], *where: Any) -> int:
@@ -317,6 +325,86 @@ def test_every_skip_reason_has_text() -> None:
     assert missing == []
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("20240115", date(2024, 1, 15)),
+        ("20240115.0", date(2024, 1, 15)),
+        # Не 8 цифр — разбор как раньше, через strptime: «2024013» — 3 января
+        ("2024013", date(2024, 1, 3)),
+        ("", None),
+        ("20240230", ValueError),
+        ("2024-01-15", ValueError),
+        ("2024011a", ValueError),
+    ],
+)
+def test_date_values(value: str, expected: date | type[ValueError] | None) -> None:
+    if expected is ValueError:
+        with pytest.raises(ValueError):
+            sackmann._date(value)
+    else:
+        assert sackmann._date(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("12", 12),
+        ("012", 12),
+        ("12.0", 12),
+        ("-3", -3),
+        ("", None),
+        ("1.5", None),
+        ("x", None),
+        # Границы INTEGER базы: за ними — битое значение, а не ошибка записи в базу
+        ("2147483647", 2147483647),
+        ("0000000012", 12),
+        ("-2147483648", -2147483648),
+        ("2147483648", None),
+        ("2147483648.0", None),
+        ("99999999999", None),
+        ("-2147483649", None),
+    ],
+)
+def test_int_values(value: str, expected: int | None) -> None:
+    if expected is None and value:
+        with pytest.raises(ValueError):
+            sackmann._int(value)
+    else:
+        assert sackmann._int(value) == expected
+
+
+def test_numbers_out_of_integer_range_are_bad_values() -> None:
+    """Число статистики больше INTEGER — битое значение (None и замечание), как
+    отрицательное; такой id игрока — битая строка. До записи в базу оно не доходит."""
+    stats = sk_row("2024-1", "20240101", 1, ZVEREV, FRITZ, "R32", "6-4 6-4")
+    stats = stats.replace(",5,", ",99999999999,", 1)
+    huge_id = sk_row("2024-1", "20240101", 2, 99999999999, RUNE, "R32", "6-4 6-4")
+    report = IngestReport()
+    parsed = parse_matches("atp_matches_2024.csv", f"{HEADER}\n{stats}\n{huge_id}\n", report)
+    assert [row.match_num for row in parsed.rows] == ["1"]
+    winner, loser = parsed.rows[0].stats or ({}, {})
+    assert (winner["aces"], winner["serve_points"], loser["aces"]) == (None, 60, 2)
+    assert any("w_ace" in w and "«99999999999»" in w for w in report.warnings)
+    assert report.counts["skipped.bad_row"] == 1
+
+
+def test_cells_like_dict_reader() -> None:
+    """Строки CSV: пробелы по краям срезаны, пустые строки пропущены, короткая строка
+    дополнена пустыми значениями, лишние значения отброшены, номер строки — как в файле
+    (значение в кавычках с переводом строки занимает две строки)."""
+    content = ' a , b ,c\n1, 2 ,3\n\n4,5\n6,7,8,9\n"x\ny",z,w\n'
+    rows = list(sackmann._cells("f.csv", content, ("a", "b")))
+    assert rows == [
+        (2, {"a": "1", "b": "2", "c": "3"}),
+        (4, {"a": "4", "b": "5", "c": ""}),
+        (5, {"a": "6", "b": "7", "c": "8"}),
+        (7, {"a": "x\ny", "b": "z", "c": "w"}),
+    ]
+    with pytest.raises(IngestError, match="d, e"):
+        list(sackmann._cells("f.csv", content, ("a", "d", "e")))
+
+
 # --- загрузка ---
 
 
@@ -448,6 +536,99 @@ async def test_rerun_skips_unchanged_files_and_force_changes_nothing(
     assert await table_counts(db) == before
     assert (await player(db, SINNER)).id == sinner_id
     assert await count(db, IngestionRun, IngestionRun.status == "ok") == 3
+
+
+async def test_progress_by_file(
+    db: AsyncSession, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Ход работы — строка на каждый файл сразу по ходу загрузки: получен, разобран (строк,
+    пропущено, создано, обновлено, секунды), не изменился, нет файла. Числа строк файла
+    в сумме дают итог отчета."""
+    said: list[str] = []
+    report = await load(factory, [2019, 2023, 2024], progress=said)
+
+    assert said[0].startswith("atp_players.csv: получен, ")
+    assert said[1] == t("ingest_sackmann.progress.missing", file="atp_matches_2019.csv")
+    assert said[2].startswith("atp_matches_2023.csv: получен, ")
+    loaded = [line for line in said if ": строк " in line]
+    assert [line.split(":")[0] for line in loaded] == [
+        "atp_matches_2023.csv",
+        "atp_matches_2024.csv",
+    ]
+    numbers = [[int(n) for n in re.findall(r"\d+", line.split(":", 1)[1])[:4]] for line in loaded]
+    assert [row[0] for row in numbers] == [15, 10]
+    assert sum(row[1] for row in numbers) == report.skipped == 8
+    # Игроки справочника сверяются в конце: они в «создано» файлов матчей
+    assert sum(row[2] for row in numbers) == report.created
+    assert said[-1].startswith("atp_players.csv: игроки базы сверены со справочником")
+    assert no_forbidden_letters(said)
+
+    said.clear()
+    await load(factory, progress=said)
+    assert said == [
+        t("ingest_sackmann.progress.unchanged", file=name)
+        for name in ("atp_players.csv", "atp_matches_2023.csv", "atp_matches_2024.csv")
+    ]
+
+
+async def test_changed_stats_are_updated_and_equal_ones_are_not_written(
+    db: AsyncSession, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Статистика: новая строка — «создано», изменившаяся в архиве — «обновлено»,
+    совпавшая не переписывается (повторная загрузка — 0)."""
+    await load(factory)
+    match_id = (await match(db, "2023-580-100")).id
+    djokovic_id = (await player(db, DJOKOVIC)).id
+    stat = await db.get(MatchStat, (match_id, djokovic_id))
+    assert stat is not None and stat.aces == 10
+    stat.aces = 99
+    await db.execute(
+        text("DELETE FROM match_stats WHERE match_id = :id AND player_id <> :p"),
+        {"id": match_id, "p": djokovic_id},
+    )
+    await db.commit()
+
+    report = await load(factory, force=True)
+    assert (report.counts["stats.created"], report.counts["stats.updated"]) == (1, 1)
+    assert (report.created, report.updated) == (1, 1)
+    db.expire_all()
+    stat = await db.get(MatchStat, (match_id, djokovic_id))
+    assert stat is not None and stat.aces == 10
+    assert await count(db, MatchStat, MatchStat.match_id == match_id) == 2
+
+    again = await load(factory, force=True)
+    assert (again.counts["stats.created"], again.counts["stats.updated"]) == (0, 0)
+
+
+async def test_copy_rows_conflict_is_integrity_error(db: AsyncSession) -> None:
+    """COPY не обходит конфликт: нарушение ключа — IntegrityError SQLAlchemy с именем
+    ограничения, и загрузчик откатывает файл, как при INSERT."""
+    table = sackmann._table(Tournament)
+    columns = ("name", "source", "source_ref")
+    await sackmann.copy_rows(db, table, columns, [("x", "sackmann", "2024-1")])
+    assert await count(db, Tournament) == 1
+    with pytest.raises(IntegrityError) as caught:
+        await sackmann.copy_rows(db, table, columns, [("y", "sackmann", "2024-1")])
+    assert getattr(caught.value.orig, "constraint_name", None) == "uq_tournaments_source_source_ref"
+    await db.rollback()
+    assert await count(db, Tournament) == 0
+
+
+async def test_copy_rows_errors_are_sqlalchemy_errors(db: AsyncSession) -> None:
+    """Прочие ошибки COPY — тоже классы SQLAlchemy, как у INSERT: значение вне типа колонки
+    (кодирует драйвер или проверяет база) — DataError, остальное — DBAPIError. Команда
+    терминала ловит DBAPIError и не печатает трассировку."""
+    table = sackmann._table(Tournament)
+    cases: list[tuple[tuple[str, ...], tuple[Any, ...], type[DBAPIError]]] = [
+        (("name", "best_of"), ("x", 10**6), DataError),
+        (("name", "source"), ("x", "s" * 40), DataError),
+        (("name", "no_such_column"), ("x", 1), DBAPIError),
+    ]
+    for columns, record, error in cases:
+        with pytest.raises(error):
+            await sackmann.copy_rows(db, table, columns, [record])
+        await db.rollback()
+    assert await count(db, Tournament) == 0
 
 
 async def test_renamed_player_keeps_human_fields(

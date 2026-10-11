@@ -3,10 +3,10 @@
 
 import asyncio
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +24,7 @@ from app.ml.backtest import (
     BacktestResult,
     DecoyResult,
     Outcome,
+    ReferenceMix,
     StrategyRules,
     candidates,
     evaluate,
@@ -34,8 +35,9 @@ from app.ml.backtest import (
     side_flip,
 )
 from app.ml.elo import MODEL_ID, EloEngine, EloMatch, PreMatch, rating_surface
+from app.ml.market import devig_power
 from app.ml.metrics import COIN_LOG_LOSS, Estimate, RoiEstimate, log_loss
-from app.ml.report import num, pct, render_markdown, summary_lines
+from app.ml.report import num, pct, reference_warning, render_markdown, summary_lines
 from tests.ml_world import World, make_world, small_world, store_world
 
 FORBIDDEN_LETTERS = ("\u0451", "\u0401")
@@ -182,6 +184,12 @@ def test_synthetic_world(world: World, result: BacktestResult) -> None:
     assert data.test_with_market == data.test.events
     assert data.market_share == 1.0
     assert set(data.market_by_year) == {2024, 2025}
+    # Pinnacle у всех событий: эталон — только он, сравнение строгое
+    reference = data.reference
+    assert reference.order == ("pinnacle", "betfair_ex", "avg")
+    assert reference.counts == {"pinnacle": data.test.events, "betfair_ex": 0, "avg": 0}
+    assert set(reference.by_year) == {2024, 2025} and reference.primary_share == 1.0
+    assert reference.strict and not result.warnings
     assert result.surface_weight in BacktestConfig().surface_weights
     assert set(result.tuning) == set(BacktestConfig().surface_weights)
     assert result.calibrated is not None and result.market is not None
@@ -391,13 +399,276 @@ def test_without_market_and_tuning_years() -> None:
     assert result.n_events == result.model_all.n
     texts = " ".join(result.warnings)
     assert t("backtest.warnings.no_tune", years="2019, 2020, 2021", weight=0.5) in texts
-    assert t("backtest.warnings.no_market", bookmaker="pinnacle", years="2024, 2025") in texts
+    names = ", ".join(
+        t(f"backtest.bookmakers.{code}") for code in ("pinnacle", "betfair_ex", "avg")
+    )
+    assert t("backtest.warnings.no_market", bookmakers=names, years="2024, 2025") in texts
     assert all(bet.bets == 0 and bet.roi.roi is None for bet in result.bets)
     lines = summary_lines(result)
-    assert lines[0] == t("backtest.verdict.no_market", bookmaker=t("backtest.bookmakers.pinnacle"))
+    assert lines[0] == t("backtest.verdict.no_market", bookmakers=names)
+    # Сравнения нет — предупреждения о составе эталона тоже нет
+    reference = result.data.reference
+    assert reference.total == 0 and reference.primary_share is None and reference.strict
     text = render_markdown(result)
     assert no_forbidden_letters(text) and t("backtest.report.warnings_title") in text
     json.dumps(result.metrics(), allow_nan=False)
+
+
+# --- запасной эталон рынка ---
+
+Odds = dict[int, dict[str, tuple[Decimal | None, Decimal | None]]]
+
+
+def exchange_pair(pinnacle: tuple[Decimal | None, Decimal | None]) -> tuple[Decimal, Decimal]:
+    """Кэфы биржи: вероятности Pinnacle без маржи с маржой 1%, округление до сотых."""
+    odds1, odds2 = pinnacle
+    assert odds1 is not None and odds2 is not None
+    q1, q2 = devig_power([odds1, odds2])
+
+    def price(q: float) -> Decimal:
+        value = Decimal(str(1.0 / (q * 1.01))).quantize(Decimal("0.01"), ROUND_HALF_UP)
+        return max(value, Decimal("1.01"))
+
+    return price(q1), price(q2)
+
+
+def thin_pinnacle(world: World, keep: Mapping[int, float]) -> tuple[Odds, set[int], set[int]]:
+    """Кэфы мира, где у части событий года нет Pinnacle: остается доля keep[год] (по
+    хешу id матча). У событий без Pinnacle с четным id есть кэфы биржи, у нечетных —
+    только среднее и максимум по рынку. Возвращает кэфы и id матчей с биржей и без нее."""
+    odds: Odds = {}
+    exchange: set[int] = set()
+    average: set[int] = set()
+    for match in world.matches:
+        books = dict(world.odds.get(match.match_id, {}))
+        share = keep.get(match.day.year)
+        if books and share is not None and (match.match_id * 7919) % 1000 >= share * 1000:
+            pinnacle = books.pop("pinnacle")
+            if match.match_id % 2 == 0:
+                books["betfair_ex"] = exchange_pair(pinnacle)
+                exchange.add(match.match_id)
+            else:
+                average.add(match.match_id)
+        if books:
+            odds[match.match_id] = books
+    return odds, exchange, average
+
+
+def test_fallback_reference_keeps_2024_2025_result(world: World, result: BacktestResult) -> None:
+    """Как у владельца в 2024–2025: Pinnacle у 99% и 96% строк. События без Pinnacle
+    оцениваются по бирже или среднему по рынку, и результат почти не меняется: разница
+    «модель − рынок» — в пределах 0,001 от мира, где Pinnacle везде."""
+    odds, exchange, average = thin_pinnacle(world, {2024: 0.99, 2025: 0.96})
+    config = BacktestConfig(bootstrap=300)
+    fallback = evaluate(world.matches, odds, config)
+    data, reference = fallback.data, fallback.data.reference
+    test_ids = {
+        match.match_id
+        for match in world.matches
+        if match.status == "finished"
+        and match.level in config.levels
+        and match.day.year in config.test_years
+    }
+    # Все тестовые события сравниваются с рынком, эталон выбран по порядку
+    assert data.test_with_market == data.test.events == len(test_ids)
+    assert reference.counts == {
+        "pinnacle": len(test_ids - exchange - average),
+        "betfair_ex": len(test_ids & exchange),
+        "avg": len(test_ids & average),
+    }
+    assert reference.counts["betfair_ex"] > 10 and reference.counts["avg"] > 10
+    assert sum(reference.by_year[2025].values()) == data.market_by_year[2025][0]
+    assert reference.year_share(2024) == pytest.approx(0.99, abs=0.01)
+    assert reference.year_share(2025) == pytest.approx(0.96, abs=0.015)
+    assert reference.primary_share is not None and reference.primary_share > 0.95
+    assert reference.strict and not fallback.warnings
+    assert not any(
+        t("backtest.verdict.reference_weak").split(" — ")[0] in line
+        for line in summary_lines(fallback)
+    )
+
+    # Модель — на тех же событиях, что и в мире с Pinnacle везде: числа совпадают
+    assert fallback.calibrated is not None and result.calibrated is not None
+    assert fallback.calibrated.log_loss == result.calibrated.log_loss
+    # Рынок и разница с ним почти не изменились
+    assert fallback.market is not None and result.market is not None
+    assert fallback.market.log_loss.value == pytest.approx(result.market.log_loss.value, abs=5e-4)
+    gap, full_gap = fallback.calibrated_gap, result.calibrated_gap
+    assert gap is not None and full_gap is not None
+    assert gap.log_loss.value == pytest.approx(full_gap.log_loss.value, abs=1e-3)
+    assert gap.log_loss.low > 0
+
+    # Прежнее поведение (эталон — только Pinnacle): события без него выпадали
+    strict = evaluate(world.matches, odds, replace(config, ref_bookmakers=("pinnacle",)))
+    assert strict.data.test_with_market == reference.counts["pinnacle"]
+    assert strict.data.reference.order == ("pinnacle",)
+    assert strict.calibrated_gap is not None
+    assert strict.calibrated_gap.log_loss.value == pytest.approx(gap.log_loss.value, abs=2e-3)
+
+    # Состав эталона — в eval_runs.metrics
+    stored = fallback.metrics()["data"]["reference"]
+    assert stored["order"] == ["pinnacle", "betfair_ex", "avg"]
+    assert stored["counts"] == reference.counts and stored["strict"] is True
+    assert stored["by_year"]["2025"] == reference.by_year[2025]
+    assert stored["primary_share_by_year"]["2024"] == reference.year_share(2024)
+    json.dumps(fallback.metrics(), allow_nan=False)
+
+
+def test_weak_reference_is_reported(world: World) -> None:
+    """Как в 2026 году: Pinnacle у 3% строк. Сравнение с рынком идет по запасным
+    эталонам, а вывод, предупреждения и отчет говорят, что оно менее строгое."""
+    odds, _, _ = thin_pinnacle(world, {2025: 0.03})
+    result = evaluate(world.matches, odds, BacktestConfig(bootstrap=100))
+    reference = result.data.reference
+    assert result.data.test_with_market == result.data.test.events
+    assert reference.year_share(2024) == 1.0
+    share_2025 = reference.year_share(2025)
+    assert share_2025 is not None and share_2025 < 0.05
+    share = reference.primary_share
+    assert share is not None and share < 0.9 and not reference.strict
+
+    counts = reference.counts
+    others = (
+        f"{t('backtest.bookmakers.betfair_ex')} — {counts['betfair_ex']}, "
+        f"{t('backtest.bookmakers.avg')} — {counts['avg']}"
+    )
+    warning = t(
+        "backtest.warnings.reference_weak",
+        primary="Pinnacle",
+        share=pct(share),
+        min="90%",
+        years=f"2024 — 100,0%, 2025 — {pct(share_2025)}",
+        others=others,
+    )
+    assert result.warnings == [warning]
+    note = t(
+        "backtest.verdict.reference_weak",
+        primary="Pinnacle",
+        share=pct(share),
+        min="90%",
+        others=others,
+    )
+    lines = summary_lines(result)
+    assert lines[0].endswith(". " + note)
+    assert lines[0].startswith(t("backtest.verdict.worse").split(" на ")[0])
+
+    text = render_markdown(result)
+    assert no_forbidden_letters(text) and "{" not in text
+    assert warning in text and lines[0] in text
+    assert f"### {t('backtest.report.reference_title')}" in text
+    total_2025 = result.data.market_by_year[2025][1]
+    row_2025 = (
+        f"| 2025 | {total_2025} | {total_2025} (100,0%) | {reference.by_year[2025]['pinnacle']} | "
+        f"{reference.by_year[2025]['betfair_ex']} | {reference.by_year[2025]['avg']} | "
+        f"{pct(share_2025)} |"
+    )
+    assert row_2025 in text
+    market_row = t(
+        "backtest.report.row_market",
+        bookmaker=" → ".join(
+            t(f"backtest.bookmakers.{code}") for code in ("pinnacle", "betfair_ex", "avg")
+        ),
+    )
+    assert f"| {market_row} |" in text
+    stored = result.metrics()["data"]["reference"]
+    assert stored["strict"] is False and stored["primary_share"] == pytest.approx(share)
+
+    # Порог настраивается: при нулевом пороге предупреждения нет
+    relaxed = evaluate(world.matches, odds, BacktestConfig(bootstrap=50, min_primary_share=0.0))
+    assert relaxed.data.reference.strict and not relaxed.warnings
+    assert t("backtest.verdict.reference_weak").split(" — ")[0] not in summary_lines(relaxed)[0]
+
+
+def test_weak_year_is_reported_despite_overall_share() -> None:
+    """Тест 2024–2026 в январе 2026 года: общая доля Pinnacle 95%, но 2026-й оценен почти
+    целиком по среднему кэфу рынка. Сравнение нестрогое; год с малым числом событий на
+    итог почти не влияет и отдельно не проверяется."""
+    order = ("pinnacle", "betfair_ex", "avg")
+    by_year = {
+        2024: {"pinnacle": 2707, "betfair_ex": 16, "avg": 9},
+        2025: {"pinnacle": 2406, "betfair_ex": 56, "avg": 23},
+        2026: {"pinnacle": 5, "betfair_ex": 0, "avg": 160},
+    }
+    mix = ReferenceMix(order, by_year, 0.9)
+    share = mix.primary_share
+    assert share is not None and share == pytest.approx(0.951, abs=0.001)
+    assert mix.overall_strict and mix.weak_years == (2026,) and not mix.strict
+    assert mix.counts_for([2026]) == {"pinnacle": 5, "betfair_ex": 0, "avg": 160}
+    assert mix.as_dict()["weak_years"] == [2026] and mix.as_dict()["strict"] is False
+    assert reference_warning(mix) == t(
+        "backtest.warnings.reference_weak_years",
+        primary="Pinnacle",
+        share=pct(share),
+        min="90%",
+        years=f"2026 — {pct(5 / 165)}",
+        others=f"{t('backtest.bookmakers.avg')} — 160",
+    )
+    # 165 событий меньше порога года — год не проверяется, общая доля выше 90%
+    assert ReferenceMix(order, by_year, 0.9, min_year_events=166).strict
+    # Общая доля ниже порога — прежнее предупреждение, годы перечислены все
+    low = ReferenceMix(order, {**by_year, 2026: {"pinnacle": 5, "betfair_ex": 0, "avg": 900}}, 0.9)
+    assert not low.overall_strict and not low.strict
+    assert reference_warning(low) == t(
+        "backtest.warnings.reference_weak",
+        primary="Pinnacle",
+        share=pct(low.primary_share),
+        min="90%",
+        years=", ".join(f"{year} — {pct(low.year_share(year))}" for year in (2024, 2025, 2026)),
+        others=f"{t('backtest.bookmakers.betfair_ex')} — 72, {t('backtest.bookmakers.avg')} — 932",
+    )
+
+
+def test_weak_year_in_backtest(world: World) -> None:
+    """Pinnacle у 85% событий 2025 года и у всех в 2024-м: общая доля выше 90%, но 2025-й
+    ниже порога — вывод, предупреждения и отчет говорят о нестрогом сравнении."""
+    odds, _, _ = thin_pinnacle(world, {2025: 0.85})
+    result = evaluate(world.matches, odds, BacktestConfig(bootstrap=100))
+    reference = result.data.reference
+    share, share_2025 = reference.primary_share, reference.year_share(2025)
+    assert share is not None and share >= 0.9
+    assert share_2025 is not None and share_2025 < 0.9
+    assert reference.weak_years == (2025,) and not reference.strict
+
+    counts = reference.by_year[2025]
+    others = (
+        f"{t('backtest.bookmakers.betfair_ex')} — {counts['betfair_ex']}, "
+        f"{t('backtest.bookmakers.avg')} — {counts['avg']}"
+    )
+    params = {"primary": "Pinnacle", "share": pct(share), "min": "90%", "others": others}
+    years = f"2025 — {pct(share_2025)}"
+    warning = t("backtest.warnings.reference_weak_years", **params, years=years)
+    assert result.warnings == [warning]
+    note = t("backtest.verdict.reference_weak_years", **params, years=years)
+    lines = summary_lines(result)
+    assert lines[0].endswith(". " + note)
+    text = render_markdown(result)
+    assert warning in text and lines[0] in text
+    assert no_forbidden_letters(text) and "{" not in text
+    stored = result.metrics()["data"]["reference"]
+    assert stored["strict"] is False and stored["weak_years"] == [2025]
+    assert stored["min_year_events"] == 100
+
+    # Порог года настраивается: если в 2025-м событий меньше порога, год не проверяется
+    relaxed = evaluate(
+        world.matches,
+        odds,
+        BacktestConfig(bootstrap=50, min_primary_year_events=sum(counts.values()) + 1),
+    )
+    assert relaxed.data.reference.strict and not relaxed.warnings
+
+
+def test_reference_order_is_configurable(world: World) -> None:
+    """Порядок эталона — настройка: «сначала среднее по рынку» берет его везде, где оно
+    есть, хотя у событий есть и Pinnacle."""
+    config = BacktestConfig(bootstrap=50, ref_bookmakers=("avg", "pinnacle"))
+    result = evaluate(world.matches, world.odds, config)
+    reference = result.data.reference
+    assert reference.order == ("avg", "pinnacle")
+    assert reference.counts == {"avg": result.data.test.events, "pinnacle": 0}
+    assert reference.primary == "avg" and reference.primary_share == 1.0
+    # Подпись рынка — по букмекерам, которые действительно использованы
+    market = t("backtest.report.row_market", bookmaker=t("backtest.bookmakers.avg"))
+    assert f"| {market} |" in render_markdown(result)
 
 
 def test_no_calibration_when_few_events() -> None:
@@ -418,6 +689,8 @@ def test_config_and_errors() -> None:
     assert config.eval_set == "atp-tour-2022-2023"
     with pytest.raises(BacktestError):
         BacktestConfig(calib_years=(2023, 2024)).validate()
+    with pytest.raises(BacktestError, match=t("backtest.errors.no_reference")):
+        BacktestConfig(ref_bookmakers=()).validate()
     with pytest.raises(BacktestError):
         evaluate([], {}, BacktestConfig())
     assert parse_years("2024,2025") == (2024, 2025)
@@ -466,6 +739,8 @@ async def test_run_backtest_saves_model_and_eval_run(
     db: AsyncSession, factory: async_sessionmaker[AsyncSession]
 ) -> None:
     world = small_world()
+    # У части событий 2025 года нет Pinnacle: эталон — биржа или среднее по рынку из базы
+    world.odds, exchange, average = thin_pinnacle(world, {2025: 0.9})
     await store_world(db, world)
     db.add(IngestionRun(source="sackmann", status="ok", finished_at=func.now()))
     await db.commit()
@@ -495,6 +770,13 @@ async def test_run_backtest_saves_model_and_eval_run(
     )
     assert run.metrics["decoy"]["passed"] is True
     assert run.metrics["config"]["eval_set"] == "atp-tour-2024-2025"
+    assert run.metrics["config"]["ref_bookmakers"] == ["pinnacle", "betfair_ex", "avg"]
+    stored = run.metrics["data"]["reference"]
+    counts = result.data.reference.counts
+    assert stored["counts"] == counts and sum(counts.values()) == result.calibrated.n
+    assert counts["betfair_ex"] > 0 and counts["avg"] > 0
+    assert counts["betfair_ex"] + counts["avg"] <= len(exchange | average)
+    assert set(stored["by_year"]) == {"2024", "2025"}
 
     model = await db.get(MlModel, MODEL_ID)
     assert model is not None
