@@ -27,6 +27,13 @@
 set -euo pipefail
 
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Git Bash на Windows (MSYS) сам переделывает аргументы вида /tmp/... в пути Windows
+# (C:/Users/.../Temp/...) и передает их docker, а внутри контейнера таких путей нет.
+# Поэтому переделку отключаем, а пути этого компьютера для docker пишем сразу как C:/...
+if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+  export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
+  DEPLOY_DIR="$(cygpath -m "$DEPLOY_DIR")"
+fi
 ENV_FILE="$DEPLOY_DIR/.env.local"
 URL="https://localhost"
 
