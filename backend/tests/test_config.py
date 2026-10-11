@@ -117,7 +117,7 @@ def test_data_sources_defaults_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Загрузка архивов (этап 2): адреса, первые годы и час ночного обновления."""
     settings = Settings.model_validate({"env": "dev"})
     assert settings.sackmann_base_url == (
-        "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master"
+        "https://raw.githubusercontent.com/Aneeshers/tennis-sackmann-archive/main/atp"
     )
     assert settings.tennis_data_base_url == "http://www.tennis-data.co.uk"
     assert settings.data_first_year == 2000

@@ -74,8 +74,11 @@ class Settings(BaseSettings):
     trusted_proxies: str = "127.0.0.1"
 
     # Архивы матчей и кэфов (этап 2, app/ingest). Адреса меняются, если источник переедет;
-    # без сети те же файлы берутся из папки (--dir у команды загрузки)
-    sackmann_base_url: str = "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master"
+    # без сети те же файлы берутся из папки (--dir у команды загрузки). Сакманн убрал
+    # tennis_atp с GitHub в сентябре 2026: по умолчанию — архивная копия (снимок июня 2026)
+    sackmann_base_url: str = (
+        "https://raw.githubusercontent.com/Aneeshers/tennis-sackmann-archive/main/atp"
+    )
     tennis_data_base_url: str = "http://www.tennis-data.co.uk"
     # Первый год архива Сакманна и tennis-data (более ранние файлы tennis-data — .xls,
     # их не берем)

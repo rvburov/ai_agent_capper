@@ -55,7 +55,7 @@ bash deploy/local.sh backtest           # отчет — в deploy/reports/backt
 
 Дальше данные обновляет воркер каждую ночь. Если tennis-data.co.uk ответит 403 (сайт закрыт Cloudflare от программ), скачайте файлы `ГОД.xlsx` в браузере со страницы http://www.tennis-data.co.uk/alldata.php в одну папку и запустите `bash deploy/local.sh data --full --tennis-data-dir ПАПКА` ([deploy/README.md](deploy/README.md#данные-о-матчах-и-бэктест)).
 
-Данные: Jeff Sackmann / Tennis Abstract, CC BY-NC-SA 4.0 ([tennis_atp](https://github.com/JeffSackmann/tennis_atp)) — матчи и статистика ATP с 2000 года. Даты матчей и кэфы букмекеров — [tennis-data.co.uk](http://www.tennis-data.co.uk) (условия использования — проверить на сайте).
+Данные: Jeff Sackmann / Tennis Abstract, CC BY-NC-SA 4.0 — матчи и статистика ATP с 2000 года. Сакманн убрал репозиторий `tennis_atp` с GitHub в сентябре 2026, программа берет файлы из архивной копии [tennis-sackmann-archive](https://github.com/Aneeshers/tennis-sackmann-archive) (снимок июня 2026, та же лицензия); матчи после мая 2026 года дает tennis-data.co.uk. Даты матчей и кэфы букмекеров — [tennis-data.co.uk](http://www.tennis-data.co.uk) (условия использования — проверить на сайте).
 
 ## Быстрый старт для разработки
 
