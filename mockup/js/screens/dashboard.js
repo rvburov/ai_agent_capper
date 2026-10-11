@@ -376,7 +376,7 @@
     const rows = D.matchesToday.map(m => {
       const inBet = betOfMatch(m);
       const pl = id => [
-        h('div', { class: 'dashboard-match-name' }, playerLink(id), D.P[id] && h('span', { class: 'rank', title: 'Место в рейтинге ATP' }, '№' + D.P[id].rank)),
+        h('div', { class: 'dashboard-match-name' }, playerLink(id), D.P[id] && h('span', { class: 'rank', title: 'Место по Эло среди игроков с матчами за 52 недели' }, '№' + D.P[id].eloPlace)),
         UI.freshnessChip(D.P[id] ? D.P[id].fresh : 'missing'),
       ];
       return h('article', { class: 'dashboard-match', 'aria-label': DATA.match(m) + ', ' + m.time },
@@ -396,8 +396,8 @@
       flush: true,
       body: h('div', null, rows),
       foot: [
-        button('Собрать экспресс из матчей дня', { kind: 'primary', size: 'sm', icon: 'spark', href: '#new-today' }),
-        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 220px' }, 'Сбор и обновление профилей перед анализом входят в цену анализа. Ночное обновление базы оплачивает администратор.'),
+        button('Все матчи дня в анализ', { kind: 'primary', size: 'sm', icon: 'spark', href: '#new-today' }),
+        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 220px' }, 'Кэфы своей линии впишете в «Новом анализе». Новости игроков перед анализом входят в его цену, ночное обновление базы оплачивает администратор.'),
       ],
     });
   }
@@ -429,9 +429,9 @@
         const m = playsToday(p.id);
         const opp = m ? D.P[m.p1 === p.id ? m.p2 : m.p1] : null;
         items.push({
-          tone: 'bad', ic: 'database', sr: 'Важно',
-          title: h('span', null, 'Нет в базе: ', playerLink(p.id)),
-          text: (m ? 'Играет сегодня в ' + m.time + (opp ? ', соперник — ' + opp.short + '. ' : '. ') : '') + 'Профиль соберется сам при анализе матча (≈ 1–2 мин, несколько веб-поисков).',
+          tone: 'warn', ic: 'database', sr: 'Предупреждение',
+          title: h('span', null, 'Профиль не собран: ', playerLink(p.id)),
+          text: (m ? 'Играет сегодня в ' + m.time + (opp ? ', соперник — ' + opp.short + '. ' : '. ') : '') + 'Анализ пройдет и без профиля: досье — по архиву матчей и Эло, свежие новости Claude поищет перед анализом. Профиль (стиль, физика, психология) можно собрать заранее.',
           action: queued.rune
             ? chip('Сбор профиля в очереди', 'info', 'clock')
             : button('Собрать сейчас', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => { queued.rune = true; draw(); UI.toast('Сбор профиля ' + p.short + ' запущен — около 1–2 минут', 'refresh'); } }),
@@ -464,20 +464,24 @@
           action: button('Сравнить ' + act.id + ' и ' + cand.id, { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#learning' }),
         });
       }
-      // Адаптации размера ставки — те же правила, что в «Профиль → Банк и стратегия»; статус считается из DATA.stats
-      const sk = S.streak, fromPeak = (S.bank - S.peak) / S.peak * 100;
-      const streakText = sk.n + ' ' + (sk.type === 'win' ? fmt.plural(sk.n, 'выигрыш', 'выигрыша', 'выигрышей') : sk.type === 'loss' ? fmt.plural(sk.n, 'проигрыш', 'проигрыша', 'проигрышей') : fmt.plural(sk.n, 'возврат', 'возврата', 'возвратов'));
+      // Адаптации размера ставки — те же правила, что в «Профиль → Банк и стратегия» (Р22: правил серий нет);
+      // статус считается из DATA.stats
+      const fromPeak = (S.bank - S.peak) / S.peak * 100, growth = (S.bank - S.start) / S.start * 100;
+      const weekBase = D.bankHistory.filter(x => x.date <= addDays(D.today, -7)).pop() || D.bankHistory[0];
+      const week = (S.bank - weekBase.bank) / weekBase.bank * 100;
       const activeRules = [
-        sk.type === 'loss' && sk.n >= 3 && 'после ' + streakText + ' подряд сумма −40%',
-        sk.type === 'win' && sk.n >= 3 && 'после ' + streakText + ' подряд сумма +20% (не больше 3% банка)',
-        fromPeak <= -10 && 'при просадке ' + fmt.signedPct(fromPeak) + ' ставка не больше 2,5% банка',
+        fromPeak <= -20 && 'при просадке ' + fmt.signedPct(fromPeak) + ' — защитный режим: 1,5% банка, только 2 события с кэфами до 1.50',
+        fromPeak <= -10 && fromPeak > -20 && 'при просадке ' + fmt.signedPct(fromPeak) + ' ставка не больше 2,5% банка',
+        growth >= 15 && S.winrate >= 60 && 'банк ' + fmt.signedPct(growth) + ' к старту и винрейт ' + fmt.pct(S.winrate) + ' — потолок ставки 4% вместо 3%',
+        week <= -5 && 'за 7 дней ' + fmt.signedPct(week) + ' — ставка не больше 2%',
+        week >= 10 && 'за 7 дней ' + fmt.signedPct(week) + ' — ставка +0,5 п.п.',
       ].filter(Boolean);
       items.push({
         tone: activeRules.length ? 'warn' : 'info', ic: 'shield', sr: activeRules.length ? 'Предупреждение' : 'Информация',
         title: activeRules.length ? 'Размер ставки изменен правилом адаптации' : 'Размер ставки: адаптации не действуют',
-        text: 'Серия — ' + streakText + ', ' + (fromPeak < 0 ? 'банк ' + fmt.signedPct(fromPeak) + ' от пика' : 'банк на пике') + '. ' + (activeRules.length
+        text: (fromPeak < 0 ? 'Банк ' + fmt.signedPct(fromPeak) + ' от пика' : 'Банк на пике') + ', за 7 дней ' + fmt.signedPct(week) + '. ' + (activeRules.length
           ? 'Сейчас ' + activeRules.join('; ') + '. Новые анализы предложат суммы с учетом этого.'
-          : 'Ставка снизится на 40% после 3 проигрышей подряд и не превысит 2,5% банка при просадке от −10%. Сегодня суммы — по таблице.'),
+          : 'Ставка не превысит 2,5% банка при просадке от −10% и 1,5% при −20%; после убыточной недели — не больше 2%. Сегодня суммы — по таблице.'),
         action: button('Правила ставок', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#profile-bank' }),
       });
       items.forEach(it => list.appendChild(h('div', { class: 'dashboard-alert' },

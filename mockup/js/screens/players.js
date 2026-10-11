@@ -157,7 +157,7 @@
         const side = l.p1 === pid ? 'p1' : 'p2', o = l[side === 'p1' ? 'p2' : 'p1'];
         const P = D.P[o], x = OTHERS.find(y => y[0] === o);
         out.push({ date: b.date, res: win === side ? 'W' : 'L', straight: l.market !== 'p1' && l.market !== 'p2',
-          opp: P ? { id: P.id, name: P.short, cc: P.country, rank: P.rank } : x ? { name: x[0], cc: x[1], rank: x[2] } : { name: o } });
+          opp: P ? { id: P.id, name: P.short, cc: P.country, rank: P.eloPlace } : x ? { name: x[0], cc: x[1], rank: null } : { name: o } });
       });
     });
     return out.sort((a, b) => b.date.localeCompare(a.date));
@@ -185,7 +185,7 @@
           let y = x;
           for (let s2 = 1; taken.has(y.id) && s2 < tops.length; s2++) { const c = tops[(k + s2) % tops.length]; if (!used.has(c.id) && !(plays && todayMatch(c.id)) && !taken.has(c.id)) y = c; }
           used.add(y.id); taken.add(y.id);
-          return { id: y.id, name: y.short, cc: y.country, rank: y.rank };
+          return { id: y.id, name: y.short, cc: y.country, rank: y.eloPlace };
         } else {
           const k = Math.floor(r() * OTHERS.length), x = OTHERS[k];
           if (used.has(x[0]) || (live && SH_BET_NAMES.has(x[0]))) continue;
@@ -193,10 +193,10 @@
           let y = x;
           for (let s2 = 1; taken.has(y[0]) && s2 < OPP_POOL.length; s2++) { const c = OPP_POOL[(k + s2) % OPP_POOL.length]; if (!used.has(c[0]) && !(live && SH_BET_NAMES.has(c[0])) && !taken.has(c[0])) y = c; }
           used.add(y[0]); taken.add(y[0]);
-          return { name: y[0], cc: y[1], rank: y[2] };
+          return { name: y[0], cc: y[1], rank: null };
         }
       }
-      return { name: OTHERS[0][0], cc: OTHERS[0][1], rank: OTHERS[0][2] };
+      return { name: OTHERS[0][0], cc: OTHERS[0][1], rank: null };
     };
     let i = 0;
     for (let week = 0; week < EVENTS.length; week++) {
@@ -548,7 +548,7 @@
     const m = todayMatch(p.id);
     return h('div', { class: 'players-name' },
       h('a', { class: 'players-link', href: '#player-' + p.id, on: { click: e => e.stopPropagation() } }, p.name),
-      h('div', { class: 'players-sub' }, h('span', { class: 'players-cc', title: COUNTRY[p.country] || p.country }, p.country), opts.rank ? '№' + p.rank + ' ATP' : age(p),
+      h('div', { class: 'players-sub' }, h('span', { class: 'players-cc', title: COUNTRY[p.country] || p.country }, p.country), opts.rank ? '№' + p.eloPlace + ' по Эло' : age(p),
         m && h('span', { class: 'players-today-tag', title: 'Матч сегодня: ' + D.match(m) }, icon('calendar'), 'сегодня ' + m.time)));
   }
   function statusChip(p) {
@@ -636,11 +636,11 @@
         { id: 'all', label: ['Все', h('span', { class: 'players-count' }, c.all)] },
         { id: 'fresh', label: ['Свежие', h('span', { class: 'players-count' }, c.fresh)] },
         { id: 'stale', label: ['Устарели', h('span', { class: 'players-count' }, c.stale)] },
-        { id: 'missing', label: ['Нет в базе', h('span', { class: 'players-count' }, c.missing)] },
+        { id: 'missing', label: ['Без профиля', h('span', { class: 'players-count' }, c.missing)] },
       ] }));
     };
     drawFreshSeg();
-    const sortField = UI.field({ id: 'players-sort', label: 'Сортировка', value: st.sort, options: [{ value: 'rank', label: 'Рейтинг ATP' }, { value: 'elo', label: 'Эло на покрытии' }, { value: 'fresh', label: 'Сначала устаревшие' }] });
+    const sortField = UI.field({ id: 'players-sort', label: 'Сортировка', value: st.sort, options: [{ value: 'rank', label: 'Место по Эло' }, { value: 'elo', label: 'Эло на покрытии' }, { value: 'fresh', label: 'Сначала устаревшие' }] });
     sortField.querySelector('select').addEventListener('change', e => { st.sort = e.target.value; drawResults(); });
     const filters = h('div', { class: 'players-filters', role: 'search' },
       h('div', { class: 'field players-search' }, h('label', { class: 'field-label', for: 'players-q' }, 'Поиск'), h('div', { class: 'input-wrap' }, icon('search', { class: 'players-search-ic' }), searchInput)),
@@ -655,7 +655,7 @@
     const sources = card({
       title: 'Откуда берутся данные', subtitle: 'Каждая запись хранит источник и дату — можно проверить, на чем основан вывод модели',
       body: h('div', { class: 'players-sources' },
-        source('database', 'Архив матчей ATP', 'Рейтинг, счет, подача и прием. Структурированные данные без ИИ и без токенов — импорт каждую ночь. Эло считаем сами по этим матчам.'),
+        source('database', 'Архив матчей ATP', 'Счет, подача и прием. Структурированные данные без ИИ и без токенов — импорт каждую ночь. Эло и место по Эло считаем сами по этим матчам.'),
         source('globe', 'Веб-поиск Claude', 'Новости, травмы, усталость, мотивация. У каждой записи ссылка на источник. Неподтвержденные слухи помечаются и не влияют на расчет.'),
         source('brain', 'Оценки Claude 1–10', 'Стиль, физика, техника, психология. Собираются из разборов матчей и интервью раз в 30 дней. Это мнение, а не измерение — вес в модели небольшой.'),
         source('coins', 'Сколько стоит', 'Обновление профиля ночным пакетом ≈ ' + usd(COST.batch) + ' (Batch API, −50%), сразу ≈ ' + fmt.usd(COST.now) + '. Сбор нового игрока ≈ ' + fmt.usd(COST.collect) + '. База игроков общая: ' + (adminSelf ? 'ночные пакеты идут с вашего ключа администратора, а сбор и обновление по кнопке — в расход того, кто нажал.' : 'ночные пакеты оплачивает администратор, а сбор и обновление по вашей кнопке идут в ваш расход на ИИ.'))),
@@ -693,7 +693,7 @@
             stale.length ? ['устаревшие данные — ', list(stale)] : null,
             stale.length && missing.length ? '; ' : null,
             missing.length ? [missing.length === 1 ? 'профиль ' : 'профили ', list(missing), missing.length === 1 ? ' не собран' : ' не собраны'] : null,
-            '. Анализ матчей с ними пойдет с пометкой «неполные данные» и пониженной уверенностью.'),
+            '. Анализ матчей с ними все равно пройдет: досье — по архиву матчей и Эло, свежие новости Claude поищет перед анализом.'),
           h('div', { class: 'row', style: 'gap:10px 14px' },
             button('Обновить сейчас · ~' + fmt.usd(cost), { kind: 'primary', size: 'sm', icon: 'refresh', onClick: () => runNow(need) }),
             first && h('span', { class: 'xsmall' }, 'Первый такой матч — в ' + first.time + ', ночной пакет не успеет')))));
@@ -707,7 +707,7 @@
       let arr = D.players.filter(p => (st.fresh === 'all' || p.fresh === st.fresh) &&
         (!q || [p.name, p.short, p.country, COUNTRY[p.country] || ''].some(s => s.toLowerCase().includes(q))));
       const fr = { missing: 0, stale: 1, fresh: 2 };
-      if (st.sort === 'rank') arr.sort((a, b) => a.rank - b.rank);
+      if (st.sort === 'rank') arr.sort((a, b) => a.eloPlace - b.eloPlace);
       else if (st.sort === 'elo') arr.sort((a, b) => b.elo[st.surface] - a.elo[st.surface]);
       else arr.sort((a, b) => fr[a.fresh] - fr[b.fresh] || (a.updated || '').localeCompare(b.updated || ''));
       return arr;
@@ -736,7 +736,8 @@
           rows: arr, onRowClick: p => UI.go('player-' + p.id),
           columns: [
             { label: 'Игрок', render: p => nameCell(p) },
-            { label: 'Рейтинг ATP', render: p => h('div', { class: 'players-cell-2' }, h('b', { class: 'num' }, '№' + p.rank), h('small', null, fmt.int(p.points) + ' очк.')) },
+            // Рейтинга ATP в базе нет: место по Эло среди игроков с матчами за 52 недели считает код
+            { label: 'Место по Эло', render: p => h('div', { class: 'players-cell-2' }, h('b', { class: 'num' }, '№' + p.eloPlace), h('small', null, 'за 52 недели')) },
             { label: 'Эло общий', align: 'r', render: p => h('span', { class: 'mono' }, elo(p.elo.all)) },
             { label: 'Эло · ' + sl, align: 'r', render: p => { const d = p.elo[sk] - p.elo.all; return h('div', { class: 'players-cell-2', style: 'align-items:flex-end' }, h('span', { class: 'mono', style: 'font-weight:600' }, elo(p.elo[sk])), h('small', null, signed(d) + ' к общему')); } },
             { label: 'Форма, 10 матчей', render: p => h('span', { class: 'players-form' }, UI.formDots(p.form), h('span', { class: 'small soft num' }, winsOf(p) + '–' + (10 - winsOf(p)))) },
@@ -847,7 +848,7 @@
       status);
 
     const stats = h('div', { class: 'players-hero-stats' },
-      h('div', null, h('span', { class: 'players-hs-l' }, 'Рейтинг ATP'), h('span', { class: 'players-hs-v' }, '№' + p.rank), h('span', { class: 'players-hs-s' }, fmt.int(p.points) + ' очков' + (ex.best && ex.best < p.rank ? ' · лучший №' + ex.best : ''))),
+      h('div', null, h('span', { class: 'players-hs-l' }, 'Место по Эло'), h('span', { class: 'players-hs-v' }, '№' + p.eloPlace), h('span', { class: 'players-hs-s' }, 'среди игроков с матчами за 52 недели')),
       h('div', null, h('span', { class: 'players-hs-l' }, 'Эло общий'), h('span', { class: 'players-hs-v' }, elo(p.elo.all)), h('span', { class: 'players-hs-s' }, missing ? eloRankAll(p) + '-й из ' + D.players.length + ' по Эло · архив ATP' : eloRankAll(p) + '-й в базе по Эло')),
       h('div', null, h('span', { class: 'players-hs-l' }, 'Эло на харде'), h('span', { class: 'players-hs-v' }, elo(p.elo.hard)), h('span', { class: 'players-hs-s' }, signed(p.elo.hard - p.elo.all) + ' к общему')),
       h('div', null, h('span', { class: 'players-hs-l' }, 'Форма, 10 матчей'), h('span', { class: 'players-hs-v' }, W + '–' + (10 - W), UI.formDots(p.form)), h('span', { class: 'players-hs-s' }, missing ? 'по архиву ATP' : 'слева — последний матч')));
@@ -858,7 +859,7 @@
       const side = m.p1 === p.id ? 'p1' : 'p2';
       const ol = openLeg(p.id);
       foot = h('div', { class: 'players-today' }, icon('calendar'),
-        h('div', { class: 'players-today-text' }, h('b', null, 'Сегодня, ' + m.time + ' · '), m.tournament + ', ' + m.round + ' · соперник — ', h('a', { href: '#player-' + opp.id }, opp.name), ' (№' + opp.rank + ') · ',
+        h('div', { class: 'players-today-text' }, h('b', null, 'Сегодня, ' + m.time + ' · '), m.tournament + ', ' + m.round + ' · соперник — ', h('a', { href: '#player-' + opp.id }, opp.name), ' (№' + opp.eloPlace + ' по Эло) · ',
           h('span', { class: 'muted' }, (side === 'p1' ? 'П1' : 'П2') + ' '), h('span', { class: 'odds' }, fmt.odds(m.odds[side]))),
         ol && h('a', { class: 'chip info', href: '#bets-' + ol.bet.id, title: 'Ставка №' + ol.bet.id + ' — внести результат' }, icon('ticket'), 'В ставке №' + ol.bet.id + ': ' + D.match(ol.leg) + ' · ' + ol.leg.marketLabel + ' ' + fmt.odds(ol.leg.odds)),
         IN_EXAMPLE.includes(m.id)
@@ -995,7 +996,7 @@
     const avg = f => played.reduce((a, m) => a + f(m), 0) / played.length;
     const W = played.filter(m => m.res === 'W').length;
     const resChip = m => m.wo ? chip('Без игры', 'outline', 'refresh') : m.res === 'W' ? chip('Победа', 'good', 'check') : chip('Поражение', 'bad', 'x');
-    const oppNode = m => m.wo ? h('span', null, m.opp.name + ' снялся') : h('span', null, m.opp.id ? h('a', { class: 'players-link', href: '#player-' + m.opp.id }, m.opp.name) : m.opp.name, m.opp.rank ? [' ', h('span', { class: 'muted xsmall' }, '№' + m.opp.rank)] : null);
+    const oppNode = m => m.wo ? h('span', null, m.opp.name + ' снялся') : h('span', null, m.opp.id ? h('a', { class: 'players-link', href: '#player-' + m.opp.id }, m.opp.name) : m.opp.name, m.opp.rank ? [' ', h('span', { class: 'muted xsmall', title: 'Место по Эло среди игроков с матчами за 52 недели' }, '№' + m.opp.rank + ' по Эло')] : null);
     const strip = h('div', { class: 'players-strip' },
       h('div', null, h('span', null, 'Победы'), h('b', null, W + ' из ' + played.length)),
       h('div', null, h('span', null, 'Эйсов за матч'), h('b', null, fmt.dec(avg(m => m.aces), 1))),
@@ -1045,7 +1046,7 @@
     const profileCard = card({ class: 'col-4 players-fill', title: 'Игровой профиль', body: [UI.kv([
       ['Стиль игры', ex.kind || '—'], ['Позиция на корте', ex.pos || '—'], ['Тип подачи', ex.serveType || '—'],
       ['Любимое покрытие', D.surfaces[bestSurface(p)].label], ['Рабочая рука', p.hand === 'левая' ? 'Левша' : 'Правша'], ['Бэкхенд', p.backhand[0].toUpperCase() + p.backhand.slice(1)],
-      ['Рост', ex.height ? ex.height + ' см' : '—'], ['Лучший рейтинг ATP', '№' + (ex.best || p.rank)],
+      ['Рост', ex.height ? ex.height + ' см' : '—'],
     ]), metaLine(4)] });
     const physCard = card({ class: 'col-4 players-fill', title: 'Физика', subtitle: 'средняя ' + fmt.dec(avg(R.phys), 1) + ' из 10', body: [rates(R.phys), metaLine(3)] });
     const techCard = card({ class: 'col-4 players-fill', title: 'Техника', subtitle: 'средняя ' + fmt.dec(avg(R.tech), 1) + ' из 10', body: [rates(R.tech), metaLine(5)] });
@@ -1117,9 +1118,8 @@
     const plus2 = iso => { const d = new Date(ts(iso) + 2 * 60000); return d.toISOString().slice(0, 16); };
     const srcNode = (ic, t) => h('span', { class: 'players-hist-src' }, icon(ic), t);
     const rows = [
-      { block: 'Рейтинг и очки ATP', at: imp, how: now ? 'Обновить сейчас' : 'Ночной импорт архива ATP', src: srcNode('database', 'архив ATP'), cost: 0 },
       { block: 'Матчи, подача и прием', at: imp, how: now ? 'Обновить сейчас' : 'Ночной импорт архива ATP', src: srcNode('database', 'архив ATP'), cost: 0 },
-      { block: 'Эло по покрытиям', at: plus2(imp), how: 'Пересчет после импорта', src: srcNode('chart', 'расчет'), cost: 0 },
+      { block: 'Эло по покрытиям и место по Эло', at: plus2(imp), how: 'Пересчет после импорта', src: srcNode('chart', 'расчет'), cost: 0 },
       { block: 'Новости и текущее состояние', at: upd, how: now ? 'Обновить сейчас · Sonnet 5.5' : 'Ночной пакет · Sonnet 5.5, Batch', src: srcNode('globe', 'веб-поиск, 3 запроса'), cost: now ? COST.now : COST.batch },
       { block: 'Игровой профиль, физика, техника', at: now ? NOW : I.staticAt, how: 'Полный сбор профиля · Sonnet 5.5', src: srcNode('brain', 'оценка Claude, 9 источников'), cost: now ? null : COST.collect },
       { block: 'Психология', at: now ? NOW : I.staticAt, how: 'Полный сбор профиля', src: srcNode('brain', 'оценка Claude, 6 источников'), cost: null },
@@ -1161,7 +1161,7 @@
     const rulesCard = card({
       title: 'Правила обновления', subtitle: 'чтобы не тратить токены зря',
       body: h('ul', { class: 'players-bullets' },
-        h('li', null, h('span', { class: 'muted', style: 'display:flex' }, icon('database')), h('span', null, h('b', null, 'Рейтинг, матчи, Эло'), ' — каждую ночь из архива ATP, без ИИ.')),
+        h('li', null, h('span', { class: 'muted', style: 'display:flex' }, icon('database')), h('span', null, h('b', null, 'Матчи и Эло'), ' — каждую ночь из архива ATP, без ИИ.')),
         h('li', null, h('span', { class: 'muted', style: 'display:flex' }, icon('globe')), h('span', null, h('b', null, 'Новости и состояние'), ' — ночным пакетом, если у игрока скоро матч; перед анализом — если старше 24 ч.')),
         h('li', null, h('span', { class: 'muted', style: 'display:flex' }, icon('brain')), h('span', null, h('b', null, 'Профиль и психология'), ' — раз в 30 дней или после травмы и смены тренера.')),
         h('li', null, h('span', { class: 'muted', style: 'display:flex' }, icon('layers')), h('span', null, h('b', null, 'В анализ'), ' идет сжатое досье ≈ 1,8K токенов вместо 12K сырого текста, и оно кэшируется.'))),
@@ -1217,8 +1217,8 @@
     const collectCard = h('section', { class: 'card', id: 'players-collect-card', 'aria-label': 'Сбор профиля', style: 'scroll-margin-top: calc(var(--topbar-h) + 16px)' }, h('div', { class: 'card-body players-collect' },
       h('span', { class: 'players-collect-ic' }, icon('database')),
       h('h3', null, 'Профиль еще не собран'),
-      h('p', null, 'Из архива ATP уже есть рейтинг, Эло и результаты. Досье — стиль игры, физику и технику, психологию, новости и травмы — Claude еще не собирал.',
-        opp ? [' Без него анализ матча ', h('a', { href: IN_EXAMPLE.includes(m.id) ? '#analysis' : '#new-' + m.id }, opp.short + ' — ' + p.short), ' сегодня в ' + m.time + ' пройдет с пометкой «неполные данные» и пониженной уверенностью.'] : null),
+      h('p', null, 'Из архива ATP уже есть результаты матчей и Эло. Досье — стиль игры, физику и технику, психологию, новости и травмы — Claude еще не собирал.',
+        opp ? [' Анализ матча ', h('a', { href: IN_EXAMPLE.includes(m.id) ? '#analysis' : '#new-' + m.id }, opp.short + ' — ' + p.short), ' сегодня в ' + m.time + ' пройдет и без него: досье — по архиву матчей и Эло, свежие новости Claude поищет перед анализом.'] : null),
       h('div', { class: 'row', style: 'justify-content:center' }, collectBtn, batchBtn),
       status,
       stepsEl));

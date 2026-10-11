@@ -33,6 +33,8 @@
     { id: 'rublev', name: 'Андрей Рублев', short: 'Рублев', country: 'RUS', age: 28, rank: 14, points: 2980, hand: 'правая', backhand: 'двуручный', elo: { all: 1941, hard: 1952, clay: 1938, grass: 1880 }, form: 'WWLLWLWLWL', fresh: 'fresh', updated: '2026-10-06T21:50', style: 'Силовой форхенд', serve: { first: 60, firstWon: 74, secondWon: 51, aces: 6.7, df: 2.9, speed: 208 }, ret: { firstRet: 29, secondRet: 50, bpConv: 39 }, wlSurface: { hard: [27, 15], clay: [15, 8], grass: [5, 4] } },
   ];
   players.forEach(p => { p.form = p.form.split(''); }); // form[0] — последний матч
+  // Рейтинга ATP в базе нет: место по Эло среди игроков с матчами за 52 недели считает код (в макете — среди демо-игроков)
+  players.slice().sort((a, b) => b.elo.all - a.elo.all).forEach((p, i) => { p.eloPlace = i + 1; });
   const P = Object.fromEntries(players.map(p => [p.id, p]));
 
   // Календарь туров (июль–октябрь 2026)
@@ -183,12 +185,23 @@
     { id: 'm5', p1: 'fritz', p2: 'deminaur', time: '16:30', round: '1/8 финала', court: 'Grand Stand', odds: { p1: 1.72, p2: 2.12, h1m: 3.10, h2p: 1.38 } },
   ].map(m => Object.assign({ tournament: 'Шанхай', category: 'Masters 1000', surface: 'hard', date: TODAY }, m));
 
+  // Последние анализы (экран «Новый анализ» → «Последние анализы»): после ухода со страницы анализ открывается по номеру.
+  // В приложении — GET /analyses (свои, последние 20); статусы: done, failed, cancelled, идет
+  // demo: true — анализ с теми же матчами, что демо-пример экрана «Анализ»; остальные в макете открываются на нем же
+  const recentAnalyses = [
+    { id: 'A-0141', at: '2026-10-07T09:12', matches: [{ p1: 'sinner', p2: 'rune' }, { p1: 'djokovic', p2: 'rublev' }], status: 'done', decision: 'bet', cost: 0.17, demo: true },
+    { id: 'A-0140', at: '2026-10-06T18:40', matches: [{ p1: 'fritz', p2: 'deminaur' }, { p1: 'draper', p2: 'medvedev' }], status: 'failed', note: 'шаг 8 из 9: Claude перегружен', cost: 0.13 },
+    { id: 'A-0139', at: '2026-10-06T10:15', matches: [{ p1: 'sinner', p2: 'medvedev' }, { p1: 'djokovic', p2: 'shelton' }, { p1: 'alcaraz', p2: 'rune' }], status: 'done', decision: 'skip', cost: 0.24 },
+    { id: 'A-0138', at: '2026-10-05T19:30', matches: [{ p1: 'zverev', p2: 'rublev' }, { p1: 'fritz', p2: 'musetti' }], status: 'cancelled', cost: 0.05 },
+    { id: 'A-0137', at: '2026-10-05T09:50', matches: [{ p1: 'sinner', p2: 'draper' }, { p1: 'alcaraz', p2: 'deminaur' }], status: 'done', decision: 'bet', cost: 0.16 },
+  ];
+
   // Расходы ИИ (октябрь)
   const runTypes = [
     { id: 'analysis', label: 'Анализ матчей', model: 'Opus 5.5' },
     { id: 'refresh', label: 'Обновление профилей (Batch)', model: 'Sonnet 5.5' },
     { id: 'postmortem', label: 'Разбор ставки', model: 'Sonnet 5.5' },
-    { id: 'parse', label: 'Разбор текста событий', model: 'Haiku 4.5' },
+    { id: 'parse', label: 'Разбор текста событий', model: 'Haiku 5.5' },
   ];
   const aiRuns = [];
   for (let d = 0; d < 7; d++) {
@@ -199,10 +212,12 @@
       const input = t.id === 'analysis' ? 38000 + Math.floor(rnd() * 22000) : t.id === 'refresh' ? 90000 + Math.floor(rnd() * 60000) : t.id === 'postmortem' ? 9000 + Math.floor(rnd() * 5000) : 1800 + Math.floor(rnd() * 900);
       const cacheShare = t.id === 'parse' ? 0 : 0.62 + rnd() * 0.25;
       const output = t.id === 'analysis' ? 3500 + Math.floor(rnd() * 2500) : t.id === 'refresh' ? 7000 + Math.floor(rnd() * 4000) : t.id === 'postmortem' ? 1200 + Math.floor(rnd() * 800) : 400 + Math.floor(rnd() * 200);
-      const price = { 'Opus 5.5': [4, 20, 0.2], 'Sonnet 5.5': [2, 10, 0.2], 'Haiku 4.5': [1, 5, 0.1] }[t.model];
+      // $ за 1 млн токенов: вход, выход, чтение кэша (docs/TOKEN_ECONOMY.md)
+      const price = { 'Opus 5.5': [4, 20, 0.2], 'Sonnet 5.5': [2, 10, 0.1], 'Haiku 5.5': [0.1, 0.5, 0.01] }[t.model];
       const batch = t.id === 'refresh' ? 0.5 : 1;
       const searches = t.id === 'analysis' ? Math.floor(rnd() * 4) : t.id === 'refresh' ? 6 + Math.floor(rnd() * 6) : 0;
-      const cost = round(((input * (1 - cacheShare) * price[0] + input * cacheShare * price[2] + output * price[1]) / 1e6) * batch + searches * 0.01, 3);
+      // разбор текста на Haiku 5.5 стоит доли цента: храним точнее, чтобы на экране не было $0,000
+      const cost = round(((input * (1 - cacheShare) * price[0] + input * cacheShare * price[2] + output * price[1]) / 1e6) * batch + searches * 0.01, t.id === 'parse' ? 5 : 3);
       const hh = String(8 + k * 3 + Math.floor(rnd() * 2)).padStart(2, '0'), mm = String(Math.floor(rnd() * 60)).padStart(2, '0');
       aiRuns.push({ id: 'run-' + day.slice(5) + '-' + k, at: day + 'T' + hh + ':' + mm, type: t.id, typeLabel: t.label, model: t.model, input, cached: Math.round(input * cacheShare), output, searches, cost, duration: t.id === 'analysis' ? 70 + Math.floor(rnd() * 80) : t.id === 'refresh' ? 600 + Math.floor(rnd() * 900) : 8 + Math.floor(rnd() * 20), batch: batch < 1 });
     }
@@ -385,7 +400,7 @@
       peak: Math.max(...bankHistory.map(b => b.bank)),
     },
     allLegs, calibration, brierRolling, roiBySurface, roiByMarket, roiByOdds, roiByTotal,
-    matchesToday,
+    matchesToday, recentAnalyses,
     ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, keySpent, ownSpent, keyUsers, limitOf, budget, forecastOf, access, recordRun, recordSpend, decisions, budgetHint: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes },
     lessons, strategyVersions,
     strategy: { minProb: 65, oddsMin: 1.13, oddsMax: 1.80, maxLegs: 3, totalMax: 3.24, stakeTable: [{ range: '1.28–1.70', pct: '2,5–3%' }, { range: '1.71–2.20', pct: '2–2,5%' }, { range: '2.21–3.24', pct: '1,5–2%' }] },

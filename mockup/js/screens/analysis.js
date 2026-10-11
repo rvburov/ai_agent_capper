@@ -1,7 +1,10 @@
 /* Анализ #A-0142: ход анализа по шагам (в макете ускорен до ~5 с), затем результат —
    карточки матчей (сравнение игроков, вероятности по рынкам, факторы), экспресс с суммой по стратегии,
    «Почему так» и строка расходов. Состояние живет в памяти модуля: смена темы или ширины экрана
-   продолжает анимацию с того же места, а повторный запуск идет только при переходе из «Нового анализа». */
+   продолжает анимацию с того же места, а повторный запуск идет только при переходе из «Нового анализа».
+   Этап 3: шаги идут по матчам (новости и оценка Claude — на каждый матч), есть отмена, сбой шага с
+   перезапуском, остановка по лимиту и потолку, неработающий ключ, потеря связи. Состояния для
+   согласования переключаются демо-панелью «Только в макете» или адресом #analysis-<состояние>. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
@@ -10,23 +13,25 @@
   const STRAT_V = (D.strategyVersions.find(v => v.status === 'active') || { id: 'v3' }).id;
 
   // ---------- режимы — те же, что на экране «Новый анализ» ----------
-  // Цены за 1 млн токенов (docs/TOKEN_ECONOMY.md): запись в кэш ×1,25 цены входа, чтение — $0,20 у Opus и Sonnet, $0,10 у Haiku.
+  // Цены за 1 млн токенов (docs/TOKEN_ECONOMY.md): вход, запись в кэш (×1,25 цены входа), чтение кэша, выход.
+  // На этапе 3 работает только «Точный»; два других режима вернутся после проверки на истории.
   const MODES = {
-    precise: { id: 'precise', label: 'Точный', model: 'Opus 5.5', perEvent: 0.09, news: true, sec: 47, price: { write: 5, read: 0.20, out: 20 } },
-    balanced: { id: 'balanced', label: 'Сбалансированный', model: 'Sonnet 5.5', perEvent: 0.045, news: false, sec: 31, price: { write: 2.5, read: 0.20, out: 10 } },
-    eco: { id: 'eco', label: 'Экономный', model: 'Haiku 4.5', perEvent: 0.02, news: false, sec: 16, price: { write: 1.25, read: 0.10, out: 5 } },
+    precise: { id: 'precise', label: 'Точный', model: 'Opus 5.5', perEvent: 0.09, news: true, sec: 47, price: { in: 4, write: 5, read: 0.20, out: 20 } },
+    balanced: { id: 'balanced', label: 'Сбалансированный', model: 'Sonnet 5.5', perEvent: 0.045, news: false, sec: 31, price: { in: 2, write: 2.5, read: 0.10, out: 10 } },
+    eco: { id: 'eco', label: 'Экономный', model: 'Haiku 5.5', perEvent: 0.02, news: false, sec: 16, price: { in: 0.1, write: 0.125, read: 0.01, out: 0.5 } },
   };
   MODES.economy = MODES.eco;
-  const COLLECT_COST = 0.05; // сбор досье нового игрока — как в оценке на экране «Новый анализ»
 
   // ---------- шаги анализа ----------
   // sec/tokens/cost — значения запуска (пример); dur — длительность шага в ускоренной анимации, мс.
-  // Раскладка по docs/TOKEN_ECONOMY.md (4.6, 4.8, раздел 5): статистику считает код по архиву ATP в базе,
-  // веб-поиск — только новости и только на Sonnet 5.5 (effort low), модель анализа работает без поиска.
-  // Досье Руне: вход 9 000 × $2 + выход 800 × $10 + 3 поиска = $0,056.
-  // Анализ: 12 500 токенов префикса пишутся в кэш, 18 000 читаются из кэша, 3 400 — выход (на Opus 5.5 это $0,134).
-  const AI = { input: 30500, cached: 18000, output: 3400 };
-  const CACHE_SHARE = Math.round(AI.cached / AI.input * 100);
+  // Раскладка по docs/TOKEN_ECONOMY.md: досье и базовую вероятность считает код по архиву ATP в базе (0 токенов),
+  // веб-поиск — только новости и только на Sonnet 5.5 (effort low), Opus 5.5 оценивает каждый матч одним вызовом без поиска.
+  // Новости Синнер — Руне: вход 9 000 × $2 + выход 800 × $10 + 2 поиска = $0,046 (новости Синнера моложе 12 ч, ищем только Руне).
+  // Claude, матч 1: 6 000 токенов инструкций и стратегии пишутся в кэш, 4 000 — досье матча, 1 700 — выход ($0,080).
+  // Claude, матч 2: те же 6 000 читаются из кэша, 4 000 — досье, 1 600 — выход ($0,049).
+  const AI = { prefix: 6000, dossier: 4000, out1: 1700, out2: 1600 };
+  const CACHE_SHARE = Math.round(AI.prefix / (2 * (AI.prefix + AI.dossier)) * 100); // доля входа Opus из кэша за оба вызова
+  const PARSE = { tokens: 2400, cost: 0.001 }; // Haiku 5.5: 2 000 входа × $0,10 + 400 выхода × $0,50 — меньше $0,001
 
   // ---------- матчи и оценки (пример данных) ----------
   const MX = [
@@ -57,7 +62,7 @@
     {
       id: 'm2', a: 'djokovic', b: 'rublev', pick: 'p1', conf: 'high',
       confNote: 'Все данные свежие, источники согласуются',
-      fresh: 'Джокович — сегодня 02:30 · Рублев — 6 окт 21:50',
+      fresh: 'последний матч в базе — 5 окт у обоих · новости Джоковича 02:30, Рублева 6 окт 21:50',
       probs: { p1: [0.78, 0.79], h1m: [0.50, 0.54] },
       // цифры совпадают с карточками игроков (#player-djokovic, #player-rublev)
       cmp: [
@@ -80,8 +85,8 @@
       ],
     },
   ];
-  // рейтинг — из базы, чтобы совпадал с карточками игроков
-  MX.forEach(m => m.cmp.unshift({ label: 'Рейтинг ATP', l: '№' + D.P[m.a].rank, r: '№' + D.P[m.b].rank, better: D.P[m.a].rank < D.P[m.b].rank ? 'l' : 'r' }));
+  // Рейтинга ATP в базе нет: место по Эло среди игроков с матчами за 52 недели считает код
+  MX.forEach(m => m.cmp.unshift({ label: 'Место по Эло', l: '№' + D.P[m.a].eloPlace, r: '№' + D.P[m.b].eloPlace, better: D.P[m.a].eloPlace < D.P[m.b].eloPlace ? 'l' : 'r' }));
   MX.forEach(m => { m.info = D.matchesToday.find(x => x.id === m.id); m.A = D.P[m.a]; m.B = D.P[m.b]; });
 
   const MK = {
@@ -122,7 +127,7 @@
 
   // ---------- запрос с экрана «Новый анализ» и все, что от него зависит ----------
   // DATA.pendingAnalysis: события, режим, модель, кэфы, банк, букмекер, оценка цены. Без него (прямая ссылка) — пример как есть.
-  let REQ, MODE, BK, BANK, FOREIGN, ODDS_EDITED, RUNE_NEW, EST, ID;
+  let REQ, MODE, BK, BANK, FOREIGN, ODDS_EDITED, EST, ID;
   let STEPS, TOTAL_MS, TOTAL, NO_AI, MODELS;
   let LEGS, TOTAL_ODDS, P_EXP, EV, BASE_PCT, BAND, CAL, P_CAL;
   let reqCount = 0;
@@ -139,7 +144,11 @@
   const sameMoney = (a, b) => inCur(a) === inCur(b);
   const curName = () => UI.currency.label.charAt(0).toLowerCase() + UI.currency.label.slice(1); // «евро», «доллары США»
   const stakeAt = pct => fmt.fromMoney(toStep(inCur(BANK) * pct / 100)); // сумма для доли банка, в рублях демо-данных
-  const payoutOf = rub => fmt.fromMoney(roundCur(inCur(rub) * TOTAL_ODDS)); // выплата = сумма × итоговый кэф
+  // «Кэф при ставке» по ногам: по умолчанию кэф из ввода; участник правит его в окнах суммы и сохранения ставки
+  const takenOdds = () => ST.taken || LEGS.map(l => l.odds);
+  const totalOf = arr => Math.round(arr.reduce((a, x) => a * x, 1) * 100) / 100;
+  const curTotal = () => totalOf(takenOdds());
+  const payoutOf = (rub, total) => fmt.fromMoney(roundCur(inCur(rub) * (total || curTotal()))); // выплата = сумма × итоговый кэф при ставке
   const REC = () => (BASE_PCT ? stakeAt(BASE_PCT) : 0);               // рекомендованная сумма по таблице стратегии
   const calibBin = p => D.calibration.find(b => p >= b.lo && p < b.hi);
 
@@ -154,49 +163,85 @@
     return null;
   }
 
+  // Время последнего прогона новостей и оценки, которые можно взять повторно (состояние «Оценка из прошлого анализа»)
+  const REUSED_FROM = { id: 'A-0141', at: '09:12' };
   function buildSteps() {
     const price = MODE.price;
-    const aCost = ((AI.input - AI.cached) * price.write + AI.cached * price.read + AI.output * price.out) / 1e6;
-    const rune = D.P.rune;
-    const runeAt = !RUNE_NEW && rune.updated ? (rune.updated.slice(0, 10) === TODAY ? 'сегодня в ' + rune.updated.slice(11, 16) : fmt.datetime(rune.updated)) : '';
+    const c1 = (AI.prefix * price.write + AI.dossier * price.in + AI.out1 * price.out) / 1e6;
+    const c2 = (AI.prefix * price.read + AI.dossier * price.in + AI.out2 * price.out) / 1e6;
     const m1 = MX[0], m2 = MX[1];
     const adj = (m, k, lbl) => { const r = m.rows.find(x => x.k === k); return m.A.short + ' ' + lbl + ': ' + pr(r.model) + ' → ' + pr(r.claude); };
-    return [
-      { title: 'Разбор событий', model: 'Haiku 4.5', sec: 3, tokens: 2400, cost: 0.004, dur: 450,
-        detail: '2 матча, 8 рынков, кэфы ' + BK + (ODDS_EDITED ? ' с вашими правками' : ' на 09:39'),
+    const reused = SCEN.id === 'reused';
+    const newsFail = SCEN.id === 'news';
+    const steps = [
+      { kind: 'parse', title: 'Разбор событий', model: 'Haiku 5.5', sec: 3, tokens: PARSE.tokens, cost: PARSE.cost, dur: 400,
+        detail: '2 матча, 8 рынков, кэфы ' + BK + (ODDS_EDITED ? ' с вашими правками' : ' на 09:39') + ' · выполнен до запуска',
         live: ['Синнер — Руне: П1/П2 и фора ±1.5', 'Джокович — Рублев: П1/П2 и фора ±1.5'] },
-      RUNE_NEW
-        ? { title: 'Проверка базы игроков', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
-          detail: 'Синнер, Джокович, Рублев — досье свежие · Руне — есть только архив ATP, досье нет',
-          live: ['Синнер, Джокович, Рублев — досье свежие', 'Руне — только архив ATP, нужно досье'] }
-        : { title: 'Проверка базы игроков', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
-          detail: 'Досье всех четырех игроков свежие · Руне собран ' + runeAt,
-          live: ['Синнер, Джокович, Рублев — досье свежие', 'Руне — досье собрано ' + runeAt] },
-      RUNE_NEW
-        ? { title: 'Досье Руне: архив ATP и новости', model: 'Sonnet 5.5 + поиск', sec: 34, tokens: 9800, cost: 0.056, searches: 3, dur: 1100,
-          detail: 'Матчи, подача, прием и тай-брейки за 52 недели — из архива ATP в базе, считает код · новости — 3 запроса (atptour.com, tennis.com), effort low',
-          live: ['Архив ATP в базе: 64 матча за 2 сезона, статистика без ИИ', 'atptour.com — 5 окт: 1/16 финала, 4:6 6:3 6:4 с Тиафо', 'Слух о плече из соцсетей без подтверждения — по L-019 не учитываем'] }
-        : { title: 'Досье Руне — из базы', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
-          detail: 'Собрано ' + runeAt + ' — повторный сбор и поиск не нужны',
-          live: ['Досье Руне из базы', 'Слух о плече без подтверждения — по L-019 не учитываем'] },
-      MODE.news
-        ? { title: 'Новости Синнера, Джоковича, Рублева', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
-          detail: 'Из кэша: обновлены ночью, моложе 12 ч — повторный поиск не нужен · матчи 1/16 финала (5 окт) уже в базе',
-          live: ['Синнер — 04:10, Джокович — 02:30, Рублев — 21:50', 'Новых травм и снятий нет'] }
-        : { title: 'Новости: в этом режиме не ищем', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
-          detail: 'Режим «' + MODE.label + '» свежие новости не ищет — берем то, что уже есть в досье (Синнер — 04:10, Джокович — 02:30, Рублев — 6 окт 21:50)',
-          live: ['Новости из сохраненных досье', 'Свежий поиск пропущен — так дешевле, но можно пропустить снятие'] },
-      { title: 'Расчет ML-модели: Эло по покрытию, подача/прием, нагрузка', model: null, sec: 2, tokens: 0, cost: 0, dur: 350,
-        detail: 'Вероятности по 8 рынкам · формула, без ИИ',
-        live: ['Эло на харде и форма за 10 матчей', 'Подача/прием, нагрузка за 14 дней'] },
-      { title: 'Анализ Claude: корректировка вероятностей', model: MODE.model, sec: MODE.sec, tokens: AI.input + AI.output, cost: aCost, dur: 1500,
-        detail: adj(m1, 'h1m', '2:0') + ', ' + adj(m2, 'p1', 'П1') + ' · 3 вызова без веб-поиска, вызовы 2–3 берут ' + CACHE_SHARE + '% входа из кэша',
-        live: ['Читает досье 4 игроков и 5 уроков', MODE.news ? 'Сверяет новости с уроками L-014 и L-019' : 'Сверяет сохраненные досье с уроками L-014 и L-019', 'Поправки: ' + m1.A.short + ' 2:0 ' + ppDelta(m1.pickRow.claude - m1.pickRow.model) + ', ' + m2.A.short + ' П1 ' + ppDelta(m2.pickRow.claude - m2.pickRow.model)] },
-      { title: 'Подбор экспресса по стратегии', model: null, sec: 3, tokens: 0, cost: 0, dur: 600,
-        detail: 'Стратегия ' + STRAT_V + ' · отобраны 2 события из 8 рынков · сумма по таблице банка',
+      { kind: 'players', title: 'Проверка базы игроков', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
+        detail: 'Все четыре игрока есть в базе · последний матч в базе — 5 окт',
+        live: ['Синнер, Руне, Джокович, Рублев — найдены', 'Архив матчей обновлен 6 окт'] },
+      reused
+        ? { kind: 'news', match: 0, title: 'Новости: Синнер — Руне', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
+          detail: 'Из кэша: найдены в анализе #' + REUSED_FROM.id + ' в ' + REUSED_FROM.at + ', моложе 12 ч',
+          live: ['Синнер — 04:10, Руне — ' + REUSED_FROM.at, 'Новых травм и снятий нет'] }
+        : newsFail
+          ? { kind: 'news', match: 0, title: 'Новости: Синнер — Руне', model: 'Sonnet 5.5 + поиск', sec: 21, tokens: 6200, cost: 0.019, searches: 1, dur: 900, warn: 'Новости не получены: поиск не ответил. Анализ идет без свежих новостей Руне',
+            detail: 'Новости Синнера — из кэша (04:10) · Руне: поиск не ответил, повтор не помог',
+            live: ['Синнер — из кэша, 04:10', 'Руне: поиск не ответил', 'Идем дальше без свежих новостей Руне'] }
+          : { kind: 'news', match: 0, title: 'Новости: Синнер — Руне', model: 'Sonnet 5.5 + поиск', sec: 24, tokens: 9800, cost: 0.046, searches: 2, dur: 900,
+            detail: 'Синнер — из кэша (04:10) · Руне — 2 запроса (atptour.com, tennis.com), effort low · найдено: 1/16 финала с Тиафо, слух о плече без подтверждения',
+            live: ['Синнер — из кэша, моложе 12 ч', 'Руне: atptour.com — 5 окт, 1/16 финала, 4:6 6:3 6:4 с Тиафо', 'Слух о плече из соцсетей без подтверждения — по L-019 не учитываем'] },
+      { kind: 'news', match: 1, title: 'Новости: Джокович — Рублев', model: null, sec: 1, tokens: 0, cost: 0, dur: 250,
+        detail: 'Из кэша: обновлены ночью, моложе 12 ч — повторный поиск не нужен',
+        live: ['Джокович — 02:30, Рублев — 6 окт 21:50', 'Новых травм и снятий нет'] },
+      { kind: 'dossier', title: 'Досье матчей', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
+        detail: 'Эло на харде, форма, подача и прием за 52 недели, личные встречи, нагрузка за 14 дней, новости — из базы, считает код',
+        live: ['Синнер — Руне: 64 и 71 матч за 2 сезона', 'Джокович — Рублев: 41 и 77 матчей'] },
+      { kind: 'model', title: 'Расчет ML-модели: Эло и калибровка', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
+        detail: 'Вероятности победы и форы −1.5 по 2 матчам · формула, без ИИ',
+        live: ['Эло на харде с калибровкой Платта', 'Вероятность 2:0 — по модели сетов'] },
+      reused
+        ? { kind: 'claude', match: 0, title: 'Claude: Синнер — Руне', model: null, sec: 0, tokens: 0, cost: 0, dur: 300, reused: true,
+          detail: 'Оценка Claude из анализа #' + REUSED_FROM.id + ' в ' + REUSED_FROM.at + ', без новых затрат: досье матча не изменилось',
+          live: ['Досье то же, что в анализе #' + REUSED_FROM.id, 'Валуй пересчитан по вашим кэфам'] }
+        : { kind: 'claude', match: 0, title: 'Claude: Синнер — Руне', model: MODE.model, sec: 26, tokens: AI.prefix + AI.dossier + AI.out1, cost: c1, dur: 900,
+          detail: adj(m1, 'h1m', '2:0') + ' · один вызов без веб-поиска, инструкции записаны в кэш',
+          live: ['Читает досье матча и 3 урока', 'Сверяет новости Руне с уроком L-019', 'Поправка: ' + m1.A.short + ' 2:0 ' + ppDelta(m1.pickRow.claude - m1.pickRow.model)] },
+      reused
+        ? { kind: 'claude', match: 1, title: 'Claude: Джокович — Рублев', model: null, sec: 0, tokens: 0, cost: 0, dur: 300, reused: true,
+          detail: 'Оценка Claude из анализа #' + REUSED_FROM.id + ' в ' + REUSED_FROM.at + ', без новых затрат',
+          live: ['Досье то же, что в анализе #' + REUSED_FROM.id, 'Валуй пересчитан по вашим кэфам'] }
+        : { kind: 'claude', match: 1, title: 'Claude: Джокович — Рублев', model: MODE.model, sec: 21, tokens: AI.prefix + AI.dossier + AI.out2, cost: c2, dur: 800,
+          detail: adj(m2, 'p1', 'П1') + ' · инструкции прочитаны из кэша — вход на 85% дешевле',
+          live: ['Читает досье матча', 'Возраст и нагрузка Джоковича против приема', 'Поправка: ' + m2.A.short + ' П1 ' + ppDelta(m2.pickRow.claude - m2.pickRow.model)] },
+      { kind: 'compose', title: 'Экспресс и сумма по стратегии', model: null, sec: 1, tokens: 0, cost: 0, dur: 450,
+        detail: 'Стратегия ' + STRAT_V + ' · отобраны 2 события из 8 рынков · сумма по таблице банка и адаптациям',
         live: ['Фильтр: p ≥ ' + STRAT.minProb + '%, кэф ' + fmt.odds(STRAT.oddsMin) + '–' + fmt.odds(STRAT.oddsMax), 'Итоговый кэф и сумма от банка'] },
     ];
+    // Разбор выполнен еще при создании анализа: в ходе анализа он сразу показан выполненным
+    steps[0].pre = true;
+    return steps;
   }
+
+  // ---------- состояния для согласования (в приложении их нет — это реальные исходы анализа) ----------
+  // stop — шаг, на котором анализ останавливается: индекс шага, код ошибки (errors.* на сервере), текст и что можно сделать.
+  const SCENARIOS = [
+    { id: 'ok', label: 'Обычный ход' },
+    { id: 'news', label: 'Новости не получены — анализ продолжается' },
+    { id: 'reused', label: 'Оценка Claude из прошлого анализа' },
+    { id: 'offline', label: 'Связь прервалась и восстановилась' },
+    { id: 'fail', label: 'Сбой шага и перезапуск', stop: { at: 7, code: 'ai.overloaded', reason: 'Claude сейчас перегружен (ответ 529). Перезапустите анализ через несколько минут', restart: true } },
+    // Тексты лимита и потолка зависят от того, кто смотрит (stopInfo): администратор, участник на ключе
+    // администратора или на своем ключе
+    { id: 'limit', label: 'Лимит месяца исчерпан посреди анализа', stop: { at: 7, code: 'ai.monthly_limit', restart: false } },
+    { id: 'cap', label: 'Потолок анализа', stop: { at: 7, code: 'ai.analysis_cap', restart: false } },
+    { id: 'keyown', label: 'Свой ключ перестал работать (вид участника на своем ключе)', stop: { at: 2, code: 'ai.key_rejected', reason: 'Anthropic не принял ваш ключ: он отозван или неверный. Анализы на вашем ключе остановлены', restart: true, link: ['Ключ Claude в личном кабинете', '#profile-key'] } },
+    { id: 'keyadmin', label: 'Ключ администратора перестал работать', stop: { at: 2, code: 'ai.key_rejected', reason: 'Ключ Claude администратора перестал работать. Мы сообщили администратору — перезапустите анализ, когда он заменит ключ', restart: true } },
+    { id: 'cancel', label: 'Анализ отменен', stop: { at: 4 } },
+  ];
+  let SCEN = SCENARIOS[0];
+  // анализ из «Последних анализов», у которого в макете нет своего разбора: показываем демо-пример с пометкой
+  let OPENED = null;
 
   function setup(req) {
     REQ = req || null;
@@ -206,7 +251,6 @@
     MODE = MODES[REQ && REQ.mode] || MODES.precise;
     BK = (REQ && REQ.bookmaker) || (D.user.bookmakers || [])[0] || 'bet365';
     BANK = REQ && REQ.bank > 0 ? REQ.bank : D.stats.bank;
-    RUNE_NEW = D.P.rune.fresh === 'missing';
     const evs = REQ && Array.isArray(REQ.events) ? REQ.events : [];
     // кэфы и рынки
     MX.forEach(m => {
@@ -219,8 +263,10 @@
       m.pickRow = m.rows.find(r => r.pick);
       m.rows.forEach(r => { r.note = noteFor(r); });
     });
-    MX[0].confNote = (RUNE_NEW ? 'Досье Руне собрано только в этом анализе' : 'Досье Руне собрано сегодня') + '; слух о плече не подтвержден';
-    MX[0].fresh = 'Синнер — сегодня 04:10 · Руне — ' + (RUNE_NEW ? 'собран в этом анализе' : 'собран ' + (D.P.rune.updated && D.P.rune.updated.slice(0, 10) === TODAY ? 'сегодня ' + D.P.rune.updated.slice(11, 16) : 'ранее'));
+    const reused = SCEN.id === 'reused', newsFail = SCEN.id === 'news';
+    MX[0].confNote = newsFail ? 'Свежих новостей Руне нет: поиск не ответил' : 'Слух о плече Руне не подтвержден';
+    MX[0].fresh = 'последний матч в базе — 5 окт у обоих · новости Синнера 04:10, Руне — ' + (newsFail ? 'не получены' : reused ? REUSED_FROM.at : 'найдены в этом анализе');
+    MX.forEach(m => { m.reused = reused; });
     FOREIGN = !!REQ && !(evs.length === MX.length && MX.every(m => m.entered));
     ODDS_EDITED = MX.some(m => m.entered && m.rows.some(r => r.edited));
     // шаги и итоги запуска
@@ -228,7 +274,7 @@
     TOTAL_MS = STEPS.reduce((a, s) => a + s.dur, 0);
     TOTAL = { sec: STEPS.reduce((a, s) => a + s.sec, 0), tokens: STEPS.reduce((a, s) => a + s.tokens, 0), cost: STEPS.reduce((a, s) => a + s.cost, 0), searches: STEPS.reduce((a, s) => a + (s.searches || 0), 0) };
     NO_AI = STEPS.filter(s => !s.model).length;
-    MODELS = ['Opus 5.5', 'Sonnet 5.5', 'Haiku 4.5'].filter(x => STEPS.some(s => s.model && s.model.startsWith(x)));
+    MODELS = ['Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'].filter(x => STEPS.some(s => s.model && s.model.startsWith(x)));
     // оценка цены, которую вы видели перед запуском: для своих событий — из запроса; для чужих событий сравнивать не с чем
     EST = REQ && !FOREIGN && REQ.estimate && REQ.estimate.cost > 0 ? REQ.estimate.cost : null;
     // экспресс и сумма — по кэфам, которые реально пришли
@@ -236,18 +282,35 @@
     TOTAL_ODDS = Math.round(LEGS.reduce((a, l) => a * l.odds, 1) * 100) / 100;
     P_EXP = LEGS.reduce((a, l) => a * l.p, 1);
     EV = P_EXP * TOTAL_ODDS - 1;
-    BASE_PCT = TOTAL_ODDS <= 1.70 ? 2.75 : TOTAL_ODDS <= 2.20 ? 2.25 : TOTAL_ODDS <= STRAT.totalMax ? 1.75 : 0;
+    BASE_PCT = bandPct(TOTAL_ODDS);
     BAND = TOTAL_ODDS <= 1.70 ? STRAT.stakeTable[0] : TOTAL_ODDS <= 2.20 ? STRAT.stakeTable[1] : TOTAL_ODDS <= STRAT.totalMax ? STRAT.stakeTable[2] : null;
     CAL = LEGS.map(l => calibBin(l.p));
     P_CAL = CAL.every(Boolean) ? CAL.reduce((a, b) => a * b.actual, 1) : null;
   }
+  // доля банка по итоговому кэфу — середина диапазона из таблицы стратегии
+  function bandPct(total) { return total <= 1.70 ? 2.75 : total <= 2.20 ? 2.25 : total <= STRAT.totalMax ? 1.75 : 0; }
 
-  const settledBets = D.bets.filter(b => b.status !== 'open');
-  const LAST = settledBets[settledBets.length - 1];
-  const STREAK = D.stats.streak;
+  // ---------- адаптации суммы (Р22: правил серий нет) — те же, что в «Личном кабинете → Банк и стратегия» ----------
+  const S0 = D.stats;
+  const DD = Math.min(0, (S0.bank - S0.peak) / S0.peak * 100);           // просадка от пика, %
+  const GROWTH = (S0.bank - S0.start) / S0.start * 100;                 // рост банка к стартовому, %
+  const WEEK_BASE = D.bankHistory.filter(x => x.date <= addDaysIso(TODAY, -7)).pop() || D.bankHistory[0];
+  const WEEK = (S0.bank - WEEK_BASE.bank) / WEEK_BASE.bank * 100;       // итог недели, %
+  const GROWTH_ON = GROWTH >= 15 && S0.winrate >= 60;                   // потолок доли 4% вместо 3%
+  function addDaysIso(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  // now — сейчас, active — что правило делает с суммой (null — не действует)
+  function adaptRows() {
+    return [
+      { now: 'просадка от пика ' + fmt.signedPct(DD), active: DD <= -20 ? 'защитный режим: 1,5% банка, 2 события до 1.50' : DD <= -10 ? 'не больше 2,5% банка' : null },
+      { now: 'банк ' + fmt.signedPct(GROWTH) + ' к старту при винрейте ' + fmt.pct(S0.winrate), active: GROWTH_ON ? 'потолок 4% вместо 3%' : null },
+      { now: 'за 7 дней ' + fmt.signedPct(WEEK), active: WEEK <= -5 ? 'не больше 2% банка' : WEEK >= 10 ? '+0,5 п.п. к доле' : null },
+    ];
+  }
 
   // ---------- состояние ----------
-  const RUN = { startedAt: null, done: false, focusResult: false, runeMarked: false };
+  // stopped — анализ остановлен: { kind: 'error' | 'cancel', at: индекс шага, ... }; attempt — номер запуска
+  // (перезапуск после сбоя продолжает с упавшего шага); offlineFrom/offlineUntil — демо потери связи.
+  const RUN = { startedAt: null, done: false, focusResult: false, stopped: null, attempt: 1, offlineFrom: null, offlineUntil: null, offlineDone: false };
   // Завершенный анализ записывается в расход один раз (DATA.ai.recordRun): тогда «анализов сегодня», расход и бюджет
   // обновятся на других экранах. Пример по прямой ссылке (без запроса) уже учтен в данных — его не записываем.
   // Повторный показ хода и перерисовки запись не повторяют.
@@ -262,13 +325,20 @@
     RUN.by = D.me; // кто запустил: запись идет ему, даже если демо-роль сменили во время анализа
     if (!REQ || recorded.has(REQ)) return;
     const req = REQ, user = RUN.by, cost = TOTAL.cost;
-    setTimeout(() => record(req, user, cost), Math.max(0, TOTAL_MS - (performance.now() - RUN.startedAt)));
+    // остановленный или отмененный анализ в макете в расход не записываем
+    setTimeout(() => { if (!RUN.stopped) record(req, user, cost); }, Math.max(0, TOTAL_MS - (performance.now() - RUN.startedAt)));
   }
-  const ST = { stake: null, decision: null, betId: null, whyOpen: null, stepsOpen: false, calcOpen: false, exampleAck: false, tab: { m1: 'probs', m2: 'probs' } };
+  // taken — «кэф при ставке» по ногам (по умолчанию кэф из ввода; участник может поправить перед сохранением)
+  const ST = { stake: null, taken: null, decision: null, betId: null, whyOpen: null, stepsOpen: false, calcOpen: false, exampleAck: false, tab: { m1: 'probs', m2: 'probs' } };
   // Новый запуск — когда с экрана «Новый анализ» пришел новый запрос; возврат из «Ставок» показывает готовый результат
   function resetRun() {
-    RUN.startedAt = null; RUN.done = false;
-    ST.decision = null; ST.stake = null; ST.betId = null; ST.exampleAck = false;
+    RUN.startedAt = null; RUN.done = false; RUN.stopped = null; RUN.attempt = 1;
+    RUN.offlineFrom = null; RUN.offlineUntil = null; RUN.offlineDone = false;
+    ST.decision = null; ST.stake = null; ST.taken = null; ST.betId = null; ST.exampleAck = false;
+  }
+  // Начало хода: разбор уже выполнен при создании анализа — анимация начинается со второго шага
+  function startRun() {
+    RUN.startedAt = performance.now() - (reduced() ? TOTAL_MS : STEPS[0].dur);
   }
   const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const stake = () => (ST.stake == null ? REC() : ST.stake);
@@ -277,6 +347,7 @@
   const pr = p => Math.round(p * 100) + '%';
   const ppDelta = d => { const v = Math.round(d * 100); return (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v) + ' п.п.'; };
   const usd3 = n => '$' + n.toFixed(3).replace('.', ',');
+  const usdS = n => (n > 0 && n < 0.01 ? usd3(n) : fmt.usd(n)); // меньше цента — с тремя знаками ($0,001)
   const pctTxt = (n, d = 2) => fmt.dec(n, d === 2 ? 2 : 1).replace(/,?0+$/, '') + '%';
   function tier(v) {
     if (v >= 0.15) return { label: 'сильный', kind: 'good', ic: 'spark' };
@@ -525,6 +596,45 @@
     .analysis-mode-acts { margin-top: 8px; }
     .analysis-mode-acts .btn { max-width: 100%; white-space: normal; height: auto; min-height: 36px; padding-block: 6px; text-align: left; }
     .analysis-modal-seg { max-width: 100%; }
+
+    /* этап 3: сбой шага, предупреждение, повтор оценки, отмена, потеря связи, демо-панель */
+    .analysis-step .analysis-step-ic svg.ic-bad, .analysis-step .analysis-step-ic svg.ic-warn { display: none; }
+    .analysis-step.is-failed .analysis-step-ic { background: var(--bad); border-color: var(--bad); color: var(--accent-fg); }
+    .analysis-step.is-failed .analysis-step-ic svg.ic-bad { display: block; }
+    .analysis-step.is-failed .analysis-step-n, .analysis-step.is-warn .analysis-step-n { display: none; }
+    .analysis-step.is-warn .analysis-step-ic { background: var(--warn-soft); border-color: var(--warn); color: var(--warn-ink); }
+    .analysis-step.is-warn .analysis-step-ic svg.ic-warn { display: block; }
+    .analysis-step.is-warn::before { background: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+    .analysis-step.is-skipped .analysis-step-title > span:first-child { color: var(--fg-3); }
+    .analysis-step.is-skipped .analysis-step-detail { display: none; }
+    .analysis-step-fail { font-size: var(--fs-sm); color: var(--bad-ink); font-weight: 500; }
+    .analysis-step.is-failed .analysis-step-detail { display: none; }
+    .analysis-step-warn { font-size: var(--fs-sm); color: var(--warn-ink); font-weight: 500; }
+    .analysis-step-note { font-size: var(--fs-xs); color: var(--accent-ink); font-weight: 500; }
+    .analysis-step.is-pending .analysis-step-note { display: none; }
+    .analysis-stop .analysis-stop-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .analysis-stop .analysis-stop-acts .btn { max-width: 100%; }
+    .analysis-stop-note { display: flex; gap: 6px; align-items: flex-start; font-size: var(--fs-xs); margin-top: 8px; }
+    .analysis-stop-note svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }
+    .analysis-offline { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--r-md); background: var(--warn-soft); color: var(--warn-ink); font-size: var(--fs-sm); font-weight: 500; }
+    .analysis-offline .analysis-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--warn-ink) 30%, transparent); border-top-color: var(--warn-ink); animation: analysis-rot .8s linear infinite; flex: none; }
+    .analysis-demo { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 12px; border: 1px dashed var(--warn); border-radius: var(--r-md); background: color-mix(in srgb, var(--warn-soft) 45%, var(--surface)); }
+    .analysis-demo .field { flex: 1 1 260px; min-width: 0; margin: 0; }
+    .analysis-demo .field-label { font-size: var(--fs-xs); }
+    .analysis-demo-acts { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; max-width: 100%; }
+    .analysis-demo-acts .btn { max-width: 100%; white-space: normal; height: auto; min-height: 40px; }
+    @media (max-width: 720px) { .analysis-demo { flex-direction: column; align-items: stretch; } .analysis-demo .field { flex: none; } .analysis-demo .demo-pill { align-self: flex-start; } }
+    .analysis-reused { align-self: flex-start; max-width: 100%; }
+    .analysis-reused .chip { white-space: normal; height: auto; min-height: 24px; padding: 3px 9px; border-radius: var(--r-md); line-height: 1.35; max-width: 100%; }
+    .analysis-reused .chip svg { flex: none; }
+    .analysis-legodds { display: flex; flex-direction: column; gap: 8px; }
+    .analysis-legodd { display: grid; grid-template-columns: minmax(0, 1fr) 112px; gap: 4px 12px; align-items: center; }
+    .analysis-legodd .input { text-align: center; font-family: var(--font-mono); height: 40px; }
+    .analysis-legodd-name { min-width: 0; font-size: var(--fs-sm); }
+    .analysis-legodd-name b { display: block; font-weight: 600; }
+    .analysis-legodd-name small { display: block; font-size: var(--fs-xs); color: var(--fg-3); }
+    .analysis-legodd .field-error { grid-column: 1 / -1; }
+    @media (max-width: 720px) { .analysis-legodd { grid-template-columns: minmax(0, 1fr) 96px; } .analysis-legodd .input { font-size: 16px; height: 44px; } }
   `);
 
   // ---------- шапка экрана ----------
@@ -533,60 +643,90 @@
     c.title = MODE.id === 'precise' ? 'Режим для решения о ставке' : MODE.id === 'eco' ? 'Черновая оценка — не для решения о ставке' : 'Качество режима на eval-наборе еще не проверено';
     return c;
   }
-  function headBlock(done) {
-    const tm = MX[0].info;
+  // state: 'running' | 'done' | 'stopped' | 'cancelled'
+  function headBlock(state) {
+    const tm = MX[0].info, done = state === 'done';
     const how = MODE.news ? 'Claude поправил их по свежим новостям' : 'Claude (' + MODE.model + ') поправил их по сохраненным досье, без поиска свежих новостей';
+    const n = MX.length + ' ' + fmt.plural(MX.length, 'матча', 'матчей', 'матчей');
+    const title = done
+      ? (FOREIGN ? 'Пример: экспресс' : 'Экспресс') + ' из ' + LEGS.length + ' событий · кэф ' + fmt.odds(TOTAL_ODDS)
+      : state === 'stopped' ? 'Анализ ' + n + ' остановлен'
+        : state === 'cancelled' ? 'Анализ ' + n + ' отменен'
+          : (FOREIGN ? 'Пример: анализ ' + n : 'Анализирую ' + MX.length + ' ' + fmt.plural(MX.length, 'матч', 'матча', 'матчей'));
+    const lead = done
+      ? 'ML-модель посчитала вероятности, ' + how + ', стратегия ' + STRAT_V + ' отобрала рынки и сумму. Решение — за вами.'
+      : state === 'stopped' ? 'Результата пока нет. Что случилось и что можно сделать — ниже.'
+        : state === 'cancelled' ? 'Вы отменили анализ. Результата нет.'
+          : 'Шаги идут по порядку: сначала дешевые проверки и формулы, дорогая модель — только там, где она нужна.';
     return h('div', { class: 'page-head analysis-head' },
       h('div', null,
         h('div', { class: 'analysis-eyebrow' }, h('span', { class: 'eyebrow' }, fmt.dateFull(TODAY) + ' · ' + tm.tournament + ' · ' + tm.category), UI.surfaceChip('hard'), modeChip()),
-        h('h2', { id: 'analysis-title', tabindex: '-1' }, done
-          ? (FOREIGN ? 'Пример: экспресс' : 'Экспресс') + ' из ' + LEGS.length + ' событий · кэф ' + fmt.odds(TOTAL_ODDS)
-          : (FOREIGN ? 'Пример: анализ ' + MX.length + ' ' + fmt.plural(MX.length, 'матча', 'матчей', 'матчей') : 'Анализирую ' + MX.length + ' ' + fmt.plural(MX.length, 'матч', 'матча', 'матчей'))),
-        h('p', { class: 'lead' }, done
-          ? 'ML-модель посчитала вероятности, ' + how + ', стратегия ' + STRAT_V + ' отобрала рынки и сумму. Решение — за вами.'
-          : 'Шаги идут по порядку: сначала дешевые проверки и формулы, дорогая модель — только там, где она нужна.')),
+        h('h2', { id: 'analysis-title', tabindex: '-1' }, title),
+        h('p', { class: 'lead' }, lead)),
       button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new' }));
   }
 
   // ---------- ход анализа ----------
+  const stepStart = i => STEPS.slice(0, i).reduce((a, s) => a + s.dur, 0);
+  // момент остановки текущего состояния (ошибка — на 35% шага, отмена — в начале шага)
+  function stopTime() {
+    const st = SCEN.stop;
+    if (!st || RUN.attempt > 1) return null;
+    return stepStart(st.at) + (SCEN.id === 'cancel' ? 0 : Math.round(STEPS[st.at].dur * 0.35));
+  }
   function phaseAt(t) {
     let acc = 0;
     for (let i = 0; i < STEPS.length; i++) { if (t < acc + STEPS[i].dur) return { i, f: Math.max(0, (t - acc) / STEPS[i].dur) }; acc += STEPS[i].dur; }
     return { i: STEPS.length, f: 1 };
   }
   function stepMeta(s, f) {
+    if (s.reused) return 'без новых затрат';
     const sec = Math.max(f > 0 ? 1 : 0, Math.round(s.sec * f));
     if (!s.tokens) return fmt.duration(sec) + ' · без токенов';
     const tk = Math.round(s.tokens * f / 100) * 100;
-    return fmt.duration(sec) + ' · ' + fmt.int(tk) + ' ток. · ' + usd3(s.cost * f);
+    return fmt.duration(sec) + ' · ' + fmt.int(tk) + ' ток. · ' + usd3(s.cost * f) + (s.searches && f >= 1 ? ' · ' + s.searches + ' ' + fmt.plural(s.searches, 'поиск', 'поиска', 'поисков') : '');
   }
-  function modelChip(s) { return s.model ? chip(s.model, 'accent', 'spark') : chip('без ИИ', 'outline', 'database'); }
+  function modelChip(s) {
+    if (s.reused) return chip('повтор оценки', 'info', 'history');
+    return s.model ? chip(s.model, 'accent', 'spark') : chip('без ИИ', 'outline', 'database');
+  }
 
   function stepEl(s, i) {
     const live = s.live.map(t => h('li', { hidden: true }, t));
     const meta = h('div', { class: 'analysis-step-meta' }, 'ожидает');
     const sr = h('span', { class: 'sr-only' }, 'ожидает');
+    const extra = h('div');
     const el = h('li', { class: 'analysis-step is-pending' },
-      h('span', { class: 'analysis-step-ic', 'aria-hidden': 'true' }, h('span', { class: 'analysis-step-n' }, String(i + 1)), icon('check')),
+      h('span', { class: 'analysis-step-ic', 'aria-hidden': 'true' }, h('span', { class: 'analysis-step-n' }, String(i + 1)), icon('check'), icon('x', { class: 'ic-bad' }), icon('alert', { class: 'ic-warn' })),
       h('div', { class: 'analysis-step-main' },
         h('div', { class: 'analysis-step-title' }, h('span', null, s.title), modelChip(s), sr),
         h('div', { class: 'analysis-step-detail' }, s.detail),
+        s.reused && h('div', { class: 'analysis-step-note' }, 'Оценка Claude из анализа #' + REUSED_FROM.id + ' в ' + REUSED_FROM.at + ', без новых затрат'),
+        extra,
         h('ul', { class: 'analysis-live' }, live)),
       meta);
     let last = '';
+    const SR = { done: ' — готово', active: ' — выполняется', failed: ' — не выполнен', warn: ' — выполнен с предупреждением', skipped: ' — не выполнялся', pending: ' — ожидает' };
     return {
       el,
-      set(status, f) {
-        if (status !== last) {
-          el.className = 'analysis-step is-' + status;
-          sr.textContent = status === 'done' ? ' — готово' : status === 'active' ? ' — выполняется' : ' — ожидает';
-          last = status;
+      // status: pending | active | done | failed | skipped; warn у шага новостей превращает done в «выполнен с предупреждением»
+      set(status, f, reason) {
+        const shown = status === 'done' && s.warn ? 'warn' : status;
+        if (shown !== last) {
+          el.className = 'analysis-step is-' + shown;
+          sr.textContent = SR[shown];
+          UI.clear(extra);
+          if (shown === 'failed') extra.appendChild(h('div', { class: 'analysis-step-fail' }, 'Не выполнен: ' + reason));
+          if (shown === 'warn') extra.appendChild(h('div', { class: 'analysis-step-warn' }, s.warn));
+          last = shown;
         }
         if (status === 'done') meta.textContent = stepMeta(s, 1);
         else if (status === 'active') {
           meta.textContent = stepMeta(s, f);
           live.forEach((li, k) => { li.hidden = f < k / live.length; li.classList.toggle('is-ok', f >= (k + 1) / live.length); });
-        } else meta.textContent = 'ожидает';
+        } else if (status === 'failed') meta.textContent = 'без токенов';
+        else if (status === 'skipped') meta.textContent = 'не выполнялся';
+        else meta.textContent = 'ожидает';
       },
     };
   }
@@ -601,7 +741,7 @@
       extra,
       h('span', null, 'Время ', h('b', null, fmt.duration(tot.sec))),
       h('span', null, 'Токены ', h('b', null, fmt.int(tot.tokens))),
-      h('span', null, 'Стоимость ', h('b', null, fmt.usd(tot.cost))),
+      h('span', null, 'Стоимость ', h('b', null, usdS(tot.cost))),
       withEst && EST != null && h('span', { title: estWhy() }, 'Оценка до запуска ', h('b', null, '≈' + fmt.usd(EST))));
   }
   // почему фактическая цена разошлась с оценкой на экране «Новый анализ»
@@ -609,7 +749,30 @@
     if (EST == null) return '';
     const d = TOTAL.cost - EST;
     if (Math.abs(d) < 0.01) return 'Совпало с оценкой';
-    return d < 0 ? (MODE.news ? 'Дешевле оценки: новости Синнера, Джоковича и Рублева взяты из кэша' : 'Дешевле оценки: вывод модели получился короче среднего') : 'Дороже оценки: досье нового игрока потребовало больше текста';
+    if (SCEN.id === 'reused') return 'Дешевле оценки: оценки Claude взяты из анализа #' + REUSED_FROM.id + ', новые вызовы не понадобились';
+    return d < 0 ? 'Дешевле оценки: новости Синнера, Джоковича и Рублева взяты из кэша, а оценка второго матча прочитала инструкции из кэша' : 'Дороже оценки: поиск новостей вернул длинные страницы';
+  }
+
+  // Отмена: сервер проверяет ее между шагами — шаг, который идет сейчас, доработает и будет оплачен, следующие
+  // не запустятся. Остановка — на следующем шаге, с него и «Продолжить».
+  const afterCurrent = ph => ({ i: Math.min(ph.i + 1, STEPS.length - 1), f: 0 });
+  function cancelAnalysis(root, ph) {
+    UI.modal({
+      title: 'Отменить анализ?',
+      body: h('div', { class: 'stack' },
+        h('p', { class: 'small soft', style: 'margin:0' }, 'Шаг, который идет сейчас, доработает, следующие не запустятся. Вместе с ним будет потрачено ' + usdS(totalsAt(afterCurrent(ph)).cost) + ' — эти деньги не вернутся. Результата не будет.'),
+        h('p', { class: 'xsmall muted', style: 'margin:0' }, 'События останутся в «Новом анализе» — их можно поправить и запустить снова.')),
+      actions: close => [
+        button('Продолжить анализ', { kind: 'secondary', onClick: close }),
+        button('Отменить анализ', { kind: 'danger', icon: 'x', onClick: () => {
+          close();
+          const next = afterCurrent(phaseAt(performance.now() - RUN.startedAt)), tot = totalsAt(next);
+          RUN.stopped = { kind: 'cancel', at: next.i, f: 0, cost: tot.cost, sec: tot.sec, tokens: tot.tokens };
+          UI.toast('Анализ #' + ID + ' отменен', 'x');
+          if (root.isConnected) draw(root);
+        } }),
+      ],
+    });
   }
 
   function progressRunning(root) {
@@ -617,46 +780,150 @@
     const bar = h('i');
     const stepLabel = h('b');
     const nums = h('div');
+    const offline = h('div', { 'aria-live': 'polite' });
     const live = h('p', { class: 'sr-only', 'aria-live': 'polite' });
-    const skip = button('Показать результат сразу', { kind: 'secondary', size: 'sm', icon: 'bolt', onClick: () => { RUN.focusResult = true; finish(root); } });
+    const cancel = button('Отменить анализ', { kind: 'ghost', size: 'sm', icon: 'x', onClick: () => cancelAnalysis(root, phaseAt(performance.now() - RUN.startedAt)) });
     const el = card({
-      eyebrow: 'Анализ #' + ID,
+      eyebrow: 'Анализ #' + ID + (RUN.attempt > 1 ? ' · попытка ' + RUN.attempt : ''),
       title: 'Claude разбирает ' + MX.length + ' ' + fmt.plural(MX.length, 'матч', 'матча', 'матчей') + (FOREIGN ? ' из примера' : ''),
-      subtitle: 'Обычно 1–2 минуты · в макете ускорено до 5 секунд',
-      actions: [skip],
+      subtitle: RUN.attempt > 1 ? 'Продолжаем с упавшего шага — выполненные шаги повторно не оплачиваются' : 'Обычно 1–2 минуты · в макете ускорено до 5 секунд',
+      actions: [cancel],
       body: [
         h('div', { class: 'analysis-prog-top' },
           h('div', { class: 'analysis-prog-bar', role: 'progressbar', 'aria-label': 'Ход анализа', 'aria-valuemin': '0', 'aria-valuemax': String(STEPS.length) }, bar),
           nums),
+        offline,
         h('ol', { class: 'analysis-steps', 'aria-label': 'Шаги анализа' }, steps.map(s => s.el)),
-        UI.callout('', 'info', NO_AI + ' из ' + STEPS.length + ' шагов идут без ИИ: проверка базы, ' + (MODE.news ? 'новости из кэша' : 'новости из досье') + (RUNE_NEW ? '' : ', досье Руне из базы') + ', формула ML-модели и правила стратегии. Статистику считает код по архиву ATP, ' + (RUNE_NEW ? 'веб-поиск — только новости. Платные токены — на разбор текста, досье нового игрока и итоговую оценку.' : 'веб-поиск не нужен. Платные токены — на разбор текста и итоговую оценку.')),
+        UI.callout('', 'info', NO_AI + ' из ' + STEPS.length + ' шагов идут без ИИ: проверка базы, новости из кэша, досье, базовая модель и правила стратегии. Статистику считает код по архиву ATP, веб-поиск — только новости. Платные токены — на разбор текста, поиск новостей и оценку каждого матча.'),
         live,
       ],
     });
-    let lastI = -1;
-    function tick() {
-      if (!el.isConnected || RUN.done) return;
-      const t = performance.now() - RUN.startedAt;
-      if (t >= TOTAL_MS) { finish(root); return; }
+    let lastI = -1, wasOffline = false;
+    const stopT = stopTime();
+    function paint(t) {
       const ph = phaseAt(t);
       steps.forEach((s, i) => s.set(i < ph.i ? 'done' : i === ph.i ? 'active' : 'pending', i === ph.i ? ph.f : 0));
       bar.style.width = (t / TOTAL_MS * 100).toFixed(1) + '%';
       bar.parentNode.setAttribute('aria-valuenow', String(ph.i));
       if (ph.i !== lastI) {
         lastI = ph.i;
-        stepLabel.textContent = String(ph.i + 1);
-        live.textContent = 'Шаг ' + (ph.i + 1) + ' из ' + STEPS.length + ': ' + STEPS[ph.i].title;
+        stepLabel.textContent = String(Math.min(ph.i + 1, STEPS.length));
+        live.textContent = 'Шаг ' + (ph.i + 1) + ' из ' + STEPS.length + ': ' + (STEPS[ph.i] || STEPS[STEPS.length - 1]).title;
       }
       UI.clear(nums).appendChild(numsLine(totalsAt(ph), h('span', null, 'Шаг ', stepLabel, ' из ' + STEPS.length)));
+    }
+    function tick() {
+      if (!el.isConnected || RUN.done || RUN.stopped) return;
+      const now = performance.now();
+      let t = now - RUN.startedAt;
+      // демо «Связь прервалась»: поток событий молчит ~2,5 с, экран показывает, что переподключается
+      if (SCEN.id === 'offline' && !RUN.offlineDone && RUN.offlineUntil == null && t >= TOTAL_MS * 0.45) { RUN.offlineFrom = t; RUN.offlineUntil = now + 2500; }
+      if (RUN.offlineUntil != null) {
+        if (now < RUN.offlineUntil) {
+          t = RUN.offlineFrom;
+          if (!wasOffline) {
+            wasOffline = true;
+            UI.clear(offline).appendChild(h('div', { class: 'analysis-offline', role: 'status' }, h('span', { class: 'analysis-spin', 'aria-hidden': 'true' }), 'Связь прервалась — обновляем… Анализ идет на сервере, ход подтянется сам'));
+          }
+          paint(t); setTimeout(tick, 120); return;
+        }
+        RUN.startedAt += 2500; RUN.offlineUntil = null; RUN.offlineDone = true; wasOffline = false;
+        UI.clear(offline);
+        UI.toast('Связь восстановлена: ход анализа обновлен', 'refresh');
+        t = now - RUN.startedAt;
+      }
+      if (stopT != null && t >= stopT) { stopAt(root); return; }
+      if (t >= TOTAL_MS) { finish(root); return; }
+      paint(t);
       setTimeout(tick, 70);
     }
     // первый кадр синхронно — чтобы не было пустого состояния
+    paint(Math.min(performance.now() - RUN.startedAt, stopT != null ? stopT : TOTAL_MS));
     setTimeout(tick, 0);
-    const t0 = performance.now() - RUN.startedAt, ph0 = phaseAt(t0);
-    steps.forEach((s, i) => s.set(i < ph0.i ? 'done' : i === ph0.i ? 'active' : 'pending', i === ph0.i ? ph0.f : 0));
-    stepLabel.textContent = String(Math.min(ph0.i + 1, STEPS.length));
-    nums.appendChild(numsLine(totalsAt(ph0), h('span', null, 'Шаг ', stepLabel, ' из ' + STEPS.length)));
     return el;
+  }
+
+  // Лимит и потолок — по тому, кто смотрит (как DATA.ai.access): у администратора личного лимита нет, его анализы
+  // ограничены общим бюджетом и жестким потолком программы ($1); участник на ключе администратора — своими лимитами,
+  // которые поднимает администратор; на своем ключе — своим потолком и счетом в консоли Anthropic
+  const usdL = n => fmt.usd(n, Number.isInteger(n) ? 0 : 2);
+  function stopInfo(st) {
+    const me = D.me, own = me.aiMode === 'own', admin = me.role === 'admin' && !own, L = D.ai.limitOf(me);
+    if (SCEN.id === 'limit') {
+      if (admin) return { code: 'ai.budget_exhausted', reason: 'Общий бюджет ключа администратора на месяц исчерпан (' + usdL(D.admin.budget.monthly) + '). Поднимите его в «Администрирование → Ключ и бюджет»', link: ['Ключ и бюджет', '#admin-key'], wait: 'Перезапуск станет доступен, когда бюджет позволит' };
+      if (own) return { code: 'ai.billing', reason: 'На счете вашего ключа Claude закончились деньги или достигнут лимит трат. Пополните счет в консоли Anthropic', restart: true, link: ['Ключ Claude в личном кабинете', '#profile-key'] };
+      return { reason: 'Лимит на ИИ в этом месяце исчерпан (' + usdL(L ? L.monthly : D.admin.defaults.monthly) + '). Попросите администратора поднять лимит или подключите свой ключ', link: ['Ключ Claude в личном кабинете', '#profile-key'], wait: 'Перезапуск станет доступен, когда лимит позволит' };
+    }
+    if (SCEN.id === 'cap') {
+      const cap = own ? (me.ownCap != null ? me.ownCap : D.admin.defaults.perAnalysis) : admin ? 1 : (L ? L.perAnalysis : D.admin.defaults.perAnalysis);
+      const spent = totalsAt({ i: st.at, f: 0 }).cost, next = Math.ceil((cap - spent) * 100 + 4) / 100;
+      const head = 'Следующий вызов Claude может стоить до ' + usdS(next) + ', а вместе с уже потраченными ' + usdS(spent) + ' это больше ';
+      if (own) return { code: 'ai.own_cap', reason: head + 'вашего потолка ' + usdL(cap) + ' на один анализ. Поднимите потолок в «Ключ Claude» или уберите часть событий', restart: true, link: ['Поднять свой потолок', '#profile-key'] };
+      if (admin) return { reason: head + 'жесткого потолка программы ' + usdL(cap) + ' на один анализ. Уберите часть событий и запустите снова', wait: 'Перезапуск с тем же составом событий упрется в тот же потолок' };
+      return { reason: head + 'потолка ' + usdL(cap) + ' на один анализ. Попросите администратора поднять потолок или уберите часть событий', wait: 'Перезапуск станет доступен, когда администратор поднимет потолок' };
+    }
+    return {};
+  }
+
+  // Анализ остановился на шаге SCEN.stop.at (сбой, лимит, потолок, ключ) или отменен в демо-состоянии «Анализ отменен»
+  function stopAt(root) {
+    const st = Object.assign({}, SCEN.stop, stopInfo(SCEN.stop)), ph = { i: st.at, f: 0 }, tot = totalsAt(ph);
+    RUN.stopped = SCEN.id === 'cancel'
+      ? { kind: 'cancel', at: st.at, f: 0, cost: tot.cost, sec: tot.sec, tokens: tot.tokens }
+      : { kind: 'error', at: st.at, f: 0.35, cost: tot.cost, sec: tot.sec, tokens: tot.tokens, code: st.code, reason: st.reason, restart: st.restart, link: st.link, wait: st.wait };
+    if (root.isConnected) draw(root);
+  }
+
+  function restartFromStep(root) {
+    const at = RUN.stopped.at;
+    RUN.stopped = null; RUN.attempt += 1; RUN.done = false;
+    RUN.startedAt = performance.now() - stepStart(at);
+    UI.toast('Анализ #' + ID + ' перезапущен с шага ' + (at + 1) + ': выполненные шаги не повторяются', 'refresh');
+    draw(root);
+    window.scrollTo(0, 0);
+  }
+
+  function stopBanner(root) {
+    const r = RUN.stopped, s = STEPS[r.at];
+    if (r.kind === 'cancel') {
+      return h('div', { class: 'callout analysis-stop', role: 'alert' }, icon('x'),
+        h('div', { style: 'min-width:0' },
+          h('b', null, 'Анализ отменен на шаге ' + (r.at + 1) + ' из ' + STEPS.length + '. '),
+          'Потрачено ' + usdS(r.cost) + ' — за шаги, которые успели выполниться; остальные не запускались. События сохранены в «Новом анализе».',
+          h('div', { class: 'analysis-stop-acts' },
+            button('Продолжить с шага ' + (r.at + 1), { kind: 'primary', size: 'sm', icon: 'refresh', onClick: () => restartFromStep(root) }),
+            button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new' })),
+          h('div', { class: 'analysis-stop-note' }, icon('check'), h('span', null, 'Выполненные шаги повторно не оплачиваются.'))));
+    }
+    const done = STEPS.slice(0, r.at).filter(x => x.cost > 0).map(x => x.title.replace('Claude: ', 'оценка ').replace('Новости: ', 'новости ').replace('Разбор событий', 'разбор текста'));
+    const reason = !r.restart && r.code === 'ai.monthly_limit' ? D.ai.access(D.me, 0) : null;
+    const restart = button('Перезапустить с этого шага', { kind: 'primary', size: 'sm', icon: 'refresh', disabled: !r.restart, onClick: () => restartFromStep(root) });
+    return h('div', { class: 'callout bad analysis-stop', role: 'alert' }, icon('alert'),
+      h('div', { style: 'min-width:0' },
+        h('b', null, 'Анализ остановлен на шаге ' + (r.at + 1) + ' из ' + STEPS.length + ' «' + s.title + '». '),
+        r.reason + '.',
+        h('div', { class: 'analysis-stop-acts' },
+          restart,
+          r.link && button(r.link[0], { kind: 'secondary', size: 'sm', icon: 'key', href: r.link[1] }),
+          button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new' })),
+        !r.restart && h('div', { class: 'analysis-stop-note' }, icon('info'), h('span', null, (r.wait || 'Перезапуск станет доступен, когда лимит позволит') + (reason ? ' (сейчас: ' + reason.charAt(0).toLowerCase() + reason.slice(1) + ')' : '') + '.')),
+        h('div', { class: 'analysis-stop-note' }, icon('check'), h('span', null, 'Уже выполненные шаги повторно не оплачиваются' + (done.length ? ' (' + done.join(', ') + ') — их результат сохранен' : '') + '. Потрачено ' + usdS(r.cost) + '.'))));
+  }
+
+  function progressStopped(root) {
+    const r = RUN.stopped;
+    const steps = STEPS.map(stepEl);
+    steps.forEach((s, i) => s.set(i < r.at ? 'done' : i === r.at ? (r.kind === 'cancel' ? 'skipped' : 'failed') : 'skipped', i === r.at ? r.f : 0, r.reason));
+    return card({
+      eyebrow: 'Анализ #' + ID + (RUN.attempt > 1 ? ' · попытка ' + RUN.attempt : ''),
+      title: r.kind === 'cancel' ? 'Анализ отменен' : 'Шаг ' + (r.at + 1) + ' не выполнен',
+      subtitle: r.kind === 'cancel' ? 'Остальные шаги не запускались' : 'Ход анализа до остановки',
+      actions: [chip(r.kind === 'cancel' ? 'Отменен' : 'Остановлен', r.kind === 'cancel' ? 'outline' : 'bad', r.kind === 'cancel' ? 'x' : 'alert')],
+      body: [
+        numsLine({ sec: r.sec, tokens: r.tokens, cost: r.cost }, h('span', null, 'Выполнено шагов ', h('b', null, r.at + ' из ' + STEPS.length))),
+        h('ol', { class: 'analysis-steps', 'aria-label': 'Шаги анализа' }, steps.map(s => s.el)),
+      ],
+    });
   }
 
   function progressDone(root) {
@@ -668,14 +935,37 @@
       toggle.setAttribute('aria-expanded', String(ST.stepsOpen));
       toggle.querySelector('span').textContent = ST.stepsOpen ? 'Скрыть шаги' : 'Показать шаги';
     } });
-    const replay = !reduced() && button('Показать ход заново', { kind: 'ghost', size: 'sm', icon: 'play', onClick: () => { RUN.startedAt = performance.now(); RUN.done = false; draw(root); } });
+    const warn = STEPS.find(s => s.warn);
     return h('section', { class: 'card', 'aria-label': 'Ход анализа' },
       h('div', { class: 'card-body' },
         h('div', { class: 'analysis-done-row' },
           chip('Анализ готов', 'good', 'check'),
           numsLine(TOTAL, h('span', null, 'Шагов ', h('b', null, String(STEPS.length))), true),
-          h('div', { class: 'row' }, replay, toggle)),
+          h('div', { class: 'row' }, toggle)),
+        warn && UI.callout('warn', 'alert', h('b', null, 'Готов с предупреждением. '), warn.warn + '. Перед ставкой проверьте новости игрока сами.'),
         list));
+  }
+
+  // Демо-панель: состояния хода анализа для согласования (в приложении ее нет)
+  function demoPanel(root) {
+    const f = UI.field({ id: 'analysis-demo-state', label: 'Состояние анализа', value: SCEN.id, options: SCENARIOS.map(x => ({ value: x.id, label: x.label })) });
+    f.querySelector('select').addEventListener('change', e => setScenario(root, e.target.value));
+    return h('div', { class: 'analysis-demo', role: 'region', 'aria-label': 'Только в макете' },
+      h('span', { class: 'demo-pill' }, 'Только в макете'),
+      f,
+      h('div', { class: 'analysis-demo-acts' },
+        button('Показать результат сразу', { kind: 'ghost', size: 'sm', icon: 'bolt', disabled: RUN.done || !!RUN.stopped, onClick: () => { RUN.focusResult = true; finish(root); } }),
+        !reduced() && button('Показать ход заново', { kind: 'ghost', size: 'sm', icon: 'play', onClick: () => setScenario(root, SCEN.id) })));
+  }
+  function setScenario(root, id) {
+    SCEN = SCENARIOS.find(x => x.id === id) || SCENARIOS[0];
+    OPENED = null;
+    setup(REQ); resetRun();
+    startRun();
+    const stopT = stopTime();
+    if (stopT != null && performance.now() - RUN.startedAt >= stopT) stopAt(root);
+    else if (performance.now() - RUN.startedAt >= TOTAL_MS) finish(root);
+    else draw(root);
   }
 
   function skeleton() {
@@ -686,12 +976,8 @@
   }
 
   function finish(root) {
-    if (!RUN.runeMarked && D.P.rune && D.P.rune.fresh === 'missing') {
-      // профиль собран на шаге 3 — теперь он есть в базе
-      D.P.rune.fresh = 'fresh'; D.P.rune.updated = TODAY + 'T09:40';
-      RUN.runeMarked = true;
-    }
     RUN.done = true;
+    RUN.stopped = null;
     record(REQ, RUN.by || D.me, TOTAL.cost);
     if (root.isConnected) draw(root);
   }
@@ -700,7 +986,7 @@
   function vsBlock(m) {
     const sideHead = (p, cls) => h('div', { class: ['analysis-vs-side', cls] },
       h('span', { class: 'analysis-vs-name' }, plink(p)),
-      h('span', { class: 'analysis-vs-sub' }, p.country + ' · №' + p.rank + ' ATP'));
+      h('span', { class: 'analysis-vs-sub' }, p.country + ' · №' + p.eloPlace + ' по Эло'));
     const val = (row, side) => {
       const better = row.better === side;
       const main = row.form
@@ -776,8 +1062,14 @@
       actions: [confChip(m)],
       class: 'analysis-match',
     };
+    // повтор оценки и новости, которые не удалось получить, видны прямо в карточке матча
+    const notes = [
+      m.reused && h('div', { class: 'analysis-reused' }, chip('Оценка Claude из анализа #' + REUSED_FROM.id + ' в ' + REUSED_FROM.at + ', без новых затрат', 'info', 'history')),
+      SCEN.id === 'news' && m === MX[0] && UI.callout('warn', 'alert', h('b', null, 'Новости Руне не получены: '), 'поиск не ответил, оценка Claude — без свежих новостей о нем. Перед ставкой проверьте новости сами.'),
+    ];
     if (!mobile) {
       return card(Object.assign(head, { body: [
+        notes,
         pickLine,
         sec('Сравнение игроков', 'лучший показатель в паре отмечен ✓', vsBlock(m)),
         sec('Вероятности по рынкам', oddsHint() + ' — перед ставкой сверьте линию', [h('div', { style: 'margin:0 -18px' }, probsTable(m)), h('p', { class: 'analysis-hint' }, PROB_HINT)]),
@@ -788,7 +1080,7 @@
     const drawPanel = () => {
       UI.clear(panel);
       const t = ST.tab[m.id];
-      if (t === 'probs') UI.append(panel, [h('p', { class: 'analysis-hint' }, 'ML-модель → Claude (поправка в п.п.) → рынок без маржи. ' + oddsHint() + '.'), probsList(m), h('p', { class: 'analysis-hint' }, PROB_HINT)]);
+      if (t === 'probs') UI.append(panel, [h('p', { class: 'analysis-hint' }, 'ML-модель → Claude (поправка в п.п., не больше ±10) → рынок без маржи. ' + oddsHint() + '.'), probsList(m), h('p', { class: 'analysis-hint' }, PROB_HINT)]);
       else if (t === 'cmp') UI.append(panel, [vsBlock(m), h('p', { class: 'analysis-hint' }, '✓ — лучший показатель в паре')]);
       else panel.appendChild(factorsBlock(m));
     };
@@ -796,7 +1088,7 @@
     const seg = UI.segmented({ label: 'Раздел анализа матча', items: [{ id: 'probs', label: 'Вероятности' }, { id: 'cmp', label: 'Сравнение' }, { id: 'factors', label: 'Факторы' }], active: ST.tab[m.id], onChange: id => { ST.tab[m.id] = id; drawPanel(); } });
     seg.style.alignSelf = 'stretch';
     seg.classList.add('analysis-seg');
-    return card(Object.assign(head, { body: [pickLine, seg, panel] }));
+    return card(Object.assign(head, { body: [notes, pickLine, seg, panel] }));
   }
 
   // ---------- экспресс ----------
@@ -819,21 +1111,22 @@
           h('div', { class: 'analysis-leg-meta' }, r.desc)),
         h('div', { class: 'analysis-leg-right' },
           h('div', { class: 'analysis-leg-p', 'aria-label': 'Вероятность ' + pr(r.claude) }, h('span', { 'aria-hidden': 'true' }, 'шанс'), h('b', { 'aria-hidden': 'true' }, pr(r.claude))),
-          UI.oddsBox('кэф', r.odds, true)));
+          UI.oddsBox(takenOdds()[MX.indexOf(m)] !== r.odds ? 'при ставке' : 'кэф', takenOdds()[MX.indexOf(m)], true)));
     }));
 
     const totals = h('div', { class: 'analysis-totals' },
-      h('div', { class: 'analysis-total' }, h('span', null, 'Кэф'), h('b', { class: 'mono' }, fmt.odds(TOTAL_ODDS)), h('small', null, LEGS.map(l => fmt.odds(l.odds)).join(' × '))),
+      h('div', { class: 'analysis-total' }, h('span', null, curTotal() !== TOTAL_ODDS ? 'Кэф при ставке' : 'Кэф'), h('b', { class: 'mono' }, fmt.odds(curTotal())), h('small', null, takenOdds().map(x => fmt.odds(x)).join(' × '))),
       h('div', { class: 'analysis-total' }, h('span', null, 'Вероятность'), h('b', null, '≈ ' + pr(P_EXP)), h('small', null, LEGS.map(l => fmt.dec(l.p)).join(' × '))),
       h('div', { class: 'analysis-total' }, h('span', { title: 'Ожидаемый результат (EV) на ' + fmt.money(fmt.fromMoney(1)) + ' ставки' }, 'Перевес'), h('b', null, fmt.signedPct(EV * 100, 1)), h('small', null, '≈ ' + fmt.signedMoney(s * EV))));
 
     const calNote = P_CAL != null && h('div', { class: 'analysis-calnote' }, icon('target'),
       h('span', null, 'По истории калибровки прогнозы ' + CAL.map(b => Math.round(b.lo * 100) + '–' + Math.round(b.hi * 100) + '%').join(' и ') + ' сбывались в ' + CAL.map(b => pr(b.actual)).join(' и ') + '. С этой поправкой p ≈ ' + pr(P_CAL) + ', перевес ≈ ' + fmt.signedPct((P_CAL * TOTAL_ODDS - 1) * 100, 1) + '.'));
 
-    const lastTxt = LAST ? (LAST.status === 'win' ? 'выиграна' : LAST.status === 'loss' ? 'проиграна' : 'возврат') : '—';
+    // Адаптации суммы (Р22): просадка от пика, рост банка, итог недели. Правил серий нет
+    const rowsA = adaptRows(), active = rowsA.filter(r => r.active);
     const adapt = UI.callout('accent', 'history',
-      h('b', null, 'Адаптация: '), 'последняя ставка ' + lastTxt + ' (№' + LAST.id + ', ' + fmt.date(LAST.date) + ', ' + fmt.signedMoney(LAST.profit) + ') → без изменений. ',
-      STREAK.type === 'win' ? 'Серия побед ' + STREAK.n + ' из 3 нужных для +20%.' : STREAK.type === 'loss' ? 'Поражений подряд ' + STREAK.n + ' из 3 — после трех сумма −40%.' : '');
+      h('b', null, 'Адаптации: '), rowsA.map(r => r.now).join(', ') + ' — ' + (active.length ? active.map(r => r.active).join('; ') + '. ' : 'сейчас не действуют, сумма по таблице. '),
+      'Правила те же, что в «Личном кабинете → Банк и стратегия»: −10% от пика → не больше 2,5%, −20% → 1,5% и 2 события до 1.50; банк +15% и винрейт от 60% → потолок 4%; неделя −5% → не больше 2%, +10% → +0,5 п.п. Правил серий нет.');
 
     const calc = h('dl', { class: 'analysis-calc' },
       h('dt', null, !sameMoney(BANK, D.stats.bank) ? 'Банк из вашего ввода' : 'Банк сейчас'), h('dd', null, fmt.money(BANK)),
@@ -841,7 +1134,8 @@
         ? [h('dt', null, 'Кэф ' + fmt.odds(TOTAL_ODDS) + ' → ', nw('диапазон ' + BAND.range)), h('dd', null, BAND.pct + ' → ' + pctTxt(BASE_PCT))]
         : [h('dt', null, 'Кэф ' + fmt.odds(TOTAL_ODDS) + ' — ', nw('выше ' + fmt.odds(STRAT.totalMax))), h('dd', null, 'вне таблицы → 0%')],
       h('dt', null, 'Валуй ног (' + MX.map(m => fmt.signedPct(m.pickRow.value * 100, 1)).join(', ') + ')'), h('dd', null, 'без поправки'),
-      h('dt', null, 'Адаптация по истории'), h('dd', null, 'без изменений'),
+      h('dt', null, 'Адаптации'), h('dd', null, active.length ? active.length + ' ' + fmt.plural(active.length, 'правило', 'правила', 'правил') : 'не действуют'),
+      h('dt', null, 'Потолок доли банка'), h('dd', null, GROWTH_ON ? '4%' : '3%'),
       h('dt', { class: 'is-sum' }, nw(fmt.money(BANK) + ' × ' + pctTxt(BASE_PCT)), ' = ', nw(fmt.money(fmt.fromMoney(inCur(BANK) * BASE_PCT / 100))),
         STEP() > 0.01 ? [', ', nw('округление до ' + fmt.money(fmt.fromMoney(STEP())))] : null), h('dd', { class: 'is-sum' }, fmt.money(rec)));
     // расчет суммы свернут: карточка решения короче и целиком видна рядом с матчами
@@ -862,7 +1156,7 @@
     let foot;
     if (ST.decision === 'saved') {
       foot = h('div', { class: 'stack', style: 'width:100%;gap:10px' },
-        UI.callout('good', 'check', 'Ставка №' + ST.betId + ' в игре: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(TOTAL_ODDS) + '. Результат внесете после матчей — модель сверит прогноз.'),
+        UI.callout('good', 'check', 'Ставка №' + ST.betId + ' в игре: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(curTotal()) + '. Результат внесете после матчей — модель сверит прогноз.'),
         h('div', { class: 'analysis-actions' }, button('Открыть в ставках', { kind: 'primary', icon: 'ticket', href: '#bets' })));
     } else if (ST.decision === 'skipped') {
       foot = h('div', { class: 'stack', style: 'width:100%;gap:10px' },
@@ -897,14 +1191,14 @@
   function rerunCost() {
     const r = REQ || {};
     const n = Array.isArray(r.events) && r.events.length ? r.events.length : MX.length;
-    return Math.round((n * MODES.precise.perEvent + (D.P.rune.fresh === 'missing' ? COLLECT_COST : 0)) * 100) / 100;
+    return Math.round(n * MODES.precise.perEvent * 100) / 100;
   }
   // режим без свежих новостей — предупреждаем и даем перезапустить в точном
   function modeNote(root) {
     if (MODE.id === 'precise') return null;
     const reason = D.ai.access(D.me, rerunCost()); // пауза, нет ключа, лимиты и бюджет — общий расчет
     const txt = MODE.id === 'eco'
-      ? 'Режим «Экономный» (Haiku 4.5) — черновая оценка по сохраненным досье, без свежих новостей. Чтобы отсеять лишнее — годится, для решения о ставке — нет.'
+      ? 'Режим «Экономный» (Haiku 5.5) — черновая оценка по сохраненным досье, без свежих новостей. Чтобы отсеять лишнее — годится, для решения о ставке — нет.'
       : 'Режим «Сбалансированный» (Sonnet 5.5) еще не проверен на eval-наборе и не ищет свежие новости. Для решения о ставке надежнее «Точный».';
     return UI.callout(MODE.id === 'eco' ? 'warn' : 'info', MODE.id === 'eco' ? 'alert' : 'info',
       txt, ' В макете вероятности примера одинаковы во всех режимах.',
@@ -918,7 +1212,7 @@
     if (reason) { UI.toast(reason, 'alert'); return; }
     D.pendingAnalysis = Object.assign({}, r, { mode: 'precise', model: MODES.precise.model, createdAt: TODAY, events: r.events || MX.map(m => ({ p1: m.a, p2: m.b, odds: Object.assign({}, m.info.odds) })), estimate: { cost, secs: n * 45 } });
     setup(D.pendingAnalysis); resetRun(); setHead();
-    RUN.startedAt = performance.now() - (reduced() ? TOTAL_MS : 0);
+    startRun();
     scheduleRecord();
     UI.toast('Анализ #' + ID + ' запущен в режиме «Точный»', 'spark');
     if (reduced()) finish(root); else draw(root);
@@ -932,28 +1226,100 @@
     rec.decision = decision; rec.stake = decision === 'bet' ? stake() : null; rec.note = decision === 'skip' ? 'анализ сохранен без ставки' : null;
   }
 
-  function saveBet(root) {
+  // Поля «Кэф при ставке» у каждой ноги: по умолчанию кэф из ввода. onChange(массив кэфов | null, если есть ошибка)
+  function legOddsFields(prefix, values, onChange) {
+    const cur = values.slice(), bad = new Set();
+    const rows = LEGS.map((l, i) => {
+      const m = MX[i], r = m.pickRow;
+      const id = prefix + '-odd-' + i;
+      const inp = h('input', { class: 'input', id, value: fmt.odds(cur[i]), inputmode: 'decimal', autocomplete: 'off', maxlength: '6', 'aria-describedby': id + '-hint' });
+      const err = h('div', { class: 'field-error', role: 'alert', hidden: true });
+      const row = h('div', { class: 'analysis-legodd' },
+        h('label', { class: 'analysis-legodd-name', for: id }, h('b', null, r.name), h('small', { id: id + '-hint' }, D.match({ p1: m.a, p2: m.b }) + ' · в анализе ' + fmt.odds(l.odds))),
+        inp, err);
+      inp.addEventListener('input', () => {
+        const x = parseFloat(String(inp.value).replace(',', '.'));
+        const ok = x >= 1.01 && x <= 50;
+        err.hidden = ok; err.textContent = ok ? '' : 'Кэф от 1.01 до 50';
+        inp.classList.toggle('invalid', !ok); inp.setAttribute('aria-invalid', String(!ok));
+        if (ok) { cur[i] = Math.round(x * 100) / 100; bad.delete(i); } else bad.add(i);
+        onChange(bad.size ? null : cur.slice());
+      });
+      inp.addEventListener('blur', () => { const x = parseFloat(String(inp.value).replace(',', '.')); if (x >= 1.01 && x <= 50) inp.value = fmt.odds(x); });
+      return row;
+    });
+    return h('div', { class: 'stack', style: 'gap:6px' },
+      h('span', { class: 'field-label' }, 'Кэф при ставке'),
+      h('div', { class: 'analysis-legodds' }, rows),
+      h('div', { class: 'field-hint' }, 'По умолчанию — кэфы из ввода. Если букмекер дал другой, поправьте: от него считаются выплата, результат и CLV.'));
+  }
+  // Предупреждение о доле банка — по правилу роста банка из личного кабинета (потолок 4% только при росте +15% и винрейте от 60%)
+  function shareWarn(pct) {
+    if (pct > 4) return UI.callout('bad', 'alert', 'Больше 4% банка — выше любого лимита стратегии. Неудачная неделя заметно ударит по банку.');
+    if (pct > 3 && !GROWTH_ON) return UI.callout('warn', 'alert', 'Больше 3% банка: до 4% стратегия разрешает только при росте банка на 15% к стартовому и винрейте от 60% (сейчас ' + fmt.signedPct(GROWTH) + ' и ' + fmt.pct(D.stats.winrate) + ') — правило «Рост банка» в личном кабинете.');
+    if (pct > 3) return UI.callout('info', 'info', 'Больше 3% банка: правило роста банка действует (банк ' + fmt.signedPct(GROWTH) + ', винрейт ' + fmt.pct(D.stats.winrate) + '), потолок — 4%.');
+    return null;
+  }
+
+  function doSaveBet(taken) {
     const s = stake();
-    if (!s) { stakeModal(root); return; }
+    ST.taken = taken;
+    const total = totalOf(taken);
     const same = b => b.status === 'open' && b.legs.length === LEGS.length && LEGS.every(l => b.legs.some(x => x.p1 === l.p1 && x.p2 === l.p2 && x.market === l.market));
     let bet = D.bets.find(same);
-    if (bet) { bet.stake = s; bet.analysis = ID; }
+    const legs = LEGS.map((l, i) => Object.assign({ closing: null, result: 'open' }, l, { odds: taken[i] }));
+    if (bet) { bet.stake = s; bet.analysis = ID; bet.legs = legs; bet.total = total; }
     else {
-      bet = { id: Math.max(...D.bets.map(b => b.id)) + 1, date: TODAY, tournament: 'Шанхай', surface: 'hard', legs: LEGS.map(l => Object.assign({ closing: null, result: 'open' }, l)), total: TOTAL_ODDS, stake: s, status: 'open', profit: 0, bankAfter: null, clv: null, bookmaker: BK, analysis: ID };
+      bet = { id: Math.max(...D.bets.map(b => b.id)) + 1, date: TODAY, tournament: 'Шанхай', surface: 'hard', legs, total, stake: s, status: 'open', profit: 0, bankAfter: null, clv: null, bookmaker: BK, analysis: ID };
       D.bets.push(bet);
       D.stats.open = D.bets.filter(b => b.status === 'open').length;
     }
     ST.decision = 'saved'; ST.betId = bet.id;
     logDecision('bet');
-    UI.toast('Ставка №' + bet.id + ' сохранена: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(TOTAL_ODDS), 'check');
+    UI.toast('Ставка №' + bet.id + ' сохранена: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(total), 'check');
     D.lastSavedBet = bet.id; // экран «Ставки» подсветит ее и прокрутит к ней
     UI.go('bets');
+  }
+
+  // «Сохранить ставку»: сумма, кэф при ставке у каждой ноги, итоговый кэф и выплата
+  function saveBet(root) {
+    const s = stake();
+    if (!s) { stakeModal(root); return; }
+    let taken = takenOdds().slice();
+    const sum = h('div', { 'aria-live': 'polite' });
+    let go = null;
+    function drawSum() {
+      UI.clear(sum);
+      if (!taken) { go.disabled = true; return; }
+      go.disabled = false;
+      const total = totalOf(taken), pay = payoutOf(s, total);
+      sum.appendChild(UI.kv([
+        ['Сумма', fmt.money(s) + ' · ' + sharePct(s) + ' банка'],
+        ['Итоговый кэф', fmt.odds(total) + (total !== TOTAL_ODDS ? ' (в анализе ' + fmt.odds(TOTAL_ODDS) + ')' : '')],
+        ['Выплата при выигрыше', fmt.money(pay) + ' (' + fmt.signedMoney(pay - s) + ')'],
+        ['Букмекер', BK],
+      ]));
+      if (total > STRAT.totalMax) sum.appendChild(UI.callout('warn', 'alert', 'Итоговый кэф выше ' + fmt.odds(STRAT.totalMax) + ' — экспресс выходит за правила стратегии ' + STRAT_V + '.'));
+    }
+    UI.modal({
+      title: 'Сохранить ставку',
+      body: h('div', { class: 'stack', style: 'gap:14px' },
+        legOddsFields('analysis-bet', taken, v => { taken = v; drawSum(); }),
+        sum,
+        h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Ставку делаете вы у букмекера — здесь она записывается в учет: сумма спишется с банка, результат внесете после матчей.')),
+      actions: close => [
+        button('Отмена', { kind: 'secondary', onClick: close }),
+        go = button('Сохранить ставку', { kind: 'primary', icon: 'check', onClick: () => { if (!taken) return; close(); doSaveBet(taken); } }),
+      ],
+    });
+    drawSum();
   }
 
   // Окно суммы работает в валюте программы: поле, шаг и доли банка — в ней, в DATA сумма уходит в рублях демо-данных
   function stakeModal(root) {
     const bankCur = inCur(BANK), recCur = inCur(REC()), minCur = MIN_CUR(), dec = curDec();
     let v = inCur(stake());
+    let taken = takenOdds().slice();
     const preview = h('div', { class: 'stack', style: 'gap:10px', 'aria-live': 'polite' });
     if (!v) v = toStep(bankCur * 1.5 / 100);
     const rub = () => fmt.fromMoney(v);
@@ -970,17 +1336,20 @@
     }
     function drawPreview() {
       UI.clear(preview);
+      if (!taken) { preview.appendChild(UI.callout('bad', 'alert', 'Проверьте кэфы при ставке: допустимо от 1.01 до 50.')); return; }
       if (!okVal()) { preview.appendChild(UI.callout('bad', 'alert', v > bankCur ? 'Сумма больше банка (' + fmt.money(BANK) + ').' : 'Минимальная ставка — ' + fmt.money(fmt.fromMoney(minCur)) + '.')); return; }
-      const pct = v / bankCur * 100, r = rub(), pay = payoutOf(r);
+      const pct = v / bankCur * 100, r = rub(), total = totalOf(taken), pay = payoutOf(r, total);
+      const ev = P_EXP * total - 1;
       preview.appendChild(UI.kv([
         ['Доля банка', sharePct(r)],
-        ['Выплата при выигрыше (@' + fmt.odds(TOTAL_ODDS) + ')', fmt.money(pay)],
+        ['Выплата при выигрыше (@' + fmt.odds(total) + ')', fmt.money(pay)],
         ['Чистая прибыль', fmt.signedMoney(pay - r)],
         ['При проигрыше', fmt.signedMoney(-r)],
-        ['Ожидаемый результат по оценке модели', '≈ ' + fmt.signedMoney(r * EV)],
+        ['Ожидаемый результат по оценке модели', '≈ ' + fmt.signedMoney(r * ev)],
       ]));
-      if (pct > 4) preview.appendChild(UI.callout('bad', 'alert', 'Больше 4% банка — выше любого лимита стратегии. Одна неудачная серия заметно ударит по банку.'));
-      else if (pct > 3) preview.appendChild(UI.callout('warn', 'alert', 'Больше 3% банка: стратегия разрешает до 4% только при росте банка на 15% и винрейте от 60% (сейчас ' + fmt.pct(D.stats.winrate) + ').'));
+      if (bandPct(total) !== BASE_PCT) preview.appendChild(UI.callout('info', 'info', 'С кэфами при ставке итоговый кэф ' + fmt.odds(total) + ' — по таблице стратегии ' + (bandPct(total) ? pctTxt(bandPct(total)) + ' банка' : 'суммы нет') + ' вместо ' + pctTxt(BASE_PCT) + '.'));
+      const w = shareWarn(pct);
+      if (w) preview.appendChild(w);
     }
     input.addEventListener('input', () => { v = roundCur(parseFloat(String(input.value).replace(/\s/g, '').replace(',', '.'))); drawSeg(); drawPreview(); });
     input.addEventListener('blur', () => { if (Number.isFinite(v)) input.value = asText(v); });
@@ -989,11 +1358,13 @@
       title: 'Изменить сумму',
       body: close => h('form', { id: 'analysis-stake-form', class: 'stack', style: 'gap:14px', novalidate: true, on: { submit: e => {
         e.preventDefault();
-        if (!okVal()) { input.focus(); return; }
+        if (!okVal() || !taken) { input.focus(); return; }
         ST.stake = v === recCur ? null : rub();
+        ST.taken = taken.every((x, i) => x === LEGS[i].odds) ? null : taken;
         close(); draw(root);
-        UI.toast('Сумма изменена: ' + fmt.money(rub()) + ' (' + sharePct(rub()) + ' банка)', 'edit');
-      } } }, fieldEl, h('div', { class: 'stack', style: 'gap:6px' }, h('span', { class: 'field-label' }, 'Или доля банка'), segHolder), preview),
+        UI.toast('Сумма изменена: ' + fmt.money(rub()) + ' (' + sharePct(rub()) + ' банка), кэф ' + fmt.odds(totalOf(taken)), 'edit');
+      } } }, fieldEl, h('div', { class: 'stack', style: 'gap:6px' }, h('span', { class: 'field-label' }, 'Или доля банка'), segHolder),
+        legOddsFields('analysis-stake', taken, x => { taken = x; drawPreview(); }), preview),
       actions: close => [
         button('Отмена', { kind: 'secondary', onClick: close }),
         button('Применить', { kind: 'primary', type: 'submit', icon: 'check', attrs: { form: 'analysis-stake-form' } }),
@@ -1064,6 +1435,10 @@
 
   // ---------- вы ввели не те матчи, что есть в примере ----------
   function foreignNote(root) {
+    if (OPENED) {
+      return h('div', { class: 'analysis-foreign-mini', role: 'note' }, icon('info'),
+        h('span', null, 'Макет: анализ #' + OPENED.id + ' (' + OPENED.matches.map(D.match).join(', ') + ') показан на демо-примере Синнер — Руне и Джокович — Рублев. В приложении откроется он сам.'));
+    }
     if (!FOREIGN) return null;
     const list = REQ.events.map(e => nm(e.p1) + ' — ' + nm(e.p2));
     const used = MX.filter(m => m.entered).map(m => D.match({ p1: m.a, p2: m.b }));
@@ -1086,13 +1461,18 @@
   function draw(root) {
     const mobile = UI.isMobile();
     UI.clear(root);
-    root.classList.toggle('analysis-running', !RUN.done);
+    root.classList.toggle('analysis-running', !RUN.done && !RUN.stopped);
+    if (RUN.stopped) {
+      UI.append(root, [headBlock(RUN.stopped.kind === 'cancel' ? 'cancelled' : 'stopped'), demoPanel(root), foreignNote(root), stopBanner(root), progressStopped(root)]);
+      return;
+    }
     if (!RUN.done) {
-      UI.append(root, [headBlock(false), foreignNote(root), progressRunning(root), skeleton()]);
+      UI.append(root, [headBlock('running'), demoPanel(root), foreignNote(root), progressRunning(root), skeleton()]);
       return;
     }
     UI.append(root, [
-      headBlock(true),
+      headBlock('done'),
+      demoPanel(root),
       foreignNote(root),
       progressDone(root),
       h('div', { class: 'analysis-result' },
@@ -1110,19 +1490,41 @@
       : h('span', null, h('a', { class: 'analysis-crumb', href: '#new' }, 'Новый анализ'), ' → Анализ #' + ID) });
   }
 
+  // #analysis-<состояние> — состояние для согласования (fail, limit, cap, keyown, keyadmin, cancel, offline, news, reused);
+  // #analysis-A-0140 — анализ из списка «Последние анализы» на экране «Новый анализ». Возвращает статус открытого анализа.
+  function applyParam(param) {
+    // адрес без параметра: перерисовка (тема, ширина экрана) не запускает состояние заново
+    try { history.replaceState(history.state, '', location.href.split('#')[0] + '#analysis'); } catch (e) { /* в песочнице адрес может быть недоступен */ }
+    const recent = (D.recentAnalyses || []).find(a => a.id === param);
+    const id = recent ? (recent.status === 'failed' ? 'fail' : recent.status === 'cancelled' ? 'cancel' : 'ok') : param;
+    const scen = SCENARIOS.find(x => x.id === id);
+    if (!scen) return null;
+    SCEN = scen;
+    setup(REQ); resetRun();
+    if (recent) { ID = recent.id; D.currentAnalysis = ID; OPENED = recent.demo ? null : recent; }
+    startRun();
+    return recent ? recent.status : 'scenario';
+  }
+
   setup(D.pendingAnalysis);
 
   UI.register('analysis', {
     title: 'Анализ',
     nav: 'new',
     crumbs: 'Новый анализ → Анализ #' + ID,
-    render(root) {
-      // пришел новый запрос с экрана «Новый анализ» — пересчитываем все под него и запускаем заново
-      if ((D.pendingAnalysis || null) !== REQ) { setup(D.pendingAnalysis); resetRun(); }
+    render(root, param) {
+      // пришел новый запрос с экрана «Новый анализ» — пересчитываем все под него и запускаем заново обычным ходом:
+      // демо-состояние прошлого анализа (сбой, отмена) к новому не переносится
+      if ((D.pendingAnalysis || null) !== REQ) { SCEN = SCENARIOS[0]; OPENED = null; setup(D.pendingAnalysis); resetRun(); }
+      const opened = param ? applyParam(param) : null;
       setHead();
       // при «уменьшении движения» анализ сразу показывается завершенным
-      if (RUN.startedAt == null) { RUN.startedAt = performance.now() - (reduced() ? TOTAL_MS : 0); scheduleRecord(); }
-      if (!RUN.done && performance.now() - RUN.startedAt >= TOTAL_MS) finish(root);
+      if (RUN.startedAt == null) { startRun(); scheduleRecord(); }
+      if (opened === 'done') RUN.startedAt = performance.now() - TOTAL_MS;
+      if (opened === 'failed' || opened === 'cancelled') RUN.startedAt = performance.now() - stopTime();
+      const t = performance.now() - RUN.startedAt, stopT = stopTime();
+      if (!RUN.done && !RUN.stopped && stopT != null && t >= stopT) stopAt(root);
+      else if (!RUN.done && !RUN.stopped && t >= TOTAL_MS) finish(root);
       else draw(root);
     },
   });

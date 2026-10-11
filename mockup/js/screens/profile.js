@@ -55,10 +55,6 @@
   // Запуски ИИ самого пользователя: без общих фоновых задач (их оплачивает администратор), как в «ИИ и расходы»
   const myRunsN = D.ai.runs.filter(r => r.type !== 'refresh').length;
   const activeVersion = D.strategyVersions.find(v => v.status === 'active');
-  const streakText = (() => {
-    const n = S.streak.n;
-    return S.streak.type === 'win' ? n + ' ' + pl(n, 'выигрыш', 'выигрыша', 'выигрышей') : S.streak.type === 'loss' ? n + ' ' + pl(n, 'проигрыш', 'проигрыша', 'проигрышей') : n + ' ' + pl(n, 'возврат', 'возврата', 'возвратов');
-  })();
   const modelsByUse = (() => {
     const g = {};
     D.ai.runTypes.forEach(t => { (g[t.model] = g[t.model] || []).push(t.label.replace(' (Batch)', '')); });
@@ -183,7 +179,8 @@
       ruleEdits: [],
       rules: { minProb: D.strategy.minProb, oddsMin: D.strategy.oddsMin, oddsMax: D.strategy.oddsMax, maxLegs: D.strategy.maxLegs, totalMax: D.strategy.totalMax },
       stakes: D.strategy.stakeTable.map(r => { const [a, b] = r.pct.split('–'); return { range: r.range, min: num(a), max: num(b) }; }),
-      adapt: { lose3: true, win3: true, dd10: true, dd20: true, up15: true, weekLoss: true, weekWin: true },
+      // Р22: правил серий нет — только просадка, рост банка и итог недели
+      adapt: { dd10: true, dd20: true, up15: true, weekLoss: true, weekWin: true },
       limits: { count: 3, amount: 4000 }, limitsPending: null,
       pauseDays: '7', pauseConfirm: false, pause: null,
       // ключ Claude: keyView — какая карточка режима выбрана на экране; сам режим — в DATA.me.aiMode
@@ -1143,10 +1140,6 @@
   function adaptCard(dd, growth) {
     const ddAbs = Math.abs(dd), max = 25;
     const GROUPS = [
-      { id: 'streak', title: 'Серии', doubt: true, rules: [
-        { id: 'lose3', t: '3 проигрыша подряд → ставка −40%', d: 'До первого выигрыша', active: S.streak.type === 'loss' && S.streak.n >= 3, now: 'Сейчас серия: ' + streakText },
-        { id: 'win3', t: '3 выигрыша подряд → ставка +20%', d: 'Но не больше 3% банка', active: S.streak.type === 'win' && S.streak.n >= 3, now: 'Сейчас серия: ' + streakText },
-      ] },
       { id: 'bank', title: 'Банк', rules: [
         { id: 'dd10', t: 'Банк −10% от пика → ставка не больше 2,5%', d: 'Пока банк не поднимется выше этой отметки', active: dd <= -10, now: 'Сейчас ' + fmt.signedPct(dd) + ' от пика' },
         { id: 'dd20', t: 'Банк −20% от пика → защитный режим', d: 'Только 2 события, кэф события ≤ 1.50, ставка 1,5% банка', active: dd <= -20, now: 'Сейчас ' + fmt.signedPct(dd) + ' от пика' },
@@ -1171,9 +1164,8 @@
         }),
         h('div', { class: 'profile-rule-status' }, chipSlot, h('span', { class: 'xsmall muted' }, r.now)));
     };
-    const streakOn = st.adapt.lose3 || st.adapt.win3;
     return card({
-      id: 'profile-adapt', class: 'profile-anchor', title: 'Адаптации ставки', subtitle: 'Меняют размер ставки по сериям, просадке и итогу недели · правила перенесены из старого бота',
+      id: 'profile-adapt', class: 'profile-anchor', title: 'Адаптации ставки', subtitle: 'Меняют размер ставки по просадке от пика, росту банка и итогу недели · правил серий нет (Р22)',
       body: [
         h('div', { class: 'profile-dd' },
           h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Просадка от пика ' + fmt.money(S.peak)), h('b', { class: 'num' }, fmt.signedPct(dd))),
@@ -1184,17 +1176,10 @@
           h('div', { class: 'profile-dd-scale', 'aria-hidden': 'true' }, h('span', { style: 'left:0' }, '0%'), h('span', { style: { left: (10 / max * 100) + '%' } }, '−10%'), h('span', { style: { left: (20 / max * 100) + '%' } }, '−20%')),
           h('div', { class: 'xsmall muted' }, anyActive
             ? 'Сейчас действует хотя бы одно правило — ставки в новых анализах изменены.'
-            : 'Серия — ' + streakText + ', просадка ' + fmt.signedPct(dd) + ', за 7 дней ' + fmt.signedPct(weekPct) + ': ни одно правило сейчас не действует.')),
+            : 'Просадка ' + fmt.signedPct(dd) + ', банк ' + fmt.signedPct(growth) + ' к старту, за 7 дней ' + fmt.signedPct(weekPct) + ': ни одно правило сейчас не действует.')),
         h('div', { class: 'profile-rule-groups' }, GROUPS.map(g => h('div', { class: 'profile-rule-group', role: 'group', 'aria-labelledby': 'profile-rg-' + g.id },
-          h('div', { class: 'profile-rule-group-head' }, h('h4', { id: 'profile-rg-' + g.id }, g.title), g.doubt && chip('Под вопросом', 'outline', 'alert')),
-          g.rules.map(ruleRow),
-          g.doubt && UI.callout('info', 'info', h('div', { class: 'stack', style: 'gap:8px' },
-            h('div', null, 'Перенесено из старого бота. При честных вероятностях серии случайны — предлагаем выключить и оставить лимиты просадки (LLM_LEARNING.md §3.5).'),
-            streakOn && h('div', { class: 'row' }, button('Выключить оба правила серий', { kind: 'secondary', size: 'sm', icon: 'pause', onClick: () => {
-              st.adapt.lose3 = false; st.adapt.win3 = false; drawPanel();
-              requestAnimationFrame(() => { const el = document.getElementById('profile-rule-lose3'); if (el) el.focus(); });
-              UI.toast('Правила серий выключены. Остаются лимиты просадки и итог недели', 'pause');
-            } }))))))),
+          h('div', { class: 'profile-rule-group-head' }, h('h4', { id: 'profile-rg-' + g.id }, g.title)),
+          g.rules.map(ruleRow)))),
       ],
     });
   }
@@ -1362,16 +1347,20 @@
       { id: 'admin', title: 'Ключ администратора', text: adm
         ? 'Ключ программы. Ваши анализы идут в общий бюджет ' + usd(D.ai.budget().monthly, 0) + ' в месяц, личного лимита нет.'
         : 'Ничего вводить не нужно. Платит администратор, у вас лимит ' + usd(memberLimit().monthly, 0) + ' в месяц.' },
-      { id: 'own', title: 'Свой ключ', text: 'Ваш ключ Anthropic. Расход — с вашего счета, лимит трат ставите сами в консоли Anthropic.' },
+      { id: 'own', title: 'Свой ключ', text: adm
+        ? 'Администратору свой ключ не нужен: его анализы всегда идут на ключе администратора.'
+        : 'Ваш ключ Anthropic. Расход — с вашего счета, лимит трат ставите сами в консоли Anthropic.' },
     ];
     const group = h('div', { class: 'profile-modes', role: 'radiogroup', 'aria-label': 'Чей ключ Claude использовать' }, opts.map(o => {
       const on = st.keyView === o.id;
-      const inp = h('input', { type: 'radio', name: 'profile-key-mode', id: 'profile-mode-' + o.id, value: o.id, checked: on, class: 'profile-mode-input', on: { change: () => {
+      // Этап 3: администратор всегда на ключе администратора (свой ключ — только у участников)
+      const locked = adm && o.id === 'own' && actual !== 'own';
+      const inp = h('input', { type: 'radio', name: 'profile-key-mode', id: 'profile-mode-' + o.id, value: o.id, checked: on, disabled: locked, class: 'profile-mode-input', on: { change: () => {
         st.keyView = o.id; st.keyErr = null; st.keyDelConfirm = false; if (o.id === 'admin') st.keyReplace = false;
         drawPanel();
         requestAnimationFrame(() => { const el = document.getElementById('profile-mode-' + o.id); if (el) el.focus({ preventScroll: true }); });
       } } });
-      return h('label', { class: ['profile-mode', on && 'is-on'], for: inp.id }, inp,
+      return h('label', { class: ['profile-mode', on && 'is-on', locked && 'is-locked'], for: inp.id, style: locked ? 'opacity:.6;cursor:not-allowed' : null }, inp,
         h('span', { class: 'profile-mode-dot', 'aria-hidden': 'true' }),
         h('span', { class: 'profile-mode-body' },
           h('span', { class: 'profile-mode-title' }, o.title,
@@ -1384,7 +1373,7 @@
       subtitle: 'Ключ нужен для анализов, разборов ставок и обновления ваших данных',
       body: [group,
         h('p', { class: 'profile-note' }, icon('info'), h('span', null, adm
-          ? 'Вы администратор: переключение в обе стороны — сразу.'
+          ? 'Вы администратор: ваши анализы идут на ключе администратора, без личного лимита — только в рамках общего бюджета.'
           : 'На свой ключ можно перейти в любой момент. Вернуться на ключ администратора — только с его разрешения.'))],
     });
   }
@@ -1505,7 +1494,7 @@
     const k = ownKey(), adm = isAdmin();
     const checkBtn = button('Проверить', { kind: 'secondary', icon: 'check', onClick: () => busy(checkBtn, 'Проверяем…', 700, () => {
       k.verified = nowIso(); drawPanel();
-      UI.toast('Ключ работает: доступны Opus 5.5, Sonnet 5.5 и Haiku 4.5', 'check');
+      UI.toast('Ключ работает: доступны Opus 5.5, Sonnet 5.5 и Haiku 5.5', 'check');
     }) });
     const capInput = h('input', { class: 'input', id: 'profile-key-cap', value: fmt.dec(ownCap(), 2), inputmode: 'decimal', autocomplete: 'off', 'aria-describedby': 'profile-key-cap-hint' });
     const capF = h('div', { class: 'field' },

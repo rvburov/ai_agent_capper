@@ -11,8 +11,8 @@
   // ---------- цены (прайс Anthropic за 1M токенов; совпадают с формулой в data.js) ----------
   const PRICE = {
     'Opus 5.5': { in: 4, out: 20, cache: 0.2, id: 'claude-opus-5-5' },
-    'Sonnet 5.5': { in: 2, out: 10, cache: 0.2, id: 'claude-sonnet-5-5' },
-    'Haiku 4.5': { in: 1, out: 5, cache: 0.1, id: 'claude-haiku-4-5' },
+    'Sonnet 5.5': { in: 2, out: 10, cache: 0.1, id: 'claude-sonnet-5-5' },
+    'Haiku 5.5': { in: 0.1, out: 0.5, cache: 0.01, id: 'claude-haiku-5-5' },
   };
   const SEARCH = 0.01;          // $10 за 1000 веб-поисков
   const SEARCH_TOKENS = 4000;   // примерно столько входных токенов добавляют результаты одного поиска
@@ -33,13 +33,14 @@
   const EFFORT_LABEL = { low: 'Низкая', medium: 'Средняя', high: 'Высокая' };
   const effortWord = e => (EFFORT_LABEL[e] || EFFORT_LABEL.medium).toLowerCase();
   const EFFORT_LEVELS = { analysis: ['low', 'medium', 'high'], refresh: ['low', 'medium'], postmortem: ['low', 'medium'], parse: ['low', 'medium'] };
-  const supportsEffort = model => model !== 'Haiku 4.5';
+  // Глубину размышлений (effort) поддерживают все три модели 5.5, в том числе Haiku 5.5
+  const supportsEffort = model => Boolean(PRICE[model]);
 
   const TYPES = [
     { id: 'analysis', label: 'Анализ матчей', short: 'Анализ', tiny: 'Анализ', bar: 'Анализ матчей', what: 'Вероятности по событиям, валуй и экспресс', options: ['Opus 5.5', 'Sonnet 5.5'] },
-    { id: 'refresh', label: 'Обновление профилей', short: 'Профили', tiny: 'Профили', bar: 'Профили', what: 'Ночью пакетом: статистика, форма, новости', options: ['Sonnet 5.5', 'Haiku 4.5', 'Opus 5.5'] },
-    { id: 'postmortem', label: 'Разбор ставки', short: 'Разбор ставок', tiny: 'Ставки', bar: 'Разбор ставки', what: 'После расчета: что сработало — кандидаты в уроки', options: ['Sonnet 5.5', 'Opus 5.5', 'Haiku 4.5'] },
-    { id: 'parse', label: 'Разбор текста', short: 'Разбор текста', tiny: 'Текст', bar: 'Разбор текста', what: 'Вставленный текст → список событий', options: ['Haiku 4.5', 'Sonnet 5.5', 'Opus 5.5'] },
+    { id: 'refresh', label: 'Обновление профилей', short: 'Профили', tiny: 'Профили', bar: 'Профили', what: 'Ночью пакетом: статистика, форма, новости', options: ['Sonnet 5.5', 'Haiku 5.5', 'Opus 5.5'] },
+    { id: 'postmortem', label: 'Разбор ставки', short: 'Разбор ставок', tiny: 'Ставки', bar: 'Разбор ставки', what: 'После расчета: что сработало — кандидаты в уроки', options: ['Sonnet 5.5', 'Opus 5.5', 'Haiku 5.5'] },
+    { id: 'parse', label: 'Разбор текста', short: 'Разбор текста', tiny: 'Текст', bar: 'Разбор текста', what: 'Вставленный текст → список событий', options: ['Haiku 5.5', 'Sonnet 5.5', 'Opus 5.5'] },
   ];
   const typeOf = id => TYPES.find(t => t.id === id);
 
@@ -49,6 +50,12 @@
   const usd = (n, d = 2) => (n < 0 ? '−' : '') + '$' + nf(d).format(Math.abs(n));
   const usdM = n => usd(n, n >= 100 ? 0 : 1);
   const usdL = n => usd(n, Number.isInteger(n) ? 0 : 2); // лимиты и потолки: $10, $1, но $1,50
+  const usdP = usdL;                                     // цены за 1M токенов: $4 / $20, но $0,10 / $0,50
+  // цена одного запуска: разбор текста на Haiku 5.5 стоит доли цента — четыре знака, а не $0,000
+  const usdRun = n => usd(n, n > 0 && n < 0.001 ? 4 : 3);
+  // суммы и доли в сводках: копейки не превращаются в «$0,00 · 0%»
+  const usdSum = n => (n > 0 && n < 0.01 ? '< $0,01' : usd(n));
+  const pctShare = x => (x > 0 && x < 0.005 ? '< 1%' : pct(x));
   const pct = (x, d = 0) => nf(d).format(x * 100) + '%';
   const sum = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
   const clone = o => JSON.parse(JSON.stringify(o));
@@ -154,7 +161,7 @@
     });
     ps.forEach((r, i) => {
       const n = 3 + (i % 3);
-      META[r.id] = { ref: 'ввод #T-' + String(201 + i).padStart(4, '0'), href: '#new', btn: 'Новый анализ', what: 'Текст из ' + n + ' событий → список матчей', prompt: 'parse-events v1', effort: null, prefix: null };
+      META[r.id] = { ref: 'ввод #T-' + String(201 + i).padStart(4, '0'), href: '#new', btn: 'Новый анализ', what: 'Текст из ' + n + ' событий → список матчей', prompt: 'parse_input v1', effort: 'low', prefix: null, noCache: 'Не кэшируется: текст разбирается одним вызовом, повторного чтения нет — запись в кэш (×1,25 к цене входа) только добавила бы цену' };
     });
   })();
 
@@ -164,7 +171,7 @@
   // деньги ограничивают только лимит участника и бюджет ключа администратора (Р9, Р13).
   // Поиски — не больше 6 на запуск (2–3 на игрока) и 15 в день.
   const DEFAULTS = {
-    models: { parse: 'Haiku 4.5', analysis: 'Opus 5.5', postmortem: 'Sonnet 5.5', refresh: 'Sonnet 5.5' },
+    models: { parse: 'Haiku 5.5', analysis: 'Opus 5.5', postmortem: 'Sonnet 5.5', refresh: 'Sonnet 5.5' },
     effort: { parse: 'low', analysis: 'medium', postmortem: 'low', refresh: 'low' },
     limitSoft: 0.5, searchLimit: 6, searchDay: 15,
     cache: true, batch: true, newsCache: true, dossier: true, eval: true,
@@ -208,9 +215,9 @@
       isOn: s => s.cache, set: (s, on) => withSet(s, { cache: on }) },
     { id: 'search', title: 'Лимит веб-поисков и кэш новостей 12 ч', how: 'Не больше 6 поисков на анализ (2–3 на игрока) и 15 в день; новости по игроку не ищутся заново, если им меньше 12 часов. Каждый поиск — $0,01 и ≈ 4 тыс. токенов во входе.',
       isOn: s => s.searchLimit > 0 && s.newsCache, set: (s, on) => withSet(s, on ? { searchLimit: s.searchLimit || 6, newsCache: true } : { searchLimit: 0, newsCache: false }) },
-    { id: 'routing', title: 'Маршрутизация моделей', how: 'Простые задачи — дешевым моделям: разбор текста на Haiku 4.5, разбор ставок и профили на Sonnet 5.5. Opus 5.5 — только для анализа.',
+    { id: 'routing', title: 'Маршрутизация моделей', how: 'Простые задачи — дешевым моделям: разбор текста на Haiku 5.5, разбор ставок и профили на Sonnet 5.5. Opus 5.5 — только для анализа.',
       isOn: s => !(s.models.parse === 'Opus 5.5' && s.models.postmortem === 'Opus 5.5' && s.models.refresh === 'Opus 5.5'),
-      set: (s, on) => on ? (LEVERS[3].isOn(s) ? clone(s) : withSet(s, { models: { parse: 'Haiku 4.5', postmortem: 'Sonnet 5.5', refresh: 'Sonnet 5.5' } })) : withSet(s, { models: { parse: 'Opus 5.5', postmortem: 'Opus 5.5', refresh: 'Opus 5.5' } }) },
+      set: (s, on) => on ? (LEVERS[3].isOn(s) ? clone(s) : withSet(s, { models: { parse: 'Haiku 5.5', postmortem: 'Sonnet 5.5', refresh: 'Sonnet 5.5' } })) : withSet(s, { models: { parse: 'Opus 5.5', postmortem: 'Opus 5.5', refresh: 'Opus 5.5' } }) },
     { id: 'batch', title: 'Batch API для фоновых задач', how: 'Ночное обновление профилей идет пакетом: ответ приходит в течение суток, зато вдвое дешевле.',
       isOn: s => s.batch, set: (s, on) => withSet(s, { batch: on }) },
     // Рычаги без переключателя: уже встроены в схему v2, их вклад входит в фактическую цену анализа
@@ -298,15 +305,15 @@
       const proven = rows.slice(0, 2).every(r => r.verdict === 'better');
       return { ok: proven, rows, why: proven ? 'Дороже, но улучшение доказано: интервал целиком ниже нуля.' : 'Дороже, а улучшение не доказано: интервал разницы задевает ноль. Изменение «ради качества» принимается, только если интервал целиком ниже нуля.' };
     }
-    const dearer = c.kind === 'effort' || (c.type === 'parse' && c.to !== 'Haiku 4.5');
-    if (c.type === 'parse') return c.to === 'Haiku 4.5'
+    const dearer = c.kind === 'effort' || (c.type === 'parse' && c.to !== 'Haiku 5.5');
+    if (c.type === 'parse') return c.to === 'Haiku 5.5'
       ? { ok: true, rows: [pctRow('Точность разбора событий', 98.7, 98.7, 'same')], why: 'Качество то же, дешевле.' }
-      : { ok: true, rows: [pctRow('Точность разбора событий', 98.7, c.to === 'Opus 5.5' ? 99.1 : 98.9, 'same')], why: dearer ? 'Качество не хуже, но дороже: на коротких текстах Haiku 4.5 справляется так же, разница в пределах шума на 150 сообщениях.' : 'Качество не хуже.' };
-    if (c.type === 'postmortem') return c.kind === 'model' && c.to === 'Haiku 4.5'
-      ? { ok: false, rows: [pctRow('Совпадение с подтвержденными уроками', 85, 72, 'worse')], why: 'Haiku 4.5 пропускает причины проигрыша, связанные с усталостью и покрытием.' }
+      : { ok: true, rows: [pctRow('Точность разбора событий', 98.7, c.to === 'Opus 5.5' ? 99.1 : 98.9, 'same')], why: dearer ? 'Качество не хуже, но дороже: на коротких текстах Haiku 5.5 справляется так же, разница в пределах шума на 150 сообщениях.' : 'Качество не хуже.' };
+    if (c.type === 'postmortem') return c.kind === 'model' && c.to === 'Haiku 5.5'
+      ? { ok: false, rows: [pctRow('Совпадение с подтвержденными уроками', 85, 72, 'worse')], why: 'Haiku 5.5 пропускает причины проигрыша, связанные с усталостью и покрытием.' }
       : { ok: true, rows: [pctRow('Совпадение с подтвержденными уроками', 85, c.to === 'Opus 5.5' || c.to === 'medium' ? 87 : 85, 'same')], why: dearer || c.to === 'Opus 5.5' ? 'Качество не хуже, но дороже: +2 п.п. на 40 ставках — в пределах шума.' : 'Качество не хуже.' };
-    return c.kind === 'model' && c.to === 'Haiku 4.5'
-      ? { ok: false, rows: [pctRow('Полнота по травмам и снятиям', 96, 88, 'worse'), pctRow('Ошибки в статистике подачи', 0.4, 2.1, 'worse')], why: 'Haiku 4.5 теряет часть статистики из длинных страниц и пропускает снятия — порог полноты 95%.' }
+    return c.kind === 'model' && c.to === 'Haiku 5.5'
+      ? { ok: false, rows: [pctRow('Полнота по травмам и снятиям', 96, 88, 'worse'), pctRow('Ошибки в статистике подачи', 0.4, 2.1, 'worse')], why: 'Haiku 5.5 теряет часть статистики из длинных страниц и пропускает снятия — порог полноты 95%.' }
       : { ok: true, rows: [pctRow('Полнота по травмам и снятиям', 96, c.to === 'Opus 5.5' || c.to === 'medium' ? 97 : 96, 'same')], why: dearer || c.to === 'Opus 5.5' ? 'Качество не хуже, но дороже.' : 'Качество не хуже.' };
   }
 
@@ -561,7 +568,7 @@
     const shown = parts.filter(x => x.cost > 0);
     const n = v => nf(2).format(v);
     const formula = '(' + fmt.int(r.cached) + ' × ' + n(p.cache) + ' + ' + fmt.int(plain) + ' × ' + n(p.in) + ' + ' + fmt.int(r.output) + ' × ' + n(p.out) + ') / 1\u00a0000\u00a0000'
-      + (r.batch ? ' × 0,5' : '') + (r.searches ? ' + ' + r.searches + ' × 0,01' : '') + ' = ' + usd(total, 3);
+      + (r.batch ? ' × 0,5' : '') + (r.searches ? ' + ' + r.searches + ' × 0,01' : '') + ' = ' + usdRun(total);
 
     UI.modal({
       title: t.label + ' · ' + fmt.datetime(r.at),
@@ -570,8 +577,8 @@
         h('div', { class: 'costs-modal-chips' }, modelChip(r.model), r.batch && batchChip(), chip(fmt.duration(r.duration), null, 'clock'),
           r.cached ? chip(pct(r.cached / r.input) + ' входа из кэша', 'good', 'database') : chip('Без кэша', null, 'database')),
         h('div', { class: 'row-between', style: 'align-items:flex-end' },
-          h('div', { style: 'min-width:0' }, h('div', { class: 'eyebrow' }, 'Стоимость запуска'), h('div', { class: 'stat-value' }, usd(r.cost, 3))),
-          r.cached ? h('div', { class: 'small soft', style: 'text-align:right' }, 'Без кэша было бы ' + usd(noCache, 3), h('br'), h('span', { class: 'good-text', style: 'font-weight:600' }, 'кэш сэкономил ' + pct(1 - total / noCache))) : null),
+          h('div', { style: 'min-width:0' }, h('div', { class: 'eyebrow' }, 'Стоимость запуска'), h('div', { class: 'stat-value' }, usdRun(r.cost))),
+          r.cached ? h('div', { class: 'small soft', style: 'text-align:right' }, 'Без кэша было бы ' + usdRun(noCache), h('br'), h('span', { class: 'good-text', style: 'font-weight:600' }, 'кэш сэкономил ' + pct(1 - total / noCache))) : null),
         h('div', { class: 'stack', style: 'gap:8px' },
           h('div', { class: 'costs-split', role: 'img', 'aria-label': 'Из чего сложилась цена: ' + shown.map(x => x.name + ' ' + usd(x.cost, 4)).join(', ') },
             shown.map(x => h('i', { style: { width: (x.cost / total * 100) + '%', background: x.color }, title: x.name + ': ' + usd(x.cost, 4) }))),
@@ -592,8 +599,8 @@
           ['Связано', m.href ? h('a', { href: m.href, on: { click: close } }, m.ref) : (m.ref || '—')],
           ['Что сделал', m.what || t.what],
           ['Версия инструкций', h('span', { class: 'mono' }, m.prompt || '—')],
-          ['Глубина размышлений', m.effort ? EFFORT_LABEL[m.effort] : 'не задается: Haiku 4.5 ее не поддерживает'],
-          ['Из кэша читается', m.prefix || 'Не кэшируется: у Haiku 4.5 минимальный префикс для кэша — 4096 токенов, а запрос короче'],
+          ['Глубина размышлений', m.effort ? EFFORT_LABEL[m.effort] : 'не задается'],
+          ['Из кэша читается', m.prefix || m.noCache || 'Не кэшируется: запрос короче минимума для кэша (512 токенов)'],
           ['ID модели', h('span', { class: 'mono' }, p.id)],
         ].map(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
         howto('Цены — прайс Anthropic за 1M токенов на 7 окт 2026. Запись в кэш (×1,25 к цене входа, раз в 5 минут) в макете не выделена отдельно.'),
@@ -613,7 +620,7 @@
       wide: true,
       body: [
         h('p', { class: 'soft' }, 'За 1 млн токенов, прайс Anthropic на 7 октября 2026' + (UI.isMobile() ? ' (справа — вход / выход)' : '') + '. В приложении цены берутся из настроек, а не зашиты в код.'),
-        UI.isMobile() ? mlist(Object.keys(PRICE).map(m => ({ title: m, sub: h('span', null, h('span', { class: 'mono' }, PRICE[m].id), h('br'), 'кэш ' + usd(PRICE[m].cache) + ' · ' + used(m)), value: usd(PRICE[m].in, 0) + ' / ' + usd(PRICE[m].out, 0) }))) : UI.table({
+        UI.isMobile() ? mlist(Object.keys(PRICE).map(m => ({ title: m, sub: h('span', null, h('span', { class: 'mono' }, PRICE[m].id), h('br'), 'кэш ' + usd(PRICE[m].cache) + ' · ' + used(m)), value: usdP(PRICE[m].in) + ' / ' + usdP(PRICE[m].out) }))) : UI.table({
           columns: [
             { label: 'Модель', render: m => h('div', { class: 'costs-price-model' }, h('b', null, m), h('span', { class: 'mono' }, PRICE[m].id)) },
             { label: 'Вход', align: 'r', render: m => usd(PRICE[m].in) },
@@ -689,7 +696,7 @@
       UI.clear(bodyEl);
       results.forEach(res => {
         const before = perRun(res.type, saved), after = perRun(res.type, applyChange(saved, res));
-        const priceRow = { name: 'Цена одного запуска', now: usd(before, 3), next: usd(after, 3), delta: (after > before ? '+' : '−') + usd(Math.abs(after - before), 3), verdict: null };
+        const priceRow = { name: 'Цена одного запуска', now: usdRun(before), next: usdRun(after), delta: (after > before ? '+' : '−') + usdRun(Math.abs(after - before)), verdict: null };
         const newLabel = res.kind === 'effort' ? 'Глубина: ' + effortWord(res.to) : res.to;
         UI.append(bodyEl, [h('section', { class: 'stack', style: 'gap:10px' },
           h('div', { class: 'row-between' }, h('h4', { style: 'min-width:0' }, typeOf(res.type).label + ': ' + changeLabel(res)),
@@ -971,13 +978,13 @@
       title: 'На что уходят деньги',
       subtitle: 'По типам задач, 1–7 октября',
       body: [
-        UI.hbars({ items: rows.map(x => ({ label: x.t.bar, value: x.b.cost, note: pct(x.b.cost / SPENT), color: 'var(--s1)', dot: false })), valueFormat: v => usd(v) }),
+        UI.hbars({ items: rows.map(x => ({ label: x.t.bar, value: x.b.cost, note: pctShare(x.b.cost / SPENT), color: 'var(--s1)', dot: false })), valueFormat: usdSum }),
         h('ul', { class: 'costs-types', 'aria-label': 'Задачи: модель, токены, цена запуска' }, rows.map(x => h('li', null,
           h('button', { class: 'costs-type', type: 'button', title: 'Показать запуски: ' + x.t.label, on: { click: () => onPick(x.t.id) } },
             h('span', { class: 'costs-type-name' }, x.t.label, modelChip(SCOPE_RUNS.find(r => r.type === x.t.id).model), x.t.id === 'refresh' && batchChip()),
             h('span', { class: 'costs-type-meta' }, x.b.n + ' ' + fmt.plural(x.b.n, 'запуск', 'запуска', 'запусков') + ' · в среднем ' + fmt.tokens(x.b.avgIn) + ' вход / ' + fmt.tokens(x.b.avgOut) + ' выход · ' + (x.b.cached ? 'кэш ' + pct(x.b.cacheShare) : 'без кэша')),
-            h('span', { class: 'costs-type-cost' }, h('span', null, h('b', null, usd(x.b.avgCost, 3)), h('small', null, 'за запуск')), icon('chevronRight')))))),
-        howto('Длина полосы — сумма за неделю, справа — доля в расходах. Нажмите на задачу, чтобы увидеть ее запуски.' + (V.admin ? '' : ' Сбор и обновление профилей перед анализом входят в цену анализа. Ночного обновления базы здесь нет: его оплачивает администратор.')),
+            h('span', { class: 'costs-type-cost' }, h('span', null, h('b', null, usdRun(x.b.avgCost)), h('small', null, 'за запуск')), icon('chevronRight')))))),
+        howto('Длина полосы — сумма за неделю, справа — доля в расходах. Нажмите на задачу, чтобы увидеть ее запуски.' + (V.admin ? '' : ' Поиск новостей перед анализом входит в цену анализа. Ночного обновления базы здесь нет: его оплачивает администратор.')),
       ],
     });
   }
@@ -1133,7 +1140,7 @@
             h('span', { class: 'costs-task' }, typeOf(r.type).label, r.batch && batchChip()),
             h('span', { class: 'costs-run-meta' }, fmt.datetime(r.at) + ' · ' + r.model + ' · ' + fmt.duration(r.duration)),
             h('span', { class: 'costs-run-meta' }, 'Вход ' + fmt.tokens(r.input) + (r.cached ? ' (кэш ' + pct(r.cached / r.input) + ')' : '') + ' · выход ' + fmt.tokens(r.output) + (r.searches ? ' · ' + r.searches + ' ' + fmt.plural(r.searches, 'поиск', 'поиска', 'поисков') : ''))),
-          h('span', { class: 'costs-run-cost' }, usd(r.cost, 3), h('small', null, 'подробнее'))))));
+          h('span', { class: 'costs-run-cost' }, usdRun(r.cost), h('small', null, 'подробнее'))))));
     } else {
       list = h('div', { class: 'costs-table' }, UI.table({
         columns: [
@@ -1144,7 +1151,7 @@
           { label: 'Выход', align: 'r', render: r => fmt.tokens(r.output) },
           { label: 'Поиски', align: 'r', render: r => r.searches ? String(r.searches) : h('span', { class: 'muted' }, '—') },
           { label: 'Длительность', align: 'r', render: r => fmt.duration(r.duration) },
-          { label: 'Стоимость', align: 'r', render: r => h('b', null, usd(r.cost, 3)) },
+          { label: 'Стоимость', align: 'r', render: r => h('b', null, usdRun(r.cost)) },
           { label: h('span', { class: 'sr-only' }, 'Подробнее'), render: () => icon('chevronRight', { width: 16, height: 16, style: 'color:var(--fg-3);display:block' }) },
         ],
         rows: shown,
@@ -1180,7 +1187,7 @@
     const tasks = ['parse', 'analysis', 'postmortem', 'refresh'].map(id => {
       const m = saved.models[id], eff = supportsEffort(m) ? 'глубина размышлений: ' + effortWord(saved.effort[id]) : 'глубина размышлений не настраивается';
       const shared = SHARED.includes(id);
-      return { title: TASK_LABEL[id], sub: m + ' · ' + eff + (shared ? ' · общая задача, платит администратор' : ''), value: shared ? null : '≈ ' + usd(perRun(id, saved), 3) };
+      return { title: TASK_LABEL[id], sub: m + ' · ' + eff + (shared ? ' · общая задача, платит администратор' : ''), value: shared ? null : '≈ ' + usdRun(perRun(id, saved)) };
     });
     const onOff = on => on ? chip('Включено', 'good', 'check') : chip('Выключено', 'warn', 'alert');
     const tricks = [
@@ -1231,7 +1238,7 @@
     function refresh() {
       TYPES.forEach(t => {
         const per = perRun(t.id, draft);
-        if (hints[t.id]) hints[t.id].textContent = '≈ ' + usd(per, 3) + ' за запуск · ≈ ' + Math.round(BASE[t.id].perMonth) + ' в месяц · ≈ ' + usdM(per * BASE[t.id].perMonth) + '/мес';
+        if (hints[t.id]) hints[t.id].textContent = '≈ ' + usdRun(per) + ' за запуск · ≈ ' + Math.round(BASE[t.id].perMonth) + ' в месяц · ≈ ' + usdM(per * BASE[t.id].perMonth) + '/мес';
       });
       const now = forecastFor(saved), next = forecastFor(draft), diff = next - now, same = Math.abs(diff) <= 0.005;
       UI.clear(forecastNum);
@@ -1244,7 +1251,7 @@
       else if (draft.limitSoft > 0 && perAn > draft.limitSoft) warnSlot.appendChild(UI.callout('warn', 'alert', 'Средний анализ (≈ ' + usd(perAn) + ') дороже порога предупреждения (' + usd(+draft.limitSoft) + '): уведомление будет приходить почти каждый раз.'));
       if (draft.searchDay > 0 && TOT.searches / DAYS > draft.searchDay) warnSlot.appendChild(UI.callout('warn', 'alert', 'Сейчас в среднем ' + fmt.dec(TOT.searches / DAYS, 1) + ' поиска в день — больше лимита ' + draft.searchDay + '. Лишние поиски не выполнятся, новости возьмутся из кэша.'));
       if (!draft.dossier) warnSlot.appendChild(UI.callout('warn', 'alert', 'Без досье ИИ снова читает файлы в 10–20 итераций, как старый бот: анализ дороже в ≈ ' + Math.round(perAn / BASE.analysis.avgCost) + ' раз.'));
-      if (draft.effort.analysis !== saved.effort.analysis && draft.models.analysis !== 'Haiku 4.5') warnSlot.appendChild(UI.callout('info', 'flask', 'Глубина размышлений влияет на качество анализа на трудных матчах. При сохранении настройка пройдет проверку на eval-наборе.'));
+      if (draft.effort.analysis !== saved.effort.analysis) warnSlot.appendChild(UI.callout('info', 'flask', 'Глубина размышлений влияет на качество анализа на трудных матчах. При сохранении настройка пройдет проверку на eval-наборе.'));
       if (!draft.eval) warnSlot.appendChild(UI.callout('bad', 'shield', 'Проверка на eval-наборе выключена: смена модели или глубины размышлений применится сразу, и просадку качества вы увидите только по проигранным ставкам.'));
       const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
       dirtyEl.textContent = dirty ? 'Есть несохраненные изменения' : 'Изменений нет';
@@ -1252,7 +1259,7 @@
       resetBtn.disabled = !dirty;
     }
 
-    // Глубина размышлений: переключатель зависит от выбранной модели (Haiku 4.5 ее не поддерживает)
+    // Глубина размышлений: переключатель есть у всех моделей 5.5
     function drawEffort(id) {
       const slot = UI.clear(effortSlots[id]);
       const model = draft.models[id];
@@ -1277,7 +1284,7 @@
       const t = typeOf(id);
       const f = UI.field({
         id: 'costs-model-' + id, label: TASK_LABEL[id],
-        options: t.options.map(m => ({ value: m, label: m + ' — ' + usd(PRICE[m].in, 0) + ' / ' + usd(PRICE[m].out, 0) + ' за 1M' + (m === saved.models[id] ? ' (сейчас)' : '') })),
+        options: t.options.map(m => ({ value: m, label: m + ' — ' + usdP(PRICE[m].in) + ' / ' + usdP(PRICE[m].out) + ' за 1M' + (m === saved.models[id] ? ' (сейчас)' : '') })),
         value: draft.models[id],
         attrs: { on: { change: e => { draft.models[id] = e.target.value; drawEffort(id); refresh(); } } },
       });

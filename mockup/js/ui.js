@@ -233,7 +233,8 @@
   function freshnessChip(f) {
     if (f === 'fresh') return chip('Данные свежие', 'good', 'check');
     if (f === 'stale') return chip('Нужно обновить', 'warn', 'clock');
-    return chip('Нет в базе', 'bad', 'alert');
+    // игрок есть в архиве ATP, но профиль Claude (стиль, физика, психология) еще не собран
+    return chip('Профиль не собран', 'warn', 'alert');
   }
 
   function formDots(arr) { return h('span', { class: 'form-dots', title: 'Форма: ' + arr.join(' '), 'aria-label': 'Форма: ' + arr.map(x => x === 'W' ? 'победа' : 'поражение').join(', ') }, arr.map(r => h('i', { class: r === 'W' ? 'w' : 'l' }))); }

@@ -1,6 +1,8 @@
-/* Новый анализ — окно ввода событий. Два способа: свободным текстом — матчи и кэфы (разбор имитирует Claude Haiku),
-   или формой с подстановкой матчей дня. Справа — «Перед запуском»: свежесть данных игроков, режим анализа,
-   цена и время, правила стратегии. Состояние живет в замыкании — черновик не теряется при переходах. */
+/* Новый анализ — окно ввода событий. Два способа: свободным текстом — матчи и кэфы (разбор имитирует Claude Haiku 5.5),
+   или формой. Справа — «Перед запуском»: игроки и свежесть их новостей, режим анализа, цена и время, правила
+   стратегии, последние анализы. Состояние живет в замыкании — черновик не теряется при переходах.
+   Этап 3: линии кэфов нет (Р10) — «Матчи сегодня» и скриншот купона убраны; игрока нет в базе — анализ с ним
+   не запускается (сбора профиля нет); досье считает код, перед анализом ищутся только устаревшие новости. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, chip, clear } = UI;
@@ -18,11 +20,17 @@
   const MODES = [
     { id: 'precise', label: 'Точный', model: 'Opus 5.5', perEvent: 0.09, secs: 45, note: 'Свежие новости о травмах и снятиях ищет Sonnet 5.5, вероятности считает Opus 5.5. Для решения о ставке.' },
     { id: 'balanced', label: 'Сбалансированный', model: 'Sonnet 5.5', perEvent: 0.045, secs: 30, flag: 'не проверен', note: 'Та же схема без поиска новостей. Качество на eval-наборе еще не проверено — для решения о ставке выбирайте «Точный».' },
-    { id: 'eco', label: 'Экономный', model: 'Haiku 4.5 + кэш', perEvent: 0.02, secs: 20, note: 'Черновая оценка по сохраненным профилям, чтобы отсеять лишнее. Не для решения о ставке.' },
+    { id: 'eco', label: 'Экономный', model: 'Haiku 5.5 + кэш', perEvent: 0.02, secs: 20, note: 'Черновая оценка по сохраненным досье, чтобы отсеять лишнее. Не для решения о ставке.' },
   ];
-  const COLLECT = { cost: 0.05, secs: 40 };   // сбор профиля игрока, которого нет в базе
-  const REFRESH = { cost: 0.01, secs: 15 };   // обновление устаревшего профиля
-  const PARSE_COST = '≈$' + fmt.dec(0.004, 3);
+  // Этап 3: работает только «Точный». Два других режима показаны выключенными до проверки на истории (вопрос владельцу);
+  // чтобы вернуть режим, добавьте его id в этот список.
+  const MODES_ON = ['precise'];
+  const modeOn = m => MODES_ON.includes(m.id);
+  // Новости перед анализом: один запрос Sonnet 5.5 с поиском на матч, если новости хотя бы одного игрока старше 12 ч
+  const NEWS = { cost: 0.05, secs: 25 };
+  const PARSE_COST = '≈$' + fmt.dec(0.001, 3);
+  // Дата последнего матча игрока в базе (архив ATP и tennis-data): в макете — одна для всех игроков сегодняшних матчей
+  const LAST_MATCH = '2026-10-05';
   // Букмекеры: свой список у каждого (Р17), меняется в «Личном кабинете → Букмекеры» — поэтому читаем его при отрисовке.
   // По умолчанию — первый из списка; эталон рынка для CLV — DATA.marketRef.
   const OTHER_BK = 'Другой';
@@ -140,14 +148,15 @@
   const state = {
     tab: 'text', text: '', auto: null, parsedText: null, parsing: false, parse: null,
     bank: S.bank, bookmaker: null, events: [], editing: new Set(), mode: 'precise',
-    collecting: new Set(), collected: new Set(),
   };
   const curBk = () => state.bookmaker || defaultBk(); // null — букмекер по умолчанию из кабинета
-  const freshOf = p => (state.collecting.has(p.id) ? 'collecting' : state.collected.has(p.id) ? 'fresh' : p.fresh);
+  // Свежесть новостей игрока: fresh — моложе 12 ч, stale — старше или новостей еще нет (поищем перед анализом).
+  // Статистику и досье код считает по архиву в базе — их «обновлять» не нужно.
+  const newsOf = p => (p.fresh === 'fresh' ? 'fresh' : 'stale');
   function resolve(name) {
     const n = String(name || '').trim(); if (!n) return null;
     const m = matchPlayer(n);
-    if (m && m.conf >= 0.7) return { name: n, p: m.p, conf: m.conf, sure: m.conf >= 0.9, fresh: freshOf(m.p) };
+    if (m && m.conf >= 0.7) return { name: n, p: m.p, conf: m.conf, sure: m.conf >= 0.9, fresh: newsOf(m.p) };
     return { name: n, p: null, conf: 0, sure: false, fresh: 'missing' };
   }
   const shortOf = (n, fallback) => { const r = resolve(n); return r ? (r.p && r.sure ? r.p.short : r.name) : fallback; };
@@ -282,14 +291,15 @@
       const key = r.p ? r.p.id : norm(r.name);
       if (!players.some(x => x.key === key)) players.push(Object.assign({ key }, r));
     }));
-    const missing = players.filter(p => !p.p || (p.sure && p.fresh === 'missing'));
-    const stale = players.filter(p => p.p && p.sure && p.fresh === 'stale');
+    const missing = players.filter(p => !p.p);                     // нет в базе — анализ не запустится
+    const stale = players.filter(p => p.p && p.sure && p.fresh === 'stale'); // новости устарели — поищем
+    // новости ищутся одним запросом на матч: считаем матчи, где новости устарели хотя бы у одного игрока
+    const newsMatches = evs.filter(ev => [ev.n1, ev.n2].some(name => { const r = resolve(name); return r && r.p && r.sure && r.fresh === 'stale'; })).length;
     const mode = MODES.find(m => m.id === state.mode);
     const items = [{ label: 'Анализ · ' + mode.model.replace(' + кэш', '') + ' · ' + evWord(n), cost: n * mode.perEvent }];
-    if (missing.length) items.push({ label: 'Сбор профиля: ' + missing.map(p => p.p ? p.p.short : p.name).join(', '), cost: missing.length * COLLECT.cost });
-    if (stale.length) items.push({ label: 'Обновление: ' + stale.map(p => p.p.short).join(', '), cost: stale.length * REFRESH.cost });
-    const extraCost = missing.length * COLLECT.cost + stale.length * REFRESH.cost;
-    const extraSecs = missing.length * COLLECT.secs + stale.length * REFRESH.secs;
+    if (stale.length && mode.id === 'precise') items.push({ label: 'Новости: ' + stale.length + ' ' + fmt.plural(stale.length, 'игрок', 'игрока', 'игроков') + ' (' + stale.map(p => p.p.short).join(', ') + ')', cost: newsMatches * NEWS.cost });
+    const extraCost = mode.id === 'precise' ? newsMatches * NEWS.cost : 0;
+    const extraSecs = mode.id === 'precise' ? newsMatches * NEWS.secs : 0;
     const cost = n * mode.perEvent + extraCost, secs = n * mode.secs + extraSecs;
 
     // Можно ли запускать, решает общий расчет DATA.ai.access. Сначала — то, что не зависит от событий (пауза, нет ключа,
@@ -301,12 +311,14 @@
       if (!n) return 'Добавьте хотя бы одно событие';
       const i = evs.findIndex(ev => check(ev).errors.length);
       if (i >= 0) { const e = check(evs[i]).errors[0]; return 'Событие ' + (i + 1) + ': ' + e.charAt(0).toLowerCase() + e.slice(1); }
+      const gone = players.find(p => !p.p);
+      if (gone) return '«' + gone.name + '» нет в базе ATP — анализ с ним не запустим. Исправьте имя или уберите событие';
       const u = players.find(p => p.p && !p.sure);
       return u ? 'Подтвердите игрока «' + u.name + '»' : null;
     };
     const blocked = D.ai.access(D.me, 0);
     const reason = blocked || inputReason() || D.ai.access(D.me, cost);
-    return { evs, n, players, missing, stale, mode, items, cost, secs, extraCost, extraSecs, reason, blocked };
+    return { evs, n, players, missing, stale, newsMatches, mode, items, cost, secs, extraCost, extraSecs, reason, blocked };
   }
 
   // ---------- лимиты ИИ (Р7, Р9, Р13) ----------
@@ -354,14 +366,6 @@
     .new-ta-status { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; flex: 1 1 240px; }
     .new-kbd { font-family: var(--font-mono); font-size: 11px; padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--fg-2); background: var(--surface-2); }
 
-    .new-drop { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1.5px dashed var(--line-strong); border-radius: var(--r-md); background: var(--surface); cursor: pointer; min-width: 0; transition: border-color .15s, background .15s; }
-    .new-drop:hover, .new-drop.drag { border-color: var(--accent); background: var(--accent-soft); }
-    .new-drop:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
-    .new-drop input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-    .new-drop-ic { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--surface-2); color: var(--fg-2); }
-    .new-drop-ic svg { width: 20px; height: 20px; }
-    .new-drop-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .new-drop-title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-weight: 600; }
 
     .new-result { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding-top: 16px; border-top: 1px solid var(--line); }
     .new-result-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
@@ -442,21 +446,6 @@
     }
 
     .new-form-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .new-today { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--r-md); background: var(--surface-2); min-width: 0; scroll-margin-top: calc(var(--topbar-h) + 16px); }
-    .new-today-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-    .new-today-head > div { min-width: 0; }
-    .new-today-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; }
-    .new-today-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); color: var(--fg); text-align: left; cursor: pointer; min-width: 0; }
-    .new-today-btn:hover { border-color: var(--line-strong); }
-    .new-today-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
-    .new-today-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; width: 100%; gap: 2px 6px; font-size: var(--fs-xs); color: var(--fg-3); min-width: 0; }
-    .new-today-top .mono { color: var(--fg-2); font-weight: 500; }
-    .new-today-state { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
-    .new-today-state svg { width: 12px; height: 12px; }
-    .new-today-btn[aria-pressed="true"] .new-today-state { color: var(--accent-ink); font-weight: 600; }
-    .new-today-name { font-weight: 600; line-height: 1.3; }
-    .new-today-odds { display: flex; flex-wrap: wrap; gap: 0 10px; font-size: var(--fs-xs); color: var(--fg-3); }
-    .new-today-odds span { white-space: nowrap; }
     .new-add.btn { border-style: dashed; height: 46px; }
 
     .new-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
@@ -484,6 +473,19 @@
     .new-mode-model { font-size: var(--fs-xs); color: var(--fg-3); font-weight: 500; }
     .new-mode-title .chip { font-weight: 500; }
     .new-mode.on .new-mode-model { color: var(--accent-ink); }
+    .new-mode.off { cursor: not-allowed; background: var(--surface-2); border-style: dashed; }
+    .new-mode-off { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); font-weight: 600; color: var(--fg-2); }
+    .new-mode-off svg { width: 13px; height: 13px; flex: none; }
+    .new-mode.off .new-mode-main, .new-mode.off .new-mode-cost { opacity: .6; }
+    .new-mode.off:hover { border-color: var(--line); }
+    .new-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .new-recent li { border-top: 1px solid var(--line); }
+    .new-recent li:first-child { border-top: 0; }
+    .new-recent a { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 9px 0; min-height: 44px; color: var(--fg); text-decoration: none; }
+    .new-recent a:hover .new-recent-m { color: var(--accent-ink); text-decoration: underline; }
+    .new-recent-m { font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+    .new-recent-s { grid-column: 1; font-size: var(--fs-xs); color: var(--fg-3); }
+    .new-recent .chip { grid-row: 1 / span 2; grid-column: 2; }
     .new-mode-note { font-size: var(--fs-xs); color: var(--fg-2); }
     .new-mode-cost { display: flex; flex-direction: column; align-items: flex-end; text-align: right; white-space: nowrap; }
     .new-mode-cost b { font-variant-numeric: tabular-nums; font-weight: 600; }
@@ -583,7 +585,8 @@
     UI.toast('Событие «' + t + '» убрано', 'trash');
   }
   const snapshots = new Map(); // ev.id → копия события до «Исправить», чтобы можно было отменить
-  function startEdit(ev) { snapshots.set(ev.id, JSON.stringify(ev)); state.editing.add(ev.id); renderPanel(); focusLater('#' + ev.id + '-n1'); }
+  // k — какой игрок неверный: фокус сразу в его поле (1 или 2)
+  function startEdit(ev, k) { snapshots.set(ev.id, JSON.stringify(ev)); state.editing.add(ev.id); renderPanel(); focusLater('#' + ev.id + '-n' + (k === 2 ? 2 : 1)); }
   function cancelEdit(ev) {
     const snap = snapshots.get(ev.id); snapshots.delete(ev.id); state.editing.delete(ev.id);
     if (!snap || JSON.parse(snap).blank) state.events = state.events.filter(e => e !== ev);
@@ -601,15 +604,6 @@
     attachToday(ev); renderPanel(); renderSide();
     UI.toast('Записал: «' + (ev['raw' + k] || p.short) + '» — это ' + p.name, 'check');
   }
-  function collectNow(p) {
-    if (state.collecting.has(p.id) || state.collected.has(p.id)) return;
-    state.collecting.add(p.id); refreshAll();
-    UI.toast('Собираем профиль ' + p.short + ': статистика, форма, личные встречи…', 'database');
-    setTimeout(() => {
-      state.collecting.delete(p.id); state.collected.add(p.id); refreshAll();
-      UI.toast('Профиль ' + p.short + ' собран (демо) — потрачено ' + usd(COLLECT.cost), 'check');
-    }, 1600);
-  }
   function addBlank() {
     const ev = blankEvent();
     state.events.push(ev);
@@ -617,23 +611,10 @@
     renderPanel(); renderSide();
     focusLater('#' + ev.id + '-n1');
   }
-  function toggleToday(m) {
-    const ex = state.events.find(e => e.todayId === m.id);
-    if (ex) { state.events = state.events.filter(e => e !== ex); UI.toast('Убрано: ' + P[m.p1].short + ' — ' + P[m.p2].short, 'x'); }
-    else { state.events.push(eventFromToday(m)); UI.toast('Добавлено с кэфами из линии: ' + P[m.p1].short + ' — ' + P[m.p2].short, 'check'); }
-    renderPanel(); renderSide();
-  }
   function onNamesChanged(ev) {
     const before = ev.todayId;
     const m = attachToday(ev);
-    if (m && m.id !== before) {
-      if (!ev.odds.p1 && !ev.odds.p2) {
-        ev.odds = { p1: fmt.odds(m.odds.p1), p2: fmt.odds(m.odds.p2), h1m: fmt.odds(m.odds.h1m), h2p: fmt.odds(m.odds.h2p) };
-        UI.toast('Матч есть в расписании на сегодня — подставил кэфы из линии', 'calendar');
-      }
-      renderPanel(); renderSide(); return;
-    }
-    if (before && !m) { renderPanel(); renderSide(); return; }
+    if ((m && m.id !== before) || (before && !m)) { renderPanel(); renderSide(); return; }
     refreshEvent(ev);
   }
   function launch() {
@@ -666,7 +647,7 @@
           h('li', null, 'Банк и букмекер необязательны — по умолчанию возьмем из кабинета.'),
           h('li', null, 'Банк — в валюте программы (' + curName() + '). Сумму в другой валюте (' + Object.values(UI.currency.list).map(c => c.sym).join(', ') + ', «руб», «usd», «eur») пересчитаем по курсу программы.'),
           h('li', null, 'Строки, которые не удалось понять, покажем отдельно — ничего не пропадет молча.')),
-        UI.callout('info', 'info', 'Разбор делает самая дешевая модель (Claude Haiku 4.5, ' + PARSE_COST + ' за текст). Если имя не совпало с базой, вы увидите это до запуска анализа.'),
+        UI.callout('info', 'info', 'Разбор делает самая дешевая модель (Claude Haiku 5.5, ' + PARSE_COST + ' за текст). Если имя не совпало с базой, вы увидите это до запуска анализа.'),
       ],
       actions: close => [
         button('Вставить шаблон', { kind: 'secondary', icon: 'copy', onClick: () => { close(); state.tab = 'text'; state.text = template(); renderPanel(); renderSide(); focusLater('#new-text'); } }),
@@ -683,24 +664,25 @@
   }
 
   function confChip(conf, r) {
-    if (!r.p) return chip('Не найден в списке ATP', 'bad', 'x');
+    if (!r.p) return chip('Нет в базе ATP', 'bad', 'x');
     if (conf >= 0.9) return h('span', { class: 'chip good', title: 'Насколько уверенно имя из текста сопоставлено с игроком' }, icon('check'), 'Совпало ' + fmt.prob(Math.min(conf, 1)));
     return chip('Проверьте · ' + fmt.prob(conf), 'warn', 'alert');
   }
   function freshChip(r) {
     if (r.p && !r.sure) return chip('Имя не подтверждено', 'warn', 'alert');
-    if (r.fresh === 'collecting') return chip('Собираем профиль…', 'info', 'clock');
-    return UI.freshnessChip(r.fresh);
+    if (!r.p) return chip('Анализ не запустим', 'bad', 'alert');
+    return r.fresh === 'fresh' ? chip('Новости свежие', 'good', 'check') : chip('Поищем новости', 'warn', 'clock');
+  }
+  // новости игрока: когда искали в последний раз (кэш новостей — 12 ч)
+  function newsWhen(p) {
+    const u = p.updated;
+    if (!u) return 'новостей еще нет';
+    return 'новости ' + (u.slice(0, 10) === D.today ? 'сегодня, ' + u.slice(11, 16) : fmt.datetime(u));
   }
   function updatedText(r) {
-    if (!r.p) return 'нет в списке ATP — проверьте имя';
+    if (!r.p) return 'нет в базе ATP — проверьте имя';
     if (!r.sure) return 'похоже на ' + r.p.name;
-    if (state.collected.has(r.p.id)) return 'профиль собран только что';
-    if (r.fresh === 'collecting') return 'собираем профиль…';
-    if (r.fresh === 'missing') return 'есть в списке ATP, профиля нет';
-    const u = r.p.updated;
-    const when = u.slice(0, 10) === D.today ? 'сегодня, ' + u.slice(11, 16) : fmt.datetime(u);
-    return (r.fresh === 'stale' ? 'обновлено ' + when + ' — освежим' : 'обновлено ' + when);
+    return 'последний матч в базе ' + fmt.date(LAST_MATCH) + ' · ' + newsWhen(r.p) + (r.fresh === 'stale' ? ' — поищем перед анализом' : '');
   }
 
   function fillPlayer(node, ev, k) {
@@ -712,7 +694,7 @@
       h('div', { class: 'new-pl-src' }, raw ? 'в тексте: «' + raw + '»' : 'Игрок ' + k),
       h('div', { class: 'new-pl-name' },
         r.p && r.sure ? h('a', { href: '#player-' + r.p.id }, r.p.name) : h('span', null, r.name),
-        r.p && h('span', { class: 'new-pl-sub' }, r.sure ? r.p.country + ' · №' + r.p.rank + ' ATP' : 'похоже на ' + r.p.name)),
+        r.p && h('span', { class: 'new-pl-sub' }, r.sure ? r.p.country + ' · №' + r.p.eloPlace + ' по Эло' : 'похоже на ' + r.p.name)),
       h('div', { class: 'row' }, raw && ev['man' + k] ? chip('Подтверждено вами', 'good', 'check') : confChip(conf, r), freshChip(r)));
   }
 
@@ -724,8 +706,8 @@
       node.append(h('button', { type: 'button', class: 'chip warn', on: { click: () => confirmPlayer(ev, k, r.p) } }, icon('alert'), 'Это ' + r.p.name + '?'), h('span', null, 'нажмите, чтобы подтвердить'));
       return;
     }
-    if (!r.p) { node.append(UI.freshnessChip('missing'), h('span', null, 'соберем профиль по имени, +' + usd(COLLECT.cost))); return; }
-    node.append(freshChip(r), h('span', null, '№' + r.p.rank + ' ATP · ' + r.p.country));
+    if (!r.p) { node.append(chip('Нет в базе ATP', 'bad', 'x'), h('span', null, 'анализ с ним не запустим — проверьте имя')); return; }
+    node.append(freshChip(r), h('span', null, '№' + r.p.eloPlace + ' по Эло · ' + r.p.country));
   }
 
   function fillWarn(node, ev) {
@@ -734,20 +716,19 @@
     [1, 2].forEach(k => {
       const r = resolve(ev['n' + k]); if (!r) return;
       const key = r.p ? r.p.id : r.name; if (seen.has(key)) return; seen.add(key);
-      const fix = button('Исправить имя', { kind: 'ghost', size: 'sm', icon: 'edit', onClick: () => startEdit(ev) });
+      const fix = button('Исправить имя', { kind: 'ghost', size: 'sm', icon: 'edit', onClick: () => startEdit(ev, k) });
       if (r.p && !r.sure) {
         node.appendChild(UI.callout('warn', 'alert',
           h('div', null, h('b', null, '«' + r.name + '» — это ' + r.p.name + '?'), ' Совпадение с базой ' + fmt.prob(r.conf) + ', без подтверждения анализ не запустим.'),
           h('div', { class: 'row new-callout-actions' }, button('Да, это ' + r.p.short, { kind: 'secondary', size: 'sm', icon: 'check', onClick: () => confirmPlayer(ev, k, r.p) }), state.editing.has(ev.id) ? null : fix)));
-      } else if (r.fresh === 'missing') {
-        node.appendChild(UI.callout('warn', 'database',
-          h('div', null, h('b', null, (r.p ? r.p.short : '«' + r.name + '»') + ' нет в базе'), ' — профиль будет собран перед анализом, +' + usd(COLLECT.cost) + ' и ~' + COLLECT.secs + ' с.'),
-          h('div', { class: 'xsmall', style: 'margin-top:2px' }, r.p ? 'Соберем статистику за 52 недели, форму, личные встречи, подачу и прием из открытых источников.' : 'Игрока нет и в списке ATP — проверьте написание, иначе профиль соберем по имени.'),
-          h('div', { class: 'row new-callout-actions' }, r.p && button('Собрать сейчас', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => collectNow(r.p) }), state.editing.has(ev.id) ? null : fix)));
-      } else if (r.fresh === 'collecting') {
-        node.appendChild(UI.callout('info', 'clock', h('b', null, 'Собираем профиль ' + r.p.short + '…'), ' Обычно это занимает до минуты, можно продолжать заполнение.'));
+      } else if (!r.p) {
+        // Сбора профиля на этапе 3 нет: игрок должен быть в базе (архив ATP), иначе анализ не запускается
+        node.appendChild(UI.callout('bad', 'alert',
+          h('div', null, h('b', null, '«' + r.name + '» нет в базе ATP'), ' — анализ с ним не запустим.'),
+          h('div', { class: 'xsmall', style: 'margin-top:2px' }, 'Проверьте написание: фамилии достаточно, можно латиницей. Или уберите событие.'),
+          h('div', { class: 'row new-callout-actions' }, state.editing.has(ev.id) ? null : fix)));
       } else if (r.fresh === 'stale') {
-        node.appendChild(UI.callout('', 'clock', h('b', null, r.p.short + ': данные от ' + fmt.date(r.p.updated)), ' — обновим перед анализом, +' + usd(REFRESH.cost) + '.'));
+        node.appendChild(UI.callout('', 'clock', h('b', null, r.p.short + ': ' + newsWhen(r.p)), ' — перед анализом поищем свежие новости о травмах и снятиях, ≈' + fmt.usd(NEWS.cost) + ' на матч.'));
       }
     });
   }
@@ -805,7 +786,7 @@
 
   function metaNodes(ev) {
     const parts = [ev.tournament || 'турнир не указан', ev.category, ev.round, ev.time && (ev.time + (ev.court ? ', ' + ev.court : ''))].filter(Boolean);
-    return [UI.surfaceChip(ev.surface), h('span', { style: 'min-width:0' }, parts.join(' · ')), ev.todayId && chip('Сверено с расписанием', 'accent', 'calendar')];
+    return [UI.surfaceChip(ev.surface), h('span', { style: 'min-width:0' }, parts.join(' · '))];
   }
 
   function reviewCard(ev, i) {
@@ -853,7 +834,7 @@
     const head = h('div', { class: 'new-ev-head' },
       h('span', { class: 'new-ev-num', 'aria-hidden': 'true' }, String(i + 1)),
       h('h4', { class: 'new-ev-title', id: ev.id + '-t' }, s.title),
-      h('div', { class: 'new-ev-meta' }, inline ? 'Исправление · изменения применяются сразу' : (ev.todayId ? [chip('Из расписания на сегодня', 'accent', 'calendar'), h('span', null, ev.time + ', ' + ev.court)] : 'Заполните игроков и кэфы')),
+      h('div', { class: 'new-ev-meta' }, inline ? 'Исправление · изменения применяются сразу' : 'Заполните игроков и кэфы'),
       h('div', { class: 'new-ev-actions' },
         button('', { kind: 'ghost', size: 'sm', icon: 'trash', title: 'Убрать событие ' + (i + 1), onClick: () => removeEvent(ev) })));
 
@@ -872,21 +853,6 @@
   }
 
   // ---------- вкладка «Вставить текстом» ----------
-  function dropzone() {
-    const input = h('input', { type: 'file', id: 'new-shot', accept: 'image/png,image/jpeg,image/webp', 'aria-describedby': 'new-shot-hint' });
-    const toastShot = name => UI.toast('«' + name + '» получен. Распознавание купона через Claude vision в разработке — пока вставьте текст', 'image');
-    const z = h('label', { class: 'new-drop', for: 'new-shot' }, input,
-      h('span', { class: 'new-drop-ic' }, icon('image')),
-      h('span', { class: 'new-drop-text' },
-        h('span', { class: 'new-drop-title' }, 'Загрузить скриншот купона', chip('в разработке', 'warn', 'flask')),
-        h('span', { class: 'xsmall muted', id: 'new-shot-hint' }, 'PNG или JPG из приложения букмекера. Распознавать будет Claude по изображению, пока надежнее вставить текст.')));
-    input.addEventListener('change', () => { const f = input.files && input.files[0]; if (f) toastShot(f.name); input.value = ''; });
-    z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('drag'); });
-    z.addEventListener('dragleave', () => z.classList.remove('drag'));
-    z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('drag'); const f = e.dataTransfer && e.dataTransfer.files[0]; toastShot(f ? f.name : 'скриншот'); });
-    return z;
-  }
-
   function resultSection() {
     const wrap = h('section', { class: 'new-result', 'aria-label': 'Что распознано', 'aria-busy': String(state.parsing) });
     if (state.parsing) {
@@ -906,7 +872,7 @@
           chip(evWord(n), n ? 'accent' : 'bad', n ? 'check' : 'alert'),
           chip('Банк ' + fmt.money(state.bank), bankDiff || foreign ? 'warn' : 'outline', bankDiff || foreign ? 'alert' : 'wallet'),
           chip(curBk(), 'outline'))),
-      h('span', { class: 'xsmall muted', style: 'padding-top:4px' }, 'Haiku 4.5 · ' + PARSE_COST)));
+      h('span', { class: 'xsmall muted', style: 'padding-top:4px' }, 'Haiku 5.5 · ' + PARSE_COST)));
     if (bankDiff || foreign) {
       const IN = { RUB: 'рублях', USD: 'долларах', EUR: 'евро' };
       const raw = foreign && (UI.currency.list[pr.bankRaw.code].dec ? fmt.dec(pr.bankRaw.value, 2) : fmt.int(pr.bankRaw.value)) + ' ' + UI.currency.list[pr.bankRaw.code].sym;
@@ -962,28 +928,12 @@
         ta,
         h('div', { class: 'new-ta-actions' },
           h('div', { class: 'new-ta-status' }, status,
-            h('span', { class: 'xsmall muted', id: 'new-text-hint' }, 'Матчи и кэфы, по строке на событие. Разбирает Claude Haiku 4.5, ' + PARSE_COST + ' за текст', UI.isMobile() ? '.' : [' · ', h('kbd', { class: 'new-kbd' }, 'Ctrl'), '+', h('kbd', { class: 'new-kbd' }, 'Enter')])),
+            h('span', { class: 'xsmall muted', id: 'new-text-hint' }, 'Матчи и кэфы, по строке на событие. Разбирает Claude Haiku 5.5, ' + PARSE_COST + ' за текст', UI.isMobile() ? '.' : [' · ', h('kbd', { class: 'new-kbd' }, 'Ctrl'), '+', h('kbd', { class: 'new-kbd' }, 'Enter')])),
           parseBtn)),
-      dropzone(),
       resultSection());
   }
 
   // ---------- вкладка «Заполнить форму» ----------
-  function todayPicker() {
-    const t = D.matchesToday[0];
-    return h('section', { class: 'new-today', 'aria-labelledby': 'new-today-t' },
-      h('div', { class: 'new-today-head' },
-        h('div', null, h('h4', { id: 'new-today-t' }, 'Матчи сегодня'), h('div', { class: 'xsmall muted' }, t.tournament + ', ' + t.category + ', ' + t.round + '. Нажмите — подставим игроков и кэфы из линии (пример линии).')),
-        UI.surfaceChip(t.surface)),
-      h('div', { class: 'new-today-grid' }, D.matchesToday.map(m => {
-        const added = state.events.some(e => e.todayId === m.id);
-        return h('button', { type: 'button', class: 'new-today-btn', 'aria-pressed': String(added), 'data-fk': 'today-' + m.id, on: { click: () => toggleToday(m) } },
-          h('span', { class: 'new-today-top' }, h('span', { class: 'mono' }, m.time), h('span', { class: 'new-today-state' }, icon(added ? 'check' : 'plus'), added ? 'добавлен' : 'добавить')),
-          h('span', { class: 'new-today-name' }, P[m.p1].short + ' — ' + P[m.p2].short),
-          h('span', { class: 'new-today-odds mono' }, h('span', null, 'П1 ' + fmt.odds(m.odds.p1)), h('span', null, 'П2 ' + fmt.odds(m.odds.p2))));
-      })));
-  }
-
   function formPanel() {
     // Банк вводится в валюте программы, в черновик уходит в рублях демо-данных (UI.fmt.fromMoney)
     const bank = UI.field({ label: 'Банк', id: 'new-bank', value: amountText(state.bank), suffix: fmt.cur(), inputmode: curDec() ? 'decimal' : 'numeric', autocomplete: 'off', hint: 'По учету ставок на ' + fmt.date(D.today) + '. Сумма ставки — % от банка', attrs: { 'data-fk': 'bank', 'aria-label': 'Банк, ' + curName() } });
@@ -1002,11 +952,10 @@
     const fromText = state.events.some(e => e.raw1 || e.raw2);
     return h('div', { class: 'stack', style: 'gap:16px' },
       h('div', { class: 'new-form-top' }, bank, bk),
-      todayPicker(),
       fromText && UI.callout('info', 'info', 'Здесь события из разобранного текста — правьте их в форме. Сам текст во вкладке «Вставить текстом» при этом не меняется.'),
       state.events.length
         ? h('div', { class: 'new-list' }, state.events.map((ev, i) => editorBlock(ev, i, false)))
-        : h('div', { class: 'card', style: 'border-style:dashed' }, UI.empty('Событий пока нет. Выберите матч выше или добавьте событие вручную.')),
+        : h('div', { class: 'card', style: 'border-style:dashed' }, UI.empty('Событий пока нет. Добавьте событие — игроков подскажем из базы, кэфы впишите из своей линии.')),
       button('Добавить событие', { kind: 'secondary', icon: 'plus', block: true, onClick: addBlank, attrs: { class: 'btn secondary block new-add', 'data-fk': 'add' } }));
   }
 
@@ -1015,9 +964,9 @@
     const strip = h('dl', { class: 'new-strip' },
       h('div', null, h('dt', null, 'События'), h('dd', null, String(a.n))),
       h('div', null, h('dt', null, 'Игроки'), h('dd', null, String(a.players.length))),
-      h('div', { title: 'Нет профиля или данные устарели' }, h('dt', null, 'Обновить'), h('dd', { class: a.missing.length + a.stale.length ? 'warn-text' : null }, String(a.missing.length + a.stale.length))));
+      h('div', { title: 'Новости старше 12 часов: поищем перед анализом' }, h('dt', null, 'Новости'), h('dd', { class: a.stale.length ? 'warn-text' : null }, String(a.stale.length))));
     const plist = h('div', { class: 'new-sub' },
-      h('div', { class: 'eyebrow' }, 'Данные игроков'),
+      h('div', { class: 'eyebrow' }, 'Игроки и их новости'),
       a.players.length
         ? h('ul', { class: 'new-plist' }, a.players.map(p => h('li', null,
           h('div', { class: 'new-plist-name' }, p.p && p.sure ? h('a', { href: '#player-' + p.p.id }, p.p.short) : h('span', null, p.name), h('span', { class: 'new-plist-sub' }, updatedText(p))),
@@ -1026,17 +975,17 @@
     const modes = h('fieldset', { class: 'new-modes' },
       h('legend', { class: 'eyebrow' }, 'Режим анализа'),
       MODES.map(m => {
-        const on = m.id === state.mode;
-        return h('label', { class: ['new-mode', on && 'on'] },
-          h('input', { type: 'radio', name: 'new-mode', value: m.id, checked: on, 'data-fk': 'mode-' + m.id, on: { change: () => { state.mode = m.id; renderSide(); } } }),
-          h('span', { class: 'new-mode-main' }, h('span', { class: 'new-mode-title' }, m.label, h('span', { class: 'new-mode-model' }, m.model), m.flag && chip(m.flag, 'warn', 'flask')), h('span', { class: 'new-mode-note' }, m.note)),
+        const on = m.id === state.mode, off = !modeOn(m);
+        return h('label', { class: ['new-mode', on && 'on', off && 'off'], title: off ? 'Режим включим после проверки на истории' : null },
+          h('input', { type: 'radio', name: 'new-mode', value: m.id, checked: on, disabled: off, 'data-fk': 'mode-' + m.id, on: { change: () => { state.mode = m.id; renderSide(); } } }),
+          h('span', { class: 'new-mode-main' }, h('span', { class: 'new-mode-title' }, m.label, h('span', { class: 'new-mode-model' }, m.model), !off && m.flag && chip(m.flag, 'warn', 'flask')), off && h('span', { class: 'new-mode-off' }, icon('flask'), 'после проверки на истории'), h('span', { class: 'new-mode-note' }, m.note)),
           h('span', { class: 'new-mode-cost' }, h('b', null, usd(Math.max(1, a.n) * m.perEvent)), h('small', null, fmtTime(Math.max(1, a.n) * m.secs))));
       }),
       a.n ? null : h('span', { class: 'xsmall muted' }, 'Цена указана за одно событие.'));
     const costs = h('div', { class: 'new-costs' },
       UI.kv(a.items.map(it => [it.label, usd(it.cost)])),
       h('div', { class: 'new-total', 'aria-live': 'polite' }, h('span', null, 'Итого'), h('span', null, h('b', null, usd(a.cost)), h('span', { class: 'muted' }, ' · ' + fmtTime(a.secs)))));
-    const L = aiLimit(), cacheNote = 'Профили и правила стратегии берутся из кэша промпта — в ' + D.ai.month.replace(/ь$/, 'е') + ' так пришло ' + D.ai.cacheShare + '% входных токенов.';
+    const L = aiLimit(), cacheNote = 'Инструкции и правила стратегии берутся из кэша промпта — в ' + D.ai.month.replace(/ь$/, 'е') + ' так пришло ' + D.ai.cacheShare + '% входных токенов.';
     let bud;
     if (L.own && !L.last4) {
       bud = h('div', { class: 'new-sub', style: 'gap:6px' },
@@ -1071,15 +1020,37 @@
   function flowCard(a) {
     const names = arr => arr.map(p => p.p ? p.p.short : p.name).join(', ');
     const steps = [];
-    if (a.missing.length || a.stale.length) steps.push(['database', 'warn', 'Соберем недостающие данные', [a.missing.length && 'Профиль с нуля: ' + names(a.missing) + '.', a.stale.length && 'Обновим: ' + names(a.stale) + '.'].filter(Boolean).join(' ')]);
-    else steps.push(['database', 'accent', 'Данные игроков свежие', 'Обновлять ничего не нужно — профили берем из базы.']);
-    steps.push(['brain', '', 'Оценим вероятности исходов', 'Форма, Эло на покрытии, подача и прием, личные встречи, усталость' + (a.mode.id === 'precise' ? ', свежие новости о травмах и снятиях' : '') + ' и ' + LESSONS_ON + ' ' + fmt.plural(LESSONS_ON, 'подтвержденный урок', 'подтвержденных урока', 'подтвержденных уроков') + ' из прошлых ставок.']);
+    if (a.stale.length && a.mode.id === 'precise') steps.push(['globe', 'warn', 'Поищем свежие новости', 'Травмы, снятия, мотивация: ' + names(a.stale) + '. Новости остальных игроков моложе 12 часов — возьмем из кэша.']);
+    else steps.push(['database', 'accent', 'Новости свежие', 'Новости всех игроков моложе 12 часов — повторный поиск не нужен.']);
+    steps.push(['database', '', 'Соберем досье', 'Эло на покрытии, форма, подача и прием за 52 недели, личные встречи и нагрузка — код считает по архиву матчей, без ИИ.']);
+    steps.push(['brain', '', 'Оценим вероятности исходов', 'Claude получает досье каждого матча' + (a.mode.id === 'precise' ? ' со свежими новостями' : '') + ' и ' + LESSONS_ON + ' ' + fmt.plural(LESSONS_ON, 'подтвержденный урок', 'подтвержденных урока', 'подтвержденных уроков') + ' и поправляет вероятность модели не больше чем на 10 п.п. — с объяснением.']);
     steps.push(['target', '', 'Сравним с рынком', 'Уберем маржу букмекера и отметим исходы, где оценка модели выше рынка.']);
     steps.push(['ticket', '', 'Соберем экспресс', LEGS + ' ' + fmt.plural(ST.maxLegs, 'событие', 'события', 'событий') + ' с итоговым кэфом ≤ ' + fmt.odds(ST.totalMax) + ' (ординары стратегия не допускает) и сумму по таблице ставок от банка ' + fmt.money(state.bank) + '.']);
     steps.push(['check', '', 'Решение за вами', 'ИИ может ошибаться и сам ставки не делает. Результат вы внесете после матча — на нем модель учится.']);
     return UI.card({
       title: 'Что произойдет после запуска',
       body: h('ol', { class: 'new-flow' }, steps.map(([ic, kind, t, d]) => h('li', null, h('span', { class: ['new-flow-ic', kind] }, icon(ic)), h('div', { class: 'new-flow-body' }, h('b', null, t), h('span', null, d))))),
+    });
+  }
+
+  // Последние анализы: открыть анализ по номеру после ухода со страницы (в приложении — GET /analyses)
+  const RECENT_STATUS = { done: ['Готов', 'good', 'check'], failed: ['Остановлен', 'bad', 'alert'], cancelled: ['Отменен', 'outline', 'x'], running: ['Идет', 'info', 'clock'] };
+  function recentCard() {
+    const list = (D.recentAnalyses || []).slice(0, 5);
+    const when = iso => (iso.slice(0, 10) === D.today ? 'сегодня, ' : fmt.date(iso) + ', ') + iso.slice(11, 16);
+    return UI.card({
+      class: 'new-recent-card', title: 'Последние анализы', subtitle: 'Откроются с того места, где вы ушли',
+      body: list.length
+        ? h('ul', { class: 'new-recent' }, list.map(x => {
+          const [t, k, i] = RECENT_STATUS[x.status] || RECENT_STATUS.done;
+          const sub = '#' + x.id + ' · ' + when(x.at) + (x.status === 'done' ? (x.decision === 'bet' ? ' · ставка сохранена' : ' · без ставки') : x.note ? ' · ' + x.note : '') + ' · ' + fmt.usd(x.cost);
+          return h('li', null, h('a', { href: '#analysis-' + x.id, 'aria-label': 'Анализ #' + x.id + ': ' + x.matches.map(D.match).join(', ') + ', ' + t.toLowerCase() },
+            h('span', { class: 'new-recent-m' }, x.matches.map(D.match).join(', ')),
+            h('span', { class: 'new-recent-s' }, sub),
+            chip(t, k, i)));
+        }))
+        : h('p', { class: 'small muted' }, 'Анализов пока нет.'),
+      foot: list.some(x => !x.demo) ? [h('span', { class: 'xsmall muted' }, 'В макете анализы, кроме #' + (list.find(x => x.demo) || { id: '—' }).id + ', открываются на демо-примере.')] : null,
     });
   }
 
@@ -1143,7 +1114,8 @@
       else if (inMain && dSide < dMain - 120) toMain = false;
     }
     rulesInMain = toMain;
-    if (toMain !== inMain) (toMain ? main : side).appendChild(rules);
+    // в правой колонке «Правила стратегии» стоят перед «Последними анализами»
+    if (toMain !== inMain) { if (toMain) main.appendChild(rules); else side.insertBefore(rules, side.querySelector('.new-recent-card')); }
   }
   let balanceQueued = false;
   window.addEventListener('resize', () => {
@@ -1158,7 +1130,7 @@
     renderSteps(a);
     if (refs.rules) refs.rules.remove();
     refs.rules = rulesCard(a);
-    keepFocus(refs.side, () => { clear(refs.side); refs.side.append(launchCard(a), flowCard(a)); (rulesInMain ? refs.main : refs.side).appendChild(refs.rules); });
+    keepFocus(refs.side, () => { clear(refs.side); refs.side.append(launchCard(a), flowCard(a)); (rulesInMain ? refs.main : refs.side).appendChild(refs.rules); refs.side.appendChild(recentCard()); });
     balance();
     renderBar(a);
     // На телефоне нижняя панель прячется, когда основная кнопка запуска видна на экране
@@ -1177,28 +1149,23 @@
   }
 
   // ---------- вход с параметром ----------
-  // #new-m3 — черновик с одним матчем из расписания (кнопка «Анализировать» на главной и в карточке игрока),
-  // #new-today — форма с выбором из матчей дня. Без параметра черновик не трогаем.
-  let revealToday = false;
+  // #new-m3 — черновик с одним матчем из расписания (кнопка «Анализировать» на главной и в карточке игрока): игроки,
+  // турнир и раунд; кэфы участник вписывает сам — линии кэфов нет (Р10). #new-today — так же все матчи дня
+  // (кнопка «Все матчи дня в анализ» на главной). Без параметра черновик не трогаем.
   function applyParam(param) {
     if (!param) return;
-    const m = D.matchesToday.find(x => x.id === param);
-    if (m) {
+    const one = D.matchesToday.find(x => x.id === param);
+    const ms = one ? [one] : param === 'today' ? D.matchesToday : [];
+    if (ms.length) {
       state.tab = 'form'; state.editing.clear(); snapshots.clear();
-      state.events = [eventFromToday(m)];
-      // во вкладке «Вставить текстом» — тот же матч текстом, чтобы вкладки не расходились
+      state.events = ms.map(m => Object.assign(eventFromToday(m), { odds: {} }));
+      // во вкладке «Вставить текстом» — те же матчи текстом, чтобы вкладки не расходились
       setAutoText(() => [
         'Текущий банк: ' + fmt.money(state.bank), 'Букмекер: ' + curBk(), '', 'События:',
-        P[m.p1].short + ' vs ' + P[m.p2].short + ', ' + m.tournament + ', ' + (D.surfaces[m.surface] ? D.surfaces[m.surface].label.toLowerCase() : 'хард') + ', ' + m.round.replace(' финала', ''),
-        'Кэфы: П1 = ' + fmt.odds(m.odds.p1) + ', П2 = ' + fmt.odds(m.odds.p2),
-        'Фора по сетам: П1(-1.5) = ' + fmt.odds(m.odds.h1m) + ', П2(+1.5) = ' + fmt.odds(m.odds.h2p),
-      ].join('\n'));
+      ].concat(ms.map(m => P[m.p1].short + ' vs ' + P[m.p2].short + ', ' + m.tournament + ', ' + (D.surfaces[m.surface] ? D.surfaces[m.surface].label.toLowerCase() : 'хард') + ', ' + m.round.replace(' финала', ''))).join('\n'));
       state.parsedText = state.text;
       state.parse = { bank: null, bankRaw: null, bookmaker: null, unknown: [] };
-      UI.toast('Добавлен матч ' + P[m.p1].short + ' — ' + P[m.p2].short + ' из расписания', 'calendar');
-    } else if (param === 'today') {
-      state.tab = 'form';
-      revealToday = true;
+      UI.toast(one ? 'Добавлен матч ' + P[one.p1].short + ' — ' + P[one.p2].short + ': впишите кэфы своей линии' : 'Добавлены матчи дня (' + ms.length + '): впишите кэфы своей линии', 'calendar');
     }
     // адрес без параметра: повторный заход на экран не сбросит черновик еще раз
     try { history.replaceState(history.state, '', location.href.split('#')[0] + '#new'); } catch (e) { /* в песочнице адрес может быть недоступен */ }
@@ -1240,16 +1207,6 @@
     renderPanel();
     renderSide();
     requestAnimationFrame(() => { const tb = document.querySelector('.tabbar'); if (tb && tb.offsetHeight) bar.style.setProperty('--new-tabbar', tb.offsetHeight + 'px'); });
-    if (revealToday) {
-      revealToday = false;
-      // после общего window.scrollTo(0, 0) в роутере — показываем «Матчи сегодня»
-      setTimeout(() => {
-        const sec = root.querySelector('.new-today'); if (!sec) return;
-        sec.scrollIntoView({ block: 'start', behavior: 'smooth' });
-        const b = sec.querySelector('.new-today-btn[aria-pressed="false"]') || sec.querySelector('.new-today-btn');
-        if (b) b.focus({ preventScroll: true });
-      }, 80);
-    }
   }
 
   UI.register('new', { title: 'Новый анализ', nav: 'new', render });
