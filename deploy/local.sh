@@ -86,9 +86,11 @@ ensure_backup_keys() {
 
 wait_health() {
   say "Жду, пока $URL/api/health ответит"
-  local i body
+  local i body=""
   for i in $(seq 1 60); do
-    body="$(curl -sk --max-time 3 "$URL/api/health" || true)"
+    # Мимо прокси: VPN-программы прописывают в системе прокси (HTTPS_PROXY и т. п.),
+    # а сайт работает на этом же компьютере
+    body="$(curl -sSk --noproxy '*' --max-time 3 "$URL/api/health" 2>&1 || true)"
     if [[ "$body" == *'"status":"ok"'* ]]; then
       printf '%s\n' "$body"
       return
@@ -96,6 +98,7 @@ wait_health() {
     sleep 2
   done
   dc ps
+  printf 'Последний ответ: %s\n' "${body:-пусто}" >&2
   die "сайт не ответил за 2 минуты. Логи: bash deploy/local.sh logs api"
 }
 
