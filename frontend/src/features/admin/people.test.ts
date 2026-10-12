@@ -42,11 +42,14 @@ describe('участники в кабинете администратора', 
     expect(summarize(ALL)).toEqual({ total: 6, active: 5, blocked: 1, admins: 2 });
   });
 
-  it('доля лимита и цвет полосы: с 80% — предупреждение, со 100% — красный', () => {
-    expect(spendShare(adminUser({ ai_spent_month_usd: 5 }))).toEqual({ share: 0.5, tone: null });
-    expect(spendShare(adminUser({ ai_spent_month_usd: 8 })).tone).toBe('warn');
-    expect(spendShare(adminUser({ ai_spent_month_usd: 10 })).tone).toBe('bad');
-    expect(spendShare(adminUser({ limit: null }))).toEqual({ share: null, tone: null });
+  it('доля лимита и цвет полосы: с порога уведомления — предупреждение, со 100% — красный', () => {
+    expect(spendShare(adminUser({ ai_spent_month_usd: 5 }), 80)).toEqual({ share: 0.5, tone: null });
+    expect(spendShare(adminUser({ ai_spent_month_usd: 8 }), 80).tone).toBe('warn');
+    expect(spendShare(adminUser({ ai_spent_month_usd: 7 }), 80).tone).toBeNull();
+    // порог — из настроек администратора, а не 80% из кода
+    expect(spendShare(adminUser({ ai_spent_month_usd: 7 }), 70).tone).toBe('warn');
+    expect(spendShare(adminUser({ ai_spent_month_usd: 10 }), 90).tone).toBe('bad');
+    expect(spendShare(adminUser({ limit: null }), 80)).toEqual({ share: null, tone: null });
   });
 
   it('код сброса и сброс 2FA — только участникам, кроме себя; 2FA — тем, у кого она включена', () => {

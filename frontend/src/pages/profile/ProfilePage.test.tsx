@@ -8,6 +8,7 @@ import { meQueryKey } from '../../api/keys';
 import { createQueryClient } from '../../api/queryClient';
 import { ThemeProvider } from '../../app/theme/ThemeProvider';
 import { ToastProvider } from '../../components';
+import { aiBudget } from '../../features/ai/testData';
 import { apiError, json, ME_ADMIN, ME_MEMBER, mockFetch, type Handler } from '../../test/fetchMock';
 import { setViewportWidth } from '../../test/setup';
 import { ProfilePage } from './ProfilePage';
@@ -50,6 +51,8 @@ function routes(me: Me, extra: Record<string, Handler> = {}): Record<string, Han
     'GET /api/settings': () => json({ currency: 'EUR' }),
     'GET /api/admin/users': () => json([{ id: 1, status: 'active' }, { id: 2, status: 'active' }, { id: 3, status: 'deleted' }]),
     'GET /api/admin/invites': () => json([{ id: 1 }]),
+    // точка у вкладки «Ключ Claude» берется из лимита
+    'GET /api/ai/budget': () => json(aiBudget()),
     ...extra,
   };
 }

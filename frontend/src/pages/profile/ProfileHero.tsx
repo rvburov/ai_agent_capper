@@ -152,7 +152,10 @@ export function ProfileHero({ me, suspicious }: ProfileHeroProps) {
               >
                 {t('profile.hero.quickPassword')}
               </Button>
-              {/* Только то, что уже работает: ключ Claude, лимиты и экспорт данных — этап 4 */}
+              <Button size="sm" icon="key" to={paths.profile('key')}>
+                {t('profile.hero.quickKey')}
+              </Button>
+              {/* Только то, что уже работает: лимиты ставок и экспорт данных — этап 4 */}
               <Button
                 size="sm"
                 icon="device"

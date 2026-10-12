@@ -8,7 +8,9 @@ import { paths } from '../../app/paths';
 import { Callout, Field, Icon, useToast, type ActionMenuEntry } from '../../components';
 import { spendMonth } from '../../features/admin/display';
 import { personName } from '../../features/admin/people';
-import type { AdminUser } from '../../features/admin/types';
+import { formatLimitUsd } from '../../features/admin/limits';
+import type { AdminLimits, AdminUser } from '../../features/admin/types';
+import { useAdminLimits } from '../../features/admin/useAdminAi';
 import {
   useBlockUser,
   useChangeRole,
@@ -18,10 +20,11 @@ import {
   useUnblockUser,
 } from '../../features/admin/useAdminUsers';
 import { formatUsd } from '../../lib/format';
+import { ApproveModal, LimitModal, RejectDialog } from './LimitDialogs';
 import { ConfirmDialog, PersonRow } from './parts';
 import { UserCard } from './UserCard';
 
-type DialogKind = 'card' | 'block' | 'sessions' | 'reset2fa' | 'role' | 'delete';
+type DialogKind = 'card' | 'block' | 'sessions' | 'reset2fa' | 'role' | 'delete' | 'limit' | 'approve' | 'reject';
 interface Dialog {
   kind: DialogKind;
   user: AdminUser;
@@ -43,6 +46,8 @@ export function useUserActions(me: Me) {
   const toast = useToast();
   const navigate = useNavigate();
   const unblock = useUnblockUser();
+  // Лимиты и просьбы вернуть ключ администратора — из «Ключ и бюджет» (/api/admin/ai/limits)
+  const limits = useAdminLimits();
   const [dialog, setDialog] = useState<Dialog | null>(null);
 
   function onUnblock(user: AdminUser) {
@@ -74,6 +79,38 @@ export function useUserActions(me: Me) {
         hint: t('admin.menu.profileHint'),
         onSelect: () => void navigate(paths.profile('security')),
       });
+    }
+    // Ключ Claude и лимит (userMenu макета): просьба вернуть ключ администратора, лимит, потолок
+    const member = limits.data?.members.find((m) => m.id === user.id);
+    if (member && member.role === 'member' && member.ai_mode === 'own' && member.return_requested_at) {
+      items.push({ id: 'approve', icon: 'key', label: t('admin.menu.approveReturn'), onSelect: open('approve') });
+      items.push({
+        id: 'reject',
+        icon: 'x',
+        label: t('admin.menu.rejectReturn'),
+        hint: t('admin.menu.rejectReturnHint'),
+        onSelect: open('reject'),
+      });
+    }
+    if (member && !mine && member.role === 'member') {
+      if (member.ai_mode === 'shared') {
+        items.push({
+          id: 'limit',
+          icon: 'sliders',
+          label: t('admin.menu.limit'),
+          hint: t('admin.menu.limitHint'),
+          onSelect: open('limit'),
+        });
+      } else {
+        items.push({
+          id: 'own-cap',
+          icon: 'sliders',
+          label: t('admin.menu.ownCap', { cap: formatLimitUsd(member.own_cap_usd) }),
+          hint: t('admin.menu.ownCapHint'),
+          disabled: true,
+          onSelect: () => undefined,
+        });
+      }
     }
     if (items.length) items.push('separator');
     items.push({
@@ -149,6 +186,7 @@ export function useUserActions(me: Me) {
       key={`${dialog.kind}-${dialog.user.id}`}
       dialog={dialog}
       me={me}
+      limits={limits.data}
       onClose={close}
       cardActions={(user) => itemsFor(user, { withCard: false })}
     />
@@ -165,12 +203,14 @@ export function useUserActions(me: Me) {
 interface UserDialogProps {
   dialog: Dialog;
   me: Me;
+  /** Лимиты и просьбы участников (окна лимита и решения по просьбе). */
+  limits: AdminLimits | undefined;
   onClose: () => void;
   /** Пункты действий в карточке: по свежим данным участника, а не по строке списка. */
   cardActions: (user: AdminUser) => ActionMenuEntry[];
 }
 
-function UserDialog({ dialog, me, onClose, cardActions }: UserDialogProps) {
+function UserDialog({ dialog, me, limits, onClose, cardActions }: UserDialogProps) {
   const { t } = useTranslation();
   const toast = useToast();
   const block = useBlockUser();
@@ -269,6 +309,19 @@ function UserDialog({ dialog, me, onClose, cardActions }: UserDialogProps) {
     }
     case 'delete':
       return <DeleteDialog user={user} me={me} onClose={onClose} run={remove.mutateAsync} />;
+    case 'limit':
+    case 'approve':
+    case 'reject': {
+      const member = limits?.members.find((m) => m.id === user.id);
+      if (!limits || !member) return null;
+      if (dialog.kind === 'limit') {
+        return <LimitModal member={member} members={limits.members} meId={me.id} onClose={onClose} />;
+      }
+      if (dialog.kind === 'approve') {
+        return <ApproveModal member={member} defaults={limits.defaults} meId={me.id} onClose={onClose} />;
+      }
+      return <RejectDialog member={member} meId={me.id} onClose={onClose} />;
+    }
   }
 }
 

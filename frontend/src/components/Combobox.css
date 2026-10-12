@@ -1,0 +1,7 @@
+/* Поле с подсказками (Combobox в Dropdown.tsx): тот же список dd-pop, что у выпадающего списка.
+   Справа в поле — значок поиска (в макете — стрелка на фоне поля; здесь значок без своего цвета). */
+.dd-combo-wrap { width: 100%; }
+.input.dd-combo { padding-right: 40px; }
+.dd-combo-chev { position: absolute; right: 12px; display: grid; place-items: center; color: var(--fg-3); pointer-events: none; }
+.dd-combo-chev svg { width: 18px; height: 18px; }
+.dd-opt-hint { flex: none; font-size: var(--fs-xs); color: var(--fg-3); white-space: nowrap; }

@@ -202,3 +202,95 @@
 .adm-users-top { display: flex; flex-direction: column; gap: 12px; padding: 4px 18px 6px; }
 @media (max-width: 720px) { .adm-users-top { padding: 2px 14px 2px; } }
 .adm-self-start { align-self: flex-start; }
+
+/* ---------- ключ и бюджет (PANELS.key макета, этап 3) ---------- */
+.adm-min0 { min-width: 0; }
+.adm-bleed { margin: 0 -18px; }
+@media (max-width: 720px) { .adm-bleed { margin: 0 -14px; } }
+.adm-secret {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2);
+  min-width: 0; flex-wrap: wrap;
+}
+.adm-secret > svg { width: 18px; height: 18px; color: var(--fg-3); flex: none; }
+.adm-secret code { font-family: var(--font-mono); font-size: var(--fs-lg); color: var(--fg); }
+.adm-secret .chip { margin-left: auto; }
+.adm-ext { display: flex; flex-direction: column; gap: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
+.adm-link { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; min-height: 32px; align-self: flex-start; }
+.adm-link svg { width: 16px; height: 16px; flex: none; }
+/* новое: на телефоне отдельная ссылка («Лимит трат в консоли Anthropic») — зона нажатия 40 px, как .adm-pill */
+@media (max-width: 960px) { .adm-link { min-height: var(--tap); } }
+.adm-form { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-md); }
+.adm-big { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.adm-big .chip { margin-left: auto; align-self: center; }
+.adm-of {
+  color: var(--fg-3); font-size: var(--fs-lg); font-weight: 500; font-family: var(--font-body); letter-spacing: 0; white-space: nowrap;
+}
+.adm-kv3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.adm-kv3 > div { min-width: 0; }
+.adm-kv3 dt { font-size: var(--fs-xs); color: var(--fg-3); }
+.adm-kv3 dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.adm-kv3 dd small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); }
+.adm-fields.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.adm-presets { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: var(--fs-xs); color: var(--fg-3); }
+.adm-pill {
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg-2); border-radius: 999px; padding: 4px 12px;
+  min-height: 32px; font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.adm-pill:hover { background: var(--surface-2); }
+.adm-pill[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); }
+.adm-pill:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (max-width: 960px) { .adm-pill { min-height: 40px; padding: 4px 14px; } }
+.adm-preview {
+  display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2);
+  font-size: var(--fs-sm); color: var(--fg-2);
+}
+.adm-preview b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.adm-preview b.warn-text { color: var(--warn-ink); }
+.adm-preview b.bad-text { color: var(--bad-ink); }
+.adm-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.adm-rule {
+  display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm); color: var(--fg-2); align-items: start;
+}
+.adm-rule:first-child { padding-top: 0; }
+.adm-rule:last-child { border-bottom: 0; padding-bottom: 0; }
+.adm-rule-k { font-weight: 600; color: var(--fg); display: flex; align-items: flex-start; gap: 8px; }
+.adm-rule-k i { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 6px; background: var(--fg-3); }
+.adm-rule-k i.warn { background: var(--warn); }
+.adm-rule-k i.bad { background: var(--bad); }
+@media (max-width: 480px) { .adm-rule { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.adm-rules.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.adm-rules.cols .adm-rule { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); }
+@media (max-width: 720px) {
+  .adm-rules.cols { display: flex; flex-direction: column; gap: 0; }
+  .adm-rules.cols .adm-rule { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 10px 0; }
+  .adm-rules.cols .adm-rule:last-child { border-bottom: 0; }
+}
+.adm-defaults {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding: 10px 14px;
+  border-radius: var(--r-md); background: var(--surface-2);
+}
+.adm-defaults-v { font-weight: 600; font-variant-numeric: tabular-nums; }
+.adm-limits-table td { vertical-align: middle; }
+.adm-limits-table th:first-child, .adm-limits-table td:first-child { padding-left: 18px; }
+.adm-limits-table th:last-child, .adm-limits-table td:last-child { padding-right: 18px; }
+.adm-limits-table .switch { display: inline-block; vertical-align: middle; }
+.adm-limits-table .adm-muted-cell { color: var(--fg-3); }
+.adm-limits-table td:last-child { width: 1%; white-space: nowrap; }
+/* новое: длинное имя в таблице лимитов обрезается многоточием (полностью — в title), как в «Участниках» */
+.adm-limits-table .adm-cell2 { max-width: 280px; }
+.adm-ellipsis { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.adm-lcards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 720px) { .adm-lcards { grid-template-columns: minmax(0, 1fr); } }
+.adm-lcard { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.adm-lcard-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* новое: кнопка внутри плашки (бюджет изменили в другой вкладке — «Взять новые значения») */
+.adm-callout-act { margin-top: 8px; }
+/* переход из уведомления «израсходовано 80%»: участники у порога подсвечиваются (как в макете);
+   без анимации («меньше движения») — ровной подсветкой, пока она действует */
+@keyframes adm-flash { 0%, 55% { background: var(--warn-soft); } 100% { background: transparent; } }
+.adm-limits-table tr.adm-flash > td, .adm-lcard.adm-flash { animation: adm-flash 2.8s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .adm-limits-table tr.adm-flash > td, .adm-lcard.adm-flash { background: var(--warn-soft); }
+}
+.adm-pause-row { cursor: pointer; flex-wrap: nowrap; min-height: var(--tap); }

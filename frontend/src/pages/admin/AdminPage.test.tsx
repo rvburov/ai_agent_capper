@@ -7,7 +7,14 @@ import { describe, expect, it } from 'vitest';
 import { meQueryKey } from '../../api/keys';
 import { createQueryClient } from '../../api/queryClient';
 import { ToastProvider } from '../../components';
-import { adminUser, auditEntry } from '../../features/admin/testData';
+import {
+  adminBudget,
+  adminKey,
+  adminUser,
+  auditEntry,
+  LIMIT_DEFAULTS,
+  memberLimit,
+} from '../../features/admin/testData';
 import type { AuditEntry, Invite } from '../../features/admin/types';
 import { apiError, json, ME_ADMIN, mockFetch, type Handler } from '../../test/fetchMock';
 import { setViewportWidth } from '../../test/setup';
@@ -69,6 +76,25 @@ function routes(extra: Record<string, Handler> = {}): Record<string, Handler> {
         },
       ]),
     'GET /api/admin/audit': () => json([]),
+    // «Ключ и бюджет»: лимиты по умолчанию, лимиты и просьбы участников, бюджет, ключ
+    'GET /api/admin/ai/limits': () =>
+      json({
+        defaults: LIMIT_DEFAULTS,
+        members: [
+          memberLimit({ id: 1, display_name: 'Роман Буров', email: 'owner@example.com', role: 'admin', limit: null }),
+          memberLimit({ id: 2 }),
+          memberLimit({
+            id: 5,
+            display_name: 'Дмитрий Шульц',
+            email: 'dmitry@example.com',
+            ai_mode: 'own',
+            own_key_last4: '7Qx2',
+            own_spent_month_usd: 3.4,
+          }),
+        ],
+      }),
+    'GET /api/admin/ai/budget': () => json(adminBudget()),
+    'GET /api/admin/ai/key': () => json(adminKey()),
     ...extra,
   };
 }
@@ -131,6 +157,9 @@ describe('Администрирование: участники', () => {
     expect(within(olga).getByRole('meter')).toHaveAccessibleName('Израсходовано $1,93 из $10');
     const dmitry = within(table).getByText('Дмитрий Шульц').closest('tr')!;
     expect(within(dmitry).getByText('Свой ключ')).toBeInTheDocument();
+    // как в макете: последние символы ключа и расход на своем счете — из лимитов участников
+    expect(await within(dmitry).findByText('sk-ant-…7Qx2')).toBeInTheDocument();
+    expect(within(dmitry).getByText('$3,40', { selector: 'b' }).parentElement).toHaveTextContent('$3,40 · свой счет');
     expect(within(dmitry).getByText('вне бюджета')).toBeInTheDocument();
     expect(within(table).getByText('Заблокирован')).toBeInTheDocument();
     // о ставках, банке и стратегии в таблице ничего нет
@@ -584,8 +613,8 @@ describe('Администрирование: журнал и заглушки',
 
   it('вкладки следующих этапов — заглушка с номером этапа', async () => {
     mockFetch(routes());
-    renderAdmin('/admin/key');
-    expect(await screen.findByText('Раздел появится на этапе 3')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Ключ и бюджет' })).toHaveAttribute('aria-selected', 'true');
+    renderAdmin('/admin/usage');
+    expect(await screen.findByText('Раздел появится на этапе 4')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Расход ИИ' })).toHaveAttribute('aria-selected', 'true');
   });
 });

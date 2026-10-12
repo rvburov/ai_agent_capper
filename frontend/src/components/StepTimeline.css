@@ -1,0 +1,30 @@
+/* Ход по шагам (mockup/js/screens/analysis.js, .analysis-step). */
+.timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.timeline-step { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, auto); gap: 2px 12px; padding: 9px 0; align-items: start; }
+.timeline-step::before { content: ""; position: absolute; left: 13px; top: 41px; bottom: -7px; width: 2px; border-radius: 2px; background: var(--line); }
+.timeline-step:last-child::before { display: none; }
+.timeline-step.is-done::before, .timeline-step.is-warn::before { background: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.timeline-ic { grid-row: 1 / span 2; position: relative; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; border: 2px solid var(--line-strong); background: var(--surface); color: var(--fg-3); font-size: var(--fs-xs); font-weight: 600; font-variant-numeric: tabular-nums; }
+.timeline-ic svg { width: 15px; height: 15px; stroke-width: 2.4; }
+.timeline-step.is-done .timeline-ic { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.timeline-step.is-active .timeline-ic { border-color: var(--accent-soft); color: var(--accent-ink); }
+.timeline-step.is-active .timeline-ic::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); border-right-color: var(--accent); animation: spin .8s linear infinite; }
+.timeline-step.is-failed .timeline-ic { background: var(--bad); border-color: var(--bad); color: var(--on-bad); }
+.timeline-step.is-warn .timeline-ic { background: var(--warn-soft); border-color: var(--warn); color: var(--warn-ink); }
+.timeline-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; padding-top: 3px; }
+.timeline-title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-weight: 500; }
+.timeline-step.is-pending .timeline-title > span:first-child,
+.timeline-step.is-skipped .timeline-title > span:first-child { color: var(--fg-3); }
+.timeline-detail { font-size: var(--fs-sm); color: var(--fg-2); overflow-wrap: anywhere; }
+.timeline-step.is-pending .timeline-detail, .timeline-step.is-failed .timeline-detail { display: none; }
+.timeline-note { font-size: var(--fs-xs); color: var(--accent-ink); font-weight: 500; }
+.timeline-step.is-pending .timeline-note { display: none; }
+.timeline-message { font-size: var(--fs-sm); font-weight: 500; }
+.timeline-step.is-failed .timeline-message { color: var(--bad-ink); }
+.timeline-step.is-warn .timeline-message { color: var(--warn-ink); }
+.timeline-meta { padding-top: 5px; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-3); white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.timeline-step.is-done .timeline-meta, .timeline-step.is-active .timeline-meta { color: var(--fg-2); }
+@media (max-width: 720px) {
+  .timeline-step { grid-template-columns: 28px minmax(0, 1fr); }
+  .timeline-meta { grid-column: 2; text-align: left; padding-top: 0; white-space: normal; }
+}

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
 import type { Me } from '../../api/hooks/useMe';
 import {
@@ -25,8 +25,10 @@ import {
   visiblePeople,
   type UserFilter,
 } from '../../features/admin/people';
-import type { AdminUser } from '../../features/admin/types';
+import type { AdminUser, MemberLimit } from '../../features/admin/types';
+import { useAdminBudget, useAdminLimits } from '../../features/admin/useAdminAi';
 import { useAdminUsers } from '../../features/admin/useAdminUsers';
+import { keyMask } from '../../features/ai/keyFormat';
 import { cx } from '../../lib/cx';
 import { formatDate, formatDateTime, formatPercent, formatUsd } from '../../lib/format';
 import { useMediaQuery } from '../../lib/useMediaQuery';
@@ -40,6 +42,15 @@ export function UsersTab({ me }: { me: Me }) {
   const narrow = useMediaQuery(NARROW_QUERY);
   const users = useAdminUsers();
   const actions = useUserActions(me);
+  // Порог желтой полосы — из настроек бюджета; из лимитов участников — просьбы вернуть ключ,
+  // последние символы своего ключа и расход на нем (в списке участников их нет)
+  const budget = useAdminBudget();
+  const limits = useAdminLimits();
+  const alertPct = budget.data?.alert_pct ?? null;
+  const ai = new Map((limits.data?.members ?? []).map((m) => [m.id, m]));
+  const asks = new Set(
+    (limits.data?.members ?? []).filter((m) => m.ai_mode === 'own' && m.return_requested_at).map((m) => m.id),
+  );
   const [filter, setFilter] = useState<UserFilter>('all');
   const month = spendMonth();
 
@@ -86,7 +97,16 @@ export function UsersTab({ me }: { me: Me }) {
             {rows.length ? (
               <div className="adm-ucards">
                 {rows.map((user) => (
-                  <UserCardItem key={user.id} user={user} me={me} menu={menu(user)} month={month} />
+                  <UserCardItem
+                    key={user.id}
+                    user={user}
+                    me={me}
+                    menu={menu(user)}
+                    month={month}
+                    alertPct={alertPct}
+                    asks={asks.has(user.id)}
+                    ai={ai.get(user.id)}
+                  />
                 ))}
               </div>
             ) : (
@@ -127,11 +147,15 @@ export function UsersTab({ me }: { me: Me }) {
         </div>
       ),
     },
-    { key: 'key', label: t('admin.users.columns.key'), render: (user) => <KeyCell user={user} /> },
+    {
+      key: 'key',
+      label: t('admin.users.columns.key'),
+      render: (user) => <KeyCell user={user} asks={asks.has(user.id)} ai={ai.get(user.id)} />,
+    },
     {
       key: 'spend',
       label: t('admin.users.columns.spend', { month }),
-      render: (user) => <SpendBlock user={user} />,
+      render: (user) => <SpendBlock user={user} alertPct={alertPct} ai={ai.get(user.id)} />,
     },
     {
       key: 'analyses',
@@ -209,14 +233,32 @@ function dailyLimit(user: AdminUser): number | null {
   return user.ai_mode === 'shared' && user.limit ? user.limit.daily_analyses : null;
 }
 
-/** «Ключ администратора · $10 · 3 в день · $1» или «Свой ключ · лимиты задает сам». */
-function KeyCell({ user }: { user: AdminUser }) {
+/** Участник на своем ключе просит вернуть ключ администратора (keyCell макета). */
+function AskChip() {
+  const { t } = useTranslation();
+  return (
+    <Chip kind="warn" icon="key">
+      {t('admin.users.asksReturn')}
+    </Chip>
+  );
+}
+
+/**
+ * «Ключ администратора · $10 · 3 в день · $1» или «Свой ключ · sk-ant-…7Qx2» (keyCell макета).
+ * ai — строка лимитов участника; пока она не загрузилась — «лимиты задает сам».
+ */
+function KeyCell({ user, asks, ai }: { user: AdminUser; asks: boolean; ai: MemberLimit | undefined }) {
   const { t } = useTranslation();
   if (user.ai_mode === 'own') {
     return (
       <div className="adm-cell2">
         <span className="adm-nowrap">{t('admin.users.keyOwn')}</span>
-        <span className="adm-sub">{t('admin.users.ownLimits')}</span>
+        {ai ? (
+          <span className="adm-sub mono">{keyMask(ai.own_key_last4)}</span>
+        ) : (
+          <span className="adm-sub">{t('admin.users.ownLimits')}</span>
+        )}
+        {asks && <AskChip />}
       </div>
     );
   }
@@ -228,8 +270,12 @@ function KeyCell({ user }: { user: AdminUser }) {
   );
 }
 
-/** Расход ИИ за месяц на ключе администратора и доля личного лимита (spendBlock макета). */
-function SpendBlock({ user }: { user: AdminUser }) {
+/**
+ * Расход ИИ за месяц на ключе администратора и доля личного лимита (spendBlock макета). alertPct —
+ * порог уведомления из настроек бюджета; пока он не загружен, желтого нет, только красный на 100%.
+ * На своем ключе — расход на своем счете из строки лимитов (ai), пока она не загрузилась — без суммы.
+ */
+function SpendBlock({ user, alertPct, ai }: { user: AdminUser; alertPct: number | null; ai?: MemberLimit }) {
   const { t } = useTranslation();
   const spent = formatUsd(user.ai_spent_month_usd);
   const dim = user.status === 'blocked' && 'adm-dim';
@@ -238,7 +284,15 @@ function SpendBlock({ user }: { user: AdminUser }) {
       <div className={cx('adm-spend', dim)}>
         <div className="adm-spend-top">
           <span>
-            <b>{t('admin.users.ownAccount')}</b>
+            {ai ? (
+              <Trans
+                i18nKey="admin.key.limits.ownSpent"
+                values={{ amount: formatUsd(ai.own_spent_month_usd) }}
+                components={{ b: <b /> }}
+              />
+            ) : (
+              <b>{t('admin.users.ownAccount')}</b>
+            )}
           </span>
           <span className="muted">{t('admin.users.outOfBudget')}</span>
         </div>
@@ -260,7 +314,7 @@ function SpendBlock({ user }: { user: AdminUser }) {
       </div>
     );
   }
-  const { share, tone } = spendShare(user);
+  const { share, tone } = spendShare(user, alertPct ?? 100);
   const limit = formatLimitUsd(user.limit.monthly_usd);
   return (
     <div className={cx('adm-spend', dim)}>
@@ -290,10 +344,13 @@ interface UserCardItemProps {
   me: Me;
   menu: ReactNode;
   month: string;
+  alertPct: number | null;
+  asks: boolean;
+  ai: MemberLimit | undefined;
 }
 
 /** Карточка участника на узком экране (userCard макета). */
-function UserCardItem({ user, me, menu, month }: UserCardItemProps) {
+function UserCardItem({ user, me, menu, month, alertPct, asks, ai }: UserCardItemProps) {
   const { t } = useTranslation();
   const blocked = user.status === 'blocked';
   const daily = dailyLimit(user);
@@ -316,8 +373,9 @@ function UserCardItem({ user, me, menu, month }: UserCardItemProps) {
         <Chip kind={user.ai_mode === 'own' ? 'info' : 'outline'} icon="key">
           {user.ai_mode === 'own' ? t('admin.users.keyOwn') : t('admin.users.keyShared')}
         </Chip>
+        {asks && <AskChip />}
       </div>
-      <SpendBlock user={user} />
+      <SpendBlock user={user} alertPct={alertPct} ai={ai} />
       <dl className="adm-facts two">
         <div>
           <dt>{t('admin.users.factMonth', { month })}</dt>

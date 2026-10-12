@@ -355,6 +355,7 @@
     .adm-ext { display: flex; flex-direction: column; gap: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
     .adm-link { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; min-height: 32px; align-self: flex-start; }
     .adm-link svg { width: 16px; height: 16px; flex: none; }
+    @media (max-width: 960px) { .adm-link { min-height: 40px; } }
     .adm-form { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-md); }
     .adm-steps { list-style: none; counter-reset: s; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
     .adm-steps li { counter-increment: s; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; font-size: var(--fs-sm); color: var(--fg-2); align-items: start; }

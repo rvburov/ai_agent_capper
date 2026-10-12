@@ -1,0 +1,32 @@
+/* Шаги процесса (Stepper). line — как шаги входа (mockup/js/screens/login.js),
+   pills — «Ввод событий → Проверка → Анализ» (mockup/js/screens/new-analysis.js). */
+.stepper { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; flex-wrap: wrap; font-size: var(--fs-sm); }
+.stepper-item { display: flex; align-items: center; gap: 8px; color: var(--fg-3); min-width: 0; }
+.stepper-n { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: var(--fs-xs); flex: none; }
+.stepper-n svg { width: 14px; height: 14px; }
+.stepper-short { display: none; }
+
+.stepper.line { gap: 8px; }
+.stepper.line .stepper-item { font-weight: 500; }
+.stepper.line .stepper-item + .stepper-item::before { content: ""; width: 28px; height: 1px; background: var(--line-strong); flex: none; }
+.stepper.line .stepper-n { font-weight: 700; border: 1.5px solid var(--line-strong); color: var(--fg-3); }
+.stepper.line .current { color: var(--fg); font-weight: 600; }
+.stepper.line .current .stepper-n { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.stepper.line .done { color: var(--fg-2); }
+.stepper.line .done .stepper-n { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); }
+
+.stepper.pills { gap: 6px 22px; }
+.stepper.pills .stepper-item { position: relative; padding: 4px 12px 4px 4px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); white-space: nowrap; }
+.stepper.pills .stepper-item + .stepper-item::before { content: ""; position: absolute; left: -18px; top: 50%; width: 14px; height: 1px; background: var(--line-strong); }
+.stepper.pills .stepper-n { background: var(--surface-2); color: var(--fg-2); font-weight: 600; }
+.stepper.pills .done { color: var(--fg-2); }
+.stepper.pills .done .stepper-n { background: var(--accent-soft); color: var(--accent-ink); }
+.stepper.pills .current { color: var(--fg); border-color: var(--accent); font-weight: 600; }
+.stepper.pills .current .stepper-n { background: var(--accent); color: var(--accent-fg); }
+@media (max-width: 480px) {
+  .stepper.pills { gap: 6px 18px; }
+  .stepper.pills .stepper-item { padding-right: 10px; gap: 6px; }
+  .stepper.pills .stepper-item + .stepper-item::before { left: -15px; width: 12px; }
+  .stepper-full { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .stepper-short { display: inline; }
+}

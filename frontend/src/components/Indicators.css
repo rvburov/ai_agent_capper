@@ -1,0 +1,10 @@
+/* Мелкие индикаторы: покрытие, форма, полоса хода (mockup/index.html). */
+.surface-chip .dot { border-radius: 2px; }
+
+.form-dots { display: inline-flex; gap: 3px; }
+.form-dots i { width: 8px; height: 8px; border-radius: 2px; display: block; }
+.form-dots i.w { background: var(--good); }
+.form-dots i.l { background: var(--bad); }
+
+.progress { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.progress > i { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .3s ease; }

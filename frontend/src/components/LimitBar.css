@@ -1,0 +1,16 @@
+/* Шкала расхода лимита — как .profile-lim и .profile-dd-* в макете (mockup/js/screens/profile.js). */
+.limit-bar { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.limit-bar-track { position: relative; height: 8px; border-radius: 999px; background: var(--surface-3); }
+.limit-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--accent); }
+.limit-bar-fill.warn { background: var(--warn); }
+.limit-bar-fill.bad { background: var(--bad); }
+.limit-bar-mark {
+  position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--fg-3); border-radius: 1px;
+}
+.limit-bar-scale { position: relative; height: 16px; font-size: var(--fs-xs); color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.limit-bar-scale span { position: absolute; top: 0; white-space: nowrap; }
+.limit-bar-scale .mid { transform: translateX(-100%); padding-right: 6px; }
+.limit-bar-scale .end { right: 0; }
+/* подпись порога наезжала бы на подпись лимита (90% и длинные суммы на телефоне) — второй строкой */
+.limit-bar-scale.tight { height: 32px; }
+.limit-bar-scale.tight .mid { top: 16px; }

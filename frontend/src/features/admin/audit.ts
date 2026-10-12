@@ -1,5 +1,6 @@
 import i18n from '../../i18n';
-import { limitText } from './limits';
+import { formatPercent } from '../../lib/format';
+import { formatLimitUsd, limitText } from './limits';
 import type { AuditAction, AuditEntry, Role } from './types';
 
 /*
@@ -75,6 +76,61 @@ function count(value: unknown): number {
   return typeof value === 'number' ? value : 0;
 }
 
+/** Изменения из details.changes: {поле: {from, to}} (журнал limit_change и budget_change). */
+function changesOf(value: unknown): Array<[string, unknown, unknown]> {
+  if (typeof value !== 'object' || value === null) return [];
+  return Object.entries(value as Record<string, unknown>).flatMap(([name, change]) =>
+    typeof change === 'object' && change !== null && 'to' in change
+      ? [[name, (change as { from?: unknown }).from, (change as { to: unknown }).to] as [string, unknown, unknown]]
+      : [],
+  );
+}
+
+function usdOf(value: unknown): string {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
+  return Number.isFinite(n) ? formatLimitUsd(n) : '—';
+}
+
+function plain(value: unknown): string {
+  return typeof value === 'number' || typeof value === 'string' ? String(value) : '—';
+}
+
+// Поля изменений журнала и вид значения: доллары, число или проценты
+const CHANGE_FIELDS = {
+  monthly_usd: 'usd',
+  daily_analyses: 'count',
+  per_analysis_usd: 'usd',
+  monthly_budget_usd: 'usd',
+  budget_alert_pct: 'pct',
+  eval_budget_usd: 'usd',
+  default_member_limit_usd: 'usd',
+  default_daily_analyses: 'count',
+  default_per_analysis_usd: 'usd',
+  per_analysis_soft_usd: 'usd',
+  per_analysis_hard_usd: 'usd',
+} as const;
+type ChangeField = keyof typeof CHANGE_FIELDS;
+
+function isChangeField(name: string): name is ChangeField {
+  return Object.hasOwn(CHANGE_FIELDS, name);
+}
+
+/** «В месяц $10 → $15, анализов в день 3 → 5, анализы на паузе» — как limitDiff в макете. */
+function changesText(value: unknown): string {
+  const parts = changesOf(value).flatMap(([name, from, to]) => {
+    if (name === 'paused') {
+      return [i18n.t(to === true ? 'admin.audit.changes.pausedOn' : 'admin.audit.changes.pausedOff')];
+    }
+    if (!isChangeField(name)) return [];
+    const kind = CHANGE_FIELDS[name];
+    const show = (v: unknown) =>
+      kind === 'usd' ? usdOf(v) : kind === 'pct' ? formatPercent(Number(v) / 100, { digits: 0 }) : plain(v);
+    return [i18n.t(`admin.audit.changes.${name}`, { from: show(from), to: show(to) })];
+  });
+  const line = parts.join(', ');
+  return line.charAt(0).toLocaleUpperCase('ru') + line.slice(1);
+}
+
 /** Подробности записи одной строкой; неизвестное действие — пустая строка. */
 export function auditDetails(entry: AuditEntry): string {
   const d = entry.details;
@@ -124,6 +180,13 @@ export function auditDetails(entry: AuditEntry): string {
         ? t('admin.audit.details.keyUnverified', { last4 })
         : t('admin.audit.details.keyVerified', { last4 });
     }
+    case 'limit_change':
+    case 'budget_change':
+      return changesText(d.changes);
+    case 'ai_mode_change':
+      if (d.decision === 'approved') return t('admin.audit.details.modeApproved');
+      if (d.decision === 'rejected') return t('admin.audit.details.modeRejected');
+      return d.to === 'own' ? t('admin.audit.details.modeOwn') : d.to === 'shared' ? t('admin.audit.details.modeShared') : '';
     case 'import':
       return t('admin.audit.details.import', {
         file: text(d.file) ?? '—',
@@ -132,8 +195,8 @@ export function auditDetails(entry: AuditEntry): string {
         matches: count(d.matches_created),
       });
     default:
-      // limit_change, currency_change, message — появятся на этапах 3–4 вместе с их экранами;
-      // confirm_failed, player_merge, player_edit (этап 2) пока без строки подробностей
+      // currency_change, message — появятся на этапе 4 вместе с их экранами; confirm_failed,
+      // player_merge, player_edit (этап 2) и agent_config_change пока без строки подробностей
       return '';
   }
 }

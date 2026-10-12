@@ -17,15 +17,16 @@ import {
 import { lowerFirst } from '../../features/admin/display';
 import {
   checkLimit,
-  defaultLimitDraft,
-  DEFAULT_LIMIT,
   formatLimitUsd,
+  LIMIT_FIELDS,
+  limitDraftOf,
   limitText,
   type LimitDraft,
   type LimitField,
 } from '../../features/admin/limits';
 import { looksLikeEmail, visiblePeople } from '../../features/admin/people';
 import type { AiMode, InviteCreated, Role } from '../../features/admin/types';
+import { useAdminLimits } from '../../features/admin/useAdminAi';
 import { useAdminUsers } from '../../features/admin/useAdminUsers';
 import { useCreateInvite, useInvites } from '../../features/admin/useInvites';
 import { formatDateTime } from '../../lib/format';
@@ -39,7 +40,6 @@ export function InviteModal({ open, onClose }: { open: boolean; onClose: () => v
 
 // Ошибки сервера, которые относятся к полю email
 const EMAIL_ERRORS = new Set(['admin.email_taken', 'admin.invite_exists']);
-const LIMIT_FIELDS: readonly LimitField[] = ['monthly', 'daily', 'perAnalysis'];
 
 function InviteDialog({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
@@ -48,11 +48,15 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
   const users = useAdminUsers();
   const invites = useInvites();
   const create = useCreateInvite();
+  // Лимит по умолчанию задает администратор во вкладке «Ключ и бюджет» (GET /api/admin/ai/limits)
+  const defaults = useAdminLimits().data?.defaults;
 
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Role>('member');
   const [mode, setMode] = useState<AiMode>('shared');
-  const [limit, setLimit] = useState<LimitDraft>(defaultLimitDraft);
+  // Пока поля не трогали, в них лимит по умолчанию (он может загрузиться после открытия окна)
+  const [edited, setEdited] = useState<LimitDraft | null>(null);
+  const limit = edited ?? limitDraftOf(defaults);
   const [code, setCode] = useState('');
   const [errors, setErrors] = useState<{
     email?: string;
@@ -183,25 +187,16 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
                   autoComplete="off"
                   value={limit[field]}
                   onChange={(e) => {
-                    const value = e.target.value;
-                    setLimit((l) => ({ ...l, [field]: value }));
+                    setEdited({ ...limit, [field]: e.target.value });
                     setErrors((prev) => ({ ...prev, limit: { ...prev.limit, [field]: undefined } }));
                   }}
                 />
               ))}
             </div>
-            <HowTo>
-              {t('admin.inviteForm.limitDefaults', {
-                limit: limitText({
-                  monthly_usd: DEFAULT_LIMIT.monthly,
-                  daily_analyses: DEFAULT_LIMIT.daily,
-                  per_analysis_usd: DEFAULT_LIMIT.perAnalysis,
-                }),
-              })}
-            </HowTo>
+            {defaults && <HowTo>{t('admin.inviteForm.limitDefaults', { limit: limitText(defaults) })}</HowTo>}
           </div>
         ) : (
-          <HowTo>{t('admin.inviteForm.ownHint', { per: formatLimitUsd(DEFAULT_LIMIT.perAnalysis) })}</HowTo>
+          defaults && <HowTo>{t('admin.inviteForm.ownHint', { per: formatLimitUsd(defaults.per_analysis_usd) })}</HowTo>
         )}
         {role === 'admin' && (
           <div className="stack" style={{ gap: 8 }}>

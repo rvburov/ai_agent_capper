@@ -6,7 +6,9 @@ import { paths, PROFILE_TABS, type ProfileTab } from '../../app/paths';
 import { Card, EmptyState, Tabs, type IconName } from '../../components';
 import { useSuspiciousCandidates } from '../../features/profile/useLoginEvents';
 import { useSuspiciousLogin } from '../../features/profile/useSuspiciousLogin';
+import { useAiBudget } from '../../features/ai/useAiBudget';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
+import { KeyTab, keyNeedsAttention } from './KeyTab';
 import { ProfileHero } from './ProfileHero';
 import { ProfileTabPanel } from './ProfileTabPanel';
 import { SecurityTab } from './SecurityTab';
@@ -21,10 +23,16 @@ const ICONS: Record<ProfileTab, IconName> = {
   data: 'database',
 };
 
-// Вкладки следующих этапов (docs/PLAN.md, раздел 10): весь личный кабинет и центр уведомлений —
-// этап 4; push-переключатели этап 6 добавит в уже готовую вкладку «Уведомления»
-type StubTab = Exclude<ProfileTab, 'profile' | 'security'>;
-const STAGES: Record<StubTab, number> = { bank: 4, key: 4, notifications: 4, data: 4 };
+// Вкладки следующих этапов (docs/PLAN.md, раздел 10): банк, центр уведомлений и данные —
+// этап 4; push-переключатели этап 6 добавит в уже готовую вкладку «Уведомления».
+// «Ключ Claude» — этап 3 (два режима ключа, Р7 и Р12)
+type StubTab = Exclude<ProfileTab, 'profile' | 'security' | 'key'>;
+const STAGES: Record<StubTab, number> = { bank: 4, notifications: 4, data: 4 };
+const READY: readonly ProfileTab[] = ['profile', 'security', 'key'];
+
+function isStubTab(tab: ProfileTab): tab is StubTab {
+  return !READY.includes(tab);
+}
 
 function isProfileTab(value: string): value is ProfileTab {
   return (PROFILE_TABS as readonly string[]).includes(value);
@@ -38,6 +46,8 @@ export function ProfilePage() {
   const mobile = useMediaQuery(MOBILE_QUERY);
   const candidates = useSuspiciousCandidates();
   const suspicious = useSuspiciousLogin(me?.id ?? 0, candidates.data);
+  // Точка у «Ключ Claude»: нет своего ключа или лимит у порога, пауза (tabAttention макета)
+  const budget = useAiBudget();
 
   if (tab !== undefined && (!isProfileTab(tab) || tab === 'profile')) {
     return <Navigate to={paths.profile()} replace />;
@@ -45,6 +55,10 @@ export function ProfilePage() {
   // Страница внутри RequireAuth: профиль уже загружен
   if (!me) return null;
   const active: ProfileTab = tab ?? 'profile';
+  const attention: Partial<Record<ProfileTab, boolean>> = {
+    security: Boolean(suspicious.event),
+    key: keyNeedsAttention(budget.data, me.role === 'admin'),
+  };
 
   return (
     <>
@@ -61,7 +75,7 @@ export function ProfilePage() {
           label: (
             <>
               {mobile ? t(`profile.tabsShort.${id}`) : t(`profile.tabs.${id}`)}
-              {id === 'security' && suspicious.event && (
+              {attention[id] && (
                 <>
                   <span className="profile-tab-dot" aria-hidden="true" />
                   <span className="sr-only">{t('profile.tabAttention')}</span>
@@ -82,7 +96,8 @@ export function ProfilePage() {
         {active === 'security' && (
           <SecurityTab me={me} suspicious={suspicious.event} onDismissSuspicious={suspicious.dismiss} />
         )}
-        {active !== 'profile' && active !== 'security' && (
+        {active === 'key' && <KeyTab me={me} />}
+        {isStubTab(active) && (
           <Card>
             <EmptyState
               className="profile-stub"

@@ -1,0 +1,860 @@
+{
+  "id": 1,
+  "status": "done",
+  "created_at": "2026-10-11T21:10:49.111235Z",
+  "started_at": "2026-10-11T21:10:50.937353Z",
+  "finished_at": "2026-10-11T21:10:53.384135Z",
+  "input_kind": "text",
+  "input_text": "Текущий банк: 48 000 ₽\nБукмекер: Fonbet\n\nСобытия:\nСиннер vs Руне, Test Open 9, хард, 1/8\nКэфы: П1 = 1.30, П2 = 3.60\nДжокович vs Рублев, Test Open 9, хард, 1/8\nКэфы: П1 = 1.45, П2 = 2.80",
+  "attempt": 1,
+  "draft": null,
+  "events": [
+    {
+      "position": 1,
+      "match_id": 91,
+      "player1": {
+        "id": 1,
+        "name": "Jannik Sinner",
+        "name_ru": "Янник Синнер",
+        "country": "ITA"
+      },
+      "player2": {
+        "id": 6,
+        "name": "Holger Rune",
+        "name_ru": "Хольгер Руне",
+        "country": "DEN"
+      },
+      "tournament_id": 6,
+      "tournament_name": "Test Open 5",
+      "surface": "hard",
+      "best_of": 3,
+      "round": "R16",
+      "odds": {
+        "ML": [
+          "1.30",
+          "3.60"
+        ],
+        "HCP_-1.5": [
+          null,
+          null
+        ],
+        "HCP_+1.5": [
+          null,
+          null
+        ]
+      },
+      "bookmaker": "Fonbet"
+    },
+    {
+      "position": 2,
+      "match_id": 92,
+      "player1": {
+        "id": 3,
+        "name": "Novak Djokovic",
+        "name_ru": "Новак Джокович",
+        "country": "SRB"
+      },
+      "player2": {
+        "id": 5,
+        "name": "Andrey Rublev",
+        "name_ru": "Андрей Рублев",
+        "country": "RUS"
+      },
+      "tournament_id": 6,
+      "tournament_name": "Test Open 5",
+      "surface": "hard",
+      "best_of": 3,
+      "round": "R16",
+      "odds": {
+        "ML": [
+          "1.45",
+          "2.80"
+        ],
+        "HCP_-1.5": [
+          null,
+          null
+        ],
+        "HCP_+1.5": [
+          null,
+          null
+        ]
+      },
+      "bookmaker": "Fonbet"
+    }
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "kind": "parse",
+      "match_id": null,
+      "state": "done",
+      "model": "claude-haiku-5-5",
+      "elapsed_ms": 0,
+      "tokens": 1250,
+      "cost_usd": 0.000265,
+      "web_searches": 0,
+      "detail_key": null,
+      "detail_params": {}
+    },
+    {
+      "index": 1,
+      "kind": "players",
+      "match_id": null,
+      "state": "done",
+      "model": null,
+      "elapsed_ms": 38,
+      "tokens": 0,
+      "cost_usd": 0.0,
+      "web_searches": 0,
+      "detail_key": "analysis.steps.players",
+      "detail_params": {
+        "count": 4
+      }
+    },
+    {
+      "index": 2,
+      "kind": "news",
+      "match_id": 91,
+      "state": "done",
+      "model": "claude-sonnet-5-5",
+      "elapsed_ms": 408,
+      "tokens": 9227,
+      "cost_usd": 0.032818,
+      "web_searches": 1,
+      "detail_key": "analysis.steps.news_found",
+      "detail_params": {
+        "facts": 2,
+        "players": 2,
+        "searches": 1,
+        "search_errors": []
+      }
+    },
+    {
+      "index": 3,
+      "kind": "news",
+      "match_id": 92,
+      "state": "done",
+      "model": "claude-sonnet-5-5",
+      "elapsed_ms": 209,
+      "tokens": 9227,
+      "cost_usd": 0.031073,
+      "web_searches": 1,
+      "detail_key": "analysis.steps.news_found",
+      "detail_params": {
+        "facts": 2,
+        "players": 2,
+        "searches": 1,
+        "search_errors": []
+      }
+    },
+    {
+      "index": 4,
+      "kind": "dossier",
+      "match_id": null,
+      "state": "done",
+      "model": null,
+      "elapsed_ms": 203,
+      "tokens": 0,
+      "cost_usd": 0.0,
+      "web_searches": 0,
+      "detail_key": "analysis.steps.dossier",
+      "detail_params": {
+        "data_to": "2026-08-27",
+        "matches": 2
+      }
+    },
+    {
+      "index": 5,
+      "kind": "model",
+      "match_id": null,
+      "state": "done",
+      "model": null,
+      "elapsed_ms": 10,
+      "tokens": 0,
+      "cost_usd": 0.0,
+      "web_searches": 0,
+      "detail_key": "analysis.steps.model",
+      "detail_params": {
+        "matches": 2
+      }
+    },
+    {
+      "index": 6,
+      "kind": "claude",
+      "match_id": 91,
+      "state": "done",
+      "model": "claude-opus-5-5",
+      "elapsed_ms": 166,
+      "tokens": 5467,
+      "cost_usd": 0.038335,
+      "web_searches": 0,
+      "detail_key": "analysis.steps.claude_done",
+      "detail_params": {
+        "calls": 1
+      }
+    },
+    {
+      "index": 7,
+      "kind": "claude",
+      "match_id": 92,
+      "state": "done",
+      "model": "claude-opus-5-5",
+      "elapsed_ms": 102,
+      "tokens": 5467,
+      "cost_usd": 0.028413,
+      "web_searches": 0,
+      "detail_key": "analysis.steps.claude_done",
+      "detail_params": {
+        "calls": 1
+      }
+    },
+    {
+      "index": 8,
+      "kind": "compose",
+      "match_id": null,
+      "state": "done",
+      "model": null,
+      "elapsed_ms": 9,
+      "tokens": 0,
+      "cost_usd": 0.0,
+      "web_searches": 0,
+      "detail_key": null,
+      "detail_params": {}
+    }
+  ],
+  "totals": {
+    "elapsed_ms": 1145,
+    "tokens": 30638,
+    "cost_usd": 0.130904,
+    "step": 9,
+    "steps": 9
+  },
+  "error": null,
+  "result": {
+    "matches": [
+      {
+        "match_id": 91,
+        "player1": {
+          "id": 1,
+          "name": "Jannik Sinner",
+          "country": "ITA",
+          "elo_rank": 1
+        },
+        "player2": {
+          "id": 6,
+          "name": "Holger Rune",
+          "country": "DEN",
+          "elo_rank": 6
+        },
+        "tournament": "Test Open 5",
+        "surface": "hard",
+        "round": "R16",
+        "best_of": 3,
+        "data_as_of": "2026-08-27",
+        "confidence": "medium",
+        "explanation": "Оценка близка к базовой модели: преимущество в Эло на покрытии.",
+        "divergence_note": "",
+        "highlight": false,
+        "flags": {
+          "p1": [],
+          "p2": []
+        },
+        "factors": [
+          {
+            "player": 1,
+            "effect": "plus",
+            "text": "Эло на покрытии выше соперника",
+            "ref": "elo",
+            "source_url": null,
+            "source_name": null,
+            "date": null
+          },
+          {
+            "player": 2,
+            "effect": "minus",
+            "text": "Форма за 10 матчей хуже",
+            "ref": "form",
+            "source_url": null,
+            "source_name": null,
+            "date": null
+          }
+        ],
+        "comparison": [
+          {
+            "key": "elo_rank",
+            "left": 1.0,
+            "right": 6.0,
+            "sub_left": null,
+            "sub_right": null,
+            "better": "left"
+          },
+          {
+            "key": "elo_surface",
+            "left": 1955.0,
+            "right": 1038.0,
+            "sub_left": 30.0,
+            "sub_right": 30.0,
+            "better": "left"
+          },
+          {
+            "key": "form10",
+            "left": "10-0",
+            "right": "0-10",
+            "sub_left": "5-0",
+            "sub_right": "0-5",
+            "better": "left"
+          },
+          {
+            "key": "load14",
+            "left": 0.0,
+            "right": 0.0,
+            "sub_left": 45.0,
+            "sub_right": 45.0,
+            "better": null
+          },
+          {
+            "key": "serve_first",
+            "left": null,
+            "right": null,
+            "sub_left": null,
+            "sub_right": null,
+            "better": null
+          },
+          {
+            "key": "serve_second",
+            "left": null,
+            "right": null,
+            "sub_left": null,
+            "sub_right": null,
+            "better": null
+          },
+          {
+            "key": "return",
+            "left": null,
+            "right": null,
+            "sub_left": null,
+            "sub_right": null,
+            "better": null
+          },
+          {
+            "key": "tiebreaks",
+            "left": "0-0",
+            "right": "0-0",
+            "sub_left": null,
+            "sub_right": null,
+            "better": null
+          },
+          {
+            "key": "h2h",
+            "left": 6.0,
+            "right": 0.0,
+            "sub_left": 6.0,
+            "sub_right": 0.0,
+            "better": "left"
+          }
+        ],
+        "form": {
+          "p1": [
+            "W",
+            "W",
+            "W",
+            "W",
+            "W",
+            "W",
+            "W",
+            "W",
+            "W",
+            "W"
+          ],
+          "p2": [
+            "L",
+            "L",
+            "L",
+            "L",
+            "L",
+            "L",
+            "L",
+            "L",
+            "L",
+            "L"
+          ]
+        },
+        "markets": [
+          {
+            "market": "ML",
+            "selection": 1,
+            "prediction_id": 1,
+            "p_base": 0.994942,
+            "p_claude": 0.99,
+            "p_final": 0.99,
+            "q_market": 0.751735,
+            "odds": "1.30",
+            "value": 0.287,
+            "tier": "strong",
+            "in_express": true,
+            "note_key": null
+          },
+          {
+            "market": "ML",
+            "selection": 2,
+            "prediction_id": 2,
+            "p_base": 0.005058,
+            "p_claude": 0.01,
+            "p_final": 0.01,
+            "q_market": 0.248265,
+            "odds": "3.60",
+            "value": -0.964,
+            "tier": "none",
+            "in_express": false,
+            "note_key": "analysis.leg.form"
+          },
+          {
+            "market": "HCP_-1.5",
+            "selection": 1,
+            "prediction_id": 3,
+            "p_base": 0.918444,
+            "p_claude": 0.928,
+            "p_final": 0.928,
+            "q_market": null,
+            "odds": null,
+            "value": null,
+            "tier": "none",
+            "in_express": false,
+            "note_key": "analysis.leg.no_odds"
+          },
+          {
+            "market": "HCP_-1.5",
+            "selection": 2,
+            "prediction_id": 4,
+            "p_base": 0.001734,
+            "p_claude": 0.0,
+            "p_final": 0.0,
+            "q_market": null,
+            "odds": null,
+            "value": null,
+            "tier": "none",
+            "in_express": false,
+            "note_key": "analysis.leg.no_odds"
+          },
+          {
+            "market": "HCP_+1.5",
+            "selection": 1,
+            "prediction_id": 5,
+            "p_base": 0.998266,
+            "p_claude": 1.0,
+            "p_final": 1.0,
+            "q_market": null,
+            "odds": null,
+            "value": null,
+            "tier": "none",
+            "in_express": false,
+            "note_key": "analysis.leg.no_odds"
+          },
+          {
+            "market": "HCP_+1.5",
+            "selection": 2,
+            "prediction_id": 6,
+            "p_base": 0.081556,
+            "p_claude": 0.072,
+            "p_final": 0.072,
+            "q_market": null,
+            "odds": null,
+            "value": null,
+            "tier": "none",
+            "in_express": false,
+            "note_key": "analysis.leg.no_odds"
+          }
+        ],
+        "reused_from": null,
+        "news_state": "done"
+      },
+      {
+        "match_id": 92,
+        "player1": {
+          "id": 3,
+          "name": "Novak Djokovic",
+          "country": "SRB",
+          "elo_rank": 3
+        },
+        "player2": {
+          "id": 5,
+          "name": "Andrey Rublev",
+          "country": "RUS",
+          "elo_rank": 5
+        },
+        "tournament": "Test Open 5",
+        "surface": "hard",
+        "round": "R16",
+        "best_of": 3,
+        "data_as_of": "2026-08-27",
+        "confidence": "medium",
+        "explanation": "Оценка близка к базовой модели: преимущество в Эло на покрытии.",
+        "divergence_note": "",
+        "highlight": false,
+        "flags": {
+          "p1": [],
+          "p2": []
+        },
+        "factors": [
+          {
+            "player": 1,
+            "effect": "plus",
+            "text": "Эло на покрытии выше соперника",
+            "ref": "elo",
+            "source_url": null,
+            "source_name": null,
+            "date": null
+          },
+          {
+            "player": 2,
+            "effect": "minus",
+            "text": "Форма за 10 матчей хуже",
+            "ref": "form",
+            "source_url": null,
+            "source_name": null,
+            "date": null
+          }
+        ],
+        "comparison": [
+          {
+            "key": "elo_rank",
+            "left": 3.0,
+            "right": 5.0,
+            "sub_left": null,
+            "sub_right": null,
+            "better": "left"
+          },
+          {
+            "key": "elo_surface",
+            "left": 1595.0,
+            "right": 1242.0,
+            "sub_left": 30.0,
+            "sub_right": 30.0,
+            "better": "left"
+          },
+          {
+            "key": "form10",
+            "left": "6-4",
+            "right": "2-8",
+            "sub_left": "3-2",
+            "sub_right": "1-4",
+            "better": "left"
+          },
+          {
+            "key": "load14",
+            "left": 0.0,
+            "right": 0.0,
+            "sub_left": 45.0,
+            "sub_right": 45.0,
+            "better": null
+          },
+          {
+            "key": "serve_first",
+            "left": null,
+            "right": null,
+            "sub_left": null,
+            "sub_right": null,
+            "better": null
+          },
+          {
+            "key": "serve_second",
+            "left": null,
+            "right": null,
+            "sub_left": null,
+            "sub_right": null,
+            "better": null
+          },
+          {
+            "key": "return",
+            "left": null,
+            "right": null,
+            "sub_left": null,
+            "sub_right": null,
+            "better": null
+          },
+          {
+            "key": "tiebreaks",
+            "left": "0-0",
+            "right": "0-0",
+            "sub_left": null,
+            "sub_right": null,
+            "better": null
+          },
+          {
+            "key": "h2h",
+            "left": 6.0,
+            "right": 0.0,
+            "sub_left": 6.0,
+            "sub_right": 0.0,
+            "better": "left"
+          }
+        ],
+        "form": {
+          "p1": [
+            "W",
+            "W",
+            "L",
+            "W",
+            "L",
+            "W",
+            "W",
+            "L",
+            "W",
+            "L"
+          ],
+          "p2": [
+            "L",
+            "L",
+            "W",
+            "L",
+            "L",
+            "L",
+            "L",
+            "W",
+            "L",
+            "L"
+          ]
+        },
+        "markets": [
+          {
+            "market": "ML",
+            "selection": 1,
+            "prediction_id": 7,
+            "p_base": 0.884431,
+            "p_claude": 0.904,
+            "p_final": 0.904,
+            "q_market": 0.670151,
+            "odds": "1.45",
+            "value": 0.3108,
+            "tier": "strong",
+            "in_express": true,
+            "note_key": null
+          },
+          {
+            "market": "ML",
+            "selection": 2,
+            "prediction_id": 8,
+            "p_base": 0.115569,
+            "p_claude": 0.096,
+            "p_final": 0.096,
+            "q_market": 0.329849,
+            "odds": "2.80",
+            "value": -0.7312,
+            "tier": "none",
+            "in_express": false,
+            "note_key": "analysis.leg.form"
+          },
+          {
+            "market": "HCP_-1.5",
+            "selection": 1,
+            "prediction_id": 9,
+            "p_base": 0.621269,
+            "p_claude": 0.631,
+            "p_final": 0.631,
+            "q_market": null,
+            "odds": null,
+            "value": null,
+            "tier": "none",
+            "in_express": false,
+            "note_key": "analysis.leg.no_odds"
+          },
+          {
+            "market": "HCP_-1.5",
+            "selection": 2,
+            "prediction_id": 10,
+            "p_base": 0.044857,
+            "p_claude": 0.035,
+            "p_final": 0.035,
+            "q_market": null,
+            "odds": null,
+            "value": null,
+            "tier": "none",
+            "in_express": false,
+            "note_key": "analysis.leg.no_odds"
+          },
+          {
+            "market": "HCP_+1.5",
+            "selection": 1,
+            "prediction_id": 11,
+            "p_base": 0.955143,
+            "p_claude": 0.965,
+            "p_final": 0.965,
+            "q_market": null,
+            "odds": null,
+            "value": null,
+            "tier": "none",
+            "in_express": false,
+            "note_key": "analysis.leg.no_odds"
+          },
+          {
+            "market": "HCP_+1.5",
+            "selection": 2,
+            "prediction_id": 12,
+            "p_base": 0.378731,
+            "p_claude": 0.369,
+            "p_final": 0.369,
+            "q_market": null,
+            "odds": null,
+            "value": null,
+            "tier": "none",
+            "in_express": false,
+            "note_key": "analysis.leg.no_odds"
+          }
+        ],
+        "reused_from": null,
+        "news_state": "done"
+      }
+    ],
+    "express": {
+      "legs": [
+        {
+          "prediction_id": 7,
+          "match_id": 92,
+          "market": "ML",
+          "selection": 1,
+          "p": 0.904,
+          "odds": "1.45"
+        },
+        {
+          "prediction_id": 1,
+          "match_id": 91,
+          "market": "ML",
+          "selection": 1,
+          "p": 0.99,
+          "odds": "1.30"
+        }
+      ],
+      "total_odds": "1.885",
+      "p_express": 0.89496,
+      "ev": 0.687,
+      "stake": {
+        "amount": "1320.00",
+        "currency": "RUB",
+        "bank": "48000.00",
+        "bank_source": "input",
+        "total_odds": "1.885",
+        "pct": "0.0275",
+        "steps": [
+          {
+            "kind": "band",
+            "pct": "0.0225",
+            "params": {
+              "low": "1.71",
+              "pct": "0.0225",
+              "high": "2.20"
+            }
+          },
+          {
+            "kind": "value",
+            "pct": "0.0275",
+            "params": {
+              "add": "0.005",
+              "tier": "strong",
+              "avg_value": "0.2989"
+            }
+          },
+          {
+            "kind": "limit",
+            "pct": "0.0275",
+            "params": {
+              "max_pct": "0.03"
+            }
+          },
+          {
+            "kind": "round",
+            "pct": "0.0275",
+            "params": {
+              "raw": "1320.00",
+              "bank": "48000.00",
+              "step": "10",
+              "amount": "1320.00"
+            }
+          }
+        ],
+        "reason": null,
+        "drawdown_level": null
+      },
+      "rules": [
+        {
+          "ok": true,
+          "key": "analysis.rules.legs_count",
+          "params": {}
+        },
+        {
+          "ok": true,
+          "key": "analysis.rules.same_match",
+          "params": {}
+        },
+        {
+          "ok": true,
+          "key": "analysis.rules.odds_low",
+          "params": {}
+        },
+        {
+          "ok": true,
+          "key": "analysis.rules.odds_high",
+          "params": {}
+        },
+        {
+          "ok": true,
+          "key": "analysis.rules.p_low",
+          "params": {}
+        },
+        {
+          "ok": true,
+          "key": "analysis.rules.no_value",
+          "params": {}
+        },
+        {
+          "ok": true,
+          "key": "analysis.rules.total_low",
+          "params": {}
+        },
+        {
+          "ok": true,
+          "key": "analysis.rules.total_high",
+          "params": {}
+        },
+        {
+          "ok": true,
+          "key": "analysis.rules.form",
+          "params": {}
+        },
+        {
+          "ok": true,
+          "key": "analysis.rules.injury",
+          "params": {}
+        },
+        {
+          "ok": true,
+          "key": "analysis.rules.fatigue",
+          "params": {}
+        }
+      ]
+    },
+    "no_express_key": null,
+    "warnings": [],
+    "costs": {
+      "tokens": 30638,
+      "cache_share": 0.102,
+      "searches": 2,
+      "cost_usd": 0.130904,
+      "estimate_usd": 0.395,
+      "duration_ms": 227,
+      "models": [
+        "claude-haiku-5-5",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5"
+      ]
+    }
+  },
+  "decision": null,
+  "bet_id": null,
+  "bet": null,
+  "key_source": "admin",
+  "estimate_usd": 0.395,
+  "cost_usd": 0.130904,
+  "bank": "48000.00",
+  "bookmaker": "Fonbet",
+  "strategy_version": "v3"
+}

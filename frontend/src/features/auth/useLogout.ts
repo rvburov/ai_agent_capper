@@ -7,10 +7,12 @@ import { errorMessage } from '../../api/errors';
 import { useLogout as useLogoutRequest } from '../../api/hooks/useLogout';
 import { paths } from '../../app/paths';
 import { useToast } from '../../components';
+import { clearDraft } from '../analysis/draftStore';
 
 /**
  * Выход из меню пользователя: POST /api/auth/logout → страница входа, кэш TanStack очищен,
- * тост «Вы вышли из аккаунта». Хук живет в оболочке приложения.
+ * черновик «Нового анализа» стерт из вкладки, тост «Вы вышли из аккаунта». Хук живет в оболочке
+ * приложения.
  *
  * Кэш чистим, когда оболочка уже убрана со страницы, а не сразу после navigate(): маршрутизатор
  * меняет экран в переходе (startTransition), и до его завершения экраны приложения еще на месте.
@@ -37,6 +39,8 @@ export function useLogout(): { logout: () => void; pending: boolean } {
     mutate(undefined, {
       onSuccess: () => {
         loggedOut.current = true;
+        // Банк и букмекер из черновика не должны дождаться следующего входа в этой вкладке
+        clearDraft();
         toast.show(t('shell.loggedOut'), { icon: 'logout' });
         void navigate(paths.login, { replace: true });
       },

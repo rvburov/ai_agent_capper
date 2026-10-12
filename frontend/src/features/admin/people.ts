@@ -1,12 +1,10 @@
+import { spendTone, type SpendTone } from '../../components/LimitBar';
 import type { AdminUser } from './types';
 
 // Участники в кабинете администратора: фильтр, порядок, сводка и кандидаты для сброса доступа.
 
 export const USER_FILTERS = ['all', 'active', 'blocked'] as const;
 export type UserFilter = (typeof USER_FILTERS)[number];
-
-/** Порог «у лимита»: с 80% расхода полоса желтая (в макете — порог уведомления бюджета). */
-export const ALERT_SHARE = 0.8;
 
 export function personName(user: Pick<AdminUser, 'display_name' | 'email'>): string {
   return user.display_name.trim() || user.email;
@@ -51,14 +49,16 @@ export function summarize(users: readonly AdminUser[]): PeopleSummary {
   };
 }
 
-export type SpendTone = 'warn' | 'bad' | null;
+export type { SpendTone };
 
-/** Доля израсходованного личного лимита и цвет полосы; без лимита — null. */
-export function spendShare(user: AdminUser): { share: number | null; tone: SpendTone } {
+/**
+ * Доля израсходованного личного лимита и цвет полосы; без лимита — null. alertPct — порог
+ * уведомления из настроек администратора (50–90%): с него полоса желтая, как в макете.
+ */
+export function spendShare(user: AdminUser, alertPct: number): { share: number | null; tone: SpendTone } {
   const monthly = user.limit?.monthly_usd;
   if (!monthly) return { share: null, tone: null };
-  const share = user.ai_spent_month_usd / monthly;
-  return { share, tone: share >= 1 ? 'bad' : share >= ALERT_SHARE ? 'warn' : null };
+  return { share: user.ai_spent_month_usd / monthly, tone: spendTone(user.ai_spent_month_usd, monthly, alertPct) };
 }
 
 const byName = (a: AdminUser, b: AdminUser) => personName(a).localeCompare(personName(b), 'ru');

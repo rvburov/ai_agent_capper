@@ -4,6 +4,7 @@ import {
   formatDate,
   formatDateLong,
   formatDateTime,
+  formatDayMonth,
   formatMoney,
   formatNumber,
   formatOdds,
@@ -116,6 +117,12 @@ describe('даты в часовом поясе пользователя', () =>
     expect(formatDateLong('2026-06-30T12:00:00Z', { timeZone: MSK })).toBe('30 июня 2026');
     expect(formatDateLong('2026-05-03T22:30:00Z', { timeZone: MSK })).toBe('4 мая 2026');
     expect(formatDateLong(null)).toBe('—');
+  });
+
+  it('formatDayMonth: день и месяц в родительном падеже, без года', () => {
+    expect(formatDayMonth('2026-11-01T00:00:00Z', { timeZone: 'UTC' })).toBe('1 ноября');
+    expect(formatDayMonth('2026-05-03T22:30:00Z', { timeZone: MSK })).toBe('4 мая');
+    expect(formatDayMonth(undefined)).toBe('—');
   });
 
   it('день считается в поясе пользователя, а не в UTC', () => {

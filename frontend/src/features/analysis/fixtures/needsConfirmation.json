@@ -1,0 +1,196 @@
+{
+  "id": 6,
+  "status": "needs_confirmation",
+  "created_at": "2026-10-11T21:16:40.315455Z",
+  "started_at": null,
+  "finished_at": null,
+  "input_kind": "text",
+  "input_text": "Текущий банк: 48 000 ₽\nБукмекер: Fonbet\n\nСобытия:\nСиннер vs Руне, Test Open 9, хард, 1/8\nКэфы: П1 = 1.30, П2 = 3.60\nДжокович vs Рублев, Test Open 9, хард, 1/8\nКэфы: П1 = 1.45, П2 = 2.80",
+  "attempt": 0,
+  "draft": {
+    "bank": "48000.00",
+    "currency": "RUB",
+    "ledger_bank": null,
+    "bank_note_key": null,
+    "bookmaker": "Fonbet",
+    "events": [
+      {
+        "position": 1,
+        "line_no": 5,
+        "raw1": "Синнер",
+        "raw2": "Руне",
+        "player1": {
+          "status": "matched",
+          "raw": "Синнер",
+          "player": {
+            "id": 1,
+            "name": "Jannik Sinner",
+            "name_ru": "Янник Синнер",
+            "country": "ITA",
+            "elo_rank": 1,
+            "last_match": "2026-08-27"
+          },
+          "score": 1.0,
+          "candidates": [
+            {
+              "id": 1,
+              "name": "Jannik Sinner",
+              "country": "ITA",
+              "score": 1.0
+            }
+          ]
+        },
+        "player2": {
+          "status": "matched",
+          "raw": "Руне",
+          "player": {
+            "id": 6,
+            "name": "Holger Rune",
+            "name_ru": "Хольгер Руне",
+            "country": "DEN",
+            "elo_rank": 6,
+            "last_match": "2026-08-27"
+          },
+          "score": 1.0,
+          "candidates": [
+            {
+              "id": 6,
+              "name": "Holger Rune",
+              "country": "DEN",
+              "score": 1.0
+            },
+            {
+              "id": 5,
+              "name": "Andrey Rublev",
+              "country": "RUS",
+              "score": 0.4
+            }
+          ]
+        },
+        "tournament": {
+          "id": 6,
+          "name": "Test Open 5",
+          "category": "500",
+          "surface": "hard",
+          "best_of": 3
+        },
+        "surface": "hard",
+        "best_of": 3,
+        "round": "R16",
+        "odds": {
+          "ML": [
+            "1.30",
+            "3.60"
+          ],
+          "HCP_-1.5": [
+            null,
+            null
+          ],
+          "HCP_+1.5": [
+            null,
+            null
+          ]
+        },
+        "bookmaker": "Fonbet",
+        "warnings": []
+      },
+      {
+        "position": 2,
+        "line_no": 7,
+        "raw1": "Джокович",
+        "raw2": "Рублев",
+        "player1": {
+          "status": "matched",
+          "raw": "Джокович",
+          "player": {
+            "id": 3,
+            "name": "Novak Djokovic",
+            "name_ru": "Новак Джокович",
+            "country": "SRB",
+            "elo_rank": 3,
+            "last_match": "2026-08-27"
+          },
+          "score": 1.0,
+          "candidates": [
+            {
+              "id": 3,
+              "name": "Novak Djokovic",
+              "country": "SRB",
+              "score": 1.0
+            }
+          ]
+        },
+        "player2": {
+          "status": "matched",
+          "raw": "Рублев",
+          "player": {
+            "id": 5,
+            "name": "Andrey Rublev",
+            "name_ru": "Андрей Рублев",
+            "country": "RUS",
+            "elo_rank": 5,
+            "last_match": "2026-08-27"
+          },
+          "score": 1.0,
+          "candidates": [
+            {
+              "id": 5,
+              "name": "Andrey Rublev",
+              "country": "RUS",
+              "score": 1.0
+            }
+          ]
+        },
+        "tournament": {
+          "id": 6,
+          "name": "Test Open 5",
+          "category": "500",
+          "surface": "hard",
+          "best_of": 3
+        },
+        "surface": "hard",
+        "best_of": 3,
+        "round": "R16",
+        "odds": {
+          "ML": [
+            "1.45",
+            "2.80"
+          ],
+          "HCP_-1.5": [
+            null,
+            null
+          ],
+          "HCP_+1.5": [
+            null,
+            null
+          ]
+        },
+        "bookmaker": "Fonbet",
+        "warnings": []
+      }
+    ],
+    "unknown_lines": [],
+    "parse_cost_usd": 0.000265,
+    "warnings": []
+  },
+  "events": [],
+  "steps": [],
+  "totals": {
+    "elapsed_ms": 0,
+    "tokens": 0,
+    "cost_usd": 0.0,
+    "step": 0,
+    "steps": 0
+  },
+  "error": null,
+  "result": null,
+  "decision": null,
+  "bet_id": null,
+  "bet": null,
+  "key_source": null,
+  "estimate_usd": null,
+  "cost_usd": 0.000265,
+  "bank": null,
+  "bookmaker": "Fonbet",
+  "strategy_version": null
+}

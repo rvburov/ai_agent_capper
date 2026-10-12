@@ -1,0 +1,19 @@
+/* Раскрывающийся блок (кнопки «Показать шаги», «Как посчитана сумма», заголовок «Почему так»). */
+.disclosure { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.disclosure-btn { align-self: flex-start; }
+.disclosure-chev { transition: transform .15s; }
+[aria-expanded="true"] > .disclosure-chev { transform: rotate(180deg); }
+.disclosure.header { gap: 0; }
+.disclosure-head {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px;
+  background: none; border: 0; cursor: pointer; text-align: left; border-radius: var(--r-lg); color: var(--fg); font: inherit;
+}
+.disclosure-head:hover { background: var(--surface-2); }
+.disclosure-head[aria-expanded="true"] { border-radius: var(--r-lg) var(--r-lg) 0 0; }
+.disclosure-head .disclosure-chev { width: 20px; height: 20px; flex: none; color: var(--fg-3); }
+.disclosure-head .disclosure-label { min-width: 0; flex: 1; }
+.disclosure.header .disclosure-body { padding: 0 18px 18px; }
+@media (max-width: 720px) {
+  .disclosure-head { padding: 14px; }
+  .disclosure.header .disclosure-body { padding: 0 14px 14px; }
+}

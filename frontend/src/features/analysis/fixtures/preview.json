@@ -1,0 +1,117 @@
+{
+  "events": [
+    {
+      "position": 1,
+      "margin_ml": 0.047,
+      "margin_hcp": null,
+      "market_p": [
+        {
+          "market": "ML",
+          "selection": 1,
+          "q": 0.7517
+        },
+        {
+          "market": "ML",
+          "selection": 2,
+          "q": 0.2483
+        }
+      ],
+      "in_corridor": [
+        {
+          "market": "ML",
+          "selection": 1,
+          "odds": "1.30"
+        }
+      ],
+      "players": [
+        {
+          "id": 1,
+          "name": "Jannik Sinner",
+          "country": "ITA",
+          "elo_rank": 1,
+          "news_fresh": true,
+          "news_checked_at": "2026-10-11T21:10:52.411334Z",
+          "last_match": "2026-08-27"
+        },
+        {
+          "id": 6,
+          "name": "Holger Rune",
+          "country": "DEN",
+          "elo_rank": 6,
+          "news_fresh": true,
+          "news_checked_at": "2026-10-11T21:10:52.411334Z",
+          "last_match": "2026-08-27"
+        }
+      ],
+      "reused": false,
+      "problems": []
+    },
+    {
+      "position": 2,
+      "margin_ml": 0.0468,
+      "margin_hcp": null,
+      "market_p": [
+        {
+          "market": "ML",
+          "selection": 1,
+          "q": 0.6702
+        },
+        {
+          "market": "ML",
+          "selection": 2,
+          "q": 0.3298
+        }
+      ],
+      "in_corridor": [
+        {
+          "market": "ML",
+          "selection": 1,
+          "odds": "1.45"
+        }
+      ],
+      "players": [
+        {
+          "id": 3,
+          "name": "Novak Djokovic",
+          "country": "SRB",
+          "elo_rank": 3,
+          "news_fresh": true,
+          "news_checked_at": "2026-10-11T21:10:52.644581Z",
+          "last_match": "2026-08-27"
+        },
+        {
+          "id": 5,
+          "name": "Andrey Rublev",
+          "country": "RUS",
+          "elo_rank": 5,
+          "news_fresh": true,
+          "news_checked_at": "2026-10-11T21:10:52.644581Z",
+          "last_match": "2026-08-27"
+        }
+      ],
+      "reused": false,
+      "problems": []
+    }
+  ],
+  "problems": [],
+  "estimate": {
+    "cost_usd": 0.23,
+    "seconds": 125,
+    "news_players": 0,
+    "reused_matches": 0
+  },
+  "access": {
+    "allowed": true,
+    "reason_code": null,
+    "reason_params": {},
+    "mode": "shared",
+    "monthly_usd": 10.0,
+    "spent_usd": 0.000265,
+    "left_usd": 9.999735,
+    "daily": 3,
+    "today": 0,
+    "per_analysis_usd": 1.0,
+    "own_key_last4": null
+  },
+  "data_to": "2026-08-27"
+}

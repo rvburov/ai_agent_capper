@@ -1,0 +1,117 @@
+{
+  "id": null,
+  "code": "v3",
+  "name": "v3",
+  "prompt_version": null,
+  "created_at": null,
+  "params": {
+    "markets": [
+      "ML",
+      "HCP_-1.5",
+      "HCP_+1.5"
+    ],
+    "min_p": 0.65,
+    "triple_min_p": 0.7,
+    "leg_odds": [
+      "1.13",
+      "1.80"
+    ],
+    "triple_max_leg_odds": "1.60",
+    "double_total": [
+      "1.28",
+      "3.24"
+    ],
+    "triple_total": [
+      "1.44",
+      "4.10"
+    ],
+    "require_value": true,
+    "cover_min_p": 0.55,
+    "form_min_wins_last5": 3,
+    "stake_bands": [
+      {
+        "low": "1.28",
+        "high": "1.70",
+        "pct": "0.0275"
+      },
+      {
+        "low": "1.71",
+        "high": "2.20",
+        "pct": "0.0225"
+      },
+      {
+        "low": "2.21",
+        "high": "3.24",
+        "pct": "0.0175"
+      },
+      {
+        "low": "3.25",
+        "high": "4.10",
+        "pct": "0.0175"
+      }
+    ],
+    "value_adjust": [
+      {
+        "min_value": "0.15",
+        "add": "0.005"
+      },
+      {
+        "min_value": "0.10",
+        "add": "0.0025"
+      },
+      {
+        "min_value": "0.05",
+        "add": "0"
+      },
+      {
+        "min_value": null,
+        "add": "-0.0025"
+      }
+    ],
+    "drawdown": [
+      {
+        "start": "0.10",
+        "max_pct": "0.025",
+        "max_legs": null,
+        "max_leg_odds": null
+      },
+      {
+        "start": "0.20",
+        "max_pct": "0.015",
+        "max_legs": 2,
+        "max_leg_odds": "1.50"
+      }
+    ],
+    "claude_max_shift": 0.1,
+    "claude_highlight": 0.08,
+    "rounding": {
+      "RUB": "10",
+      "USD": "1",
+      "EUR": "1"
+    },
+    "min_stake": {
+      "RUB": "50",
+      "USD": "0.50",
+      "EUR": "0.50"
+    },
+    "max_pct": "0.03",
+    "growth": {
+      "bank_up": "0.15",
+      "min_winrate": "0.60",
+      "max_pct": "0.04"
+    },
+    "week": {
+      "loss": "-0.05",
+      "loss_max_pct": "0.02",
+      "win": "0.10",
+      "win_add": "0.005"
+    },
+    "adapt": {
+      "dd10": true,
+      "dd20": true,
+      "up15": true,
+      "week_loss": true,
+      "week_win": true
+    }
+  }
+}

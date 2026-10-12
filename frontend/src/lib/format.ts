@@ -226,6 +226,18 @@ export function formatDateLong(
   return i18n.t('format.dateYear', { day: p.day, month: months[p.month - 1] ?? p.month, year: p.year });
 }
 
+/** День и месяц полностью, без года: «1 ноября» («С 1 ноября расход начнется заново»). */
+export function formatDayMonth(
+  value: DateInput | null | undefined,
+  options: Pick<DateFormatOptions, 'timeZone'> = {},
+): string {
+  const date = toDate(value);
+  if (!date) return DASH;
+  const p = partsIn(date, options.timeZone ?? displayTimeZone);
+  const months: readonly string[] = i18n.t('format.monthsGenitive', { returnObjects: true });
+  return i18n.t('format.date', { day: p.day, month: months[p.month - 1] ?? p.month });
+}
+
 /**
  * «Сегодня, 14:05», «Вчера, 09:30», «8 окт, 14:05». calendar: false — без «Сегодня»;
  * year: 'always' — с годом и в текущем году: «8 окт 2026, 14:05» (для файлов, которые хранят).
@@ -273,4 +285,55 @@ export function formatRelative(
   const days = Math.round(minutes / 1440);
   if (days < 30) return i18n.t(future ? 'format.inDays' : 'format.daysAgo', { count: days });
   return formatDate(date, options);
+}
+
+// ---------- время и токены (ход анализа) ----------
+
+/** Длительность из миллисекунд: «0 с», «45 с», «1 мин 28 с», «1 ч 5 мин» (fmt.duration в макете). */
+export function formatDuration(ms: number | null | undefined): string {
+  const n = toNumber(ms);
+  if (!Number.isFinite(n)) return DASH;
+  const total = Math.max(0, Math.round(n / 1000));
+  if (total < 60) return i18n.t('format.durationSec', { s: total });
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return i18n.t('format.durationMin', { m: minutes, s: total % 60 });
+  return i18n.t('format.durationHour', { h: Math.floor(minutes / 60), m: minutes % 60 });
+}
+
+/** Оценка времени до запуска: «~45 с», «~1,5 мин» (fmtTime в mockup/js/screens/new-analysis.js). */
+export function formatEstimate(seconds: number | null | undefined): string {
+  const n = toNumber(seconds);
+  if (!Number.isFinite(n)) return DASH;
+  if (n < 60) return i18n.t('format.aboutSec', { n: Math.max(5, Math.round(n / 5) * 5) });
+  const minutes = Math.round(n / 6) / 10;
+  return i18n.t('format.aboutMin', { n: formatNumber(minutes, Number.isInteger(minutes) ? 0 : 1) });
+}
+
+/** Токены: «2 400»; compact — «41,2 тыс.» (от 10 тысяч). */
+export function formatTokens(
+  value: number | null | undefined,
+  { compact = false }: { compact?: boolean } = {},
+): string {
+  const n = toNumber(value);
+  if (!Number.isFinite(n)) return DASH;
+  if (compact && n >= 10_000) return i18n.t('format.thousands', { n: formatNumber(n / 1000, 1) });
+  return formatNumber(n);
+}
+
+// ---------- поля ввода сумм («Новый анализ», окна ставки) ----------
+
+/** Знак валюты программы рядом с полем суммы: «₽», «$», «€». */
+export function currencySign(currency: Currency): string {
+  const part = numberFormat({ style: 'currency', currency })
+    .formatToParts(0)
+    .find((item) => item.type === 'currency');
+  return part?.value ?? currency;
+}
+
+/** Сумма в поле ввода, без знака валюты: «48 000» (рубли), «477,14» (доллары и евро). */
+export function formatAmountInput(amount: Amount | null | undefined, currency: Currency): string {
+  const value = toNumber(amount);
+  if (!Number.isFinite(value)) return '';
+  const digits = currency === 'RUB' ? 0 : 2;
+  return numberFormat({ minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
 }

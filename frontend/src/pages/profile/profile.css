@@ -116,6 +116,99 @@
 .profile-note { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-sm); color: var(--fg-2); margin: 0; }
 .profile-note > svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--fg-3); }
 
+/* ---------- ключ Claude (panelKey макета) ---------- */
+.profile-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.profile-mode {
+  position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; align-items: start;
+  padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface);
+  cursor: pointer; min-width: 0; transition: border-color .15s, background .15s;
+}
+.profile-mode:hover { border-color: var(--accent); }
+.profile-mode.is-on {
+  border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 50%, var(--surface));
+}
+.profile-mode.is-locked { opacity: .6; cursor: not-allowed; }
+.profile-mode.is-locked:hover { border-color: var(--line-strong); }
+.profile-mode-input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+.profile-mode-dot {
+  width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--line-strong); margin-top: 1px;
+  display: grid; place-items: center; background: var(--surface);
+}
+.profile-mode.is-on .profile-mode-dot { border-color: var(--accent); }
+.profile-mode.is-on .profile-mode-dot::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.profile-mode-input:focus-visible + .profile-mode-dot { outline: 2px solid var(--focus); outline-offset: 3px; }
+.profile-mode-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.profile-mode-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-weight: 600; font-size: var(--fs-md); color: var(--fg); }
+.profile-mode-text { font-size: var(--fs-sm); color: var(--fg-2); }
+.profile-keyline { margin: 0; font-size: var(--fs-md); line-height: 1.55; color: var(--fg-2); }
+.profile-keyline b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.profile-keyline code { font-family: var(--font-mono); color: var(--fg); white-space: nowrap; }
+.profile-kfacts {
+  margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden;
+}
+.profile-kfacts > div { background: var(--surface); padding: 10px 12px; min-width: 0; }
+.profile-kfacts dt { font-size: var(--fs-xs); color: var(--fg-3); }
+.profile-kfacts dd { margin: 2px 0 0; font-weight: 600; font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+.profile-kfacts dd small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); }
+.profile-thr-block { gap: 10px; }
+.profile-thr { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.profile-thr li { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 12px; align-items: start; font-size: var(--fs-sm); color: var(--fg-2); }
+.profile-thr b { color: var(--fg); font-weight: 600; }
+.profile-thr-badge { display: grid; place-items: center; height: 24px; border-radius: var(--r-sm); font-family: var(--font-mono); font-weight: 600; font-size: var(--fs-sm); }
+.profile-thr-badge.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.profile-thr-badge.bad { background: var(--bad-soft); color: var(--bad-ink); }
+.profile-secret {
+  display: flex; align-items: center; gap: 6px 10px; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2);
+  min-width: 0; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--fg-2);
+}
+.profile-secret > svg { width: 18px; height: 18px; color: var(--fg-3); flex: none; }
+.profile-secret code { font-family: var(--font-mono); font-size: var(--fs-md); color: var(--fg); }
+.profile-keyinput { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.profile-keyinput .input { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-sm); }
+.profile-keyinput .btn { flex: none; width: 42px; height: 42px; }
+.profile-cap { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.profile-cap .input { width: 120px; flex: none; font-variant-numeric: tabular-nums; }
+.profile-foot-link { margin-left: auto; }
+.profile-strong-link { font-weight: 600; }
+.profile-admin-note { gap: 6px 12px; }
+.profile-admin-note > span { min-width: 0; flex: 1 1 280px; }
+.profile-plain { margin: 0; }
+.profile-tight { gap: 8px; }
+.profile-bullets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); color: var(--fg-2); }
+.profile-bullets li { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
+.profile-bullets li > span { min-width: 0; }
+.profile-bullets svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--accent-ink); }
+.profile-bullets.lock svg { color: var(--fg-3); }
+.profile-bullets.warnlist svg { color: var(--warn-ink); }
+.profile-bullets b { color: var(--fg); font-weight: 600; }
+.profile-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; counter-reset: pstep; }
+.profile-steps > li {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; font-size: var(--fs-sm);
+  color: var(--fg-2); counter-increment: pstep; overflow-wrap: anywhere;
+}
+.profile-steps > li::before {
+  content: counter(pstep); width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink);
+  display: grid; place-items: center; font-weight: 600; font-family: var(--font-display); font-size: var(--fs-sm);
+}
+.profile-steps > li > div { padding-top: 3px; min-width: 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.profile-steps b { color: var(--fg); font-weight: 600; }
+.profile-details { border: 1px solid var(--line); border-radius: var(--r-md); min-width: 0; }
+.profile-details > summary {
+  list-style: none; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 14px; cursor: pointer;
+  font-weight: 600; border-radius: var(--r-md);
+}
+.profile-details > summary::-webkit-details-marker { display: none; }
+.profile-details > summary > svg { width: 18px; height: 18px; flex: none; color: var(--accent-ink); }
+.profile-details > summary > .chev { margin-left: auto; color: var(--fg-3); transition: transform .15s; }
+.profile-details[open] > summary > .chev { transform: rotate(180deg); }
+.profile-details > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.profile-details-body { padding: 2px 14px 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.profile-faq { margin: 0; display: flex; flex-direction: column; gap: 10px; font-size: var(--fs-sm); }
+.profile-faq dt { font-weight: 600; color: var(--fg); }
+.profile-faq dd { margin: 2px 0 0; color: var(--fg-2); }
+
 /* новое: заглушка вкладки следующего этапа и ошибка загрузки внутри карточки */
 .profile-stub { padding: 8px 0; }
 .profile-load-error { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
@@ -138,6 +231,18 @@
   .profile-facts > div:first-child { grid-column: span 2; }
   .profile-item.wrap-mobile { grid-template-columns: 40px minmax(0, 1fr); }
   .profile-item.wrap-mobile .profile-item-side { grid-column: 2; justify-content: flex-start; }
+  .profile-modes { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .profile-mode { padding: 12px 14px; }
+  .profile-kfacts > div { padding: 8px 10px; }
+  .profile-kfacts dd { font-size: var(--fs-md); }
+  /* новое: на телефоне ссылка «ИИ и расходы» в подвале карточки — своей строкой, зона нажатия 40 px */
+  .profile-foot-link { margin-left: 0; display: inline-flex; align-items: center; min-height: var(--tap); }
+}
+/* новое: на телефоне длинная подпись кнопки в подвале карточки («Попросить администратора вернуть
+   ключ») переносится, а не выходит за карточку и не дает горизонтальную прокрутку (в макете на
+   375 px выходила; там исправлено так же) */
+@media (max-width: 480px) {
+  .profile-panel .card-foot .btn { white-space: normal; height: auto; min-height: var(--tap); padding-block: 8px; max-width: 100%; }
 }
 /* очень узкий экран (320 px): длинные подписи кнопок («Выйти на всех других устройствах»)
    переносятся, а не выходят за край и не дают горизонтальную прокрутку */

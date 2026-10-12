@@ -1,14 +1,15 @@
 import i18n from '../../i18n';
-import { formatUsd } from '../../lib/format';
-import type { InviteLimit } from './types';
+import { formatNumber, formatUsd } from '../../lib/format';
+import type { InviteLimit, LimitPatch, UserLimit } from './types';
 
 /*
- * Стартовый лимит в приглашении: в месяц ($), анализов в день, потолок на один анализ ($).
- * Значения по умолчанию совпадают с настройками программы из миграции 0001
- * (app_settings: $10, 3 в день, $1). Своего адреса API у этих настроек пока нет —
- * он появится вместе с вкладкой «Ключ и бюджет» (этап 3), тогда форма возьмет их оттуда.
+ * Лимит на ключе администратора: в месяц ($), анализов в день, потолок на один анализ ($).
+ * Лимиты по умолчанию для новых участников задает администратор во вкладке «Ключ и бюджет»;
+ * формы берут их из API (GET /api/admin/ai/limits → defaults), а не из кода.
  */
-export const DEFAULT_LIMIT = { monthly: 10, daily: 3, perAnalysis: 1 } as const;
+
+/** Лимит по решению Р13 — подсказка «Как решено» и кнопка «Подставить» в лимитах по умолчанию. */
+export const R13_LIMIT = { monthly_usd: 10, daily_analyses: 3, per_analysis_usd: 1 } as const;
 
 export interface LimitDraft {
   monthly: string;
@@ -18,12 +19,28 @@ export interface LimitDraft {
 
 export type LimitField = keyof LimitDraft;
 
-export function defaultLimitDraft(): LimitDraft {
+export const LIMIT_FIELDS: readonly LimitField[] = ['monthly', 'daily', 'perAnalysis'];
+
+/** Сумма для поля ввода: «10», «0,50», «1 000». */
+export function amountInput(amount: number | string): string {
+  const n = typeof amount === 'number' ? amount : Number(amount);
+  return formatNumber(n, Number.isInteger(n) ? 0 : 2);
+}
+
+/** Поля формы по лимиту (действующему или по умолчанию); нет лимита — пустые поля. */
+export function limitDraftOf(limit: LimitLike | null | undefined): LimitDraft {
+  if (!limit) return { monthly: '', daily: '', perAnalysis: '' };
   return {
-    monthly: String(DEFAULT_LIMIT.monthly),
-    daily: String(DEFAULT_LIMIT.daily),
-    perAnalysis: String(DEFAULT_LIMIT.perAnalysis),
+    monthly: amountInput(limit.monthly_usd),
+    daily: String(limit.daily_analyses),
+    perAnalysis: amountInput(limit.per_analysis_usd),
   };
+}
+
+interface LimitLike {
+  monthly_usd: number | string;
+  daily_analyses: number;
+  per_analysis_usd: number | string;
 }
 
 /** «12,5», «12.50», «1 000» → число; мусор — null. */
@@ -72,11 +89,6 @@ export function formatLimitUsd(amount: number | string): string {
   return formatUsd(n, Number.isInteger(n) ? 0 : 2);
 }
 
-interface LimitLike {
-  monthly_usd: number | string;
-  daily_analyses: number;
-  per_analysis_usd: number | string;
-}
 
 /** «$10 в месяц · 3 анализа в день · $1 на анализ». */
 export function limitText(limit: LimitLike): string {
@@ -94,4 +106,46 @@ export function limitShort(limit: LimitLike): string {
     daily: limit.daily_analyses,
     per: formatLimitUsd(limit.per_analysis_usd),
   });
+}
+
+/**
+ * Что поменялось в лимите участника: только измененные поля (PUT /api/admin/ai/limits/{id}).
+ * Ничего не поменялось — null.
+ */
+export function limitPatch(before: UserLimit, after: InviteLimit, paused: boolean): LimitPatch | null {
+  const patch: LimitPatch = {};
+  if (Number(after.monthly_usd) !== before.monthly_usd) patch.monthly_usd = after.monthly_usd;
+  if (after.daily_analyses !== before.daily_analyses) patch.daily_analyses = after.daily_analyses;
+  if (Number(after.per_analysis_usd) !== before.per_analysis_usd) patch.per_analysis_usd = after.per_analysis_usd;
+  if (paused !== before.paused) patch.paused = paused;
+  return Object.keys(patch).length ? patch : null;
+}
+
+/** Тот же лимит (лимиты по умолчанию не изменились). */
+export function sameLimit(a: LimitLike, b: LimitLike): boolean {
+  return (
+    Number(a.monthly_usd) === Number(b.monthly_usd) &&
+    a.daily_analyses === b.daily_analyses &&
+    Number(a.per_analysis_usd) === Number(b.per_analysis_usd)
+  );
+}
+
+export const BUDGET_MIN = 1;
+export const BUDGET_MAX = 5000;
+
+export type BudgetProblem = 'range' | 'belowSpent';
+
+/**
+ * Общий бюджет на месяц, как в форме макета: от $1 до $5000 и не меньше уже потраченного
+ * (проверяется, только если сумма меняется: сервер так же). Сумма уходит строкой (Decimal).
+ */
+export function checkBudget(
+  text: string,
+  { spent, current }: { spent: number; current: number },
+): { value: string | null; problem: BudgetProblem | null } {
+  const amount = parseAmount(text);
+  if (amount === null || amount < BUDGET_MIN || amount > BUDGET_MAX) return { value: null, problem: 'range' };
+  const value = round2(amount);
+  if (value !== current && value < spent) return { value: null, problem: 'belowSpent' };
+  return { value: value.toFixed(2), problem: null };
 }

@@ -8,7 +8,17 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Checkbox, Chip, FieldShell, Icon, Meter, describedById, type ChipKind, type IconName } from '../../components';
+import {
+  Checkbox,
+  Chip,
+  FieldShell,
+  Icon,
+  Meter,
+  Stepper as BaseStepper,
+  describedById,
+  type ChipKind,
+  type IconName,
+} from '../../components';
 import { maskCode, type CodePrefix } from '../../features/auth/codes';
 import { checkPassword, type PasswordLevel } from '../../features/auth/password';
 import { cx } from '../../lib/cx';
@@ -31,26 +41,11 @@ export function useStepFocus(root: RefObject<HTMLElement | null>, enabled: boole
   }, [root, enabled]);
 }
 
+/** Шаги входа и регистрации: общий Stepper (components) с подписями раздела auth. */
 export function Stepper({ items, current }: { items: readonly string[]; current: number }) {
   const { t } = useTranslation();
   return (
-    <ol className="login-steps" aria-label={t('auth.steps.label')}>
-      {items.map((label, i) => (
-        <li
-          key={label}
-          className={cx('login-step', i < current && 'done', i === current && 'current')}
-          aria-current={i === current ? 'step' : undefined}
-        >
-          <span className="login-step-n" aria-hidden="true">
-            {i < current ? <Icon name="check" /> : i + 1}
-          </span>
-          <span>
-            {label}
-            {i < current && <span className="sr-only">{t('auth.steps.done')}</span>}
-          </span>
-        </li>
-      ))}
-    </ol>
+    <BaseStepper items={items} current={current} label={t('auth.steps.label')} doneLabel={t('auth.steps.done')} />
   );
 }
 

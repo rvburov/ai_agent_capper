@@ -1,0 +1,24 @@
+/* Кэфы: рамка ноги экспресса и сетка полей события (mockup/index.html .odds-box,
+   mockup/js/screens/new-analysis.js .new-odds). */
+.odds-box { display: inline-flex; flex-direction: column; align-items: center; padding: 6px 10px; border-radius: var(--r-sm); background: var(--surface-2); min-width: 64px; }
+.odds-box small { font-size: 10px; color: var(--fg-3); text-transform: uppercase; letter-spacing: .06em; }
+.odds-box.picked { background: var(--accent-soft); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent); }
+
+.odds-grid { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 8px; }
+@container (max-width: 560px) { .odds-grid.many { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container (max-width: 400px) { .odds-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.odds-cell { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 8px 4px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid transparent; cursor: text; min-width: 0; transition: border-color .15s, background .15s; }
+.odds-cell small { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--fg-3); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; white-space: nowrap; }
+.odds-cell-tick { display: none; color: var(--accent-ink); }
+.odds-cell-tick svg { width: 11px; height: 11px; stroke-width: 2.6; }
+.odds-cell.in { box-shadow: inset 0 -2px 0 var(--accent); }
+.odds-cell.in .odds-cell-tick { display: inline-flex; }
+.odds-cell input { width: 100%; min-width: 0; border: 0; background: transparent; text-align: center; font-family: var(--font-mono); font-weight: 500; font-size: var(--fs-lg); padding: 1px 0; color: var(--fg); font-variant-numeric: tabular-nums; }
+.odds-cell input:focus { outline: none; }
+.odds-cell input::placeholder { color: var(--fg-3); }
+.odds-cell:hover { border-color: var(--line-strong); }
+.odds-cell:focus-within { border-color: var(--focus); background: var(--surface); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
+.odds-cell.invalid { border-color: var(--bad); background: var(--bad-soft); }
+.odds-cell.invalid input, .odds-cell.invalid small { color: var(--bad-ink); }
+/* телефон: шрифт 16 px — iOS не увеличивает страницу при фокусе; зона нажатия не меньше 40 px */
+@media (max-width: 960px) { .odds-cell input { font-size: 16px; min-height: 28px; } .odds-cell { min-height: var(--tap); } }

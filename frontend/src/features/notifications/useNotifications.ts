@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 
 import { api, unwrap } from '../../api/client';
 import { notificationsQueryKey } from '../../api/keys';
-import { markAllRead, markOneRead, type NotificationsOut } from './notifications';
+import { markAllRead, markOneRead, staleQueriesFor, type NotificationsOut } from './notifications';
 
 const LIMIT = 50;
 const POLL_MS = 60_000;
@@ -10,15 +11,33 @@ const POLL_MS = 60_000;
 /**
  * Уведомления пользователя (GET /api/me/notifications). Опрос раз в минуту, пока вкладка
  * видима: TanStack Query не опрашивает скрытую вкладку и сразу обновляет данные при возврате.
+ * Пришло новое уведомление (опрос или открытие колокольчика) — данные, о которых оно, на
+ * открытых экранах перечитываются: просьба вернуть ключ видна в «Участниках», решение по ней —
+ * во вкладке «Ключ Claude», не дожидаясь перезагрузки.
  */
 export function useNotifications() {
-  return useQuery({
+  const client = useQueryClient();
+  const query = useQuery({
     queryKey: notificationsQueryKey,
     queryFn: () => unwrap(api.GET('/api/me/notifications', { params: { query: { limit: LIMIT } } })),
     refetchInterval: POLL_MS,
     refetchIntervalInBackground: false,
     staleTime: 30_000,
   });
+  // Самое новое уже виденное уведомление; null — список еще не приходил (экраны и так свежие)
+  const newest = useRef<number | null>(null);
+  const items = query.data?.items;
+
+  useEffect(() => {
+    if (!items) return;
+    const seen = newest.current;
+    newest.current = items.reduce((max, item) => Math.max(max, item.id), seen ?? 0);
+    if (seen === null) return;
+    const keys = items.filter((item) => item.id > seen).flatMap((item) => staleQueriesFor(item.kind));
+    for (const queryKey of keys) void client.invalidateQueries({ queryKey });
+  }, [items, client]);
+
+  return query;
 }
 
 /** Отметка прочитанного: сразу в кэше, при ошибке — откат. */

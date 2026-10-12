@@ -4,8 +4,6 @@ import { Card, EmptyState, type IconName } from '../../components';
 
 export type StubScreen =
   | 'dashboard'
-  | 'new'
-  | 'analysis'
   | 'bets'
   | 'players'
   | 'player'
@@ -15,8 +13,6 @@ export type StubScreen =
 
 const ICONS: Record<StubScreen, IconName> = {
   dashboard: 'home',
-  new: 'plus',
-  analysis: 'spark',
   bets: 'ticket',
   players: 'users',
   player: 'user',

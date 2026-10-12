@@ -8,6 +8,7 @@ import { meQueryKey, notificationsQueryKey } from '../../api/keys';
 import { createQueryClient } from '../../api/queryClient';
 import { ToastProvider } from '../../components';
 import { apiError, ME_MEMBER, mockFetch, type Handler } from '../../test/fetchMock';
+import { emptyDraft, loadDraft, saveDraft } from '../analysis/draftStore';
 import { useLogout } from './useLogout';
 
 // Выход из меню пользователя: запрос, страница входа, пустой кэш, тост.
@@ -55,6 +56,16 @@ describe('выход', () => {
     await waitFor(() => expect(client.getQueryData(meQueryKey)).toBeUndefined());
     expect(client.getQueryData(notificationsQueryKey)).toBeUndefined();
     expect(await screen.findByText('Вы вышли из аккаунта')).toBeInTheDocument();
+  });
+
+  it('черновик «Нового анализа» стирается из вкладки при выходе', async () => {
+    saveDraft(emptyDraft(), ME_MEMBER.id);
+    expect(loadDraft(ME_MEMBER.id)).not.toBeNull();
+    setup(() => new Response(null, { status: 204 }));
+    await userEvent.click(screen.getByRole('button', { name: 'logout' }));
+    await screen.findByText('login page');
+    expect(window.sessionStorage.getItem('capper.new-analysis.draft')).toBeNull();
+    expect(loadDraft(ME_MEMBER.id)).toBeNull();
   });
 
   it('сеанс уже закончился (401) — тоже выход', async () => {

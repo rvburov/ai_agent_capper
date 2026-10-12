@@ -1,9 +1,11 @@
 import { createBrowserRouter, type RouteObject } from 'react-router';
 
 import { AdminPage } from '../pages/admin/AdminPage';
+import { AnalysisPage } from '../pages/analysis/AnalysisPage';
 import { LoginPage } from '../pages/auth/LoginPage';
 import { RegisterPage } from '../pages/auth/RegisterPage';
 import { ResetPage } from '../pages/auth/ResetPage';
+import { NewAnalysisPage } from '../pages/new/NewAnalysisPage';
 import { NotFoundPage } from '../pages/not-found/NotFoundPage';
 import { ProfilePage } from '../pages/profile/ProfilePage';
 import { StubPage } from '../pages/stub/StubPage';
@@ -39,12 +41,12 @@ export const routes: RouteObject[] = [
       },
       {
         path: 'new',
-        element: <StubPage screen="new" stage={3} />,
+        element: <NewAnalysisPage />,
         handle: meta({ title: 'new', nav: 'new' }),
       },
       {
         path: 'analysis/:id',
-        element: <StubPage screen="analysis" stage={3} />,
+        element: <AnalysisPage />,
         handle: meta({ title: 'analysis', nav: 'new', crumbs: 'analysis' }),
       },
       {

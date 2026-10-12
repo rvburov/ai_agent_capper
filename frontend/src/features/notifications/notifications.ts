@@ -1,5 +1,10 @@
+import type { QueryKey } from '@tanstack/react-query';
+
+import { meQueryKey } from '../../api/keys';
 import type { IconName } from '../../components';
 import type { components } from '../../api/schema';
+import { adminKeys } from '../admin/keys';
+import { aiKeys } from '../ai/keys';
 
 // Центр уведомлений (колокольчик, Р3): вид уведомления, ссылки и отметка прочитанного в кэше.
 
@@ -19,6 +24,18 @@ export function notificationLook(kind: string): { icon: IconName; tone: Notifica
       return { icon: 'coins', tone: 'warn' };
     case 'limit_100':
       return { icon: 'coins', tone: 'bad' };
+    // Этап 3: общий бюджет ключа администратора — как лимит участника
+    case 'budget_80':
+      return { icon: 'coins', tone: 'warn' };
+    case 'budget_100':
+      return { icon: 'coins', tone: 'bad' };
+    // Ключ Claude: не работает; просьба вернуть ключ администратора и решение по ней
+    case 'ai_key_failed':
+      return { icon: 'key', tone: 'bad' };
+    case 'ai_mode_request':
+      return { icon: 'key', tone: 'info' };
+    case 'ai_mode_decision':
+      return { icon: 'key', tone: 'info' };
     case 'data_stale':
       return { icon: 'clock', tone: 'warn' };
     case 'admin_message':
@@ -27,6 +44,33 @@ export function notificationLook(kind: string): { icon: IconName; tone: Notifica
       return { icon: 'ticket', tone: null };
     default:
       return { icon: 'bell', tone: null };
+  }
+}
+
+// Лимит и расход на ИИ: «Ключ Claude» и блок лимита анализа
+const AI_BUDGET: readonly QueryKey[] = [aiKeys.all];
+
+/**
+ * Какие данные устарели, когда пришло уведомление этого вида: событие (просьба, решение,
+ * расход) уже случилось на сервере, а открытый экран показывает старое. Переход по ссылке
+ * уведомления на ту же страницу данные сам не перечитывает.
+ */
+export function staleQueriesFor(kind: string): readonly QueryKey[] {
+  switch (kind) {
+    case 'ai_mode_request':
+      return [adminKeys.users, adminKeys.aiLimits];
+    case 'ai_mode_decision':
+      return [...AI_BUDGET, meQueryKey];
+    case 'ai_key_failed':
+      return [...AI_BUDGET, adminKeys.aiKey];
+    case 'limit_80':
+    case 'limit_100':
+      return [...AI_BUDGET, adminKeys.aiLimits, adminKeys.users];
+    case 'budget_80':
+    case 'budget_100':
+      return [...AI_BUDGET, adminKeys.aiBudget, adminKeys.aiLimits];
+    default:
+      return [];
   }
 }
 

@@ -75,7 +75,37 @@ describe('журнал действий', () => {
     expect(d('import', { file: 'История-ставок.json', players_created: 4, tournaments_created: 2, matches_created: 9 })).toBe(
       'Файл История-ставок.json: новых игроков 4, турниров 2, матчей 9',
     );
+    // этап 3: лимиты, бюджет и режим ключа — что поменялось, как в макете
+    expect(
+      d('limit_change', {
+        changes: {
+          monthly_usd: { from: '10.00', to: '8.00' },
+          daily_analyses: { from: 3, to: 5 },
+          paused: { from: false, to: true },
+        },
+      }),
+    ).toBe('В месяц $10 → $8, анализов в день 3 → 5, анализы на паузе');
+    expect(d('limit_change', { changes: { per_analysis_usd: { from: '1.00', to: '0.50' } } })).toBe(
+      'На анализ $1 → $0,50',
+    );
+    expect(
+      d('budget_change', {
+        changes: { monthly_budget_usd: { from: '60.00', to: '70.00' }, budget_alert_pct: { from: 80, to: 90 } },
+      }),
+    ).toBe('Общий бюджет $60 → $70 в месяц, уведомление при 80% → 90%');
+    expect(d('budget_change', { changes: { default_daily_analyses: { from: 3, to: 4 } } })).toBe(
+      'По умолчанию анализов в день 3 → 4',
+    );
+    expect(d('ai_mode_change', { from: 'own', to: 'shared', decision: 'approved' })).toBe(
+      'Разрешен возврат на ключ администратора',
+    );
+    expect(d('ai_mode_change', { from: 'own', to: 'own', decision: 'rejected' })).toBe(
+      'Просьба вернуть ключ администратора отклонена',
+    );
+    expect(d('ai_mode_change', { from: 'shared', to: 'own' })).toBe('Перешел на свой ключ');
     // неожиданный вид details не ломает журнал
+    expect(d('limit_change', { changes: 'x' })).toBe('');
+    expect(d('budget_change', { changes: { unknown_field: { from: 1, to: 2 } } })).toBe('');
     expect(d('role_change', { from: 1 })).toBe('');
     expect(d('message', { text: 'Привет' })).toBe('');
   });

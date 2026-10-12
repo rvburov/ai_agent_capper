@@ -14,3 +14,12 @@ export type AuditEntry = components['schemas']['AuditOut'];
 export type AuditAction = AuditEntry['action'];
 export type Role = AdminUser['role'];
 export type AiMode = AdminUser['ai_mode'];
+// «Ключ и бюджет» (этап 3)
+export type AdminKey = components['schemas']['AdminKeyOut'];
+export type AdminBudget = components['schemas']['AdminBudgetOut'];
+export type AdminLimits = components['schemas']['AdminLimitsOut'];
+export type LimitDefaults = components['schemas']['LimitDefaultsOut'];
+export type MemberLimit = components['schemas']['MemberLimitOut'];
+export type LimitPatch = components['schemas']['LimitPatchIn'];
+export type LimitRequest = components['schemas']['LimitIn'];
+export type AlertPct = components['schemas']['BudgetIn']['alert_pct'];

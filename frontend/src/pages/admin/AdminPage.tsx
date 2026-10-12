@@ -12,6 +12,7 @@ import { AccessTab } from './AccessTab';
 import { AuditTab } from './AuditTab';
 import { InviteModal } from './InviteModal';
 import { InvitesTab } from './InvitesTab';
+import { KeyTab } from './KeyTab';
 import { UsersTab } from './UsersTab';
 import './admin.css';
 
@@ -27,10 +28,15 @@ const ICONS: Record<AdminTab, IconName> = {
   message: 'megaphone',
 };
 
-// Вкладки следующих этапов (docs/PLAN.md, раздел 10): ключ Claude, бюджет и лимиты — этап 3;
-// обзор с бюджетом, расход ИИ по людям, настройки (валюта) и сообщения в центр уведомлений — этап 4
-type StubTab = Exclude<AdminTab, 'users' | 'invites' | 'access' | 'audit'>;
-const STAGES: Record<StubTab, number> = { overview: 4, key: 3, usage: 4, settings: 4, message: 4 };
+// Вкладки следующих этапов (docs/PLAN.md, раздел 10): обзор с бюджетом, расход ИИ по людям,
+// настройки (валюта) и сообщения в центр уведомлений — этап 4. «Ключ и бюджет» — этап 3
+type StubTab = Exclude<AdminTab, 'users' | 'invites' | 'access' | 'key' | 'audit'>;
+const STAGES: Record<StubTab, number> = { overview: 4, usage: 4, settings: 4, message: 4 };
+const READY: readonly AdminTab[] = ['users', 'invites', 'access', 'key', 'audit'];
+
+function isStubTab(tab: AdminTab): tab is StubTab {
+  return !READY.includes(tab);
+}
 
 function isAdminTab(value: string): value is AdminTab {
   return (ADMIN_TABS as readonly string[]).includes(value);
@@ -79,8 +85,9 @@ export function AdminPage() {
         {active === 'users' && <UsersTab me={me} />}
         {active === 'invites' && <InvitesTab onInvite={openInvite} />}
         {active === 'access' && <AccessTab me={me} />}
+        {active === 'key' && <KeyTab me={me} />}
         {active === 'audit' && <AuditTab />}
-        {active !== 'users' && active !== 'invites' && active !== 'access' && active !== 'audit' && (
+        {isStubTab(active) && (
           <Card>
             <EmptyState
               className="adm-stub"

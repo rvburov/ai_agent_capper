@@ -34,6 +34,15 @@ describe('центр уведомлений', () => {
     expect(notificationLook('login_failures')).toEqual({ icon: 'lock', tone: 'bad' });
     expect(notificationLook('new_device')).toEqual({ icon: 'device', tone: 'info' });
     expect(notificationLook('что-то новое')).toEqual({ icon: 'bell', tone: null });
+    // этап 3: бюджет, ключ Claude и просьба вернуть ключ администратора
+    expect(notificationLook('budget_80')).toEqual(notificationLook('limit_80'));
+    expect(notificationLook('budget_100')).toEqual(notificationLook('limit_100'));
+    expect(notificationLook('ai_key_failed')).toEqual({ icon: 'key', tone: 'bad' });
+    expect(notificationLook('ai_mode_request')).toEqual({ icon: 'key', tone: 'info' });
+    expect(notificationLook('ai_mode_decision')).toEqual({ icon: 'key', tone: 'info' });
+    // ссылки уведомлений этапа 3: ключ и бюджет с прокруткой к лимитам, ключ Claude участника
+    expect(internalLink('/admin/key#adm-limits')).toBe('/admin/key#adm-limits');
+    expect(internalLink('/profile/key')).toBe('/profile/key');
   });
 
   it('одно прочитано: отметка и счетчик, повтор ничего не меняет', () => {

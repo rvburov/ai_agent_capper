@@ -467,6 +467,10 @@
       .profile-kfacts dd { font-size: var(--fs-md); }
       .profile-del-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     }
+    /* длинная подпись кнопки в подвале карточки («Попросить администратора вернуть ключ») на телефоне переносится */
+    @media (max-width: 480px) {
+      .profile-panel .card-foot .btn { white-space: normal; height: auto; min-height: 40px; padding-block: 8px; max-width: 100%; }
+    }
   `);
 
   // ---------- общие кусочки ----------
