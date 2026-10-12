@@ -1308,9 +1308,9 @@
   }
   function keyTile() {
     return tile({ icon: 'key', label: 'Ключ администратора',
-      value: [h('code', null, 'sk-ant-…' + A.key.last4), chip('Работает', 'good', 'check')],
-      sub: 'Проверен ' + lc(when(A.key.verified)) + ' тестовым запросом. Сам ключ не показывается никому',
-      foot: [h('span', { class: 'stat-hint' }, 'Хранится на сервере, зашифрован'), button('Заменить', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => { st.keyForm = true; switchTab('key', () => scrollToId('adm-key', '#adm-key-new')); } })] });
+      value: A.key.status === 'missing' ? [h('span', null, 'Не задан'), chip('Нет ключа', 'bad', 'alert')] : [h('code', null, 'sk-ant-…' + A.key.last4), chip('Работает', 'good', 'check')],
+      sub: A.key.status === 'missing' ? 'Анализы на ключе администратора не запускаются, пока ключ не задан' : 'Проверен ' + lc(when(A.key.verified)) + ' тестовым запросом. Сам ключ не показывается никому',
+      foot: [h('span', { class: 'stat-hint' }, 'Хранится на сервере, зашифрован'), button(A.key.status === 'missing' ? 'Задать' : 'Заменить', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => { st.keyForm = true; switchTab('key', () => scrollToId('adm-key', '#adm-key-new')); } })] });
   }
   function currencyTile() {
     const c = UI.currency;
@@ -1566,7 +1566,7 @@
       confirm2fa({
         id: 'adm-key-otp',
         title: 'Заменить ключ администратора',
-        body: [h('p', { class: 'small soft' }, 'Новый ключ проверим легким запросом к Claude API. Старый sk-ant-…' + A.key.last4 + ' перестанет использоваться сразу; анализы, которые идут сейчас, доработают на нем.')],
+        body: [h('p', { class: 'small soft' }, 'Новый ключ проверим легким запросом к Claude API.' + (A.key.last4 ? ' Старый sk-ant-…' + A.key.last4 + ' перестанет использоваться сразу; анализы, которые идут сейчас, доработают на нем.' : ''))],
         confirmLabel: 'Проверить и сохранить', icon: 'key',
         onConfirm: () => busy(save, 'Проверяем ключ…', 1100, () => {
           if (/wrong|bad/i.test(v)) { setErr(f, 'Anthropic не принял ключ: проверьте, что он скопирован целиком и не отозван'); return; }
@@ -1583,14 +1583,14 @@
     return h('div', { class: 'adm-form' }, f, h('div', { class: 'row' }, save, button('Отмена', { kind: 'ghost', onClick: () => { st.keyForm = false; redrawPanel(); } })));
   }
   function keyCard() {
-    const users = onAdminKey().filter(u => u.status === 'active').length;
+    const users = onAdminKey().filter(u => u.status === 'active').length, noKey = A.key.status === 'missing';
     return card({
       title: 'Ключ администратора', subtitle: 'Им оплачиваются анализы участников на вашем ключе и общие фоновые задачи', id: 'adm-key', class: 'adm-anchor adm-fill adm-nowrap-head',
-      actions: st.keyForm ? null : [button('Заменить ключ', { kind: 'secondary', size: 'sm', icon: 'refresh', attrs: { id: 'adm-key-replace' }, onClick: () => { st.keyForm = true; redrawPanel(); const i = document.getElementById('adm-key-new'); if (i) i.focus(); } })],
+      actions: st.keyForm ? null : [button(noKey ? 'Задать ключ' : 'Заменить ключ', { kind: 'secondary', size: 'sm', icon: 'refresh', attrs: { id: 'adm-key-replace' }, onClick: () => { st.keyForm = true; redrawPanel(); const i = document.getElementById('adm-key-new'); if (i) i.focus(); } })],
       body: [
-        h('div', { class: 'adm-secret' }, icon('key'), h('code', null, 'sk-ant-…' + A.key.last4), chip('Работает', 'good', 'check')),
+        h('div', { class: 'adm-secret' }, icon('key'), noKey ? h('span', null, 'Ключ не задан') : h('code', null, 'sk-ant-…' + A.key.last4), noKey ? chip('Нет ключа', 'bad', 'alert') : chip('Работает', 'good', 'check')),
         UI.kv([
-          ['Проверен', when(A.key.verified) + ' · тестовым запросом'],
+          ['Проверен', noKey ? '—' : when(A.key.verified) + ' · тестовым запросом'],
           ['Кто на нем', pl(users, 'человек', 'человека', 'человек') + ' и общие задачи'],
           ['Где хранится', 'на сервере, зашифрован'],
         ]),
@@ -1666,9 +1666,9 @@
       title: 'Что происходит на 80% и 100%', subtitle: 'Уведомления приходят на сайт и push на телефон',
       body: h('ul', { class: 'adm-rules cols' },
         rule('80% лимита участника', 'warn', 'Уведомление участнику и вам. Анализы продолжаются.'),
-        rule('100% лимита участника', 'bad', 'Его анализы на вашем ключе останавливаются до вашего решения: поднять лимит или дождаться 1-го числа. Участник видит, почему анализ не запускается.'),
+        rule('100% лимита участника', 'bad', 'Его анализы на вашем ключе останавливаются, когда остатка лимита не хватает на вызов Claude, — до вашего решения: поднять лимит или дождаться 1-го числа. Участник видит, почему анализ не запускается.'),
         rule(A.budget.alertAt + '% общего бюджета', 'warn', 'Уведомление вам.'),
-        rule('100% общего бюджета', 'bad', 'Останавливаются все анализы на вашем ключе и фоновые задачи. Участники на своем ключе работают как обычно.'),
+        rule('100% общего бюджета', 'bad', 'Когда остатка не хватает на вызов Claude, останавливаются все анализы на вашем ключе и фоновые задачи. Участники на своем ключе работают как обычно.'),
         rule('Потолок на анализ', null, 'Анализ, который выходит дороже, останавливается, участник видит понятную ошибку. На своем ключе потолок задает сам участник.')),
     });
   }

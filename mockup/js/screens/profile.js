@@ -379,6 +379,8 @@
     .profile-note { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-sm); color: var(--fg-2); margin: 0; }
     .profile-note > svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--fg-3); }
     .profile-keyline { margin: 0; font-size: var(--fs-md); line-height: 1.55; color: var(--fg-2); }
+    .profile-strong-link { font-weight: 600; }
+    @media (max-width: 960px) { .profile-strong-link { display: inline-flex; align-items: center; min-height: 40px; } }
     .profile-keyline b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .profile-keyline code { font-family: var(--font-mono); color: var(--fg); white-space: nowrap; }
     .profile-lim { display: flex; flex-direction: column; gap: 6px; }
@@ -1338,7 +1340,7 @@
     return h('div', { class: 'profile-panel' },
       isAdmin() && UI.callout('accent', 'admin', h('div', { class: 'row-between', style: 'gap:6px 12px' },
         h('span', { style: 'min-width:0;flex:1 1 280px' }, h('b', null, 'Вы администратор: '), 'ваш ключ — это ключ администратора, им управляют в «Администрирование → Ключ и бюджет».'),
-        h('a', { href: '#admin-key', style: 'font-weight:600' }, 'Открыть'))),
+        h('a', { class: 'profile-strong-link', href: '#admin-key' }, 'Открыть'))),
       modeCard(),
       h('div', { class: 'grid' },
         h('div', { class: 'col-7 profile-col' }, main),
@@ -1368,7 +1370,8 @@
         h('span', { class: 'profile-mode-dot', 'aria-hidden': 'true' }),
         h('span', { class: 'profile-mode-body' },
           h('span', { class: 'profile-mode-title' }, o.title,
-            actual === o.id && chip('Действует', 'good', 'check'),
+            // администратор без ключа: режим не «действует», пока ключ не задан
+            actual === o.id && (adm && o.id === 'admin' && D.admin.key.status === 'missing' ? chip('Ключа нет', 'bad', 'alert') : chip('Действует', 'good', 'check')),
             o.id === 'admin' && actual === 'own' && req && chip('Запрос отправлен', 'info', 'clock')),
           h('span', { class: 'profile-mode-text' }, o.text)));
     }));
@@ -1407,7 +1410,7 @@
           h('h4', null, 'Что будет при 80% и 100%'),
           h('ul', { class: 'profile-thr' },
             h('li', null, h('span', { class: 'profile-thr-badge warn' }, s.alertAt + '%'), h('span', null, h('b', null, usd(L.monthly * s.alertAt / 100, 0) + ' — уведомление'), ' вам и администратору, на сайте и push. Анализы работают как обычно.')),
-            h('li', null, h('span', { class: 'profile-thr-badge bad' }, '100%'), h('span', null, h('b', null, usd(L.monthly, 0) + ' — анализы останавливаются'), ' до решения администратора: он может поднять лимит. Или перейдите на свой ключ.')))),
+            h('li', null, h('span', { class: 'profile-thr-badge bad' }, '100%'), h('span', null, h('b', null, usd(L.monthly, 0) + ' — анализы останавливаются'), ' до решения администратора: он может поднять лимит. Или перейдите на свой ключ. Остановка наступает чуть раньше — когда остатка не хватает на вызов Claude.')))),
         h('p', { class: 'profile-note' }, icon('lock'), h('span', null, 'Лимит меняет администратор. С 1 ноября расход начнется заново.')),
       ],
       foot: [button('Подробнее в «ИИ и расходы»', { kind: 'secondary', icon: 'coins', href: '#costs' })],
@@ -1419,9 +1422,11 @@
     const A = D.admin, B = D.ai.budget();
     return card({
       id: 'profile-key-admin', class: 'profile-anchor', title: 'Ключ администратора', subtitle: 'Ваши анализы идут на нем без личного лимита',
-      actions: [A.key.status === 'ok' ? chip('Работает', 'good', 'check') : chip('Нужна проверка', 'warn', 'alert')],
+      actions: [A.key.status === 'ok' ? chip('Работает', 'good', 'check') : A.key.status === 'missing' ? chip('Ключа нет', 'bad', 'alert') : chip('Нужна проверка', 'warn', 'alert')],
       body: [
-        h('div', { class: 'profile-secret' }, icon('key'), h('code', { 'aria-label': 'Ключ, последние символы ' + A.key.last4.split('').join(' ') }, 'sk-ant-…' + A.key.last4), h('span', { class: 'xsmall muted' }, 'проверен ' + lower1(when(A.key.verified)))),
+        A.key.status === 'missing'
+          ? h('div', { class: 'profile-secret' }, icon('key'), h('span', null, 'Ключ не задан: задайте его в «Ключ и бюджет»'))
+          : h('div', { class: 'profile-secret' }, icon('key'), h('code', { 'aria-label': 'Ключ, последние символы ' + A.key.last4.split('').join(' ') }, 'sk-ant-…' + A.key.last4), h('span', { class: 'xsmall muted' }, 'проверен ' + lower1(when(A.key.verified)))),
         h('p', { class: 'profile-keyline' }, 'Общий бюджет ключа ', h('b', null, usd(B.monthly, 0) + ' в месяц'), ' · израсходовано ', h('b', null, usd(B.spent)), ' · осталось ', h('b', null, usd(B.left))),
         limitBar(B.spent, B.monthly, B.alertAt, 'Расход общего бюджета ключа за ' + D.ai.month),
         h('dl', { class: 'profile-kfacts' },

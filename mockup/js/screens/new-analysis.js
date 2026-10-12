@@ -1013,6 +1013,9 @@
         a.reason
           ? h('p', { class: 'new-reason', role: 'status' }, icon('alert'), a.reason)
           : h('p', { class: 'xsmall muted' }, 'Займет ' + fmtTime(a.secs) + '. Ставку ИИ не делает: экспресс и сумму вы подтверждаете сами.'),
+        // нет ключа или бюджета: администратор решает сам — сразу ссылка туда (участнику — «напишите администратору»)
+        a.reason && D.me.role === 'admin' && /«Администрирование → Ключ и бюджет»/.test(a.reason)
+          ? button('Открыть «Ключ и бюджет»', { size: 'sm', icon: 'key', href: '#admin-key' }) : null,
         h('a', { class: 'new-link', href: '#costs' }, 'Цена и качество режимов — «ИИ и расходы»', icon('arrowRight'))],
     });
   }

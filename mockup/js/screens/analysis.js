@@ -202,14 +202,14 @@
         live: ['Эло на харде с калибровкой Платта', 'Вероятность 2:0 — по модели сетов'] },
       reused
         ? { kind: 'claude', match: 0, title: 'Claude: Синнер — Руне', model: null, sec: 0, tokens: 0, cost: 0, dur: 300, reused: true,
-          detail: 'Оценка Claude из анализа #' + REUSED_FROM.id + ' в ' + REUSED_FROM.at + ', без новых затрат: досье матча не изменилось',
+          detail: 'Досье матча не изменилось — валуй пересчитан по вашим кэфам',
           live: ['Досье то же, что в анализе #' + REUSED_FROM.id, 'Валуй пересчитан по вашим кэфам'] }
         : { kind: 'claude', match: 0, title: 'Claude: Синнер — Руне', model: MODE.model, sec: 26, tokens: AI.prefix + AI.dossier + AI.out1, cost: c1, dur: 900,
           detail: adj(m1, 'h1m', '2:0') + ' · один вызов без веб-поиска, инструкции записаны в кэш',
           live: ['Читает досье матча и 3 урока', 'Сверяет новости Руне с уроком L-019', 'Поправка: ' + m1.A.short + ' 2:0 ' + ppDelta(m1.pickRow.claude - m1.pickRow.model)] },
       reused
         ? { kind: 'claude', match: 1, title: 'Claude: Джокович — Рублев', model: null, sec: 0, tokens: 0, cost: 0, dur: 300, reused: true,
-          detail: 'Оценка Claude из анализа #' + REUSED_FROM.id + ' в ' + REUSED_FROM.at + ', без новых затрат',
+          detail: 'Досье матча не изменилось — валуй пересчитан по вашим кэфам',
           live: ['Досье то же, что в анализе #' + REUSED_FROM.id, 'Валуй пересчитан по вашим кэфам'] }
         : { kind: 'claude', match: 1, title: 'Claude: Джокович — Рублев', model: MODE.model, sec: 21, tokens: AI.prefix + AI.dossier + AI.out2, cost: c2, dur: 800,
           detail: adj(m2, 'p1', 'П1') + ' · инструкции прочитаны из кэша — вход на 85% дешевле',
@@ -233,7 +233,7 @@
     { id: 'fail', label: 'Сбой шага и перезапуск', stop: { at: 7, code: 'ai.overloaded', reason: 'Claude сейчас перегружен (ответ 529). Перезапустите анализ через несколько минут', restart: true } },
     // Тексты лимита и потолка зависят от того, кто смотрит (stopInfo): администратор, участник на ключе
     // администратора или на своем ключе
-    { id: 'limit', label: 'Лимит месяца исчерпан посреди анализа', stop: { at: 7, code: 'ai.monthly_limit', restart: false } },
+    { id: 'limit', label: 'Лимита месяца не хватает на следующий вызов Claude', stop: { at: 7, code: 'ai.monthly_limit', restart: false } },
     { id: 'cap', label: 'Потолок анализа', stop: { at: 7, code: 'ai.analysis_cap', restart: false } },
     { id: 'keyown', label: 'Свой ключ перестал работать (вид участника на своем ключе)', stop: { at: 2, code: 'ai.key_rejected', reason: 'Anthropic не принял ваш ключ: он отозван или неверный. Анализы на вашем ключе остановлены', restart: true, link: ['Ключ Claude в личном кабинете', '#profile-key'] } },
     { id: 'keyadmin', label: 'Ключ администратора перестал работать', stop: { at: 2, code: 'ai.key_rejected', reason: 'Ключ Claude администратора перестал работать. Мы сообщили администратору — перезапустите анализ, когда он заменит ключ', restart: true } },
@@ -850,9 +850,9 @@
   function stopInfo(st) {
     const me = D.me, own = me.aiMode === 'own', admin = me.role === 'admin' && !own, L = D.ai.limitOf(me);
     if (SCEN.id === 'limit') {
-      if (admin) return { code: 'ai.budget_exhausted', reason: 'Общий бюджет ключа администратора на месяц исчерпан (' + usdL(D.admin.budget.monthly) + '). Поднимите его в «Администрирование → Ключ и бюджет»', link: ['Ключ и бюджет', '#admin-key'], wait: 'Перезапуск станет доступен, когда бюджет позволит' };
+      if (admin) return { code: 'ai.budget_exhausted', reason: 'Общего бюджета ключа администратора на месяц не хватает на следующий вызов Claude. Поднимите его в «Администрирование → Ключ и бюджет»', link: ['Ключ и бюджет', '#admin-key'], wait: 'Перезапуск станет доступен, когда бюджет позволит' };
       if (own) return { code: 'ai.billing', reason: 'На счете вашего ключа Claude закончились деньги или достигнут лимит трат. Пополните счет в консоли Anthropic', restart: true, link: ['Ключ Claude в личном кабинете', '#profile-key'] };
-      return { reason: 'Лимит на ИИ в этом месяце исчерпан (' + usdL(L ? L.monthly : D.admin.defaults.monthly) + '). Попросите администратора поднять лимит или подключите свой ключ', link: ['Ключ Claude в личном кабинете', '#profile-key'], wait: 'Перезапуск станет доступен, когда лимит позволит' };
+      return { reason: 'Лимита на ИИ в этом месяце (' + usdL(L ? L.monthly : D.admin.defaults.monthly) + ') не хватает на следующий вызов Claude. Попросите администратора поднять лимит или подключите свой ключ', link: ['Ключ Claude в личном кабинете', '#profile-key'], wait: 'Перезапуск станет доступен, когда лимит позволит' };
     }
     if (SCEN.id === 'cap') {
       const cap = own ? (me.ownCap != null ? me.ownCap : D.admin.defaults.perAnalysis) : admin ? 1 : (L ? L.perAnalysis : D.admin.defaults.perAnalysis);
@@ -1110,7 +1110,7 @@
           h('div', { class: 'analysis-leg-pick' }, r.name),
           h('div', { class: 'analysis-leg-meta' }, r.desc)),
         h('div', { class: 'analysis-leg-right' },
-          h('div', { class: 'analysis-leg-p', 'aria-label': 'Вероятность ' + pr(r.claude) }, h('span', { 'aria-hidden': 'true' }, 'шанс'), h('b', { 'aria-hidden': 'true' }, pr(r.claude))),
+          h('div', { class: 'analysis-leg-p' }, h('span', { 'aria-hidden': 'true' }, 'шанс'), h('b', { 'aria-hidden': 'true' }, pr(r.claude)), h('span', { class: 'sr-only' }, 'Вероятность ' + pr(r.claude))),
           UI.oddsBox(takenOdds()[MX.indexOf(m)] !== r.odds ? 'при ставке' : 'кэф', takenOdds()[MX.indexOf(m)], true)));
     }));
 

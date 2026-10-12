@@ -333,6 +333,8 @@
     return { monthly, shared, spent, forecast, left: round(Math.max(0, monthly - spent), 2), daysLeft: MONTH_DAYS - DAY, share: spent / monthly, fShare: forecast / monthly, alertAt: admin.budget.alertAt };
   }
   Object.defineProperty(admin.budget, 'spent', { enumerable: true, get: () => budget().spent });
+  // Демо-состояние для согласования: ?adminkey=missing — ключ администратора еще не задан (новая установка)
+  try { if (new URLSearchParams(location.search).get('adminkey') === 'missing') Object.assign(admin.key, { last4: null, verified: null, status: 'missing' }); } catch (e) { /* без адреса — ключ задан */ }
   // Можно ли запустить анализ стоимостью cost: null — можно, иначе причина для человека.
   // opts.kind = 'review' — разбор (не анализ): дневной счетчик анализов не проверяется.
   function access(u, cost, opts) {
@@ -350,9 +352,12 @@
       if (L.paused) return 'Анализы на паузе — решение администратора';
       if (!review && u.todayAnalyses >= L.daily) return 'На сегодня анализы закончились: ' + L.daily + ' в день';
       if (cost > L.perAnalysis) return 'Анализ дороже потолка ' + usdL(L.perAnalysis) + ' на один анализ';
-      if (keySpent(u) + cost > L.monthly) return 'Лимит на месяц исчерпан';
+      if (keySpent(u) + cost > L.monthly) return 'Лимита на месяц не хватает на анализ';
     }
-    if (budget().spent + cost > admin.budget.monthly) return 'Общий бюджет ключа администратора на месяц исчерпан';
+    // Нет ключа и общий бюджет администратор решает сам — ему текст со ссылкой на «Ключ и бюджет»
+    const self = u.role === 'admin';
+    if (budget().spent + cost > admin.budget.monthly) return 'Общего бюджета ключа администратора на месяц не хватает на анализ' + (self ? '. Поднимите его в «Администрирование → Ключ и бюджет»' : '');
+    if (admin.key.status === 'missing') return 'Ключ Claude администратора не задан. ' + (self ? 'Задайте его в «Администрирование → Ключ и бюджет»' : 'Напишите администратору');
     return null;
   }
   // Расход ИИ без счетчика анализов (разбор ставки, разбор в «Аналитике»)

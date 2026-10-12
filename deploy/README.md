@@ -22,7 +22,7 @@
 ```
 
 - **caddy** — образ из `frontend/Dockerfile`: внутри собранный интерфейс и этот `Caddyfile`. Сертификат Let's Encrypt выпускает и продлевает сам.
-- **api** и **worker** — один образ из `backend/Dockerfile`. API — uvicorn, воркер — arq (`python -m app.workers.main`): ночная очистка сеансов и журнала входов (03:15 UTC) и обновление данных о матчах (05:25 UTC, час — `CAPPER_DATA_UPDATE_HOUR_UTC`), дальше — анализы. Оба без root, файловая система только для чтения.
+- **api** и **worker** — один образ из `backend/Dockerfile`. API — uvicorn, воркер — arq (`python -m app.workers.main`): анализы, ночная очистка сеансов и журнала входов (03:15 UTC), обновление данных о матчах (05:25 UTC, час — `CAPPER_DATA_UPDATE_HOUR_UTC`) и раз в 5 минут уборка зависших анализов: анализ без движения дольше 15 минут переходит в «сбой» (`analysis.worker_lost`), участник перезапускает его с упавшего шага. Оба без root, файловая система только для чтения.
 - **postgres** 18 и **redis** 8 — только во внутренней сети docker, наружу не открыты. Данные — в томах `capper_postgres-data` и `capper_redis-data` (у Redis включен AOF).
 - **backup** — ночной `pg_dump`, шифрование age, выгрузка в S3, ежемесячная проверка восстановления.
 - Сеть `edge` (Caddy и API) отдельная: только от ее адресов API верит заголовку `X-Forwarded-For` с IP клиента. Без этого у всех был бы IP Caddy, и лимит попыток входа закрывал бы вход всем.
@@ -256,12 +256,16 @@ bash deploy.sh
 bash deploy/local.sh up                            # затем https://localhost
 bash deploy/local.sh admin you@example.com "Имя"   # первый администратор
 bash deploy/local.sh cli reset-code --email you@example.com   # любая команда терминала
+bash deploy/local.sh cli set-admin-key             # ключ Claude администратора (спросит, не покажет)
+bash deploy/local.sh cli agent-smoke               # проверка на живом ключе, ≈ $0,30
 bash deploy/local.sh import you@example.com История-ставок.json Игроки --dry-run
 bash deploy/local.sh backup                        # бэкап и проверка восстановления
 bash deploy/local.sh restore --list                # копии для восстановления
 bash deploy/local.sh restore latest                # восстановить рабочую базу из копии
 bash deploy/local.sh down                          # остановить, данные сохраняются
 ```
+
+Ключ Claude администратора задается и в приложении: «Администрирование → Ключ и бюджет» → «Задать ключ», с кодом 2FA. Ключ берется в консоли Anthropic — [docs/CLAUDE_API_KEY.md](../docs/CLAUDE_API_KEY.md), шаги 1–6. `agent-smoke` проверяет конвейер на живом ключе: разбор образца, новости одного игрока и две оценки последнего сыгранного матча из базы (нужны данные о матчах, см. ниже, или `--match ID`; у матчей архива Сакманна без даты берется начало турнира); перед запуском показывает оценку цены (обычно ≈ $0,30, в худшем случае до $2,82) и спрашивает подтверждение, прогнозы и новости не пишет. Код возврата 1 — проверка не пройдена: шаг Claude не выполнен, разбор образца нашел не одно событие, модель не искала перед `record_news` или второй вызов анализа не прочитал кэш.
 
 ### Данные о матчах и бэктест
 
