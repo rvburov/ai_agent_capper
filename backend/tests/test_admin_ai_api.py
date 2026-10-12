@@ -752,6 +752,37 @@ async def test_return_request_rejected(
     assert bad.status_code == 422
 
 
+async def test_approve_return_lifts_pause(
+    make_client: ClientFactory, make_user: UserFactory, login: LoginFn, db: AsyncSession
+) -> None:
+    """Участник на паузе ушел на свой ключ и просит вернуть ключ администратора: «Разрешить»
+    возвращает его с новым лимитом и без паузы (как в макете), иначе «снова на ключе
+    администратора» на деле значило бы «анализы не запускаются»."""
+    await seed_prices(db)
+    await set_admin_key(db)
+    admin = await admin_signed_in(make_client, make_user, login)
+    member = await signed_in(make_client, make_user, login, ai_mode="own")
+    paused = await admin.client.put(f"/api/admin/ai/limits/{member.id}", json={"paused": True})
+    assert paused.status_code == 200, paused.text
+    assert (await member.client.post("/api/me/ai-mode/return-request")).status_code == 200
+
+    approved = await admin.client.post(
+        f"/api/admin/users/{member.id}/ai-mode",
+        json={
+            "decision": "approve",
+            "limit": {"monthly_usd": "12", "daily_analyses": 4, "per_analysis_usd": "1"},
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["limit"]["paused"] is False
+    row = await limit_row(db, member.id)
+    assert row is not None and row.paused is False
+    budget = (await member.client.get("/api/ai/budget")).json()
+    assert (budget["mode"], budget["paused"], budget["reason_code"]) == ("shared", False, None)
+    changes = [e.details["changes"] for e in await audit_entries(db, "limit_change")]
+    assert changes[-1]["paused"] == {"from": True, "to": False}
+
+
 async def test_approve_with_limit_without_request_changes_nothing(
     make_client: ClientFactory, make_user: UserFactory, login: LoginFn, db: AsyncSession
 ) -> None:

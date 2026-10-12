@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     tennis_data_first_year: int = Field(default=2013, ge=2013)
     # Час (UTC) ночного обновления данных воркером
     data_update_hour_utc: int = Field(default=5, ge=0, le=23)
+    # Расписание воркера (очистка, ночное обновление данных, уборщик анализов). false —
+    # только задачи из очереди: стек сквозных тестов не качает архивы посреди прогона
+    worker_cron: bool = True
 
     # Адрес Claude API. Меняется только для локальных прогонов без ключа: поддельный
     # сервер tests/fake_claude.py. В prod — только https (ключ уходит в заголовке)

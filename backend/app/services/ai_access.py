@@ -21,6 +21,11 @@ analyses — один порядок во всех функциях), commit —
 анализа, лимит месяца, общий бюджет; затем нет ключа администратора и нет цены модели.
 У администратора на ключе администратора нет личных лимитов (как в макете), но потолок
 анализа (per_analysis_hard_usd) действует.
+
+Лимит месяца и общий бюджет до запуска проверяются той же мерой, что перед вызовом
+(check_before_call): свободным должен быть не только расход по оценке, но и худший случай
+одного вызова оценки матча (весь max_tokens Opus, около $0,36). Иначе анализ запускался
+по оценке ($0,12) и останавливался на первом же вызове Opus, а перезапуск упирался в то же.
 """
 
 import calendar
@@ -35,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.config import AgentConfig, default_per_analysis, load_agent_config
 from app.agent.errors import ClaudeStepError
+from app.agent.runs import worst_case_usd
 from app.core.errors import AppError
 from app.db.models import (
     ANALYSIS_ACTIVE_STATUSES,
@@ -70,9 +76,12 @@ ACCESS_STATUS = 409
 CENT = Decimal("0.01")
 ESTIMATE_STEP = Decimal("0.0001")
 ZERO = Decimal(0)
-# Куда ведут уведомления о расходе: экран «ИИ и расходы» и кабинет администратора
-COSTS_LINK = "/costs"
-USAGE_LINK = "/admin/usage"
+# Куда ведут уведомления о расходе: участнику — «Личный кабинет → Ключ Claude» (лимит и
+# расход), администратору — «Администрирование → Ключ и бюджет»: к лимитам участников или
+# к общему бюджету. Экраны «ИИ и расходы» и «Расход ИИ» — этап 4, пока там заглушки
+MEMBER_LIMIT_LINK = "/profile/key"
+ADMIN_LIMITS_LINK = "/admin/key#adm-limits"
+ADMIN_BUDGET_LINK = "/admin/key"
 # pg_advisory_xact_lock: предупреждения о расходе не дублируются параллельными анализами
 AI_ALERTS_LOCK = 0x61695F616C657274  # "ai_alert"
 
@@ -291,6 +300,25 @@ async def missing_prices(
     return [model for model in models if model not in priced]
 
 
+async def call_need_usd(db: AsyncSession, config: AgentConfig, now: datetime) -> Decimal:
+    """Сколько должно быть свободно, чтобы check_before_call пропустил вызов оценки матча:
+    худший случай самого дорогого вызова анализа (вход по оценке estimate_analysis_input_tokens,
+    выход — весь analysis_max_tokens). Нет цены модели — 0: тогда отказ ai.no_price."""
+    price = await db.scalar(
+        select(ModelPrice)
+        .where(ModelPrice.model == config.analysis_model, ModelPrice.valid_from <= now)
+        .order_by(ModelPrice.valid_from.desc())
+        .limit(1)
+    )
+    if price is None:
+        return ZERO
+    return worst_case_usd(
+        price,
+        input_tokens=config.estimate_analysis_input_tokens,
+        max_tokens=config.analysis_max_tokens,
+    )
+
+
 async def _settings(db: AsyncSession, *, lock: bool) -> AppSettings:
     stmt = select(AppSettings).where(AppSettings.id == SETTINGS_ROW_ID)
     if lock:
@@ -323,10 +351,16 @@ async def _evaluate(
 ) -> Access:
     """analysis_spent_usd — уже потраченное анализом при повторном запуске: потолок анализа
     сравнивается с ним плюс оценкой (как в check_before_call), лимиты месяца — с оценкой
-    (потраченное уже в расходе месяца)."""
+    (потраченное уже в расходе месяца). Для лимита месяца и общего бюджета нужна еще и
+    свобода на худший случай одного вызова оценки матча (call_need_usd), если вызовы
+    Claude впереди: оценка больше нуля или не задана (можно ли сейчас запустить анализ).
+    Оценка 0 — все оценки матчей уже есть (перезапуск после них): вызовов не будет."""
+    config = await load_agent_config(db)
     limits = limits_of(limit_row, settings)
     cost = estimate_usd if estimate_usd is not None else ZERO
     total = analysis_spent_usd + cost
+    calls_ahead = estimate_usd is None or estimate_usd > 0
+    need = max(cost, await call_need_usd(db, config, now)) if calls_ahead else cost
     reason: str | None = None
     params: dict[str, Any] = {}
 
@@ -376,12 +410,12 @@ async def _evaluate(
             refuse("ai.analysis_cap", cap=usd_text(cap), estimate=usd_text(total))
         if member:
             left = limits.monthly_usd - spent - reserved
-            if left <= 0 or cost > left:
+            if left <= 0 or need > left:
                 refuse("ai.monthly_limit", limit=usd_text(limits.monthly_usd))
         budget_spent = await _budget_spent(db, now)
         budget_reserved = await _reserved(db, user_id=None, exclude_analysis_id=exclude_analysis_id)
         budget_left = settings.monthly_budget_usd - budget_spent - budget_reserved
-        if budget_left <= 0 or cost > budget_left:
+        if budget_left <= 0 or need > budget_left:
             refuse("ai.budget_exhausted")
         has_key = settings.anthropic_key_enc is not None
         if not has_key:
@@ -402,7 +436,7 @@ async def _evaluate(
             "budget_spent_usd": budget_spent,
             "budget_reserved_usd": budget_reserved,
         }
-    missing = await missing_prices(db, await load_agent_config(db), now)
+    missing = await missing_prices(db, config, now)
     if missing:
         refuse("ai.no_price", model=missing[0])
     return Access(
@@ -614,7 +648,10 @@ async def _send_once(
             continue
         to_admin = recipient in admin_ids
         variant = "admin" if family == "limit" and to_admin else None
-        link = USAGE_LINK if to_admin else COSTS_LINK
+        if not to_admin:
+            link = MEMBER_LIMIT_LINK
+        else:
+            link = ADMIN_LIMITS_LINK if family == "limit" else ADMIN_BUDGET_LINK
         if kind == "limit_80":
             note = await notify(
                 db, user_id=recipient, kind="limit_80", variant=variant, link=link, **params

@@ -946,7 +946,8 @@ export interface paths {
         };
         /**
          * List Analyses
-         * @description Свои анализы, новые сверху. Следующая страница — before=next_cursor.
+         * @description Свои анализы, новые сверху. Следующая страница — before=next_cursor; launched=true —
+         *     без черновиков (только запущенные).
          */
         get: operations["list_analyses_api_analyses_get"];
         put?: never;
@@ -1528,6 +1529,8 @@ export interface components {
             input_kind: "text" | "form";
             /** Matches */
             matches: string[];
+            /** Pairs */
+            pairs: components["schemas"]["MatchPairOut"][];
             /** Decision */
             decision: ("bet" | "skip") | null;
             /** Cost Usd */
@@ -1568,6 +1571,8 @@ export interface components {
             /** Attempt */
             attempt: number;
             draft: components["schemas"]["DraftOut"] | null;
+            /** Events */
+            events: components["schemas"]["ConfirmedEventOut"][];
             /** Steps */
             steps: components["schemas"]["StepOut"][];
             totals: components["schemas"]["TotalsOut"];
@@ -1577,6 +1582,7 @@ export interface components {
             decision: ("bet" | "skip") | null;
             /** Bet Id */
             bet_id: number | null;
+            bet: components["schemas"]["BetBrief"] | null;
             /** Key Source */
             key_source: ("admin" | "own") | null;
             /** Estimate Usd */
@@ -1660,6 +1666,25 @@ export interface components {
             /** Adaptations */
             adaptations: components["schemas"]["AdaptationOut"][];
         };
+        /**
+         * BetBrief
+         * @description Сохраненная ставка по анализу: после перезагрузки экран показывает ее сумму и кэфы,
+         *     а не рекомендацию анализа.
+         */
+        BetBrief: {
+            /** Id */
+            id: number;
+            /** Stake */
+            stake: string;
+            /** Currency */
+            currency: string;
+            /** Total Odds */
+            total_odds: string;
+            /** Bookmaker */
+            bookmaker: string;
+            /** Legs */
+            legs: components["schemas"]["BetLegBrief"][];
+        };
         /** BetIn */
         BetIn: {
             /** Analysis Id */
@@ -1672,6 +1697,13 @@ export interface components {
             legs: components["schemas"]["BetLegIn"][];
             /** Client Ref */
             client_ref: string;
+        };
+        /** BetLegBrief */
+        BetLegBrief: {
+            /** Prediction Id */
+            prediction_id: number | null;
+            /** Odds Taken */
+            odds_taken: string;
         };
         /**
          * BetLegIn
@@ -1777,6 +1809,43 @@ export interface components {
             bank?: number | string | null;
             /** Bookmaker */
             bookmaker?: string | null;
+        };
+        /**
+         * ConfirmedEventOut
+         * @description Событие, подтвержденное при запуске (analyses.confirmed): по нему экран называет
+         *     матчи в шагах хода (match_id) и возвращает события в «Новый анализ» для правки.
+         */
+        ConfirmedEventOut: {
+            /** Position */
+            position: number;
+            /** Match Id */
+            match_id: number | null;
+            player1: components["schemas"]["ConfirmedPlayer"];
+            player2: components["schemas"]["ConfirmedPlayer"];
+            /** Tournament Id */
+            tournament_id: number | null;
+            /** Tournament Name */
+            tournament_name: string | null;
+            /** Surface */
+            surface: string;
+            /** Best Of */
+            best_of: number;
+            /** Round */
+            round: string;
+            odds: components["schemas"]["OddsPairsOut"];
+            /** Bookmaker */
+            bookmaker: string | null;
+        };
+        /** ConfirmedPlayer */
+        ConfirmedPlayer: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Name Ru */
+            name_ru: string | null;
+            /** Country */
+            country: string | null;
         };
         /** CorridorOut */
         CorridorOut: {
@@ -2336,6 +2405,14 @@ export interface components {
             /** Note Key */
             note_key: string | null;
         };
+        /**
+         * MatchPairOut
+         * @description Игроки матча для списка: экран пишет их так же, как на остальных карточках.
+         */
+        MatchPairOut: {
+            player1: components["schemas"]["PairName"];
+            player2: components["schemas"]["PairName"];
+        };
         /** MatchResult */
         MatchResult: {
             /** Match Id */
@@ -2591,6 +2668,13 @@ export interface components {
             check: ("ok" | "rejected" | "error" | "models") | null;
             /** Models */
             models: components["schemas"]["KeyModelOut"][];
+        };
+        /** PairName */
+        PairName: {
+            /** Name */
+            name: string;
+            /** Name Ru */
+            name_ru: string | null;
         };
         /** PasswordChangeIn */
         PasswordChangeIn: {
@@ -5002,6 +5086,7 @@ export interface operations {
             query?: {
                 before?: number | null;
                 limit?: number;
+                launched?: boolean;
             };
             header?: never;
             path?: never;

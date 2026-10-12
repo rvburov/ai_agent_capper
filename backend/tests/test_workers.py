@@ -59,6 +59,7 @@ from app.workers.main import (
     REAP_MINUTES,
     WorkerSettings,
     apply_redis_prefix,
+    build_cron_jobs,
     create_queue_pool,
 )
 from tests.support import BACKEND_DIR, UserFactory
@@ -255,6 +256,15 @@ def test_worker_settings(settings: Settings) -> None:
     assert redis_url.startswith(
         f"{WorkerSettings.redis_settings.host}:{WorkerSettings.redis_settings.port}"
     )
+
+
+def test_worker_cron_can_be_turned_off(settings: Settings) -> None:
+    # CAPPER_WORKER_CRON=false (стек сквозных тестов): только задачи из очереди, без
+    # ночной загрузки архивов и уборщика
+    jobs_on = build_cron_jobs(settings)
+    assert jobs_on is not None and len(jobs_on) == 3
+    assert build_cron_jobs(settings.model_copy(update={"worker_cron": False})) is None
+    assert Settings.model_fields["worker_cron"].default is True
 
 
 def test_arq_keys_use_redis_prefix(settings: Settings) -> None:

@@ -582,13 +582,15 @@ async def decide_mode(
     actor: User,
     ip: str | None,
 ) -> MemberLimitOut:
-    """Решение по просьбе вернуть ключ администратора (Р12). При одобрении с limit
-    сначала ставится лимит (журнал limit_change), чтобы уведомление участнику назвало
-    новый; затем режим (журнал ai_mode_change, уведомление ai_mode_decision), свой ключ
-    участника удаляется. Просьбы нет — 409 ai.no_return_request, и лимит не меняется.
-    Администратор возвращается на ключ администратора сам — 409 ai.return_not_needed."""
+    """Решение по просьбе вернуть ключ администратора (Р12). При одобрении сначала
+    ставится лимит (с limit — новый) и снимается пауза (журнал limit_change), чтобы
+    уведомление участнику назвало действующий лимит: раз администратор вернул участника
+    на свой ключ, анализы снова идут (как в макете, approveReturn); затем режим (журнал
+    ai_mode_change, уведомление ai_mode_decision), свой ключ участника удаляется. Просьбы
+    нет — 409 ai.no_return_request, и лимит не меняется. Администратор возвращается на
+    ключ администратора сам — 409 ai.return_not_needed."""
     target = await _limit_target(db, user_id, admin_code="ai.return_not_needed")
-    if approve and limit is not None:
+    if approve:
         row = await db.scalar(
             select(AiLimit)
             .where(AiLimit.user_id == user_id)
@@ -596,13 +598,15 @@ async def decide_mode(
         )
         if target.ai_mode != "own" or row is None or row.return_requested_at is None:
             raise AppError(409, "ai.no_return_request")
-        _check_cap(limit.monthly_usd, limit.per_analysis_usd)
+        if limit is not None:
+            _check_cap(limit.monthly_usd, limit.per_analysis_usd)
         await ai_keys.set_member_limit(
             db,
             user_id,
-            monthly_usd=limit.monthly_usd,
-            daily_analyses=limit.daily_analyses,
-            per_analysis_usd=limit.per_analysis_usd,
+            monthly_usd=limit.monthly_usd if limit is not None else None,
+            daily_analyses=limit.daily_analyses if limit is not None else None,
+            per_analysis_usd=limit.per_analysis_usd if limit is not None else None,
+            paused=False,
             actor=actor,
             ip=ip,
         )

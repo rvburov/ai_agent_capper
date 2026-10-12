@@ -71,9 +71,13 @@ async def list_analyses(
     db: DbSession,
     before: Annotated[int | None, Query(ge=1, le=2**63 - 1)] = None,
     limit: Annotated[int, Query(ge=1, le=50)] = analyses_service.LIST_LIMIT,
+    launched: bool = False,
 ) -> AnalysisListOut:
-    """Свои анализы, новые сверху. Следующая страница — before=next_cursor."""
-    return await analyses_service.list_analyses(db, user, before=before, limit=limit)
+    """Свои анализы, новые сверху. Следующая страница — before=next_cursor; launched=true —
+    без черновиков (только запущенные)."""
+    return await analyses_service.list_analyses(
+        db, user, before=before, limit=limit, launched=launched
+    )
 
 
 @router.get("/{analysis_id}")

@@ -305,6 +305,45 @@ async def test_old_job_failure_does_not_fail_new_attempt(
     assert analysis.status == "done" and analysis.error_code is None
 
 
+async def test_call_finished_after_cancel_is_kept_for_continue(
+    db: AsyncSession,
+    engine: AsyncEngine,
+    redis: Redis,
+    make_user: UserFactory,
+    world: dict[str, int],
+) -> None:
+    fake = FakeClaude()
+    gates = Gates(1)
+    with _claude(fake, gates):
+        member = await make_user()
+        analysis_id = await make_analysis(
+            db, redis, member.user, world, ("sinner", "rune"), ("djokovic", "rublev")
+        )
+        maker = create_sessionmaker(engine)
+        old = asyncio.create_task(execute(analysis_id, maker, redis, attempt=1))
+        await gates.event(gates.entered, 1).wait()  # идет оценка матча 1
+        await analyses_service.cancel(db, redis, member.user, analysis_id)
+        gates.event(gates.released, 1).set()  # вызов доработал уже после отмены
+        assert await asyncio.wait_for(old, 10) == "cancelled"
+        analysis = await _analysis(db, analysis_id)
+        claude = [step for step in analysis.checkpoint["steps"] if step["kind"] == "claude"]
+        # Оплаченная оценка осталась в отмененном анализе: шаг готов, расход шагов равен
+        # учету agent_runs, второй матч не начинался
+        assert analysis.status == "cancelled"
+        assert [step["state"] for step in claude] == ["done", "pending"]
+        assert sum(Decimal(str(s["cost_usd"])) for s in analysis.checkpoint["steps"]) == (
+            analysis.cost_usd
+        )
+        assert "assessment_id" in analysis.checkpoint["matches"][str(claude[0]["match_id"])]
+        # «Продолжить» покупает только второй матч
+        await analyses_service.start_run(
+            db, redis, member.user, analysis_id, None, enqueue=_no_queue
+        )
+        assert await execute(analysis_id, maker, redis, attempt=2) == "done"
+    assert len(fake.calls("analysis")) == 2
+    assert len(await _runs(db, analysis_id, "analysis")) == 2
+
+
 # --- снятие задачи и общий предел ---
 
 

@@ -468,6 +468,47 @@ class ResultOut(BaseModel):
 # --- анализ целиком ---
 
 
+class ConfirmedPlayer(BaseModel):
+    id: int
+    name: str
+    name_ru: str | None
+    country: str | None
+
+
+class ConfirmedEventOut(BaseModel):
+    """Событие, подтвержденное при запуске (analyses.confirmed): по нему экран называет
+    матчи в шагах хода (match_id) и возвращает события в «Новый анализ» для правки."""
+
+    position: int
+    match_id: int | None
+    player1: ConfirmedPlayer
+    player2: ConfirmedPlayer
+    tournament_id: int | None
+    tournament_name: str | None
+    surface: str
+    best_of: int
+    round: str
+    odds: OddsPairsOut
+    bookmaker: str | None
+
+
+class BetLegBrief(BaseModel):
+    prediction_id: int | None
+    odds_taken: DecimalOut
+
+
+class BetBrief(BaseModel):
+    """Сохраненная ставка по анализу: после перезагрузки экран показывает ее сумму и кэфы,
+    а не рекомендацию анализа."""
+
+    id: int
+    stake: DecimalOut
+    currency: str
+    total_odds: DecimalOut
+    bookmaker: str
+    legs: list[BetLegBrief]
+
+
 class AnalysisOut(BaseModel):
     id: int
     status: AnalysisStatus
@@ -478,18 +519,32 @@ class AnalysisOut(BaseModel):
     input_text: str
     attempt: int
     draft: DraftOut | None
+    events: list[ConfirmedEventOut]
     steps: list[StepOut]
     totals: TotalsOut
     error: ErrorInfoOut | None
     result: ResultOut | None
     decision: Decision | None
     bet_id: int | None
+    bet: BetBrief | None
     key_source: KeySource | None
     estimate_usd: UsdOut | None
     cost_usd: UsdOut
     bank: DecimalOut | None
     bookmaker: str | None
     strategy_version: str | None
+
+
+class PairName(BaseModel):
+    name: str
+    name_ru: str | None
+
+
+class MatchPairOut(BaseModel):
+    """Игроки матча для списка: экран пишет их так же, как на остальных карточках."""
+
+    player1: PairName
+    player2: PairName
 
 
 class AnalysisListItem(BaseModel):
@@ -499,6 +554,7 @@ class AnalysisListItem(BaseModel):
     finished_at: datetime | None
     input_kind: InputKind
     matches: list[str]
+    pairs: list[MatchPairOut]
     decision: Decision | None
     cost_usd: UsdOut
 

@@ -13,10 +13,14 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AgentRun, Analysis, Bet, StrategyVersion
+from app.db.models import AgentRun, Analysis, Bet, BetLeg, Player, StrategyVersion
 from app.schemas.analyses import (
     AccessOut,
     AnalysisOut,
+    BetBrief,
+    BetLegBrief,
+    ConfirmedEventOut,
+    ConfirmedPlayer,
     DraftEventOut,
     DraftOut,
     ErrorInfoOut,
@@ -35,6 +39,7 @@ from app.services.ai_access import Access
 from app.services.analysis_input import (
     DEFAULT_BEST_OF,
     MAX_EVENTS,
+    Confirmed,
     Pick,
     PlayerFacts,
     money,
@@ -294,6 +299,59 @@ def access_out(access: Access) -> AccessOut:
     )
 
 
+async def confirmed_events(db: AsyncSession, analysis: Analysis) -> list[ConfirmedEventOut]:
+    """Подтвержденные события запуска с именами игроков (одним запросом, без Эло)."""
+    if not analysis.confirmed:
+        return []
+    events = Confirmed.from_json(analysis.confirmed).events
+    ids = {pid for event in events for pid in (event.player1_id, event.player2_id)}
+    players = {
+        row.id: ConfirmedPlayer(id=row.id, name=row.name, name_ru=row.name_ru, country=row.country)
+        for row in await db.scalars(select(Player).where(Player.id.in_(ids)))
+    }
+
+    def player(pid: int) -> ConfirmedPlayer:
+        return players.get(pid) or ConfirmedPlayer(id=pid, name="", name_ru=None, country=None)
+
+    return [
+        ConfirmedEventOut(
+            position=event.position,
+            match_id=event.match_id,
+            player1=player(event.player1_id),
+            player2=player(event.player2_id),
+            tournament_id=event.tournament_id,
+            tournament_name=event.tournament_name,
+            surface=event.surface,
+            best_of=event.best_of,
+            round=event.round,
+            odds=odds_out(event.odds),
+            bookmaker=event.bookmaker,
+        )
+        for event in events
+    ]
+
+
+async def bet_brief(db: AsyncSession, analysis_id: int) -> BetBrief | None:
+    """Ставка по анализу (одна на анализ): сумма и кэфы, которые участник сохранил."""
+    bet = await db.scalar(
+        select(Bet).where(Bet.analysis_id == analysis_id).order_by(Bet.id).limit(1)
+    )
+    if bet is None:
+        return None
+    legs = await db.scalars(select(BetLeg).where(BetLeg.bet_id == bet.id).order_by(BetLeg.id))
+    return BetBrief(
+        id=bet.id,
+        stake=bet.stake,
+        currency=bet.currency,
+        total_odds=short_odds(bet.total_odds),
+        bookmaker=bet.bookmaker,
+        legs=[
+            BetLegBrief(prediction_id=leg.prediction_id, odds_taken=short_odds(leg.odds_taken))
+            for leg in legs
+        ],
+    )
+
+
 async def analysis_out(
     db: AsyncSession, analysis: Analysis, *, today: date | None = None
 ) -> AnalysisOut:
@@ -305,9 +363,7 @@ async def analysis_out(
     ):
         draft = await build_draft(db, analysis, today=day)
     steps = steps_of(analysis)
-    bet_id: int | None = await db.scalar(
-        select(Bet.id).where(Bet.analysis_id == analysis.id).order_by(Bet.id).limit(1)
-    )
+    bet = await bet_brief(db, analysis.id)
     version_code: str | None = None
     if analysis.strategy_version_id is not None:
         version_code = await db.scalar(
@@ -324,12 +380,14 @@ async def analysis_out(
         input_text=analysis.input_text,
         attempt=analysis.attempt,
         draft=draft,
+        events=await confirmed_events(db, analysis),
         steps=steps,
         totals=totals_of(steps),
         error=error_of(analysis),
         result=result,
         decision=analysis.decision,  # type: ignore[arg-type]
-        bet_id=bet_id,
+        bet_id=bet.id if bet is not None else None,
+        bet=bet,
         key_source=analysis.key_source,  # type: ignore[arg-type]
         estimate_usd=analysis.estimate_usd,
         cost_usd=analysis.cost_usd,

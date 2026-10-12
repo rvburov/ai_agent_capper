@@ -157,16 +157,12 @@ async def shutdown(ctx: dict[Any, Any]) -> None:
         await engine.dispose()
 
 
-class WorkerSettings:
-    """Настройки воркера для arq (arq читает атрибуты класса)."""
-
-    functions: Sequence[WorkerCoroutine | Function] = (
-        cleanup_auth_records,
-        update_data,
-        job_function(run_analysis, timeout=ANALYSIS_TIMEOUT_SECONDS, max_tries=1),
-        reap_stuck_analyses,
-    )
-    cron_jobs: Sequence[CronJob] | None = (
+def build_cron_jobs(settings: Settings) -> tuple[CronJob, ...] | None:
+    """Расписание воркера; CAPPER_WORKER_CRON=false выключает его целиком (стек
+    сквозных тестов: ночная загрузка архивов не должна начаться посреди прогона)."""
+    if not settings.worker_cron:
+        return None
+    return (
         cron(
             cleanup_auth_records,
             hour=CLEANUP_HOUR_UTC,
@@ -177,7 +173,7 @@ class WorkerSettings:
         ),
         cron(
             update_data,
-            hour=get_settings().data_update_hour_utc,
+            hour=settings.data_update_hour_utc,
             minute=DATA_UPDATE_MINUTE,
             # Шаг с ошибкой уже записан в ingestion_runs, повтор — следующей ночью;
             # о давно не обновленных данных администраторам скажет data_stale
@@ -191,6 +187,18 @@ class WorkerSettings:
             timeout=REAP_TIMEOUT_SECONDS,
         ),
     )
+
+
+class WorkerSettings:
+    """Настройки воркера для arq (arq читает атрибуты класса)."""
+
+    functions: Sequence[WorkerCoroutine | Function] = (
+        cleanup_auth_records,
+        update_data,
+        job_function(run_analysis, timeout=ANALYSIS_TIMEOUT_SECONDS, max_tries=1),
+        reap_stuck_analyses,
+    )
+    cron_jobs: Sequence[CronJob] | None = build_cron_jobs(get_settings())
     on_startup: StartupShutdown | None = startup
     on_shutdown: StartupShutdown | None = shutdown
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)

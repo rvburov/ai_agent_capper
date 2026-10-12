@@ -318,6 +318,8 @@ async def test_run_queues_once_and_creates_matches(
 ) -> None:
     member = await _member(make_client, make_user, login)
     created = (await member.client.post("/api/analyses", json={"input_kind": "form"})).json()
+    # Черновик еще без подтвержденных событий
+    assert created["events"] == []
     url = f"/api/analyses/{created['id']}/run"
     body = {"events": [_event(world, "sinner", "rune")], "bank": "10000"}
     response = await member.client.post(url, json=body)
@@ -343,6 +345,24 @@ async def test_run_queues_once_and_creates_matches(
     assert analysis.confirmed["events"][0]["match_id"] == match.id
     assert analysis.confirmed["bank"] == "10000.00"
     assert analysis.budget_reserved_usd > 0
+    # Подтвержденные события с именами: экран называет по ним матчи в шагах хода и
+    # возвращает события в «Новый анализ» после перезагрузки страницы
+    shown = (await member.client.get(f"/api/analyses/{created['id']}")).json()["events"]
+    assert len(shown) == 1 and shown[0]["position"] == 1 and shown[0]["match_id"] == match.id
+    assert shown[0]["player1"] == {
+        "id": world["sinner"],
+        "name": "Jannik Sinner",
+        "name_ru": "Янник Синнер",
+        "country": "ITA",
+    }
+    assert shown[0]["player2"]["name"] == "Holger Rune"
+    assert shown[0]["surface"] == "hard" and shown[0]["round"] == "R16"
+    assert shown[0]["odds"] == {
+        "ML": ["1.30", "3.60"],
+        "HCP_-1.5": [None, None],
+        "HCP_+1.5": [None, None],
+    }
+    assert shown[0]["bookmaker"] == "Fonbet" and shown[0]["best_of"] == 3
 
 
 @pytest.mark.parametrize(
@@ -480,6 +500,7 @@ async def test_done_analysis_view_decision_and_list(
     assert data.status == "done" and data.result is not None and data.result.express is not None
     assert data.totals.steps == len(data.steps) and data.totals.step == len(data.steps)
     assert data.cost_usd > 0 and data.bet_id is None and data.strategy_version == "v3"
+    assert data.bet is None
     comparison = {row.key for row in data.result.matches[0].comparison}
     assert {"elo_rank", "elo_surface", "form10", "h2h"} <= comparison
     url = f"/api/analyses/{analysis_id}/decision"
@@ -497,10 +518,19 @@ async def test_done_analysis_view_decision_and_list(
         "Jannik Sinner vs Holger Rune",
         "Novak Djokovic vs Andrey Rublev",
     ]
+    # Пары игроков с русскими именами: экран пишет «Синнер — Руне», как на карточках
+    assert items[0]["pairs"][0] == {
+        "player1": {"name": "Jannik Sinner", "name_ru": "Янник Синнер"},
+        "player2": {"name": "Holger Rune", "name_ru": "Хольгер Руне"},
+    }
 
 
 async def test_list_cursor(
-    make_client: ClientFactory, make_user: UserFactory, login: LoginFn, world: dict[str, int]
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    world: dict[str, int],
+    queued: list[tuple[int, int, str]],
 ) -> None:
     member = await _member(make_client, make_user, login)
     ids = [
@@ -515,6 +545,13 @@ async def test_list_cursor(
         )
     ).json()
     assert [item["id"] for item in second["items"]] == [ids[0]] and second["next_cursor"] is None
+    # Только запущенные: черновики (каждая форма и каждый разбор) в короткий список не идут
+    url = f"/api/analyses/{ids[1]}/run"
+    started = await member.client.post(url, json={"events": [_event(world, "sinner", "rune")]})
+    assert started.status_code == 202, started.text
+    launched = (await member.client.get("/api/analyses", params={"launched": "true"})).json()
+    assert [item["id"] for item in launched["items"]] == [ids[1]]
+    assert launched["next_cursor"] is None
 
 
 async def test_decision_needs_done_analysis(

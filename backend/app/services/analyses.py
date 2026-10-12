@@ -53,6 +53,8 @@ from app.schemas.analyses import (
     EstimateOut,
     EventIn,
     FairOut,
+    MatchPairOut,
+    PairName,
     PreviewEvent,
     PreviewOut,
     PreviewPlayer,
@@ -750,25 +752,46 @@ async def set_decision(
     return analysis
 
 
-def _labels(analysis: Analysis, names: dict[int, str]) -> list[str]:
+def _pairs(analysis: Analysis, names: dict[int, PairName]) -> list[MatchPairOut]:
+    """Игроки матчей: подтвержденные — из базы (с русским именем), у черновика — как в
+    тексте."""
     if analysis.confirmed:
+        unknown = PairName(name="?", name_ru=None)
         return [
-            f"{names.get(event.player1_id, '?')} vs {names.get(event.player2_id, '?')}"
+            MatchPairOut(
+                player1=names.get(event.player1_id, unknown),
+                player2=names.get(event.player2_id, unknown),
+            )
             for event in Confirmed.from_json(analysis.confirmed).events
         ]
     parsed = parsed_input(analysis.parsed)
     if parsed is None:
         return []
-    return [f"{event.player1.raw} vs {event.player2.raw}" for event in parsed.events]
+    return [
+        MatchPairOut(
+            player1=PairName(name=event.player1.raw, name_ru=None),
+            player2=PairName(name=event.player2.raw, name_ru=None),
+        )
+        for event in parsed.events
+    ]
 
 
 async def list_analyses(
-    db: AsyncSession, user: User, *, before: int | None, limit: int = LIST_LIMIT
+    db: AsyncSession,
+    user: User,
+    *,
+    before: int | None,
+    limit: int = LIST_LIMIT,
+    launched: bool = False,
 ) -> AnalysisListOut:
-    """Свои анализы, новые сверху; before — курсор (id), следующая страница — next_cursor."""
+    """Свои анализы, новые сверху; before — курсор (id), следующая страница — next_cursor.
+    launched — только запущенные: каждый разбор текста и каждая форма создают черновик, и
+    без фильтра они вытесняют анализы из короткого списка."""
     stmt = select(Analysis).where(Analysis.user_id == user.id)
     if before is not None:
         stmt = stmt.where(Analysis.id < before)
+    if launched:
+        stmt = stmt.where(Analysis.started_at.is_not(None))
     rows = list(await db.scalars(stmt.order_by(Analysis.id.desc()).limit(limit + 1)))
     more = len(rows) > limit
     rows = rows[:limit]
@@ -781,27 +804,31 @@ async def list_analyses(
     }
     names = (
         {
-            pid: name
-            for pid, name in await db.execute(
-                select(Player.id, Player.name).where(Player.id.in_(ids))
+            pid: PairName(name=name, name_ru=name_ru)
+            for pid, name, name_ru in await db.execute(
+                select(Player.id, Player.name, Player.name_ru).where(Player.id.in_(ids))
             )
         }
         if ids
         else {}
     )
-    return AnalysisListOut(
-        items=[
+    items = []
+    for row in rows:
+        pairs = _pairs(row, names)
+        items.append(
             AnalysisListItem(
                 id=row.id,
                 status=row.status,  # type: ignore[arg-type]
                 created_at=row.created_at,
                 finished_at=row.finished_at,
                 input_kind=row.input_kind,  # type: ignore[arg-type]
-                matches=_labels(row, names),
+                matches=[f"{pair.player1.name} vs {pair.player2.name}" for pair in pairs],
+                pairs=pairs,
                 decision=row.decision,  # type: ignore[arg-type]
                 cost_usd=row.cost_usd,
             )
-            for row in rows
-        ],
+        )
+    return AnalysisListOut(
+        items=items,
         next_cursor=rows[-1].id if more and rows else None,
     )

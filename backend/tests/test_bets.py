@@ -110,6 +110,19 @@ async def test_bet_with_initial_bank_and_repeat(
     assert stored.decision == "bet"
     view = (await member.client.get(f"/api/analyses/{analysis['id']}")).json()
     assert view["bet_id"] == bet["id"] and view["decision"] == "bet"
+    # Экран анализа после перезагрузки показывает сохраненную ставку, а не рекомендацию
+    assert view["bet"] == {
+        "id": bet["id"],
+        "stake": "250.00",
+        "currency": "RUB",
+        "total_odds": bet["total_odds"],
+        "bookmaker": "Fonbet",
+        "legs": [
+            {"prediction_id": leg["prediction_id"], "odds_taken": leg["odds_taken"]}
+            for leg in bet["legs"]
+        ],
+    }
+    assert view["bet"]["legs"][0]["odds_taken"] == "1.28"
     # Повтор с тем же client_ref — та же ставка, журнал не растет
     again = await member.client.post("/api/bets", json=body)
     assert again.status_code == 201 and again.json()["id"] == bet["id"]

@@ -2338,7 +2338,7 @@
           "analyses"
         ],
         "summary": "List Analyses",
-        "description": "Свои анализы, новые сверху. Следующая страница — before=next_cursor.",
+        "description": "Свои анализы, новые сверху. Следующая страница — before=next_cursor; launched=true —\nбез черновиков (только запущенные).",
         "operationId": "list_analyses_api_analyses_get",
         "parameters": [
           {
@@ -2369,6 +2369,16 @@
               "minimum": 1,
               "default": 20,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "launched",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Launched"
             }
           }
         ],
@@ -3758,6 +3768,13 @@
             "type": "array",
             "title": "Matches"
           },
+          "pairs": {
+            "items": {
+              "$ref": "#/components/schemas/MatchPairOut"
+            },
+            "type": "array",
+            "title": "Pairs"
+          },
           "decision": {
             "anyOf": [
               {
@@ -3786,6 +3803,7 @@
           "finished_at",
           "input_kind",
           "matches",
+          "pairs",
           "decision",
           "cost_usd"
         ],
@@ -3898,6 +3916,13 @@
               }
             ]
           },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedEventOut"
+            },
+            "type": "array",
+            "title": "Events"
+          },
           "steps": {
             "items": {
               "$ref": "#/components/schemas/StepOut"
@@ -3953,6 +3978,16 @@
               }
             ],
             "title": "Bet Id"
+          },
+          "bet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BetBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "key_source": {
             "anyOf": [
@@ -4029,12 +4064,14 @@
           "input_text",
           "attempt",
           "draft",
+          "events",
           "steps",
           "totals",
           "error",
           "result",
           "decision",
           "bet_id",
+          "bet",
           "key_source",
           "estimate_usd",
           "cost_usd",
@@ -4259,6 +4296,48 @@
         "title": "BankOut",
         "description": "Банк по учету: баланс, в игре, капитал, пик и просадка (0..1), стартовый банк\n(пополнения минус выводы), рост к нему, итог 7 дней, винрейт и адаптации."
       },
+      "BetBrief": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "stake": {
+            "type": "string",
+            "title": "Stake"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "total_odds": {
+            "type": "string",
+            "title": "Total Odds"
+          },
+          "bookmaker": {
+            "type": "string",
+            "title": "Bookmaker"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/BetLegBrief"
+            },
+            "type": "array",
+            "title": "Legs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "stake",
+          "currency",
+          "total_odds",
+          "bookmaker",
+          "legs"
+        ],
+        "title": "BetBrief",
+        "description": "Сохраненная ставка по анализу: после перезагрузки экран показывает ее сумму и кэфы,\nа не рекомендацию анализа."
+      },
       "BetIn": {
         "properties": {
           "analysis_id": {
@@ -4310,6 +4389,31 @@
           "client_ref"
         ],
         "title": "BetIn"
+      },
+      "BetLegBrief": {
+        "properties": {
+          "prediction_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Id"
+          },
+          "odds_taken": {
+            "type": "string",
+            "title": "Odds Taken"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prediction_id",
+          "odds_taken"
+        ],
+        "title": "BetLegBrief"
       },
       "BetLegIn": {
         "properties": {
@@ -4665,6 +4769,137 @@
         "type": "object",
         "title": "ConfirmIn",
         "description": "Подтвержденный ввод для «Перед запуском» и запуска. events null — взять уже\nподтвержденные (повторный запуск после сбоя или отмены)."
+      },
+      "ConfirmedEventOut": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "match_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Id"
+          },
+          "player1": {
+            "$ref": "#/components/schemas/ConfirmedPlayer"
+          },
+          "player2": {
+            "$ref": "#/components/schemas/ConfirmedPlayer"
+          },
+          "tournament_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament Id"
+          },
+          "tournament_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament Name"
+          },
+          "surface": {
+            "type": "string",
+            "title": "Surface"
+          },
+          "best_of": {
+            "type": "integer",
+            "title": "Best Of"
+          },
+          "round": {
+            "type": "string",
+            "title": "Round"
+          },
+          "odds": {
+            "$ref": "#/components/schemas/OddsPairsOut"
+          },
+          "bookmaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bookmaker"
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "match_id",
+          "player1",
+          "player2",
+          "tournament_id",
+          "tournament_name",
+          "surface",
+          "best_of",
+          "round",
+          "odds",
+          "bookmaker"
+        ],
+        "title": "ConfirmedEventOut",
+        "description": "Событие, подтвержденное при запуске (analyses.confirmed): по нему экран называет\nматчи в шагах хода (match_id) и возвращает события в «Новый анализ» для правки."
+      },
+      "ConfirmedPlayer": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "name_ru": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Ru"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "name_ru",
+          "country"
+        ],
+        "title": "ConfirmedPlayer"
       },
       "CorridorOut": {
         "properties": {
@@ -6269,6 +6504,23 @@
         "title": "MarketRow",
         "description": "Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф\nучастника, валуй p_final·кэф − 1 и уровень, попал ли в экспресс, почему нет\n(note_key — ключ analysis.leg.*)."
       },
+      "MatchPairOut": {
+        "properties": {
+          "player1": {
+            "$ref": "#/components/schemas/PairName"
+          },
+          "player2": {
+            "$ref": "#/components/schemas/PairName"
+          }
+        },
+        "type": "object",
+        "required": [
+          "player1",
+          "player2"
+        ],
+        "title": "MatchPairOut",
+        "description": "Игроки матча для списка: экран пишет их так же, как на остальных карточках."
+      },
       "MatchResult": {
         "properties": {
           "match_id": {
@@ -7019,6 +7271,31 @@
         ],
         "title": "OwnKeyOut",
         "description": "Свой ключ участника и его режим. check — итог проверки в этом запросе (пусто,\nесли ключ не проверяли), models — доступность моделей по этой проверке.\nlast_error — код последней ошибки ключа (например rejected:401, ai.billing)."
+      },
+      "PairName": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "name_ru": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Ru"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "name_ru"
+        ],
+        "title": "PairName"
       },
       "PasswordChangeIn": {
         "properties": {

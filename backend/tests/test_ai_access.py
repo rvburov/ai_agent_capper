@@ -8,7 +8,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.agent.config import AgentConfig
@@ -24,6 +24,7 @@ from app.services.ai_access import (
     access_for,
     after_run_notifications,
     budget_overview,
+    call_need_usd,
     check_before_call,
     estimate_cost,
     release_reservation,
@@ -522,6 +523,54 @@ async def test_check_before_call(db: AsyncSession, make_user: UserFactory) -> No
     await check_before_call(db, analysis, D("0.10"))
 
 
+async def test_launch_needs_room_for_one_call(db: AsyncSession, make_user: UserFactory) -> None:
+    """До запуска — та же мера, что перед вызовом (check_before_call): свободным должен быть
+    худший случай одного вызова оценки матча, а не только оценка анализа. Иначе при остатке
+    $0,33 анализ по оценке $0,12 запускался и останавливался на первом вызове Opus, а
+    перезапуск упирался в то же (тупик)."""
+    member = await make_user()
+    admin = await make_user(role="admin")
+    await seed_prices(db)
+    await _set_admin_key(db)
+    limit = await _limit(db, member.id, monthly="1.00", daily=30)
+    await _spend(db, member.id, "0.67")
+    need = await call_need_usd(db, AgentConfig(), utcnow())
+    # 7 тыс. входа по цене записи кэша $5 и 16 тыс. выхода по $20 за 1 млн токенов
+    assert need == D("0.355")
+    for estimate in (None, D("0.115")):
+        access = await access_for(db, member.user, estimate_usd=estimate)
+        assert (access.reason, access.left_month_usd) == ("ai.monthly_limit", D("0.33"))
+    # Все оценки матчей уже есть (перезапуск после шага оценки): вызовов Claude не будет
+    assert (await access_for(db, member.user, estimate_usd=D("0"))).allowed
+
+    # Остатка хватает на худший случай вызова: запуск можно, и вызов пройдет проверку
+    limit.monthly_usd = D("1.03")
+    await db.commit()
+    assert (await access_for(db, member.user, estimate_usd=None)).allowed
+    analysis = await _analysis(db, member.id)
+    await reserve_for_run(db, member.user, analysis, estimate_usd=D("0.115"))
+    analysis.status = "llm_review"
+    await db.commit()
+    await check_before_call(db, analysis, need)
+
+    # Общий бюджет — так же (администратор без личного лимита)
+    settings = await _settings(db)
+    budget_spent = await _sum_spent(db)
+    settings.monthly_budget_usd = budget_spent + D("0.12") + D("0.33")
+    await db.commit()
+    assert (await access_for(db, admin.user, estimate_usd=D("0.115"))).reason == (
+        "ai.budget_exhausted"
+    )
+    settings.monthly_budget_usd = budget_spent + D("0.12") + need
+    await db.commit()
+    assert (await access_for(db, admin.user, estimate_usd=D("0.115"))).allowed
+
+
+async def _sum_spent(db: AsyncSession) -> Decimal:
+    total = await db.scalar(select(func.sum(AgentRun.cost_usd)))
+    return Decimal(total or 0)
+
+
 async def test_release_and_finished_analyses_hold_nothing(
     db: AsyncSession, make_user: UserFactory
 ) -> None:
@@ -529,17 +578,17 @@ async def test_release_and_finished_analyses_hold_nothing(
     await seed_prices(db)
     await _set_admin_key(db)
     await _limit(db, member.id, monthly="1.00")
-    active = await _analysis(db, member.id, status="composing", key_source="admin", reserved="0.70")
+    active = await _analysis(db, member.id, status="composing", key_source="admin", reserved="0.60")
     # Анализ упал, а резерв не сняли: он не в работе и ничего не держит
     await _analysis(db, member.id, status="failed", key_source="admin", reserved="0.90")
     access = await access_for(db, member.user, estimate_usd=D("0.20"))
-    assert access.reserved_usd == D("0.70") and access.allowed
-    assert (await access_for(db, member.user, estimate_usd=D("0.40"))).reason == (
+    assert access.reserved_usd == D("0.60") and access.allowed
+    assert (await access_for(db, member.user, estimate_usd=D("0.45"))).reason == (
         "ai.monthly_limit"
     )
     await release_reservation(db, active)
     await db.commit()
-    assert (await access_for(db, member.user, estimate_usd=D("0.40"))).allowed
+    assert (await access_for(db, member.user, estimate_usd=D("0.45"))).allowed
 
 
 async def _notes(db: AsyncSession, user_id: int) -> list[Notification]:
@@ -577,13 +626,14 @@ async def test_spending_alerts_once_per_month(db: AsyncSession, make_user: UserF
     [for_admin] = await _notes(db, admin.id)
     assert for_admin.title == "Ольга: израсходовано 80% лимита на ИИ"
     assert for_admin.params["variant"] == "admin"
-    assert (mine.link, for_admin.link) == ("/costs", "/admin/usage")
+    assert (mine.link, for_admin.link) == ("/profile/key", "/admin/key#adm-limits")
     assert await after_run_notifications(db, member.id) == []
 
     await _spend(db, member.id, "1.50")
     second = await after_run_notifications(db, member.id)
     await db.commit()
     assert sorted(n.kind for n in second) == ["budget_80", "limit_100", "limit_100"]
+    assert {n.link for n in second if n.kind == "budget_80"} == {"/admin/key"}
     assert await after_run_notifications(db, member.id) == []
 
     await _spend(db, None, "2.00")

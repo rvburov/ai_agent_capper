@@ -361,12 +361,26 @@ class _Runner:
         return {**self.checkpoint, "steps": [step.model_dump(mode="json") for step in self.steps]}
 
     async def _save(
-        self, *, status: str | None = None, event: str = "step", step: StepOut | None = None
+        self,
+        *,
+        status: str | None = None,
+        event: str = "step",
+        step: StepOut | None = None,
+        finishing: bool = False,
     ) -> None:
-        """Чекпойнт и статус (только если анализ еще в работе) и событие прогресса."""
+        """Чекпойнт и статус (только если анализ еще в работе) и событие прогресса.
+
+        finishing — итог уже идущего шага (расход вызова, done/failed): после отмены он
+        тоже пишется в чекпойнт отмененного анализа того же запуска. Вызов, начатый до
+        отмены, доработал и оплачен, и «Продолжить» не должен покупать его снова. Событие
+        не шлем (поток закрыт отменой), новых шагов после отмены нет: начало шага и смена
+        статуса по-прежнему останавливают задачу."""
         values: dict[str, Any] = {"checkpoint": self._checkpoint_json()}
         if status is not None:
             values["status"] = status
+        allowed = [*ANALYSIS_ACTIVE_STATUSES]
+        if finishing and status is None:
+            allowed.append("cancelled")
         async with self.maker() as db:
             row = (
                 await db.execute(
@@ -374,15 +388,17 @@ class _Runner:
                     .where(
                         Analysis.id == self.analysis_id,
                         Analysis.attempt == self.attempt,
-                        Analysis.status.in_(ANALYSIS_ACTIVE_STATUSES),
+                        Analysis.status.in_(allowed),
                     )
                     .values(**values)
-                    .returning(Analysis.id)
+                    .returning(Analysis.status)
                 )
             ).first()
             await db.commit()
         if row is None:
             raise Stopped
+        if row[0] == "cancelled":
+            return
         if status is not None:
             self.status = status
         await self._publish(event, step=step)
@@ -418,7 +434,7 @@ class _Runner:
                 fields["detail_key"] = detail_key
                 fields["detail_params"] = detail_params or {}
             self.steps[index] = self.steps[index].model_copy(update=fields)
-            await self._save(step=self.steps[index])
+            await self._save(step=self.steps[index], finishing=state != "running")
 
     async def add_usage(self, index: int, *, tokens: int, cost: Decimal, searches: int) -> None:
         async with self.lock:
@@ -430,7 +446,7 @@ class _Runner:
                     "web_searches": step.web_searches + searches,
                 }
             )
-            await self._save(step=self.steps[index])
+            await self._save(step=self.steps[index], finishing=True)
 
     async def set_status(self, status: str) -> None:
         async with self.lock:

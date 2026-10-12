@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Стек для сквозных тестов в браузере (Playwright, frontend/e2e): временная база PostgreSQL
 # с миграциями, свой префикс ключей Redis, поддельный Claude API (backend/tests/fake_claude.py,
-# ключ Claude не нужен), API (uvicorn), воркер arq (выполняет анализы) и собранный фронтенд
-# (vite preview, /api проксируется на API). При остановке база и ключи Redis удаляются.
+# ключ Claude не нужен), API (uvicorn), воркер arq (выполняет анализы, без расписания) и
+# собранный фронтенд (vite preview, /api проксируется на API). В базе — 6 игроков с матчами
+# (tests/analysis_helpers.py: Синнер, Алькарас, Джокович, Медведев, Рублев, Руне). При
+# остановке база и ключи Redis удаляются.
 #
 #   bash scripts/e2e-stack.sh [up]           поднять и держать до Ctrl+C или SIGTERM
 #   bash scripts/e2e-stack.sh cli КОМАНДА ...  команда терминала backend (python -m app.admin.cli)
@@ -70,6 +72,8 @@ backend_env() {
   export CAPPER_SECRET_KEY="" CAPPER_MASTER_KEYS=""
   # Claude API — поддельный сервер этого стека (http разрешен везде, кроме prod)
   export CAPPER_ANTHROPIC_BASE_URL="http://127.0.0.1:$FAKE_PORT"
+  # Воркер без расписания: ночная загрузка архивов и уборщик не начнутся посреди прогона
+  export CAPPER_WORKER_CRON=false
 }
 
 # Создать (drop=0) или удалить (drop=1) временную базу через служебную
@@ -155,6 +159,32 @@ cmd_up() {
   (cd "$BACKEND" && "$PY" -m alembic upgrade head) >"$STATE_DIR/migrate.log" 2>&1 \
     || { cat "$STATE_DIR/migrate.log" >&2; die "миграции не применились"; }
 
+  # Маленький теннисный мир для сценариев анализа (те же игроки и матчи, что в тестах backend:
+  # tests/analysis_helpers.py) и повтор оценки Claude выключен: каждый прогон вызывает
+  # поддельный Claude, и сбой шага, включенный тестом, действительно случается
+  say "игроки и матчи для сценариев анализа (лог: $STATE_DIR/seed.log)"
+  (cd "$BACKEND" && "$PY" - <<'PY'
+import asyncio
+
+from app.db.session import create_engine, create_sessionmaker
+from tests.analysis_helpers import seed_world
+
+
+async def main() -> None:
+    engine = create_engine()
+    try:
+        async with create_sessionmaker(engine)() as db:
+            await seed_world(db, engine)
+    finally:
+        await engine.dispose()
+
+
+asyncio.run(main())
+PY
+  ) >"$STATE_DIR/seed.log" 2>&1 || { cat "$STATE_DIR/seed.log" >&2; die "игроки для сценариев анализа не загружены"; }
+  (cd "$BACKEND" && "$PY" -m app.admin.cli agent-config --set assessment_reuse_hours=0) \
+    >>"$STATE_DIR/seed.log" 2>&1 || { cat "$STATE_DIR/seed.log" >&2; die "настройки агента не сохранены"; }
+
   say "поддельный Claude API на http://127.0.0.1:$FAKE_PORT (лог: $STATE_DIR/fake_claude.log)"
   (cd "$BACKEND" && exec "$PY" -m uvicorn tests.fake_claude:app --host 127.0.0.1 \
     --port "$FAKE_PORT" --no-access-log) >"$STATE_DIR/fake_claude.log" 2>&1 &
@@ -210,6 +240,6 @@ cmd_cli() {
 case "${1:-up}" in
   up) cmd_up ;;
   cli) shift; cmd_cli "$@" ;;
-  -h|--help|help) sed -n '2,28p' "${BASH_SOURCE[0]}" ;;
+  -h|--help|help) sed -n '2,30p' "${BASH_SOURCE[0]}" ;;
   *) die "неизвестная команда: $1 (up, cli)" ;;
 esac
