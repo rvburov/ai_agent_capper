@@ -5,10 +5,21 @@ Playwright волны 3.
 - разбор (схема с unknown_lines) — свой разбор текста формата бота регулярными
   выражениями: банк, букмекер, «A vs B, турнир, покрытие, раунд», кэфы П1/П2 и форы;
 - новости (инструмент record_news) — блок поиска web_search_tool_result с двумя
-  адресами и вызов record_news с фактами по этим адресам;
+  адресами и вызов record_news с фактами по этим адресам; у web_search без
+  allowed_callers (фильтрация поиска кодом) — в форме такого ответа: блок выполнения
+  кода, пара server_tool_use и web_search_tool_result с полем caller и контейнер;
+  запись кэша после результата поиска — только если в запросе есть точка cache_control;
 - анализ (схема с p1_win) — потоком SSE: p_base досье со сдвигом +0,02 к игроку 1,
-  факторы со ссылками elo и form; первый вызов с этим system пишет кэш, следующие читают;
-- GET /v1/models и /v1/models/{id} — для проверки ключа.
+  факторы со ссылками elo и form; первый вызов с этими инструментами и system пишет
+  кэш, следующие читают;
+- GET /v1/models и /v1/models/{id} — для проверки ключа; у модели есть capabilities
+  (веб-поиск у всех, programmatic tool calling — у всех, кроме claude-haiku-4-5);
+- Message Batches (smoke-eval): POST /v1/messages/batches, GET …/batches/{id} (пакет
+  в работе первые batch_polls опросов, потом ended и results_url), GET …/{id}/results —
+  JSONL: каждый запрос пакета отвечается как обычный (без потока, service_tier batch);
+  ответ с ошибкой HTTP — результат errored с тем же типом ошибки. Неизвестный пакет —
+  404 not_found_error; batches[id]["expired"] = True — прошло 29 дней (пакет виден,
+  results_url нет, результаты — 404).
 
 Сбои включаются переключателем: FakeClaude.fail(step, error, times) в тестах,
 POST /_fake/fail {"step": "analysis", "error": "overloaded", "times": 1} у сервера или
@@ -16,7 +27,8 @@ POST /_fake/fail {"step": "analysis", "error": "overloaded", "times": 1} у се
 parse, news, analysis или any; error — overloaded (529), rate_limited (429),
 key_rejected (401), server (500), refusal, max_tokens, bad_json, bad_checks (ответ не
 проходит проверку кода), search_error (ошибка поиска unavailable), no_record
-(новости без record_news).
+(новости без record_news). Пакеты: step batch — error expired или canceled (результат
+запроса пакета такого вида), step batch_create — ошибка из списка выше при отправке.
 
 Запуск сервера:
     cd backend && .venv/bin/uvicorn tests.fake_claude:app --port 8099
@@ -30,6 +42,7 @@ import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx2
@@ -48,6 +61,11 @@ ERRORS = {
     "bad_request": (400, "invalid_request_error"),
 }
 SHIFT = 0.02
+# Фильтрация поиска кодом: кто вызвал поиск и контейнер выполнения кода в ответе
+CODE_CALLER = "code_execution_20260120"
+FAKE_CONTAINER = {"id": "container_fake", "expires_at": "2026-12-31T00:00:00Z"}
+# Модели без programmatic tool calling: фильтрация поиска кодом им недоступна
+NO_CODE_CALLERS = frozenset({"claude-haiku-4-5"})
 
 _SURFACES = {
     "хард": "hard",
@@ -264,6 +282,42 @@ def step_of(body: dict[str, Any]) -> str:
     return "parse"
 
 
+def _dynamic_search(body: dict[str, Any]) -> bool:
+    """У web_search_20260209 без allowed_callers поиск вызывает код (фильтрация)."""
+    tools = body.get("tools") or []
+    search = next((tool for tool in tools if tool.get("name") == "web_search"), None)
+    return search is not None and "allowed_callers" not in search
+
+
+def _has_cache_control(body: dict[str, Any]) -> bool:
+    """Есть ли в запросе хоть одна точка cache_control (system, инструменты, сообщения)."""
+    return '"cache_control"' in json.dumps(
+        [body.get("system"), body.get("tools"), body.get("messages")]
+    )
+
+
+def _news_iterations(cache: dict[str, Any]) -> list[dict[str, Any]]:
+    """usage.iterations ответа новостей: первая итерация (system и запрос, вызов поиска)
+    пишет или читает кэш, вторая (после результата поиска) — вход без кэша. Сумма
+    итераций равна usage ответа (вход 8000, выход 500)."""
+    return [
+        {
+            "type": "message",
+            "input_tokens": 300,
+            "output_tokens": 150,
+            "cache_creation_input_tokens": cache.get("cache_creation_input_tokens", 0),
+            "cache_read_input_tokens": cache.get("cache_read_input_tokens", 0),
+        },
+        {
+            "type": "message",
+            "input_tokens": 7700,
+            "output_tokens": 350,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+        },
+    ]
+
+
 def _user_text(body: dict[str, Any]) -> str:
     content = body["messages"][0]["content"]
     if isinstance(content, str):
@@ -298,6 +352,9 @@ class FakeClaude:
     cached: set[str] = field(default_factory=set)
     lock: threading.Lock = field(default_factory=threading.Lock)
     shift: float = SHIFT
+    # Пакеты Message Batches: id → запросы, сколько опросов еще «в работе», результаты
+    batches: dict[str, dict[str, Any]] = field(default_factory=dict)
+    batch_polls: int = 0
 
     def fail(self, step: str, error: str, times: int = 1) -> "FakeClaude":
         with self.lock:
@@ -315,9 +372,21 @@ class FakeClaude:
                     return switch.error
         return None
 
+    def _take_exact(self, step: str) -> str | None:
+        """Сбой только этого шага (без any): пакет — не шаг анализа."""
+        with self.lock:
+            for switch in self.switches:
+                if switch.times > 0 and switch.step == step:
+                    switch.times -= 1
+                    return switch.error
+        return None
+
     def _cache(self, body: dict[str, Any]) -> dict[str, Any]:
         system = json.dumps(body.get("system"), sort_keys=True, ensure_ascii=False)
-        key = hashlib.sha256((body.get("model", "") + system).encode()).hexdigest()
+        # Префикс кэша — инструменты, потом system: другие инструменты (например, поиск
+        # без allowed_callers) кэш того же system не читают, как у настоящего API
+        tools = json.dumps(body.get("tools"), sort_keys=True, ensure_ascii=False)
+        key = hashlib.sha256((body.get("model", "") + tools + system).encode()).hexdigest()
         with self.lock:
             seen = key in self.cached
             self.cached.add(key)
@@ -377,15 +446,28 @@ class FakeClaude:
         today = re.search(r"(\d{4}-\d{2}-\d{2})", text)
         day = today.group(1) if today else "2026-10-01"
         players = re.findall(r"^(\d)\. (.+)$", text, re.MULTILINE)
-        content: list[dict[str, Any]] = [
-            _thinking(),
+        dynamic = _dynamic_search(body)
+        # Фильтрация поиска кодом: поиск вызывает код, у пары блоков поиска есть caller
+        caller = {"caller": {"type": CODE_CALLER, "tool_id": "srvtoolu_code"}} if dynamic else {}
+        content: list[dict[str, Any]] = [_thinking()]
+        if dynamic:
+            content.append(
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtoolu_code",
+                    "name": "code_execution",
+                    "input": {"code": "results = await web_search({'query': 'tennis news'})"},
+                }
+            )
+        content.append(
             {
                 "type": "server_tool_use",
                 "id": "srvtoolu_fake",
                 "name": "web_search",
                 "input": {"query": "tennis news"},
-            },
-        ]
+                **caller,
+            }
+        )
         urls: list[str] = []
         if error == "search_error":
             content.append(
@@ -396,6 +478,7 @@ class FakeClaude:
                         "type": "web_search_tool_result_error",
                         "error_code": "unavailable",
                     },
+                    **caller,
                 }
             )
         else:
@@ -416,18 +499,37 @@ class FakeClaude:
                         }
                         for url in urls
                     ],
+                    **caller,
                 }
             )
+        if dynamic:
+            content.append(
+                {
+                    "type": "code_execution_tool_result",
+                    "tool_use_id": "srvtoolu_code",
+                    "content": {
+                        "type": "encrypted_code_execution_result",
+                        "content": [],
+                        "encrypted_stdout": "enc",
+                        "return_code": 0,
+                        "stderr": "",
+                    },
+                }
+            )
+        extra: dict[str, Any] = {"container": FAKE_CONTAINER} if dynamic else {}
         if error == "no_record":
             content.append({"type": "text", "text": "Ничего важного не нашел."})
-            return message(
-                content,
-                model=model,
-                stop_reason="end_turn",
-                server_tool_use={"web_search_requests": 1, "web_fetch_requests": 0},
-                input_tokens=8000,
-                output_tokens=500,
-            )
+            return {
+                **message(
+                    content,
+                    model=model,
+                    stop_reason="end_turn",
+                    server_tool_use={"web_search_requests": 1, "web_fetch_requests": 0},
+                    input_tokens=8000,
+                    output_tokens=500,
+                ),
+                **extra,
+            }
         items = []
         for (number, name), url in zip(players, urls, strict=False):
             items.append(
@@ -455,15 +557,21 @@ class FakeClaude:
                 "input": {"players": items},
             }
         )
-        return message(
-            content,
-            model=model,
-            stop_reason="tool_use",
-            server_tool_use={"web_search_requests": 1, "web_fetch_requests": 0},
-            input_tokens=8000,
-            output_tokens=500,
-            **self._cache(body),
-        )
+        # Без точки cache_control сервер не пишет в кэш и результаты поиска
+        cache = self._cache(body) if _has_cache_control(body) else {}
+        return {
+            **message(
+                content,
+                model=model,
+                stop_reason="tool_use",
+                server_tool_use={"web_search_requests": 1, "web_fetch_requests": 0},
+                input_tokens=8000,
+                output_tokens=500,
+                iterations=_news_iterations(cache),
+                **cache,
+            ),
+            **extra,
+        }
 
     def _analysis(self, body: dict[str, Any], model: str, error: str | None) -> dict[str, Any]:
         dossier = _dossier(body)
@@ -512,16 +620,115 @@ class FakeClaude:
             **self._cache(body),
         )
 
+    # --- Message Batches ---
+
+    def _batch_create(self, raw: bytes) -> tuple[int, Any, str]:
+        error = self._take_exact("batch_create")
+        if error in ERRORS:
+            status, kind = ERRORS[error]
+            return status, {"type": "error", "error": {"type": kind, "message": "fake"}}, "json"
+        requests = list(json.loads(raw or b"{}").get("requests") or [])
+        now = datetime.now(UTC)
+        with self.lock:
+            batch_id = f"msgbatch_fake{len(self.batches) + 1}"
+            self.batches[batch_id] = {
+                "requests": requests,
+                "polls_left": self.batch_polls,
+                "created_at": now,
+                "results": None,
+            }
+        return 200, self._batch_view(batch_id, ""), "json"
+
+    def _batch_view(self, batch_id: str, origin: str) -> dict[str, Any]:
+        batch = self.batches[batch_id]
+        created: datetime = batch["created_at"]
+        results: list[dict[str, Any]] | None = batch["results"]
+        counts = {"processing": 0, "succeeded": 0, "errored": 0, "canceled": 0, "expired": 0}
+        if results is None:
+            counts["processing"] = len(batch["requests"])
+        else:
+            for item in results:
+                counts[item["result"]["type"]] += 1
+        return {
+            "id": batch_id,
+            "type": "message_batch",
+            "processing_status": "in_progress" if results is None else "ended",
+            "request_counts": counts,
+            "created_at": created.isoformat(),
+            "expires_at": (created + timedelta(hours=24)).isoformat(),
+            "ended_at": None if results is None else datetime.now(UTC).isoformat(),
+            "archived_at": None,
+            "cancel_initiated_at": None,
+            # expired — прошло 29 дней: пакет виден, результатов нет
+            "results_url": None
+            if results is None or batch.get("expired")
+            else f"{origin}/v1/messages/batches/{batch_id}/results",
+        }
+
+    def _batch_result(self, request: dict[str, Any], key: str) -> dict[str, Any]:
+        """Результат одного запроса пакета: тот же ответ, что на POST /v1/messages."""
+        custom = request.get("custom_id", "")
+        kind = self._take_exact("batch")
+        if kind in ("expired", "canceled"):
+            return {"custom_id": custom, "result": {"type": kind}}
+        params = {**(request.get("params") or {}), "stream": False}
+        status, payload, _ = self.reply(params, key)
+        if status != 200:
+            return {
+                "custom_id": custom,
+                "result": {
+                    "type": "errored",
+                    "error": {"type": "error", "error": payload["error"], "request_id": None},
+                },
+            }
+        payload["usage"]["service_tier"] = "batch"
+        return {"custom_id": custom, "result": {"type": "succeeded", "message": payload}}
+
+    def _batch_get(self, batch_id: str, key: str, origin: str) -> tuple[int, Any, str]:
+        batch = self.batches.get(batch_id)
+        if batch is None:
+            return (
+                404,
+                {"type": "error", "error": {"type": "not_found_error", "message": "batch"}},
+                "json",
+            )
+        if batch["results"] is None:
+            if batch["polls_left"] > 0:
+                batch["polls_left"] -= 1
+            else:
+                batch["results"] = [self._batch_result(item, key) for item in batch["requests"]]
+        return 200, self._batch_view(batch_id, origin), "json"
+
+    def _batch_lines(self, batch_id: str) -> tuple[int, Any, str]:
+        batch = self.batches.get(batch_id)
+        if batch is None or batch["results"] is None or batch.get("expired"):
+            return (
+                404,
+                {"type": "error", "error": {"type": "not_found_error", "message": "batch"}},
+                "json",
+            )
+        lines = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in batch["results"])
+        return 200, lines, "jsonl"
+
     # --- транспорт ---
 
     def handler(self, request: httpx2.Request) -> httpx2.Response:
         """Обработчик для httpx2.MockTransport (тесты)."""
+        url = request.url
+        origin = f"{url.scheme}://{url.host}" + (f":{url.port}" if url.port else "")
         status, payload, kind = self._route(
-            request.method, request.url.path, request.content, request.headers.get("x-api-key", "")
+            request.method,
+            url.path,
+            request.content,
+            request.headers.get("x-api-key", ""),
+            origin=origin,
         )
         headers = {"request-id": "req_fake"}
         if kind == "sse":
             headers["content-type"] = "text/event-stream"
+            return httpx2.Response(status, text=payload, headers=headers)
+        if kind == "jsonl":
+            headers["content-type"] = "application/binary"
             return httpx2.Response(status, text=payload, headers=headers)
         return httpx2.Response(status, json=payload, headers=headers)
 
@@ -530,7 +737,17 @@ class FakeClaude:
 
         return anthropic.DefaultAsyncHttpxClient(transport=httpx2.MockTransport(self.handler))
 
-    def _route(self, method: str, path: str, raw: bytes, key: str) -> tuple[int, Any, str]:
+    def _route(
+        self, method: str, path: str, raw: bytes, key: str, *, origin: str = ""
+    ) -> tuple[int, Any, str]:
+        if path.startswith("/v1/messages/batches"):
+            parts = path.rstrip("/").split("/")[4:]
+            if method == "POST" and not parts:
+                return self._batch_create(raw)
+            if method == "GET" and len(parts) == 1:
+                return self._batch_get(parts[0], key, origin)
+            if method == "GET" and len(parts) == 2 and parts[1] == "results":
+                return self._batch_lines(parts[0])
         if method == "GET" and path.rstrip("/") == "/v1/models":
             return (
                 200,
@@ -557,7 +774,22 @@ class FakeClaude:
 
 
 def _model(name: str) -> dict[str, Any]:
-    return {"type": "model", "id": name, "display_name": name, "created_at": "2026-09-01T00:00:00Z"}
+    """Модель как в GET /v1/models/{id}; из capabilities — только то, что смотрит код:
+    веб-поиск и programmatic tool calling (фильтрация поиска кодом)."""
+    return {
+        "type": "model",
+        "id": name,
+        "display_name": name,
+        "created_at": "2026-09-01T00:00:00Z",
+        "capabilities": {
+            "server_tools": {
+                "supported": True,
+                "web_search": {"supported": True},
+                "code_execution": {"supported": True},
+            },
+            "code_execution": {"supported": name not in NO_CODE_CALLERS},
+        },
+    }
 
 
 def _from_env(fake: FakeClaude) -> FakeClaude:
@@ -574,12 +806,20 @@ STATE = _from_env(FakeClaude())
 def _endpoint(method: str) -> Callable[[Request], Any]:
     async def handle(request: Request) -> Response:
         status, payload, kind = STATE._route(
-            method, request.url.path, await request.body(), request.headers.get("x-api-key", "")
+            method,
+            request.url.path,
+            await request.body(),
+            request.headers.get("x-api-key", ""),
+            origin=str(request.base_url).rstrip("/"),
         )
         headers = {"request-id": "req_fake"}
         if kind == "sse":
             return Response(
                 payload, status_code=status, media_type="text/event-stream", headers=headers
+            )
+        if kind == "jsonl":
+            return Response(
+                payload, status_code=status, media_type="application/binary", headers=headers
             )
         return JSONResponse(payload, status_code=status, headers=headers)
 
@@ -598,6 +838,7 @@ async def _reset(request: Request) -> Response:
         STATE.requests.clear()
         STATE.keys.clear()
         STATE.cached.clear()
+        STATE.batches.clear()
     return JSONResponse({"ok": True})
 
 
@@ -610,6 +851,9 @@ app = Starlette(
         Route("/v1/messages", _endpoint("POST"), methods=["POST"]),
         Route("/v1/models", _endpoint("GET"), methods=["GET"]),
         Route("/v1/models/{model}", _endpoint("GET"), methods=["GET"]),
+        Route("/v1/messages/batches", _endpoint("POST"), methods=["POST"]),
+        Route("/v1/messages/batches/{batch}", _endpoint("GET"), methods=["GET"]),
+        Route("/v1/messages/batches/{batch}/results", _endpoint("GET"), methods=["GET"]),
         Route("/_fake/fail", _set_fail, methods=["POST"]),
         Route("/_fake/reset", _reset, methods=["POST"]),
         Route("/_fake/calls", _calls, methods=["GET"]),

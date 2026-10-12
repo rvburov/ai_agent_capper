@@ -10,10 +10,11 @@ const CONSOLE_URL = 'https://platform.claude.com/';
 const KEYS_URL = 'https://platform.claude.com/settings/keys';
 const COUNTRIES_URL = 'https://www.anthropic.com/supported-countries';
 // Ориентиры цены из docs/CLAUDE_API_KEY.md, пока своих анализов нет: анализ двух матчей,
-// расход в месяц при 1–2 анализах в день, новости одного матча
+// расход в месяц при 1–2 анализах в день, новости одного матча (живая проверка 12 октября
+// 2026: Sonnet 5.5, 2 поиска — $0,113)
 const GUIDE_ANALYSIS_USD = 0.3;
 const GUIDE_MONTH_USD = [10, 20] as const;
-const GUIDE_NEWS_USD = 0.05;
+const GUIDE_NEWS_USD = 0.11;
 
 const STEPS = ['step1', 'step2', 'step3', 'step4', 'step5', 'step6', 'step7'] as const;
 const HOW = [

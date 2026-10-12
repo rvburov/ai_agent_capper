@@ -29,6 +29,8 @@ export interface LaunchSummary {
   players: SidePlayer[];
   /** Игроки с устаревшими новостями: поищем перед анализом. */
   stale: SidePlayer[];
+  /** У скольких из них новости войдут в анализ и в цену: не больше лимита поисков анализа (null — расчета еще нет). */
+  newsPlayers: number | null;
   costUsd: number | null;
   seconds: number | null;
   reusedMatches: number;
@@ -150,6 +152,7 @@ export function summarize(
     retry: reason !== null && reason !== blockedText ? retry : null,
     players,
     stale,
+    newsPlayers: preview && valid ? preview.estimate.news_players : null,
     // Цена — только для событий, которые сервер принял (иначе он считает 0)
     costUsd: preview && valid ? preview.estimate.cost_usd : null,
     seconds: preview ? preview.estimate.seconds : null,

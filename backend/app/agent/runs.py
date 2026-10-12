@@ -10,6 +10,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_HALF_UP, ROUND_UP, Decimal
+from typing import Any
 
 from anthropic.types import Message
 from sqlalchemy import select, update
@@ -26,9 +27,28 @@ _REQUEST_ID_LENGTH = 128
 
 
 @dataclass(frozen=True)
+class Iteration:
+    """Одна итерация выборки внутри вызова (usage.iterations ответа): ход серверного цикла
+    инструментов, например поиска. По итерациям видно, шли поиски сразу или подряд, и
+    можно пересчитать цену того же разговора без кэша. В agent_runs не пишется."""
+
+    type: str
+    input_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
+    output_tokens: int = 0
+
+    @property
+    def prompt_tokens(self) -> int:
+        """Весь вход итерации: без кэша, запись и чтение кэша."""
+        return self.input_tokens + self.cache_write_tokens + self.cache_read_tokens
+
+
+@dataclass(frozen=True)
 class Usage:
     """Токены одного вызова (или сумма нескольких). input_tokens — вход без кэша,
-    cache_write_tokens — запись кэша всего (5 мин + 1 ч), output_tokens — с размышлениями."""
+    cache_write_tokens — запись кэша всего (5 мин + 1 ч), output_tokens — с размышлениями.
+    iterations — итерации вызовов по порядку (пусто, если API их не прислал)."""
 
     input_tokens: int = 0
     output_tokens: int = 0
@@ -39,6 +59,7 @@ class Usage:
     thinking_tokens: int | None = None
     web_searches: int = 0
     batch: bool = False
+    iterations: tuple[Iteration, ...] = ()
 
     @property
     def prompt_tokens(self) -> int:
@@ -66,7 +87,34 @@ class Usage:
             thinking_tokens=thinking,
             web_searches=self.web_searches + other.web_searches,
             batch=self.batch or other.batch,
+            iterations=self.iterations + other.iterations,
         )
+
+
+def _count(item: Any, name: str) -> int:
+    value = item.get(name) if isinstance(item, dict) else getattr(item, name, None)
+    return value if isinstance(value, int) else 0
+
+
+def _iterations(usage: Any) -> tuple[Iteration, ...]:
+    """usage.iterations: в SDK 1.12.1 обычный Usage этого поля не описывает, но хранит
+    его как есть (список словарей); у BetaUsage — объекты. Нет поля — пусто."""
+    raw = getattr(usage, "iterations", None)
+    if not isinstance(raw, list):
+        return ()
+    found: list[Iteration] = []
+    for item in raw:
+        kind = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+        found.append(
+            Iteration(
+                type=str(kind or "message"),
+                input_tokens=_count(item, "input_tokens"),
+                cache_write_tokens=_count(item, "cache_creation_input_tokens"),
+                cache_read_tokens=_count(item, "cache_read_input_tokens"),
+                output_tokens=_count(item, "output_tokens"),
+            )
+        )
+    return tuple(found)
 
 
 def usage_from(message: Message) -> Usage:
@@ -90,6 +138,7 @@ def usage_from(message: Message) -> Usage:
         thinking_tokens=details.thinking_tokens if details is not None else None,
         web_searches=u.server_tool_use.web_search_requests if u.server_tool_use else 0,
         batch=u.service_tier == "batch",
+        iterations=_iterations(u),
     )
 
 
@@ -114,6 +163,24 @@ def cost_usd(price: ModelPrice, usage: Usage) -> Decimal:
         tokens /= 2
     total = tokens + usage.web_searches * price.search_price
     return total.quantize(USD_STEP, rounding=ROUND_HALF_UP)
+
+
+def cost_without_cache(price: ModelPrice, usage: Usage) -> Decimal | None:
+    """Цена того же вызова без точек кэша: весь вход каждой итерации (без кэша, запись и
+    чтение) — по цене обычного входа, выход и поиски — как были. Без точки в запросе
+    сервер не пишет в кэш и результаты серверных инструментов (tool-use-with-prompt-caching,
+    «Server tool results are cached automatically»). Нужны итерации ответа: без них None.
+    Итерации compaction в сумму usage не входят и здесь не считаются."""
+    messages = [item for item in usage.iterations if item.type == "message"]
+    if not messages:
+        return None
+    flat = Usage(
+        input_tokens=sum(item.prompt_tokens for item in messages),
+        output_tokens=usage.output_tokens,
+        web_searches=usage.web_searches,
+        batch=usage.batch,
+    )
+    return cost_usd(price, flat)
 
 
 def worst_case_usd(

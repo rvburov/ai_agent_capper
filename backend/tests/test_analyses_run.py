@@ -201,7 +201,7 @@ async def test_requests_follow_the_rules_and_tool_whitelist(
     # Новости: только веб-поиск и свой strict-инструмент; дата — в сообщении, не в system
     assert [tool["name"] for tool in news["tools"]] == ["web_search", "record_news"]
     assert news["tools"][0]["type"] == "web_search_20260209"
-    assert news["tools"][0]["max_uses"] == 3
+    assert news["tools"][0]["max_uses"] == 2
     assert news["tools"][1]["strict"] is True
     assert news["model"] == "claude-sonnet-5-5" and news["output_config"] == {"effort": "low"}
     assert utcnow().date().isoformat() not in json.dumps(news["system"])

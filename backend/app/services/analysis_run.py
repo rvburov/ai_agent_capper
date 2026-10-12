@@ -42,7 +42,7 @@ from typing import Any, cast
 import anthropic
 import structlog
 from redis.asyncio import Redis
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -109,6 +109,14 @@ _FATAL_NEWS = frozenset({"ai.key_rejected", "ai.billing", "ai.no_key", "ai.no_pr
 # Шаг новостей закончен (в том числе неудачно): перезапуск его не повторяет — досье уже
 # собрано без этих новостей, а за поиск уже заплачено
 NEWS_KEEP = frozenset({"done", "cache", "off", "failed", "limit"})
+# Ключ чекпойнта прогона приемки (команда acceptance-runs, номер прогона): его прогнозы
+# пишутся с is_eval и в статистику участника не попадают. Его поиски не входят в дневной
+# лимит программы и не уменьшают его: серия из 20 прогонов делает до 100 поисков при
+# лимите 30 в день и оставила бы без новостей и себя, и анализы участников до полуночи
+# UTC. Поиски прогона ограничивает лимит на анализ, их число показывает оценка до запуска
+ACCEPTANCE_MARK = "acceptance"
+# Резерв поисков прогона приемки: без счетчика дня в Redis
+_ACCEPTANCE_SEARCHES = "acceptance"
 RULE_KEYS = (
     "legs_count",
     "same_match",
@@ -799,8 +807,14 @@ class _Runner:
                 stale.append(player)
         return stale
 
+    @property
+    def acceptance(self) -> bool:
+        """Прогон приемки (acceptance-runs): дневной лимит поисков к нему не применяется."""
+        return bool(self.checkpoint.get(ACCEPTANCE_MARK))
+
     async def _searches_used(self, db: AsyncSession) -> tuple[int, int]:
-        """Поиски, уже записанные в agent_runs: этого анализа и всей программы за день."""
+        """Поиски, уже записанные в agent_runs: этого анализа и всей программы за день
+        (без прогонов приемки)."""
         day_start = datetime.combine(utcnow().date(), time(0), UTC)
         used_here = await db.scalar(
             select(func.coalesce(func.sum(AgentRun.web_searches), 0)).where(
@@ -808,8 +822,13 @@ class _Runner:
             )
         )
         used_today = await db.scalar(
-            select(func.coalesce(func.sum(AgentRun.web_searches), 0)).where(
-                AgentRun.kind == "news", AgentRun.created_at >= day_start
+            select(func.coalesce(func.sum(AgentRun.web_searches), 0))
+            .select_from(AgentRun)
+            .outerjoin(Analysis, Analysis.id == AgentRun.analysis_id)
+            .where(
+                AgentRun.kind == "news",
+                AgentRun.created_at >= day_start,
+                or_(Analysis.id.is_(None), ~Analysis.checkpoint.has_key(ACCEPTANCE_MARK)),
             )
         )
         return int(used_here or 0), int(used_today or 0)
@@ -820,22 +839,30 @@ class _Runner:
     async def _searches_left(self) -> int:
         async with self.maker() as db:
             used_here, used_today = await self._searches_used(db)
-        in_flight_day = int(await self.redis.get(self._day_key()) or 0)
-        return min(
+        here = (
             self.config.news_max_searches_per_analysis
             - used_here
-            - sum(self.searches_in_flight.values()),
-            self.config.news_max_searches_per_day - used_today - in_flight_day,
+            - sum(self.searches_in_flight.values())
         )
+        if self.acceptance:
+            return here
+        in_flight_day = int(await self.redis.get(self._day_key()) or 0)
+        return min(here, self.config.news_max_searches_per_day - used_today - in_flight_day)
 
     async def reserve_searches(self, db: AsyncSession, count: int) -> str:
         """Резерв поисков одного запроса новостей (count = max_uses): лимит анализа и лимит
-        дня с поисками, которые идут сейчас. Не хватает — SearchLimitReached. Возвращает
-        ключ счетчика дня (снять резерв — release_searches)."""
+        дня с поисками, которые идут сейчас (у прогона приемки — только лимит анализа). Не
+        хватает — SearchLimitReached. Возвращает ключ счетчика дня (снять резерв —
+        release_searches)."""
         used_here, used_today = await self._searches_used(db)
         mine = sum(self.searches_in_flight.values())
         if used_here + mine + count > self.config.news_max_searches_per_analysis:
             raise SearchLimitReached
+        if self.acceptance:
+            self.searches_in_flight[_ACCEPTANCE_SEARCHES] = (
+                self.searches_in_flight.get(_ACCEPTANCE_SEARCHES, 0) + count
+            )
+            return _ACCEPTANCE_SEARCHES
         key = self._day_key()
         async with self.redis.pipeline(transaction=True) as pipe:
             pipe.incrby(key, count)
@@ -853,6 +880,8 @@ class _Runner:
             self.searches_in_flight[key] = left
         else:
             self.searches_in_flight.pop(key, None)
+        if key == _ACCEPTANCE_SEARCHES:
+            return
         try:
             await self.redis.decrby(key, count)
         except Exception:
@@ -1249,6 +1278,8 @@ class _Runner:
                         bank_input=self.confirmed.bank,
                         bookmaker=self.confirmed.bookmaker,
                         warnings=list(self.checkpoint.get("warnings") or []),
+                        # Прогон приемки (acceptance-runs): прогнозы не в статистику участника
+                        is_eval=bool(self.checkpoint.get(ACCEPTANCE_MARK)),
                     ),
                 )
                 self.checkpoint["predictions_written"] = True

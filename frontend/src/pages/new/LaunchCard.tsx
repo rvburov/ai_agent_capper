@@ -110,6 +110,16 @@ function LimitBlock({ access, summary }: { access: AiBudget | undefined; summary
   );
 }
 
+/** Строка новостей в цене: у скольких игроков поищем. Сверх лимита поисков анализа новости
+ * не ищутся — тогда «N из M» с причиной, чтобы цена и число игроков не расходились. */
+function newsValue(t: TFunction, summary: LaunchSummary): string {
+  const stale = summary.stale.length;
+  if (!stale) return t('new.costs.newsFresh');
+  const searched = summary.newsPlayers;
+  if (searched !== null && searched < stale) return t('new.costs.newsLimited', { news: searched, count: stale });
+  return t('new.costs.newsPlayers', { count: stale });
+}
+
 interface LaunchCardProps {
   summary: LaunchSummary;
   access: AiBudget | undefined;
@@ -189,13 +199,7 @@ export function LaunchCard({ summary, access, launching, onLaunch, onRetry, butt
         <KeyValue
           items={[
             { key: 'analysis', label: t('new.costs.analysis'), value: t('new.costs.events', { count: summary.n }) },
-            {
-              key: 'news',
-              label: t('new.costs.news'),
-              value: summary.stale.length
-                ? t('new.costs.newsPlayers', { count: summary.stale.length })
-                : t('new.costs.newsFresh'),
-            },
+            { key: 'news', label: t('new.costs.news'), value: newsValue(t, summary) },
             ...(summary.reusedMatches
               ? [{ key: 'reused', label: t('new.costs.reused'), value: t('new.costs.reusedValue', { count: summary.reusedMatches }) }]
               : []),

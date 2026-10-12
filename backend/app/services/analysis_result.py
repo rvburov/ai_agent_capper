@@ -78,7 +78,8 @@ RULE_KEYS = (
 @dataclass(frozen=True)
 class ComposeInput:
     """Что нужно итогу: анализ, события, чекпойнты матчей, параметры стратегии, банк и
-    букмекер из ввода, предупреждения шагов."""
+    букмекер из ввода, предупреждения шагов. is_eval — прогноз проверочного прогона
+    (команда acceptance-runs): predictions.is_eval, в статистику участника не попадает."""
 
     analysis: Analysis
     events: Sequence[ConfirmedEvent]
@@ -87,6 +88,7 @@ class ComposeInput:
     bank_input: Decimal | None
     bookmaker: str | None
     warnings: Sequence[dict[str, Any]]
+    is_eval: bool = False
 
 
 @dataclass
@@ -345,6 +347,7 @@ def _predictions(
                 value_at_pred=value(p_final, price) if price is not None else None,
                 rationale=item.out.explanation,
                 agent_run_id=assessment.agent_run_id,
+                is_eval=data.is_eval,
             )
     return rows
 

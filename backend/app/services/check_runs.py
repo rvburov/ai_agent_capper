@@ -1,0 +1,109 @@
+"""Общее для команд приемки этапа 3 (acceptance-runs, smoke-eval, parse-eval):
+администратор, на чьем ключе идут вызовы, и бюджет проверок.
+
+Бюджет проверок (Р22) — app_settings.eval_budget_usd на месяц по UTC. Проверки — вызовы
+Claude с kind из CHECK_RUN_KINDS (eval, shadow): smoke-eval через Batch и разбор
+эталонных сообщений parse-eval. В расход участника и общий бюджет ключа администратора
+они не входят. Anthropic списывает деньги за запросы пакета, когда они выполнены, а
+строки agent_runs с их ценой пишутся, когда результаты забирают. Поэтому худший случай
+пакета (eval_runs.metrics.worst_usd) держится в резерве, пока строк нет:
+
+- submitted (еще не забран) — пока результаты можно забрать: 29 дней после отправки, а в
+  месяце отправки — до конца месяца. Старше — в резерв не входит: результатов уже не
+  будет, а деньги списаны в прошлом месяце;
+- lost (пакета или результатов у Anthropic нет) и abandoned (закрыт владельцем,
+  smoke-eval --abandon) — до конца месяца отправки: деньги, скорее всего, списаны, а
+  сколько — неизвестно.
+"""
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import AgentRun, AppSettings, EvalRun, User
+from app.services.admin_users import CHECK_RUN_KINDS, find_user_by_email, month_start
+from app.services.app_settings import SETTINGS_ROW_ID
+from app.services.sessions import utcnow
+
+ZERO = Decimal(0)
+# Статусы пакета smoke-eval (eval_runs.metrics.status): отправлен и еще не забран;
+# потерян (у Anthropic его нет); закрыт владельцем без результатов
+SUBMITTED = "submitted"
+LOST = "lost"
+ABANDONED = "abandoned"
+# Результаты пакета хранятся 29 дней после создания
+RESULTS_DAYS = 29
+
+
+async def pick_admin(db: AsyncSession, email: str | None) -> User | None:
+    """Администратор для вызовов: по email или первый действующий. Не администратор,
+    заблокирован или не найден — None."""
+    if email:
+        user = await find_user_by_email(db, email)
+        if user is None or user.role != "admin" or user.status != "active":
+            return None
+        return user
+    found: User | None = await db.scalar(
+        select(User).where(User.role == "admin", User.status == "active").order_by(User.id).limit(1)
+    )
+    return found
+
+
+@dataclass(frozen=True)
+class EvalBudget:
+    """Бюджет проверок на месяц: всего, потрачено, в резерве за незабранными пакетами."""
+
+    budget_usd: Decimal
+    spent_usd: Decimal
+    reserved_usd: Decimal
+
+    @property
+    def left_usd(self) -> Decimal:
+        return max(ZERO, self.budget_usd - self.spent_usd - self.reserved_usd)
+
+
+async def eval_budget(db: AsyncSession, now: datetime | None = None) -> EvalBudget:
+    moment = now or utcnow()
+    budget = await db.scalar(
+        select(AppSettings.eval_budget_usd).where(AppSettings.id == SETTINGS_ROW_ID)
+    )
+    spent = await db.scalar(
+        select(func.sum(AgentRun.cost_usd)).where(
+            AgentRun.kind.in_(CHECK_RUN_KINDS), AgentRun.created_at >= month_start(moment)
+        )
+    )
+    month = month_start(moment)
+    # Пакет месяца отправки в резерве всегда, прошлого месяца — пока его можно забрать
+    collectable_since = min(month, moment - timedelta(days=RESULTS_DAYS))
+    reserved = ZERO
+    rows = await db.execute(
+        select(EvalRun.created_at, EvalRun.metrics).where(
+            EvalRun.metrics["status"].astext.in_((SUBMITTED, LOST, ABANDONED))
+        )
+    )
+    for created_at, metrics in rows:
+        sent = _submitted_at(metrics, created_at)
+        since = collectable_since if metrics.get("status") == SUBMITTED else month
+        if sent < since:
+            continue
+        try:
+            reserved += Decimal(str(metrics.get("worst_usd") or 0))
+        except ArithmeticError:
+            continue
+    return EvalBudget(
+        budget_usd=Decimal(budget or 0), spent_usd=Decimal(spent or 0), reserved_usd=reserved
+    )
+
+
+def _submitted_at(metrics: dict[str, object], created_at: datetime) -> datetime:
+    """Когда пакет отправлен (metrics.submitted_at), без этой метки — создание строки."""
+    raw = metrics.get("submitted_at")
+    if isinstance(raw, str):
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            pass
+    return created_at

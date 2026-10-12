@@ -192,9 +192,9 @@ async def test_search_limit_holds_with_ask_for_record(
         )
         assert await run(engine, redis, analysis_id) == "done"
     # Просьба вызвать record_news — новый запрос со своими max_uses: он допускается, только
-    # если весь его max_uses укладывается в лимит анализа (9)
-    assert await _searches(db, analysis_id) == 9
-    assert [body["tools"][0]["max_uses"] for body in fake.calls("news")] == [3, 3, 3]
+    # если весь его max_uses укладывается в лимит анализа (6)
+    assert await _searches(db, analysis_id) == 6
+    assert [body["tools"][0]["max_uses"] for body in fake.calls("news")] == [2, 2, 2]
     analysis = await _analysis(db, analysis_id)
     assert analysis.result is not None
     keys = [warning["key"] for warning in analysis.result["warnings"]]

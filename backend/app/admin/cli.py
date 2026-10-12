@@ -12,6 +12,16 @@ Claude (этап 3):
     python -m app.admin.cli agent-config [--set ИМЯ=ЗНАЧЕНИЕ ...] [--reset ИМЯ ...]
     python -m app.admin.cli prices
     python -m app.admin.cli agent-smoke [--match ID] [--yes]
+    python -m app.admin.cli agent-smoke --only news [--news-model M] [--news-dynamic] \\
+        [--news-max-uses N] [--news-no-cache] [--player ID] [--yes]
+
+Приемка этапа 3 (app/admin/acceptance.py; отчет — --report ПУТЬ.md):
+
+    python -m app.admin.cli acceptance-runs [--count 20] [--yes]
+    python -m app.admin.cli smoke-eval [--events 40] [--since 2026-08-01] [--yes] [--no-wait]
+    python -m app.admin.cli smoke-eval --resume ID
+    python -m app.admin.cli parse-eval --file ПАРЫ.json [--yes]
+    python -m app.admin.cli parse-eval --draft --from-telegram result.json --out ПАРЫ.json
 
 Игроки (этап 2, app/services/players.py):
 
@@ -49,6 +59,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.admin import acceptance
+from app.admin.terminal import EXIT_INTERRUPTED, CliError
+from app.admin.terminal import confirmed as _confirmed
+from app.admin.terminal import dash as _dash
+from app.admin.terminal import say as _say
+from app.admin.terminal import table as _table
 from app.agent import config as agent_config
 from app.agent.client import close_client
 from app.agent.errors import ClaudeStepError
@@ -65,18 +81,6 @@ from app.services.app_settings import get_app_settings
 
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _NAME_MAX_LENGTH = 100
-
-
-class CliError(Exception):
-    """Ошибка команды: текст из локали cli.*, код возврата 1."""
-
-    def __init__(self, key: str, **params: Any) -> None:
-        super().__init__(key)
-        self.message = t(f"cli.{key}", **params)
-
-
-def _say(text: str) -> None:
-    print(text, flush=True)
 
 
 def _normalize_email(raw: str) -> str:
@@ -299,26 +303,8 @@ def _usd(value: Decimal) -> str:
     return f"{value.quantize(Decimal('0.0001'))}"
 
 
-async def _agent_smoke(args: argparse.Namespace) -> None:
-    async with get_session() as db:
-        config = await agent_config.load_agent_config(db)
-        match = await agent_smoke.smoke_match(db, args.match)
-        estimate = await agent_smoke.estimate_smoke(db, config)
-        worst = await agent_smoke.max_smoke(db, config)
-        _say(t("cli.agent_smoke.estimate", usd=estimate, max=worst, match=match.id))
-        if not args.yes and not _confirmed("cli.agent_smoke.confirm"):
-            raise CliError("cancelled")
-        report = agent_smoke.SmokeReport()
-        failure: str | None = None
-        try:
-            await agent_smoke.run_smoke(
-                db,
-                match_id=match.id,
-                progress=lambda step: _say(t("cli.agent_smoke.step", step=step)),
-                report=report,
-            )
-        except ClaudeStepError as exc:
-            failure = agent_smoke.failure_text(exc)
+def _smoke_calls(calls: Sequence[agent_smoke.SmokeCall]) -> None:
+    """Таблица вызовов проверки и итог в долларах."""
     header = [
         t(f"cli.agent_smoke.columns.{name}")
         for name in (
@@ -345,11 +331,57 @@ async def _agent_smoke(args: argparse.Namespace) -> None:
             _usd(call.cost_usd),
             _dash(call.error),
         ]
-        for call in report.calls
+        for call in calls
     ]
     _say(t("cli.agent_smoke.title"))
     _say(_table(header, rows))
-    _say(t("cli.agent_smoke.total", usd=_usd(report.total_usd)))
+    _say(t("cli.agent_smoke.total", usd=_usd(sum((c.cost_usd for c in calls), Decimal(0)))))
+
+
+def _smoke_problems(problems: Sequence[tuple[str, dict[str, Any]]]) -> None:
+    """Что проверка не подтвердила — код 1 с перечнем."""
+    if problems:
+        raise CliError(
+            "agent_smoke.checks_failed",
+            problems="; ".join(
+                t(f"cli.agent_smoke.problems.{key}", **params) for key, params in problems
+            ),
+        )
+
+
+async def _agent_smoke(args: argparse.Namespace) -> None:
+    if args.only == "news":
+        await _agent_smoke_news(args)
+        return
+    news_flags = (
+        args.news_model,
+        args.news_dynamic or None,
+        args.news_max_uses,
+        args.news_no_cache or None,
+        args.player,
+    )
+    if any(flag is not None for flag in news_flags):
+        raise CliError("agent_smoke.news_flags")
+    async with get_session() as db:
+        config = await agent_config.load_agent_config(db)
+        match = await agent_smoke.smoke_match(db, args.match)
+        estimate = await agent_smoke.estimate_smoke(db, config)
+        worst = await agent_smoke.max_smoke(db, config)
+        _say(t("cli.agent_smoke.estimate", usd=estimate, max=worst, match=match.id))
+        if not args.yes and not _confirmed("cli.agent_smoke.confirm"):
+            raise CliError("cancelled")
+        report = agent_smoke.SmokeReport()
+        failure: str | None = None
+        try:
+            await agent_smoke.run_smoke(
+                db,
+                match_id=match.id,
+                progress=lambda step: _say(t("cli.agent_smoke.step", step=step)),
+                report=report,
+            )
+        except ClaudeStepError as exc:
+            failure = agent_smoke.failure_text(exc)
+    _smoke_calls(report.calls)
     if failure is not None:
         raise CliError("agent_smoke.failed", message=failure)
     _say(
@@ -369,36 +401,146 @@ async def _agent_smoke(args: argparse.Namespace) -> None:
         _say(t("cli.agent_smoke.no_cache"))
     # Команда — единственная живая проверка до запуска: то, что она должна подтвердить
     # (одно событие разбора, поиск перед record_news, чтение кэша), без этого — код 1
-    problems = report.problems()
-    if problems:
-        raise CliError(
-            "agent_smoke.checks_failed",
-            problems="; ".join(
-                t(f"cli.agent_smoke.problems.{key}", **params) for key, params in problems
-            ),
+    _smoke_problems(report.problems())
+
+
+def _yes_no(value: bool | None) -> str:
+    if value is None:
+        return t("cli.agent_smoke.news.unknown")
+    return t("cli.agent_smoke.news.yes" if value else "cli.agent_smoke.news.no")
+
+
+def _news_iterations(report: agent_smoke.NewsSmokeReport, *, prompt_cache: bool) -> None:
+    """Итерации серверного цикла каждого вызова (usage.iterations): шли поиски сразу или
+    подряд. С точкой кэша — и цена того же разговора без нее (весь вход каждой итерации
+    по цене обычного входа), чтобы не сравнивать два живых запуска с разными поисками."""
+    rows = [
+        [
+            str(number),
+            str(position),
+            item.type,
+            str(item.input_tokens),
+            str(item.cache_write_tokens),
+            str(item.cache_read_tokens),
+            str(item.output_tokens),
+        ]
+        for number, call in enumerate(report.calls, start=1)
+        for position, item in enumerate(call.iterations, start=1)
+    ]
+    if not rows:
+        _say(t("cli.agent_smoke.news.no_iterations"))
+        return
+    header = [
+        t(f"cli.agent_smoke.columns.{name}")
+        for name in (
+            "call",
+            "iteration",
+            "type",
+            "input",
+            "cache_write",
+            "cache_read",
+            "output",
         )
+    ]
+    _say(t("cli.agent_smoke.news.iterations_title"))
+    _say(_table(header, rows))
+    no_cache = report.no_cache_usd
+    if prompt_cache and no_cache is not None:
+        # Знак — по округленной разнице: иначе при разнице меньше $0,00005 вышло бы «−$0.0000»
+        diff = (no_cache - report.total_usd).quantize(Decimal("0.0001"))
+        _say(
+            t(
+                "cli.agent_smoke.news.no_cache_cost",
+                usd=_usd(no_cache),
+                actual=_usd(report.total_usd),
+                diff=f"{'+' if diff >= 0 else '−'}${_usd(abs(diff))}",
+            )
+        )
+
+
+async def _agent_smoke_news(args: argparse.Namespace) -> None:
+    """Только шаг новостей одного игрока: варианты модели, фильтрации поиска кодом, числа
+    поисков и точки кэша для сравнения на живом ключе."""
+    if args.match is not None:
+        # Новости ищутся по игроку, а не по матчу: молча взять другого игрока нельзя
+        raise CliError("agent_smoke.news_match")
+    options = agent_smoke.NewsOptions(
+        model=args.news_model,
+        dynamic_filtering=True if args.news_dynamic else None,
+        max_uses=args.news_max_uses,
+        prompt_cache=False if args.news_no_cache else None,
+    )
+    try:
+        async with get_session() as db:
+            config = agent_smoke.news_config(await agent_config.load_agent_config(db), options)
+            player = await agent_smoke.smoke_player(db, args.player)
+            estimate, worst = await agent_smoke.estimate_news_smoke(db, config)
+            support = await agent_smoke.check_news_model(db, config)
+            _say(
+                t(
+                    "cli.agent_smoke.news.model",
+                    model=config.news_model,
+                    web_search=_yes_no(support.web_search),
+                    code_execution=_yes_no(support.code_execution),
+                )
+            )
+            _say(
+                t(
+                    "cli.agent_smoke.news.estimate",
+                    player=player.name,
+                    id=player.id,
+                    model=config.news_model,
+                    max_uses=config.news_max_uses,
+                    dynamic=_yes_no(config.news_dynamic_filtering),
+                    cache=_yes_no(config.news_prompt_cache),
+                    usd=estimate,
+                    max=worst,
+                )
+            )
+            if not args.yes and not _confirmed("cli.agent_smoke.confirm"):
+                raise CliError("cancelled")
+            report = await agent_smoke.run_news_smoke(db, config=config, player=player)
+    except ClaudeStepError as exc:
+        # Нет цены модели, нет ключа или ключ отклонен: причина и код 1
+        raise CliError("agent_smoke.failed", message=agent_smoke.failure_text(exc)) from None
+    _smoke_calls(report.calls)
+    if report.failure is not None:
+        raise CliError("agent_smoke.failed", message=report.failure)
+    _news_iterations(report, prompt_cache=config.news_prompt_cache)
+    _say(
+        t(
+            "cli.agent_smoke.news.summary",
+            searches=report.searches,
+            errors=", ".join(report.search_errors) or "—",
+            limited=report.limited,
+            code_errors=", ".join(report.code_errors) or "—",
+            facts=len(report.facts),
+            dropped=report.dropped,
+        )
+    )
+    if report.facts:
+        _say(t("cli.agent_smoke.news.facts_title"))
+        for number, fact in enumerate(report.facts, start=1):
+            _say(
+                t(
+                    "cli.agent_smoke.news.fact",
+                    number=number,
+                    kind=fact.kind,
+                    date=fact.published_at.isoformat(),
+                    summary=fact.summary,
+                    url=fact.source_url,
+                    source=_dash(fact.source_name),
+                )
+            )
+    else:
+        _say(t("cli.agent_smoke.news.no_facts"))
+    _smoke_problems(report.problems())
 
 
 # --- игроки (этап 2) ---
 
 # Сколько примеров (слияний, несопоставленных строк) печатать после привязки
 _PLAYERS_SHOWN = 20
-_YES = frozenset({"y", "yes", "д", "да"})
-
-
-def _dash(value: object) -> str:
-    return "—" if value is None or value == "" else str(value)
-
-
-def _table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
-    """Таблица для терминала: ширина колонки — по самому длинному значению."""
-    widths = [max(len(row[i]) for row in (header, *rows)) for i in range(len(header))]
-    lines = [
-        "  ".join(cell.ljust(width) for cell, width in zip(row, widths, strict=True)).rstrip()
-        for row in (header, *rows)
-    ]
-    lines.insert(1, "  ".join("-" * width for width in widths))
-    return "\n".join(lines)
 
 
 def _items(values: dict[str, int]) -> str:
@@ -457,14 +599,6 @@ async def _players_find(args: argparse.Namespace) -> None:
         for hit in hits
     ]
     _say(_table(header, rows))
-
-
-def _confirmed(prompt_key: str = "cli.players_merge_confirm") -> bool:
-    try:
-        answer = input(t(prompt_key))
-    except (EOFError, KeyboardInterrupt):
-        return False
-    return answer.strip().casefold() in _YES
 
 
 async def _players_merge(args: argparse.Namespace) -> None:
@@ -778,8 +912,33 @@ def build_parser() -> argparse.ArgumentParser:
     smoke = command("agent-smoke", "agent_smoke")
     smoke.add_argument("--match", type=int, help=t("cli.help.agent_smoke_match"))
     smoke.add_argument("--yes", action="store_true", help=t("cli.help.agent_smoke_yes"))
+    smoke.add_argument("--only", choices=["news"], help=t("cli.help.agent_smoke_only"))
+    smoke.add_argument(
+        "--news-model",
+        metavar=t("cli.agent_smoke.metavar.model"),
+        help=t("cli.help.agent_smoke_news_model"),
+    )
+    smoke.add_argument(
+        "--news-dynamic", action="store_true", help=t("cli.help.agent_smoke_news_dynamic")
+    )
+    smoke.add_argument(
+        "--news-max-uses",
+        type=int,
+        metavar=t("cli.agent_smoke.metavar.count"),
+        help=t("cli.help.agent_smoke_news_max_uses"),
+    )
+    smoke.add_argument(
+        "--news-no-cache", action="store_true", help=t("cli.help.agent_smoke_news_no_cache")
+    )
+    smoke.add_argument(
+        "--player",
+        type=int,
+        metavar=t("cli.agent_smoke.metavar.id"),
+        help=t("cli.help.agent_smoke_player"),
+    )
     smoke.set_defaults(handler=_agent_smoke)
 
+    acceptance.add_commands(commands)
     _add_player_commands(command)
     return parser
 
@@ -799,7 +958,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         asyncio.run(_run(args))
     except CliError as exc:
         print(exc.message, file=sys.stderr)
-        return 1
+        return exc.exit_code
+    except KeyboardInterrupt:
+        # Ctrl+C: текст вместо трассировки; прерванный анализ уже помечен failed
+        print(t("cli.interrupted"), file=sys.stderr)
+        return EXIT_INTERRUPTED
     except AppError as exc:
         print(exc.message, file=sys.stderr)
         return 1

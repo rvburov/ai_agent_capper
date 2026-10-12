@@ -257,6 +257,38 @@ describe('Новый анализ: текст', () => {
   });
 });
 
+/** «Перед запуском»: новости всех игроков устарели, в оценку вошли новости news игроков. */
+function stalePreview(news: number) {
+  const preview = previewOut();
+  for (const event of preview.events) for (const player of event.players) player.news_fresh = false;
+  preview.estimate.news_players = news;
+  return preview;
+}
+
+describe('Новый анализ: новости в цене', () => {
+  it('сверх лимита поисков анализа: «N из M игроков» с причиной, а не все игроки', async () => {
+    const user = userEvent.setup();
+    mockFetch(routes({ 'POST /api/analyses/6/preview': () => json(stalePreview(2)) }));
+    renderNew();
+    await user.type(screen.getByLabelText('Текст событий'), TEXT.replace(/\n/g, '{Shift>}{Enter}{/Shift}'));
+    await user.click(screen.getByRole('button', { name: 'Разобрать' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Запустить анализ' })).toBeEnabled());
+    const costs = document.querySelector('.new-costs') as HTMLElement;
+    expect(within(costs).getByText('2 из 4 игроков — лимит поисков на анализ')).toBeInTheDocument();
+  });
+
+  it('все устаревшие новости входят в лимит — просто число игроков', async () => {
+    const user = userEvent.setup();
+    mockFetch(routes({ 'POST /api/analyses/6/preview': () => json(stalePreview(4)) }));
+    renderNew();
+    await user.type(screen.getByLabelText('Текст событий'), TEXT.replace(/\n/g, '{Shift>}{Enter}{/Shift}'));
+    await user.click(screen.getByRole('button', { name: 'Разобрать' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Запустить анализ' })).toBeEnabled());
+    const costs = document.querySelector('.new-costs') as HTMLElement;
+    expect(within(costs).getByText('4 игрока')).toBeInTheDocument();
+  });
+});
+
 describe('Новый анализ: черновик и «Изменить события»', () => {
   it('черновик по адресу /new?draft=ID загружается с сервера', async () => {
     mockFetch(routes({ 'GET /api/analyses/6': () => json(analysisDraft()) }));

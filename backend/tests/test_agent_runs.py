@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.errors import ClaudeStepError
 from app.agent.runs import (
+    Iteration,
     Usage,
     cost_usd,
+    cost_without_cache,
     max_tokens_within,
     price_for,
     record_run,
@@ -134,6 +136,77 @@ def test_haiku_long_prompt_costs_five_times() -> None:
     assert cost_usd(HAIKU, long) == Decimal("0.037001")
     with_search = Usage(input_tokens=120_000, web_searches=1)
     assert cost_usd(HAIKU, with_search) == Decimal("0.070000")  # 0,06 + поиск без множителя
+
+
+# Живая проверка новостей 12 октября: вход 262, запись 32 444, чтение 4 498, выход 1 076,
+# 2 поиска; итерации — форма «оба поиска в первой итерации, потом record_news»
+LIVE_NEWS = Usage(
+    input_tokens=262,
+    output_tokens=1076,
+    cache_write_tokens=32444,
+    cache_write_5m_tokens=32444,
+    cache_read_tokens=4498,
+    web_searches=2,
+    iterations=(
+        Iteration("message", input_tokens=262, cache_write_tokens=4498, output_tokens=300),
+        Iteration("message", cache_write_tokens=27946, cache_read_tokens=4498, output_tokens=776),
+    ),
+)
+
+
+def test_usage_iterations_from_message() -> None:
+    """usage.iterations: обычный Usage SDK 1.12.1 хранит поле как есть (список словарей),
+    без поля итераций нет."""
+    raw = text_message("{}", input_tokens=262, output_tokens=1076)
+    raw["usage"]["iterations"] = [
+        {
+            "type": "message",
+            "input_tokens": 262,
+            "output_tokens": 300,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 4498,
+        },
+        {"type": "compaction", "input_tokens": 10, "output_tokens": 5},
+    ]
+    usage = usage_from(Message.model_validate(raw))
+    assert usage.iterations == (
+        Iteration("message", input_tokens=262, cache_write_tokens=4498, output_tokens=300),
+        Iteration("compaction", input_tokens=10, output_tokens=5),
+    )
+    assert usage_from(Message.model_validate(text_message("{}"))).iterations == ()
+    total = Usage(iterations=usage.iterations[:1]) + Usage(iterations=usage.iterations[1:])
+    assert total.iterations == usage.iterations
+
+
+def test_cost_without_cache_from_iterations() -> None:
+    """Тот же разговор без точки кэша: весь вход каждой итерации по цене обычного входа.
+    С точкой: 262 × $2 + 32 444 × $2,50 + 4 498 × $0,10 + 1 076 × $10 (за млн) + 2 × $0,01
+    = $0,112844. Без точки: (262 + 4 498 + 27 946 + 4 498) × $2 + 1 076 × $10 + $0,02 =
+    $0,105168 — на $0,0077 дешевле, если оба поиска шли в одной итерации."""
+    assert cost_usd(SONNET, LIVE_NEWS) == Decimal("0.112844")
+    assert cost_without_cache(SONNET, LIVE_NEWS) == Decimal("0.105168")
+    # Поиски подряд: результат первого поиска (14 тыс.) читается и третьей итерацией
+    serial = Usage(
+        input_tokens=262,
+        output_tokens=1076,
+        cache_write_tokens=32444,
+        cache_write_5m_tokens=32444,
+        cache_read_tokens=4498 + 18498,
+        web_searches=2,
+        iterations=(
+            Iteration("message", input_tokens=262, cache_write_tokens=4498, output_tokens=200),
+            Iteration(
+                "message", cache_write_tokens=14000, cache_read_tokens=4498, output_tokens=200
+            ),
+            Iteration(
+                "message", cache_write_tokens=13946, cache_read_tokens=18498, output_tokens=676
+            ),
+        ),
+    )
+    serial_no_cache = cost_without_cache(SONNET, serial)
+    assert serial_no_cache is not None and serial_no_cache > cost_usd(SONNET, serial)
+    # Итераций нет (старый ответ) — пересчитать нельзя
+    assert cost_without_cache(SONNET, Usage(input_tokens=100, output_tokens=10)) is None
 
 
 def test_cost_rounding() -> None:

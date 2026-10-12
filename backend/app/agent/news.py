@@ -18,19 +18,38 @@ news_timeout_s — предел всего разговора (запрос, п�
 на день проверяет сервис перед каждым запросом разговора (StepHooks.before_call получает
 searches = max_uses): max_uses действует на один запрос, а продолжение и просьба —
 новые запросы.
+
+Поиск — web_search_20260209 у любой модели: без programmatic tool calling (Haiku 4.5)
+эта версия работает с allowed_callers ["direct"] (server-tools, «ZDR and
+allowed_callers»). По умолчанию поиск прямой; news_dynamic_filtering — фильтрация
+результатов кодом на стороне Anthropic (allowed_callers не задается). Тогда в ответе есть
+блоки выполнения кода, а пары server_tool_use и web_search_tool_result идут с полем
+caller: адреса для сверки и ошибки поиска берутся из всех таких блоков, как и без
+фильтрации; ответ с контейнером продолжается в том же контейнере. Точка кэша на system
+(news_prompt_cache) включает и автоматическую запись в кэш после каждого результата
+поиска: без точки ее нет, но тогда каждая следующая итерация серверного цикла читает
+весь предыдущий вход по полной цене (tool-use-with-prompt-caching, «Server tool results
+are cached automatically»).
 """
 
 import asyncio
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from functools import partial
 from typing import Any, Literal
 
 import anthropic
 import structlog
-from anthropic.types import Message, MessageParam, ToolUnionParam
+from anthropic.types import (
+    BashCodeExecutionToolResultBlock,
+    CodeExecutionToolResultBlock,
+    Message,
+    MessageParam,
+    TextEditorCodeExecutionToolResultBlock,
+    ToolUnionParam,
+)
 from pydantic import ValidationError
 
 from app.agent.calls import CallSpec, StepHooks, assistant_turn, call, create, estimate_tokens
@@ -48,8 +67,15 @@ RECORD_DESCRIPTION = (
     "Call once after searching: the facts you found about each player, "
     "each with its source URL from the search results."
 )
+SEARCH_TOOL = "web_search_20260209"
 # Поиск без фильтрации кодом: проще проверить адреса и посчитать вход (understand: 1.3)
 ALLOWED_CALLERS: list[Literal["direct"]] = ["direct"]
+# Результаты выполнения кода (фильтрация поиска): их ошибки идут в лог и в итог шага
+CODE_RESULTS = (
+    CodeExecutionToolResultBlock,
+    BashCodeExecutionToolResultBlock,
+    TextEditorCodeExecutionToolResultBlock,
+)
 SUMMARY_MAX = 200
 SOURCE_NAME_MAX = 200
 DETAIL_MAX = 200
@@ -87,7 +113,9 @@ class NewsOutcome:
     вернул результаты (пусть пустые): без этого новости не проверены, даже если модель
     вызвала record_news. limited — попытки поиска сверх max_uses (не сбой: разрешенные
     поиски прошли). misplaced — группы record_news с номером игрока не из запроса,
-    reported — id игроков, о которых модель ответила (с фактами или без)."""
+    reported — id игроков, о которых модель ответила (с фактами или без). code_errors —
+    сбои выполнения кода при фильтрации поиска: error_code инструмента или
+    «return_code:N» упавшего кода (участнику не показываются)."""
 
     facts: list[NewsFact]
     searches: int
@@ -99,6 +127,7 @@ class NewsOutcome:
     limited: int = 0
     misplaced: int = 0
     reported: frozenset[int] = frozenset()
+    code_errors: tuple[str, ...] = ()
 
 
 # Отказ API из-за сайтов, закрытых для робота Anthropic (текст ответа 400)
@@ -120,12 +149,9 @@ def blocked_domains(exc: ClaudeStepError) -> set[str]:
 def _tools(
     config: AgentConfig, max_uses: int, skip: frozenset[str] = frozenset()
 ) -> list[ToolUnionParam]:
-    search: dict[str, Any] = {
-        "type": "web_search_20260209",
-        "name": "web_search",
-        "max_uses": max_uses,
-        "allowed_callers": ALLOWED_CALLERS,
-    }
+    search: dict[str, Any] = {"type": SEARCH_TOOL, "name": "web_search", "max_uses": max_uses}
+    if not config.news_dynamic_filtering:
+        search["allowed_callers"] = ALLOWED_CALLERS
     domains = [domain for domain in config.news_domains if domain.split("/")[0] not in skip]
     if domains:
         search["allowed_domains"] = domains
@@ -161,22 +187,52 @@ def _read(message: Message) -> tuple[NewsReport | None, str | None]:
 MAX_USES_EXCEEDED = "max_uses_exceeded"
 
 
-def _search_results(message: Message, urls: set[str], errors: list[str], limited: list[str]) -> int:
-    """Адреса и коды ошибок поиска из ответа; возвращает число удачных поисков. Попытки
-    сверх max_uses — в limited, остальные ошибки — в errors."""
-    done = 0
+@dataclass
+class _Found:
+    """Что собрано из ответов разговора: адреса результатов поиска, ошибки поиска,
+    попытки сверх max_uses, ошибки выполнения кода и число удачных поисков."""
+
+    urls: set[str] = field(default_factory=set)
+    errors: list[str] = field(default_factory=list)
+    limited: list[str] = field(default_factory=list)
+    code_errors: list[str] = field(default_factory=list)
+    searched: int = 0
+
+
+def _code_error(content: Any) -> str | None:
+    """Сбой выполнения кода фильтрации: ошибка инструмента (error_code) или упавший код —
+    ненулевой return_code (Traceback в stderr или превышение 90 с на ячейку: тогда в
+    выводе detection_timeout, а error_code нет; code-execution-tool, «Tool versions»)."""
+    code = getattr(content, "error_code", None)
+    if code is not None:
+        return str(code)
+    returned = getattr(content, "return_code", None)
+    if isinstance(returned, int) and returned != 0:
+        return f"return_code:{returned}"
+    return None
+
+
+def _search_results(message: Message, found: _Found) -> None:
+    """Адреса и коды ошибок поиска из ответа. Блоки web_search_tool_result берутся все:
+    и прямого поиска, и вызванные кодом фильтрации (с полем caller). Попытки сверх
+    max_uses — в limited, остальные ошибки поиска — в errors, сбои кода — в
+    code_errors."""
     for block in message.content:
+        if isinstance(block, CODE_RESULTS):
+            failure = _code_error(block.content)
+            if failure is not None:
+                found.code_errors.append(failure)
+            continue
         if block.type != "web_search_tool_result":
             continue
         content = block.content
         if isinstance(content, list):
-            done += 1
-            urls.update(item.url for item in content)
+            found.searched += 1
+            found.urls.update(item.url for item in content)
         elif str(content.error_code) == MAX_USES_EXCEEDED:
-            limited.append(MAX_USES_EXCEEDED)
+            found.limited.append(MAX_USES_EXCEEDED)
         else:
-            errors.append(str(content.error_code))
-    return done
+            found.errors.append(str(content.error_code))
 
 
 def _day(value: str) -> date | None:
@@ -289,15 +345,15 @@ async def fetch_news(
         players="\n".join(f"{target.position}. {target.name}" for target in targets),
         max_uses=max_uses,
     )
-    system: list[Any] = [
-        {"type": "text", "text": prompt.text, "cache_control": {"type": "ephemeral"}}
-    ]
+    system_block: dict[str, Any] = {"type": "text", "text": prompt.text}
+    if config.news_prompt_cache:
+        system_block["cache_control"] = {"type": "ephemeral"}
+    system: list[Any] = [system_block]
     tools = _tools(config, max_uses)
     messages: list[MessageParam] = [{"role": "user", "content": user_text}]
-    urls: set[str] = set()
-    errors: list[str] = []
-    limited: list[str] = []
-    searched = 0
+    found = _Found()
+    # Контейнер выполнения кода (фильтрация поиска): продолжение идет в том же
+    container: str | None = None
     total = Usage()
     run_id: int | None = None
     continuations = 0
@@ -323,22 +379,19 @@ async def fetch_news(
             max_tokens=config.news_max_tokens,
             searches=max_uses,
         )
+        params: dict[str, Any] = {
+            "model": config.news_model,
+            "max_tokens": config.news_max_tokens,
+            "system": system,
+            "tools": tools,
+            "messages": list(messages),
+            "output_config": {"effort": config.news_effort},
+        }
+        if container is not None:
+            params["container"] = container
         try:
             result = await call(
-                hooks,
-                spec,
-                partial(
-                    create,
-                    client,
-                    model=config.news_model,
-                    max_tokens=config.news_max_tokens,
-                    system=system,
-                    tools=tools,
-                    messages=list(messages),
-                    output_config={"effort": config.news_effort},
-                ),
-                timeout_s=left,
-                read=_read,
+                hooks, spec, partial(create, client, **params), timeout_s=left, read=_read
             )
         except ClaudeStepError as exc:
             # Закрытые сайты отклоняют только первый запрос: убираем их и пробуем еще раз.
@@ -355,23 +408,28 @@ async def fetch_news(
         total = total + result.usage
         previous = result.usage
         run_id = result.agent_run_id
-        searched += _search_results(message, urls, errors, limited)
+        _search_results(message, found)
+        if message.container is not None:
+            container = message.container.id
         report = result.value
         if report is not None:
-            found = _facts(report, targets, urls=urls, since=since, today=today)
-            if limited:
-                log.info("news.max_uses_exceeded", attempts=len(limited), max_uses=max_uses)
+            checked = _facts(report, targets, urls=found.urls, since=since, today=today)
+            if found.limited:
+                log.info("news.max_uses_exceeded", attempts=len(found.limited), max_uses=max_uses)
+            if found.code_errors:
+                log.warning("news.code_errors", codes=sorted(set(found.code_errors)))
             return NewsOutcome(
-                facts=found.facts,
+                facts=checked.facts,
                 searches=total.web_searches,
-                search_errors=tuple(errors),
-                dropped=found.dropped,
+                search_errors=tuple(found.errors),
+                dropped=checked.dropped,
                 agent_run_id=run_id,
                 usage=total,
-                searched=searched > 0,
-                limited=len(limited),
-                misplaced=found.misplaced,
-                reported=found.reported,
+                searched=found.searched > 0,
+                limited=len(found.limited),
+                misplaced=checked.misplaced,
+                reported=checked.reported,
+                code_errors=tuple(found.code_errors),
             )
         if message.stop_reason == "pause_turn":
             if continuations >= config.news_max_pause_continuations:

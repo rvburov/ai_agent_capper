@@ -80,13 +80,21 @@ class AgentConfig(BaseModel):
     news_effort: Effort = "low"
     news_max_tokens: int = Field(default=8000, ge=256, le=64000)
     news_timeout_s: int = Field(default=180, ge=5, le=600)
-    news_max_uses: int = Field(default=3, ge=1, le=10)
-    news_max_searches_per_analysis: int = Field(default=9, ge=0, le=100)
+    # Один поиск на игрока: запрос новостей идет на матч, в нем два игрока
+    news_max_uses: int = Field(default=2, ge=1, le=10)
+    news_max_searches_per_analysis: int = Field(default=6, ge=0, le=100)
     news_max_searches_per_day: int = Field(default=30, ge=0, le=1000)
     news_ttl_hours: int = Field(default=12, ge=1, le=168)
     news_lookback_days: int = Field(default=14, ge=1, le=90)
     news_max_pause_continuations: int = Field(default=3, ge=0, le=10)
     news_domains: tuple[Domain, ...] = DEFAULT_NEWS_DOMAINS
+    # Варианты для сравнения на живом ключе (agent-smoke --only news), качество не
+    # проверено. news_dynamic_filtering — поиск с фильтрацией результатов кодом на стороне
+    # Anthropic (у web_search не задается allowed_callers): нужна модель с programmatic
+    # tool calling. news_prompt_cache — точка кэша на system шага новостей; с ней сервер
+    # сам пишет в кэш результаты поиска (TOKEN_ECONOMY.md, 4.8)
+    news_dynamic_filtering: bool = False
+    news_prompt_cache: bool = True
     # Анализ матча
     analysis_model: ModelId = "claude-opus-5-5"
     analysis_effort: Effort = "medium"
@@ -102,9 +110,11 @@ class AgentConfig(BaseModel):
     # Оценка стоимости до запуска
     estimate_analysis_input_tokens: int = Field(default=7000, ge=0, le=1_000_000)
     estimate_analysis_output_tokens: int = Field(default=4000, ge=0, le=128000)
-    estimate_news_input_tokens: int = Field(default=15000, ge=0, le=1_000_000)
+    # Новости одного матча по живой проверке 12 октября 2026: весь вход запроса с двумя
+    # поисками — 37 204 токена (262 без кэша, 32 444 запись, 4 498 чтение), выход 1 076
+    estimate_news_input_tokens: int = Field(default=37000, ge=0, le=1_000_000)
     estimate_news_output_tokens: int = Field(default=1500, ge=0, le=64000)
-    estimate_news_searches: int = Field(default=3, ge=0, le=100)
+    estimate_news_searches: int = Field(default=2, ge=0, le=100)
     # Потолок одного анализа по умолчанию для новых участников (на ключе администратора и
     # потолок своего ключа, Р13). Меняется в кабинете администратора («Лимиты по
     # умолчанию»); у зарегистрированных не меняется. Это не жесткий потолок программы

@@ -875,6 +875,6 @@ async def test_budget_overview(db: AsyncSession, make_user: UserFactory) -> None
 def test_estimate_cost() -> None:
     prices = {m: price_row(m) for m in ("claude-opus-5-5", "claude-sonnet-5-5")}
     config = AgentConfig()
-    # анализ 7000 × 5 + 4000 × 20 = 0,115; новости 15000 × 2,5 + 1500 × 10 + 3 × 0,01 = 0,0825
-    assert estimate_cost(config, prices, matches=2) == D("0.3950")
+    # анализ 7000 × 5 + 4000 × 20 = 0,115; новости 37000 × 2,5 + 1500 × 10 + 2 × 0,01 = 0,1275
+    assert estimate_cost(config, prices, matches=2) == D("0.4850")
     assert estimate_cost(AgentConfig(news_enabled=False), prices, matches=2) == D("0.2300")

@@ -576,17 +576,30 @@ async def archive_tournament(
 
 
 async def build_dossier(
-    db: AsyncSession, match: Match, *, as_of: datetime, best_of: int, surface: str
+    db: AsyncSession,
+    match: Match,
+    *,
+    as_of: datetime,
+    best_of: int,
+    surface: str,
+    with_news: bool = True,
+    swap: bool = False,
 ) -> DossierResult:
     """Досье матча на момент as_of (aware datetime): собрать, записать в dossiers (новая
     строка или уже существующая с тем же sha256) и вернуть. surface и best_of — из
     подтвержденного ввода (у матча из ввода турнира может не быть). Коммит — за
-    вызывающим."""
+    вызывающим.
+
+    Для проверки на архиве (команда smoke-eval): with_news=False — досье без новостей
+    (срез «Claude без новостей»), swap=True — игрок 2 матча становится p1 досье (в архиве
+    игрок 1 — победитель, стороны назначает проверка)."""
     if as_of.tzinfo is None:
         raise ValueError("build_dossier: as_of без часового пояса")
     day = as_of.astimezone(UTC).date()
     surface = surface.strip().lower()
-    player_ids = (match.player1_id, match.player2_id)
+    player_ids = (
+        (match.player2_id, match.player1_id) if swap else (match.player1_id, match.player2_id)
+    )
     params = await _model_params(db)
     weight = float(params.get("surface_weight", EloParams.surface_weight))
     initial = float(params.get("initial", EloParams.initial))
@@ -612,7 +625,7 @@ async def build_dossier(
     form = {player_id: await _form_rows(db, player_id, day) for player_id in player_ids}
     recent = await _recent_rows(db, player_ids, day)
     serve = await _serve_stats(db, player_ids, day)
-    news = await _news(db, player_ids, as_of)
+    news = await _news(db, player_ids, as_of) if with_news else {}
     data_to = await _data_to(db, day)
     head_to_head = await _h2h(db, *player_ids, day, surface)
 

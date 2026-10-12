@@ -50,7 +50,8 @@ def test_defaults_from_brief() -> None:
         c.news_ttl_hours,
         c.news_lookback_days,
         c.news_max_pause_continuations,
-    ) == (3, 9, 30, 12, 14, 3)
+    ) == (2, 6, 30, 12, 14, 3)
+    assert c.news_dynamic_filtering is False and c.news_prompt_cache is True
     assert c.news_domains == DEFAULT_NEWS_DOMAINS and "atptour.com" in c.news_domains
     assert (c.analysis_model, c.analysis_effort, c.analysis_max_tokens) == (
         "claude-opus-5-5",
@@ -70,7 +71,7 @@ def test_defaults_from_brief() -> None:
         c.estimate_news_input_tokens,
         c.estimate_news_output_tokens,
         c.estimate_news_searches,
-    ) == (7000, 4000, 15000, 1500, 3)
+    ) == (7000, 4000, 37000, 1500, 2)
     assert c.models() == ("claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5")
     no_news = AgentConfig(news_enabled=False)
     assert no_news.models() == ("claude-haiku-5-5", "claude-opus-5-5")
@@ -79,14 +80,14 @@ def test_defaults_from_brief() -> None:
 def test_overrides_skip_unknown_and_invalid() -> None:
     config = config_from_overrides(
         {
-            "news_max_uses": 2,
+            "news_max_uses": 3,
             "analysis_effort": "low",
             "removed_setting": True,
             "analysis_parallel": 99,
             "parse_model": "gpt-4",
         }
     )
-    assert config.news_max_uses == 2 and config.analysis_effort == "low"
+    assert config.news_max_uses == 3 and config.analysis_effort == "low"
     assert config.analysis_parallel == 3 and config.parse_model == "claude-haiku-5-5"
     assert config_from_overrides({}) == DEFAULT_CONFIG
 
@@ -111,13 +112,13 @@ async def test_save_and_load(db: AsyncSession) -> None:
     assert await load_agent_config(db) == DEFAULT_CONFIG
     saved = await save_agent_config(
         db,
-        changes={"news_max_uses": "2", "news_enabled": "false", "news_domains": ["atptour.com"]},
+        changes={"news_max_uses": "3", "news_enabled": "false", "news_domains": ["atptour.com"]},
         actor_id=None,
     )
-    assert saved.news_max_uses == 2 and saved.news_enabled is False
+    assert saved.news_max_uses == 3 and saved.news_enabled is False
     row = await db.get_one(AppSettings, 1, populate_existing=True)
     assert row.agent_config == {
-        "news_max_uses": 2,
+        "news_max_uses": 3,
         "news_enabled": False,
         "news_domains": ["atptour.com"],
     }
@@ -125,7 +126,7 @@ async def test_save_and_load(db: AsyncSession) -> None:
     [entry] = await audit_entries(db, "agent_config_change")
     assert entry.details == {
         "changes": {
-            "news_max_uses": {"from": 3, "to": 2},
+            "news_max_uses": {"from": 2, "to": 3},
             "news_enabled": {"from": True, "to": False},
             "news_domains": {"from": list(DEFAULT_NEWS_DOMAINS), "to": ["atptour.com"]},
         },
@@ -148,8 +149,8 @@ async def test_save_and_load(db: AsyncSession) -> None:
 
     # Возврат к значению по умолчанию и сохранение без изменений (журнал не пишется)
     back = await save_agent_config(db, changes={}, reset=["news_enabled"], actor_id=None)
-    assert back.news_enabled is True and back.news_max_uses == 2
-    await save_agent_config(db, changes={"news_max_uses": 2}, actor_id=None)
+    assert back.news_enabled is True and back.news_max_uses == 3
+    await save_agent_config(db, changes={"news_max_uses": 3}, actor_id=None)
     assert len(await audit_entries(db, "agent_config_change")) == 2
 
 
@@ -171,20 +172,20 @@ async def test_cli_agent_config(db: AsyncSession, capsys: pytest.CaptureFixture[
         await run(
             "agent-config",
             "--set",
-            "news_max_uses=2",
+            "news_max_uses=3",
             "--set",
             "news_domains=atptour.com,bbc.com",
         )
         == 0
     )
     out = capsys.readouterr().out
-    assert "* news_max_uses = 2 (по умолчанию 3)" in out
+    assert "* news_max_uses = 3 (по умолчанию 2)" in out
     assert "* news_domains = atptour.com, bbc.com" in out
     [entry] = await audit_entries(db, "agent_config_change")
     assert entry.actor_id is None and entry.details["source"] == "terminal"
 
     assert await run("agent-config", "--reset", "news_max_uses") == 0
-    assert "  news_max_uses = 3" in capsys.readouterr().out
+    assert "  news_max_uses = 2" in capsys.readouterr().out
 
     for argv in (
         ("--set", "news_max_uses"),

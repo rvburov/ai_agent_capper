@@ -26,8 +26,10 @@
   // чтобы вернуть режим, добавьте его id в этот список.
   const MODES_ON = ['precise'];
   const modeOn = m => MODES_ON.includes(m.id);
-  // Новости перед анализом: один запрос Sonnet 5.5 с поиском на матч, если новости хотя бы одного игрока старше 12 ч
-  const NEWS = { cost: 0.05, secs: 25 };
+  // Новости перед анализом: один запрос Sonnet 5.5 с поиском на матч, если новости хотя бы одного игрока старше 12 ч.
+  // Цена — по живой проверке (2 поиска, ≈ 37 тыс. токенов входа). Поисков на анализ не больше 6, по 2 на запрос:
+  // новости ищутся у первых трех таких матчей, у остальных шаг пропускается (лимит поисков)
+  const NEWS = { cost: 0.11, secs: 25, maxMatches: 3 };
   const PARSE_COST = '≈$' + fmt.dec(0.001, 3);
   // Дата последнего матча игрока в базе (архив ATP и tennis-data): в макете — одна для всех игроков сегодняшних матчей
   const LAST_MATCH = '2026-10-05';
@@ -293,11 +295,19 @@
     }));
     const missing = players.filter(p => !p.p);                     // нет в базе — анализ не запустится
     const stale = players.filter(p => p.p && p.sure && p.fresh === 'stale'); // новости устарели — поищем
-    // новости ищутся одним запросом на матч: считаем матчи, где новости устарели хотя бы у одного игрока
-    const newsMatches = evs.filter(ev => [ev.n1, ev.n2].some(name => { const r = resolve(name); return r && r.p && r.sure && r.fresh === 'stale'; })).length;
+    // новости ищутся одним запросом на матч: считаем матчи, где новости устарели хотя бы у одного игрока, —
+    // не больше NEWS.maxMatches (лимит поисков на анализ), по порядку событий
+    const staleOf = name => { const r = resolve(name); return r && r.p && r.sure && r.fresh === 'stale' ? r.p.id : null; };
+    const newsEvs = evs.filter(ev => [ev.n1, ev.n2].some(staleOf)).slice(0, NEWS.maxMatches);
+    const newsMatches = newsEvs.length;
+    const searched = stale.filter(p => newsEvs.some(ev => [ev.n1, ev.n2].some(name => staleOf(name) === p.p.id)));
     const mode = MODES.find(m => m.id === state.mode);
     const items = [{ label: 'Анализ · ' + mode.model.replace(' + кэш', '') + ' · ' + evWord(n), cost: n * mode.perEvent }];
-    if (stale.length && mode.id === 'precise') items.push({ label: 'Новости: ' + stale.length + ' ' + fmt.plural(stale.length, 'игрок', 'игрока', 'игроков') + ' (' + stale.map(p => p.p.short).join(', ') + ')', cost: newsMatches * NEWS.cost });
+    const newsCount = searched.length < stale.length
+      ? searched.length + ' из ' + stale.length + ' ' + fmt.plural(stale.length, 'игрока', 'игроков', 'игроков')
+      : stale.length + ' ' + fmt.plural(stale.length, 'игрок', 'игрока', 'игроков');
+    const newsLimit = searched.length < stale.length ? ' — лимит поисков на анализ' : '';
+    if (stale.length && mode.id === 'precise') items.push({ label: 'Новости: ' + newsCount + ' (' + searched.map(p => p.p.short).join(', ') + ')' + newsLimit, cost: newsMatches * NEWS.cost });
     const extraCost = mode.id === 'precise' ? newsMatches * NEWS.cost : 0;
     const extraSecs = mode.id === 'precise' ? newsMatches * NEWS.secs : 0;
     const cost = n * mode.perEvent + extraCost, secs = n * mode.secs + extraSecs;

@@ -188,9 +188,10 @@ async def _limit_refused(db: AsyncSession, user_id: int, code: str, *, rollback:
     await db.commit()
 
 
-class _ParseHooks:
+class ParseHooks:
     """Учет вызова разбора в запросе API (сеанс запроса, commit после каждого вызова).
-    Транзакция закрывается до вызова: соединение из пула API не ждет ответа Claude."""
+    Транзакция закрывается до вызова: соединение из пула API не ждет ответа Claude.
+    Тот же учет — у разбора в команде приемки acceptance-runs."""
 
     def __init__(self, db: AsyncSession, user: User, key_source: str, analysis_id: int) -> None:
         self.db = db
@@ -291,7 +292,7 @@ async def create_from_text(db: AsyncSession, redis: Redis, user: User, text: str
         key = await key_for(db, key_source=access.key_source, user_id=user.id)
         await db.commit()
         client = client_for(key, timeout=float(config.parse_timeout_s))
-        hooks = _ParseHooks(db, user, access.key_source, analysis.id)
+        hooks = ParseHooks(db, user, access.key_source, analysis.id)
         parsed = await parse_text(client, cleaned, config, hooks)
     except ClaudeStepError as exc:
         if exc.is_key_failure:
@@ -322,11 +323,15 @@ async def create_from_text(db: AsyncSession, redis: Redis, user: User, text: str
 
 @dataclass(frozen=True)
 class Estimate:
+    """Оценка до запуска. news_players и news_matches — игроки и запросы новостей, которые
+    вошли в цену: не больше, чем помещается в лимит поисков анализа."""
+
     cost_usd: Decimal
     seconds: int
     news_players: int
     reused_matches: int
     reused: frozenset[int]
+    news_matches: int = 0
 
 
 def _drafts(events: Sequence[EventIn]) -> list[EventDraft]:
@@ -437,6 +442,24 @@ def _stale(checked: datetime | None, cutoff: datetime) -> bool:
     return checked is None or checked < cutoff
 
 
+async def news_searches_used(db: AsyncSession, analysis_id: int) -> int:
+    """Поиски, уже записанные анализом в agent_runs (как _Runner._searches_used)."""
+    used = await db.scalar(
+        select(func.coalesce(func.sum(AgentRun.web_searches), 0)).where(
+            AgentRun.analysis_id == analysis_id, AgentRun.kind == "news"
+        )
+    )
+    return int(used or 0)
+
+
+def news_requests(config: AgentConfig, searches_used: int = 0) -> int:
+    """Сколько запросов новостей воркер успеет до лимита поисков анализа: каждый берет
+    max_uses поисков (последний — остаток). Как _Runner._match_news, без лимита дня: он
+    общий для всей программы и к моменту шага новостей может измениться."""
+    left = config.news_max_searches_per_analysis - searches_used
+    return math.ceil(left / config.news_max_uses) if left > 0 else 0
+
+
 async def estimate_run(
     db: AsyncSession,
     config: AgentConfig,
@@ -445,11 +468,14 @@ async def estimate_run(
     prompt_version: str,
     now: datetime,
     done: RestartWork | None = None,
+    analysis_id: int | None = None,
 ) -> Estimate:
     """Оценка анализа до запуска: новости — только у матчей с устаревшими новостями
-    игроков, анализ Claude — у матчей без свежей оценки (ее берут бесплатно). done —
-    повторный запуск: шаги, которые воркер не повторит (новости, оценки, досье из
-    чекпойнта), в оценку и резерв не входят."""
+    игроков и не больше, чем помещается в лимит поисков анализа (новости идут по порядку
+    матчей, у остальных шаг пропускается); анализ Claude — у матчей без свежей оценки (ее
+    берут бесплатно). done — повторный запуск: шаги, которые воркер не повторит (новости,
+    оценки, досье из чекпойнта), в оценку и резерв не входят. analysis_id — поиски,
+    которые анализ уже потратил, вычитаются из его лимита (как в воркере)."""
     prices = await _prices(db, config)
     work = done or RestartWork(news=frozenset(), assessed=frozenset(), dossiers={})
     ids = {pid for event in events for pid in (event.player1_id, event.player2_id)}
@@ -461,6 +487,8 @@ async def estimate_run(
         )
     }
     stale_players = {pid for pid in ids if _stale(checked.get(pid), cutoff)}
+    used = await news_searches_used(db, analysis_id) if analysis_id is not None else 0
+    news_left = news_requests(config, used)
     news_matches = 0
     news_players: set[int] = set()
     analysed = 0
@@ -471,7 +499,12 @@ async def estimate_run(
             found = await find_match(db, event.player1_id, event.player2_id, day=now.date())
             match_id = found.id if found is not None else None
         pair = {event.player1_id, event.player2_id}
-        if config.news_enabled and match_id not in work.news and pair & stale_players:
+        if (
+            config.news_enabled
+            and match_id not in work.news
+            and pair & stale_players
+            and news_matches < news_left
+        ):
             news_matches += 1
             news_players |= pair & stale_players
         if match_id is not None and (
@@ -512,6 +545,7 @@ async def estimate_run(
         news_players=len(news_players),
         reused_matches=len(reused),
         reused=frozenset(reused),
+        news_matches=news_matches,
     )
 
 
@@ -567,7 +601,12 @@ async def preview(
     drafts = await _input_drafts(analysis, body)
     confirmed, problems = await check_events(db, drafts, today=today)
     estimate = await estimate_run(
-        db, config, confirmed, prompt_version=prompt_version_of(version), now=now
+        db,
+        config,
+        confirmed,
+        prompt_version=prompt_version_of(version),
+        now=now,
+        analysis_id=analysis.id,
     )
     access = await access_for(db, user, estimate_usd=estimate.cost_usd)
     ids = {pid for event in drafts for pid in (event.player1_id, event.player2_id) if pid}
@@ -686,6 +725,7 @@ async def start_run(
         prompt_version=prompt_version_of(version),
         now=now,
         done=None if new_events else restart_work(analysis.checkpoint),
+        analysis_id=analysis.id,
     )
     user_id = user.id
     try:
@@ -706,7 +746,7 @@ async def start_run(
         analysis.confirmed = confirmed.to_json()
         analysis.bank_input = confirmed.bank
         analysis.bookmaker = confirmed.bookmaker
-        parse_tokens, parse_spent = await _parse_usage(db, analysis.id)
+        parse_tokens, parse_spent = await parse_usage(db, analysis.id)
         steps = plan_steps(
             attached,
             config,
@@ -792,6 +832,7 @@ async def restart_state(db: AsyncSession, user: User, analysis: Analysis) -> Res
         prompt_version=prompt_version_of(version),
         now=now,
         done=restart_work(analysis.checkpoint),
+        analysis_id=analysis.id,
     )
     access = await restart_access(db, user, analysis, estimate_usd=estimate.cost_usd)
     return RestartOut(
@@ -807,7 +848,8 @@ async def analysis_view(db: AsyncSession, user: User, analysis: Analysis) -> Ana
     return await analysis_out(db, analysis, restart=await restart_state(db, user, analysis))
 
 
-async def _parse_usage(db: AsyncSession, analysis_id: int) -> tuple[int, Decimal]:
+async def parse_usage(db: AsyncSession, analysis_id: int) -> tuple[int, Decimal]:
+    """Токены и стоимость разбора текста анализа (для шага parse хода анализа)."""
     row = (
         await db.execute(
             select(
