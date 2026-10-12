@@ -55,10 +55,9 @@ DEFAULT_NEWS_DOMAINS = (
     "tennis.com",
     "tennismajors.com",
     "espn.com",
-    "bbc.com",
-    "reuters.com",
-    "apnews.com",
 )
+# bbc.com, reuters.com и apnews.com закрыты для робота Anthropic: запрос поиска с ними
+# отклоняется целиком (400, проверено на живом API 12 октября 2026)
 
 
 class AgentConfig(BaseModel):

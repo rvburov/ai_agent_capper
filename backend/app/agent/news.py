@@ -11,13 +11,17 @@ error_code (ответ 200) — она попадает в итог, анали�
 news_max_pause_continuations раз. Модель закончила без record_news — одна просьба
 вызвать его. Принудительный tool_choice на Sonnet 5.5 дает 400, поэтому только так.
 news_timeout_s — предел всего разговора (запрос, продолжения и просьба), а не каждого
-запроса. Шаг ничего не пишет в базу: факты сохраняет сервис. Лимиты поиска на анализ и
+запроса. Сайт из allowed_domains, закрытый для робота Anthropic, API отклоняет вместе со
+всем запросом (400 «domains are not accessible to our user agent»): такие сайты шаг
+убирает из списка и повторяет первый запрос один раз. Шаг ничего не пишет в базу: факты
+сохраняет сервис. Лимиты поиска на анализ и
 на день проверяет сервис перед каждым запросом разговора (StepHooks.before_call получает
 searches = max_uses): max_uses действует на один запрос, а продолжение и просьба —
 новые запросы.
 """
 
 import asyncio
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -97,15 +101,34 @@ class NewsOutcome:
     reported: frozenset[int] = frozenset()
 
 
-def _tools(config: AgentConfig, max_uses: int) -> list[ToolUnionParam]:
+# Отказ API из-за сайтов, закрытых для робота Anthropic (текст ответа 400)
+_BLOCKED_DOMAINS = re.compile(r"domains are not accessible to our user agent: \[([^\]]*)\]")
+_QUOTED = re.compile(r"'([^']+)'|\"([^\"]+)\"")
+
+
+def blocked_domains(exc: ClaudeStepError) -> set[str]:
+    """Сайты из отказа «domains are not accessible to our user agent» (пусто — отказ
+    другой)."""
+    if exc.code != "ai.bad_request" or not exc.api_message:
+        return set()
+    found = _BLOCKED_DOMAINS.search(exc.api_message)
+    if found is None:
+        return set()
+    return {(a or b).strip().lower() for a, b in _QUOTED.findall(found.group(1))}
+
+
+def _tools(
+    config: AgentConfig, max_uses: int, skip: frozenset[str] = frozenset()
+) -> list[ToolUnionParam]:
     search: dict[str, Any] = {
         "type": "web_search_20260209",
         "name": "web_search",
         "max_uses": max_uses,
         "allowed_callers": ALLOWED_CALLERS,
     }
-    if config.news_domains:
-        search["allowed_domains"] = list(config.news_domains)
+    domains = [domain for domain in config.news_domains if domain.split("/")[0] not in skip]
+    if domains:
+        search["allowed_domains"] = domains
     record: dict[str, Any] = {
         "name": RECORD_TOOL,
         "description": RECORD_DESCRIPTION,
@@ -280,6 +303,7 @@ async def fetch_news(
     continuations = 0
     asked = False
     previous: Usage | None = None
+    skipped: frozenset[str] = frozenset()
     loop = asyncio.get_running_loop()
     deadline = loop.time() + config.news_timeout_s
     while True:
@@ -299,22 +323,34 @@ async def fetch_news(
             max_tokens=config.news_max_tokens,
             searches=max_uses,
         )
-        result = await call(
-            hooks,
-            spec,
-            partial(
-                create,
-                client,
-                model=config.news_model,
-                max_tokens=config.news_max_tokens,
-                system=system,
-                tools=tools,
-                messages=list(messages),
-                output_config={"effort": config.news_effort},
-            ),
-            timeout_s=left,
-            read=_read,
-        )
+        try:
+            result = await call(
+                hooks,
+                spec,
+                partial(
+                    create,
+                    client,
+                    model=config.news_model,
+                    max_tokens=config.news_max_tokens,
+                    system=system,
+                    tools=tools,
+                    messages=list(messages),
+                    output_config={"effort": config.news_effort},
+                ),
+                timeout_s=left,
+                read=_read,
+            )
+        except ClaudeStepError as exc:
+            # Закрытые сайты отклоняют только первый запрос: убираем их и пробуем еще раз.
+            # Если в списке не осталось ни одного сайта — сбой, а не поиск по всему вебу
+            blocked = blocked_domains(exc) - skipped
+            remaining = [d for d in config.news_domains if d.split("/")[0] not in skipped | blocked]
+            if previous is not None or not blocked or not remaining or skipped:
+                raise
+            skipped = skipped | blocked
+            log.warning("news.domains_blocked", domains=sorted(blocked))
+            tools = _tools(config, max_uses, skipped)
+            continue
         message = result.message
         total = total + result.usage
         previous = result.usage

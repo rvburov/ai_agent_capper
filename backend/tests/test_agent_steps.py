@@ -589,3 +589,62 @@ def test_prod_needs_https_base_url() -> None:
     assert Settings(**fields).anthropic_base_url == "https://api.anthropic.com"
     with pytest.raises(ValidationError, match="CAPPER_ANTHROPIC_BASE_URL"):
         Settings(**fields, anthropic_base_url="http://127.0.0.1:8099")
+
+
+BLOCKED = (
+    "The following domains are not accessible to our user agent: ['bbc.com', 'reuters.com']."
+    " Read more: https://support.anthropic.com/en/articles/8896518"
+)
+
+
+async def test_news_drops_domains_closed_for_anthropic(claude: ClaudeMock) -> None:
+    """Живой API отклоняет весь запрос, если в allowed_domains есть сайт, закрытый для
+    робота Anthropic (так было с bbc.com, reuters.com и apnews.com). Шаг убирает такие
+    сайты и повторяет первый запрос один раз; отказ записан в учет."""
+    config = CONFIG.model_copy(update={"news_domains": ("atptour.com", "bbc.com", "reuters.com")})
+    claude.add(
+        api_error(400, "invalid_request_error", message=BLOCKED),
+        message(
+            [*_search([URL1]), _record([{"player": 1, "items": [_item(URL1)]}])],
+            stop_reason="tool_use",
+            model="claude-sonnet-5-5",
+        ),
+    )
+    hooks = Hooks()
+    outcome = await fetch_news(
+        _client(),
+        targets=TARGETS,
+        match_label="Jannik Sinner vs Holger Rune, Shanghai",
+        today=TODAY,
+        config=config,
+        hooks=hooks,
+        max_uses=3,
+    )
+    first, second = claude.bodies
+    assert first["tools"][0]["allowed_domains"] == ["atptour.com", "bbc.com", "reuters.com"]
+    assert second["tools"][0]["allowed_domains"] == ["atptour.com"]
+    assert len(outcome.facts) == 1
+    rejected = hooks.after[0].error
+    assert rejected is not None and rejected.startswith("400:invalid_request_error | ")
+
+
+async def test_news_all_domains_closed_is_a_failure(claude: ClaudeMock) -> None:
+    """Если закрыты все сайты списка, шаг не ищет по всему вебу, а падает с причиной."""
+    config = CONFIG.model_copy(update={"news_domains": ("bbc.com", "reuters.com")})
+    claude.add(api_error(400, "invalid_request_error", message=BLOCKED))
+    with pytest.raises(ClaudeStepError) as caught:
+        await fetch_news(
+            _client(),
+            targets=TARGETS,
+            match_label="Jannik Sinner vs Holger Rune, Shanghai",
+            today=TODAY,
+            config=config,
+            hooks=Hooks(),
+            max_uses=3,
+        )
+    assert caught.value.code == "ai.bad_request" and len(claude.requests) == 1
+
+
+def test_default_news_domains_are_open() -> None:
+    """Сайты, закрытые для робота Anthropic, не стоят в списке по умолчанию."""
+    assert not {"bbc.com", "reuters.com", "apnews.com"} & set(AgentConfig().news_domains)
