@@ -9,10 +9,13 @@
 Сеанс БД не держится открытым во время вызова Claude: каждое чтение и запись — свой
 короткий сеанс. Ключ расшифровывается прямо перед шагом и в аргументы задачи не
 попадает. Перед каждым вызовом — проверка потолка анализа и лимитов по худшему случаю
-(check_before_call), после — строка agent_runs (и на неудачный вызов) и предупреждения
+(ai_access.fit_call), после — строка agent_runs (и на неудачный вызов) и предупреждения
 о расходе на ключе администратора. Вызовы оценки идут параллельно, поэтому худший случай
 уже допущенных, но еще не учтенных вызовов держится в резерве и входит в проверку
-следующих. Так же поиски новостей: лимит анализа и лимит дня на всю программу считаются
+следующих: вызов, которому не хватает места только из-за них, ждет их конца, а не
+останавливает анализ (три вызова Opus по худшему случаю дороже потолка $1). Не хватает
+и без них — max_tokens оценки урезается до остатка, но не ниже analysis_min_tokens.
+Так же поиски новостей: лимит анализа и лимит дня на всю программу считаются
 с поисками, которые идут прямо сейчас (у дня — счетчик в Redis, его видят все воркеры).
 
 Отмена — статус cancelled в базе: воркер видит его между шагами и перед каждым вызовом.
@@ -30,7 +33,8 @@ failed (ai.timeout). Задачу сняли (остановка воркера)
 
 import asyncio
 import secrets
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any, cast
@@ -49,7 +53,7 @@ from app.agent.config import AgentConfig, load_agent_config
 from app.agent.errors import ClaudeStepError
 from app.agent.news import NewsOutcome, NewsTarget, fetch_news
 from app.agent.prompts import Prompt, load_prompt_id
-from app.agent.runs import price_for, record_run, worst_case_usd
+from app.agent.runs import price_for, record_run
 from app.agent.schemas import ASSESSMENT_SCHEMA_VERSION
 from app.core.errors import AppError
 from app.core.redis import redis_key
@@ -69,13 +73,20 @@ from app.ml.strategy import (
     StrategyParams,
 )
 from app.schemas.analyses import StepOut
-from app.services.ai_access import after_run_notifications, check_before_call, release_reservation
+from app.services.ai_access import (
+    LIMIT_REFUSALS,
+    after_run_notifications,
+    call_rooms,
+    fit_call,
+    refusal_params,
+    release_reservation,
+)
 from app.services.ai_keys import report_key_failure
 from app.services.analysis_input import Confirmed, ConfirmedEvent
 from app.services.analysis_result import ComposeInput, compose
 from app.services.analysis_view import make_event
 from app.services.claude_key import key_for_run
-from app.services.dossier import build_dossier, canonical_json
+from app.services.dossier import archive_tournament, build_dossier, canonical_json
 from app.services.progress import publish
 from app.services.sessions import utcnow
 from app.services.strategy_versions import params_of, prompt_version_of
@@ -195,6 +206,47 @@ def reset_steps(raw: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     return reset
 
 
+@dataclass(frozen=True)
+class RestartWork:
+    """Что повторный запуск не повторит (как _Runner): матчи с законченным шагом
+    новостей, матчи с оценкой Claude и досье матчей (match_id → dossier_id)."""
+
+    news: frozenset[int]
+    assessed: frozenset[int]
+    dossiers: dict[int, int]
+
+
+def restart_work(checkpoint: Mapping[str, Any] | None) -> RestartWork:
+    """Сделанное по чекпойнту анализа: по нему считается оценка перезапуска (резерв не
+    берется на шаги, которые воркер пропустит)."""
+    raw = checkpoint or {}
+    finished_news = {
+        step.get("match_id")
+        for step in raw.get("steps") or []
+        if step.get("kind") == "news" and step.get("state") in ("done", "skipped")
+    }
+    news: set[int] = set()
+    assessed: set[int] = set()
+    dossiers: dict[int, int] = {}
+    for key, entry in (raw.get("matches") or {}).items():
+        match_id = int(key)
+        if entry.get("news") in NEWS_KEEP and match_id in finished_news:
+            news.add(match_id)
+        if "assessment_id" in entry:
+            assessed.add(match_id)
+        if "dossier_id" in entry and "p_base" in entry:
+            dossiers[match_id] = int(entry["dossier_id"])
+    return RestartWork(news=frozenset(news), assessed=frozenset(assessed), dossiers=dossiers)
+
+
+def running_claude_steps(checkpoint: Mapping[str, Any] | None) -> bool:
+    """В чекпойнте есть шаг с вызовом Claude (новости, оценка) в работе."""
+    return any(
+        step.get("state") == "running" and step.get("kind") in ("news", "claude")
+        for step in (checkpoint or {}).get("steps") or []
+    )
+
+
 # --- учет вызовов ---
 
 
@@ -242,27 +294,55 @@ class _Hooks:
         self.reserved_searches: tuple[str, int] | None = None
 
     async def before_call(
-        self, *, kind: str, model: str, input_tokens: int, max_tokens: int, searches: int
-    ) -> None:
+        self,
+        *,
+        kind: str,
+        model: str,
+        input_tokens: int,
+        max_tokens: int,
+        min_tokens: int,
+        searches: int,
+    ) -> int | None:
         runner = self.runner
-        # Проверка и резерв — под замком: параллельный вызов видит худший случай соседа
-        async with runner.budget_lock:
-            async with runner.maker() as db:
-                analysis = await db.get(Analysis, runner.analysis_id)
-                if analysis is None or not runner.owns(analysis):
-                    raise Stopped
-                price = await price_for(db, model)
-                worst = worst_case_usd(
-                    price, input_tokens=input_tokens, max_tokens=max_tokens, searches=searches
-                )
-                await check_before_call(db, analysis, worst + runner.in_flight_usd)
-                if searches > 0:
-                    self.reserved_searches = (
-                        await runner.reserve_searches(db, searches),
-                        searches,
+        # Проверка и резерв — под замком: параллельный вызов видит худший случай соседа.
+        # Не помещается только из-за своих вызовов в полете — ждем, пока один из них
+        # закончится (release будит), и проверяем заново с его настоящей ценой
+        async with runner.budget_cond:
+            while True:
+                async with runner.maker() as db:
+                    analysis = await db.get(Analysis, runner.analysis_id)
+                    if analysis is None or not runner.owns(analysis):
+                        raise Stopped
+                    price = await price_for(db, model)
+                    fit = fit_call(
+                        await call_rooms(db, analysis),
+                        price,
+                        input_tokens=input_tokens,
+                        max_tokens=max_tokens,
+                        min_tokens=min_tokens,
+                        searches=searches,
+                        in_flight_usd=runner.in_flight_usd,
                     )
-            runner.in_flight_usd += worst
-            self.reserved_usd = worst
+                    if fit.refuse is not None:
+                        raise ClaudeStepError(fit.refuse.code, **refusal_params(fit))
+                    if not fit.wait:
+                        if searches > 0:
+                            self.reserved_searches = (
+                                await runner.reserve_searches(db, searches),
+                                searches,
+                            )
+                        break
+                await runner.budget_cond.wait()
+            runner.in_flight_usd += fit.worst_usd
+            self.reserved_usd = fit.worst_usd
+        if fit.max_tokens is not None and fit.max_tokens < max_tokens:
+            log.info(
+                "analysis.max_tokens_cut",
+                analysis_id=runner.analysis_id,
+                kind=kind,
+                max_tokens=fit.max_tokens,
+            )
+        return fit.max_tokens
 
     async def after_call(self, info: CallInfo) -> int | None:
         runner = self.runner
@@ -290,12 +370,15 @@ class _Hooks:
         return run_id
 
     async def release(self) -> None:
-        self.runner.in_flight_usd -= self.reserved_usd
-        self.reserved_usd = Decimal(0)
+        runner = self.runner
+        async with runner.budget_cond:
+            runner.in_flight_usd -= self.reserved_usd
+            self.reserved_usd = Decimal(0)
+            runner.budget_cond.notify_all()
         if self.reserved_searches is not None:
             key, count = self.reserved_searches
             self.reserved_searches = None
-            await self.runner.release_searches(key, count)
+            await runner.release_searches(key, count)
 
 
 # --- выполнение ---
@@ -315,8 +398,9 @@ class _Runner:
         self.redis = redis
         self.deadline_s = deadline_s
         self.lock = asyncio.Lock()
-        # Резерв вызовов в полете: худший случай допущенных, но еще не учтенных вызовов
-        self.budget_lock = asyncio.Lock()
+        # Резерв вызовов в полете: худший случай допущенных, но еще не учтенных вызовов.
+        # Вызов, которому не хватает места только из-за них, ждет их конца (wait/notify)
+        self.budget_cond = asyncio.Condition()
         self.in_flight_usd = Decimal(0)
         self.searches_in_flight: dict[str, int] = {}
         self.attempt = 0
@@ -537,20 +621,21 @@ class _Runner:
             async with asyncio.timeout(self.deadline_s):
                 await self.steps_all()
         except Stopped:
+            await self._release_running()
             return await self._current_status()
         except ClaudeStepError as exc:
             if exc.is_key_failure:
                 await self._report_key(exc.code)
-            await self.fail(exc.code, exc.params)
-            return "failed"
+            status = await self.fail(exc.code, exc.params)
+            if exc.code in LIMIT_REFUSALS and self.key_source == "admin":
+                await self._limit_notices()
+            return status
         except AppError as exc:
-            await self.fail(exc.code, exc.params)
-            return "failed"
+            return await self.fail(exc.code, exc.params)
         except TimeoutError:
             # Общий предел анализа: прерванные вызовы уже учтены (app/agent/calls.py)
             log.warning("analysis.deadline", analysis_id=self.analysis_id)
-            await self.fail("ai.timeout", {})
-            return "failed"
+            return await self.fail("ai.timeout", {})
         except asyncio.CancelledError:
             # Задачу сняли (остановка воркера, предел arq): failed сразу, не ждать уборщика
             try:
@@ -560,8 +645,7 @@ class _Runner:
             raise
         except Exception:
             log.exception("analysis.crashed", analysis_id=self.analysis_id)
-            await self.fail("common.internal", {})
-            return "failed"
+            return await self.fail("common.internal", {})
         finally:
             await self.release_all_searches()
         return "done"
@@ -578,6 +662,26 @@ class _Runner:
         await self.set_status("composing")
         await self.compose()
 
+    async def _release_running(self) -> None:
+        """Задача остановилась (отмена): все ее вызовы закончены, а шаги, которые так и не
+        дошли до вызова, остались «в работе». Они снова ждут — иначе «Продолжить» считал
+        бы, что вызов еще идет (start_run отвечает 409, пока в отмененном анализе идет
+        шаг Claude)."""
+        async with self.lock:
+            changed = False
+            for number, step in enumerate(self.steps):
+                if step.state == "running":
+                    self.steps[number] = step.model_copy(
+                        update={"state": "pending", "detail_key": None, "detail_params": {}}
+                    )
+                    changed = True
+            if not changed:
+                return
+            try:
+                await self._save(finishing=True)
+            except Stopped:
+                return
+
     async def _current_status(self) -> str:
         async with self.maker() as db:
             status = await db.scalar(select(Analysis.status).where(Analysis.id == self.analysis_id))
@@ -588,35 +692,48 @@ class _Runner:
             await report_key_failure(db, self.key_source, self.user_id, code)
             await db.commit()
 
-    async def fail(self, code: str, params: dict[str, Any]) -> None:
-        """failed с кодом ошибки и шагом; резерв снимается."""
-        step_kind: str | None = None
-        if self.current is not None and self.steps:
-            index = self.current
-            step_kind = self.steps[index].kind
-            if self.steps[index].state == "running":
-                self.steps[index] = self.steps[index].model_copy(
-                    update={
-                        "state": "failed",
-                        "detail_key": f"errors.{code}",
-                        "detail_params": dict(params),
-                    }
-                )
+    async def _limit_notices(self) -> None:
+        """Остановка по лимиту месяца или бюджету: порог 100% мог пройти без вызова
+        (лимит снизили посреди анализа) — предупреждения о расходе."""
+        try:
+            async with self.maker() as db:
+                await after_run_notifications(db, self.user_id)
+                await db.commit()
+        except Exception:
+            log.warning("analysis.limit_notices_failed", analysis_id=self.analysis_id)
+
+    async def fail(self, code: str, params: dict[str, Any]) -> str:
+        """failed с кодом ошибки и шагом; резерв снимается. Анализ уже не в работе
+        (отменен, перезапущен) — его не трогаем, только шаги этой задачи, оставшиеся «в
+        работе», снова ждут (_release_running). Возвращает статус анализа."""
+        step_kind = self.steps[self.current].kind if self.current is not None else None
         safe_params = {key: str(value_) for key, value_ in params.items()}
         async with self.maker() as db:
             analysis = await db.get(Analysis, self.analysis_id, with_for_update=True)
-            if analysis is None or not self.owns(analysis):
-                return
-            analysis.status = "failed"
-            analysis.error_code = code[:64]
-            analysis.error_params = safe_params
-            analysis.failed_step = step_kind
-            analysis.finished_at = utcnow()
-            analysis.checkpoint = self._checkpoint_json()
-            await release_reservation(db, analysis)
-            await db.commit()
+            stopped = analysis is None or not self.owns(analysis)
+            if analysis is not None and not stopped:
+                if self.current is not None and self.steps[self.current].state == "running":
+                    self.steps[self.current] = self.steps[self.current].model_copy(
+                        update={
+                            "state": "failed",
+                            "detail_key": f"errors.{code}",
+                            "detail_params": dict(params),
+                        }
+                    )
+                analysis.status = "failed"
+                analysis.error_code = code[:64]
+                analysis.error_params = safe_params
+                analysis.failed_step = step_kind
+                analysis.finished_at = utcnow()
+                analysis.checkpoint = self._checkpoint_json()
+                await release_reservation(db, analysis)
+                await db.commit()
+        if stopped:
+            await self._release_running()
+            return await self._current_status()
         self.status = "failed"
         await self._publish_failed(code, safe_params, step_kind)
+        return "failed"
 
     async def _publish_failed(
         self, code: str, params: dict[str, Any], step_kind: str | None
@@ -783,7 +900,21 @@ class _Runner:
                 # иначе 12 часов никто не искал бы новости этих игроков
                 codes = ", ".join(sorted(set(outcome.search_errors))) or "no_search"
                 return self._news_failed(event, entry, codes)
-            await self._save_news(outcome, [player.id for player in stale])
+            checked = [player.id for player in stale]
+            if outcome.misplaced:
+                # Часть ответа — под номером игрока не из запроса: чьи это факты, неизвестно.
+                # Проверенными считаются только игроки, о которых модель ответила под их
+                # номером, остальных поищет следующий анализ
+                log.warning(
+                    "analysis.news_misplaced",
+                    analysis_id=self.analysis_id,
+                    match_id=event.match_id,
+                    groups=outcome.misplaced,
+                )
+                checked = [pid for pid in checked if pid in outcome.reported]
+            if not checked:
+                return self._news_failed(event, entry, "bad_player")
+            await self._save_news(outcome, checked)
         finally:
             await self._unlock_news(tokens)
         entry["news"] = "done"
@@ -822,9 +953,16 @@ class _Runner:
         self, index: int, event: ConfirmedEvent, stale: Sequence[Player], max_uses: int
     ) -> NewsOutcome:
         names = await self._match_label(event)
+        # Номер — место игрока в матче, как в строке «Матч» запроса: если новости нужны
+        # только второму игроку, он остается номером 2 (иначе модель путала номера, и
+        # факты уходили не тому игроку или пропадали)
         targets = [
-            NewsTarget(position=cast(Any, number), player_id=player.id, name=player.name)
-            for number, player in enumerate(stale, start=1)
+            NewsTarget(
+                position=1 if player.id == event.player1_id else 2,
+                player_id=player.id,
+                name=player.name,
+            )
+            for player in stale
         ]
         key = await self.key()
         client = client_for(key, timeout=float(self.config.news_timeout_s))
@@ -839,6 +977,9 @@ class _Runner:
         )
 
     async def _match_label(self, event: ConfirmedEvent) -> str:
+        """Строка «Матч: …» запроса новостей: игроки и турнир из базы, покрытие и раунд
+        из списков. Название турнира из ввода участника сюда не идет (archive_tournament):
+        свободный текст с переводами строк подменял список игроков запроса."""
         async with self.maker() as db:
             rows = await db.execute(
                 select(Player.id, Player.name).where(
@@ -846,8 +987,9 @@ class _Runner:
                 )
             )
             names = {pid: name for pid, name in rows}
+            tour, _ = await archive_tournament(db, event.tournament_id)
         label = f"{names.get(event.player1_id, '?')} vs {names.get(event.player2_id, '?')}"
-        extra = [part for part in (event.tournament_name, event.surface, event.round) if part]
+        extra = [part for part in (tour, event.surface, event.round) if part]
         return label + (", " + ", ".join(extra) if extra else "")
 
     async def _lock_news(self, player_ids: Sequence[int]) -> dict[str, str]:

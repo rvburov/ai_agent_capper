@@ -3,7 +3,10 @@
 
 Каждый факт обязан ссылаться на адрес из результатов поиска этого разговора: факты с
 другими адресами отбрасываются. Ошибка поиска приходит блоком web_search_tool_result с
-error_code (ответ 200) — она попадает в итог, анализ идет дальше. pause_turn — продолжение
+error_code (ответ 200) — она попадает в итог, анализ идет дальше; max_uses_exceeded
+(попытка сверх разрешенных поисков) сбоем не считается. Сколько поисков разрешено, модель
+видит в сообщении. Номер игрока в запросе — его место в матче (1 или 2), даже когда
+новости нужны только второму. pause_turn — продолжение
 тем же разговором (ответ ассистента как есть, те же tools), не больше
 news_max_pause_continuations раз. Модель закончила без record_news — одна просьба
 вызвать его. Принудительный tool_choice на Sonnet 5.5 дает 400, поэтому только так.
@@ -22,6 +25,7 @@ from functools import partial
 from typing import Any, Literal
 
 import anthropic
+import structlog
 from anthropic.types import Message, MessageParam, ToolUnionParam
 from pydantic import ValidationError
 
@@ -31,6 +35,8 @@ from app.agent.errors import ClaudeStepError
 from app.agent.prompts import NEWS_PROMPT, NEWS_REQUEST, NEWS_RETRY, load_prompt
 from app.agent.runs import Usage
 from app.agent.schemas import NEWS_SCHEMA_VERSION, NewsItem, NewsReport, news_schema
+
+log = structlog.get_logger(__name__)
 
 KIND = "news"
 RECORD_TOOL = "record_news"
@@ -49,7 +55,8 @@ ITEMS_PER_PLAYER = 5
 
 @dataclass(frozen=True)
 class NewsTarget:
-    """Игрок, о котором ищем: номер в запросе (1 или 2), id и имя латиницей."""
+    """Игрок, о котором ищем: номер — его место в матче (1 или 2, как в строке «Матч»
+    запроса, даже если в списке он один), id и имя латиницей."""
 
     position: Literal[1, 2]
     player_id: int
@@ -74,7 +81,9 @@ class NewsOutcome:
     """Итог шага: факты, число поисков, коды ошибок поиска, сколько фактов отброшено,
     id последней строки agent_runs и usage всех вызовов. searched — хотя бы один поиск
     вернул результаты (пусть пустые): без этого новости не проверены, даже если модель
-    вызвала record_news."""
+    вызвала record_news. limited — попытки поиска сверх max_uses (не сбой: разрешенные
+    поиски прошли). misplaced — группы record_news с номером игрока не из запроса,
+    reported — id игроков, о которых модель ответила (с фактами или без)."""
 
     facts: list[NewsFact]
     searches: int
@@ -83,6 +92,9 @@ class NewsOutcome:
     agent_run_id: int | None
     usage: Usage
     searched: bool
+    limited: int = 0
+    misplaced: int = 0
+    reported: frozenset[int] = frozenset()
 
 
 def _tools(config: AgentConfig, max_uses: int) -> list[ToolUnionParam]:
@@ -121,8 +133,14 @@ def _read(message: Message) -> tuple[NewsReport | None, str | None]:
         raise ClaudeStepError("ai.bad_output", detail="schema") from None
 
 
-def _search_results(message: Message, urls: set[str], errors: list[str]) -> int:
-    """Адреса и коды ошибок поиска из ответа; возвращает число удачных поисков."""
+# Модель попробовала искать сверх max_uses: разрешенные поиски прошли, это не сбой поиска
+# (иначе участник видел бы «часть поисков не удалась»), а только запись в лог
+MAX_USES_EXCEEDED = "max_uses_exceeded"
+
+
+def _search_results(message: Message, urls: set[str], errors: list[str], limited: list[str]) -> int:
+    """Адреса и коды ошибок поиска из ответа; возвращает число удачных поисков. Попытки
+    сверх max_uses — в limited, остальные ошибки — в errors."""
     done = 0
     for block in message.content:
         if block.type != "web_search_tool_result":
@@ -131,6 +149,8 @@ def _search_results(message: Message, urls: set[str], errors: list[str]) -> int:
         if isinstance(content, list):
             done += 1
             urls.update(item.url for item in content)
+        elif str(content.error_code) == MAX_USES_EXCEEDED:
+            limited.append(MAX_USES_EXCEEDED)
         else:
             errors.append(str(content.error_code))
     return done
@@ -185,18 +205,32 @@ def _fact(
     )
 
 
+@dataclass(frozen=True)
+class _Facts:
+    facts: list[NewsFact]
+    dropped: int
+    misplaced: int
+    reported: frozenset[int]
+
+
 def _facts(
     report: NewsReport, targets: Sequence[NewsTarget], *, urls: set[str], since: date, today: date
-) -> tuple[list[NewsFact], int]:
+) -> _Facts:
+    """Проверенные факты. Группа с номером игрока не из запроса отбрасывается целиком:
+    чей это факт, неизвестно (misplaced), а игрок такой группы не считается проверенным."""
     by_position = {target.position: target for target in targets}
     facts: list[NewsFact] = []
     dropped = 0
+    misplaced = 0
+    reported: set[int] = set()
     seen: set[tuple[int, str]] = set()
     for group in report.players:
         target = by_position.get(group.player)
         if target is None:
             dropped += len(group.items)
+            misplaced += 1
             continue
+        reported.add(target.player_id)
         kept = 0
         for item in group.items:
             fact = _fact(item, target, urls=urls, since=since, today=today)
@@ -207,7 +241,7 @@ def _facts(
             seen.add(key)
             facts.append(fact)
             kept += 1
-    return facts, dropped
+    return _Facts(facts, dropped, misplaced, frozenset(reported))
 
 
 async def fetch_news(
@@ -230,6 +264,7 @@ async def fetch_news(
         days=config.news_lookback_days,
         match=match_label,
         players="\n".join(f"{target.position}. {target.name}" for target in targets),
+        max_uses=max_uses,
     )
     system: list[Any] = [
         {"type": "text", "text": prompt.text, "cache_control": {"type": "ephemeral"}}
@@ -238,6 +273,7 @@ async def fetch_news(
     messages: list[MessageParam] = [{"role": "user", "content": user_text}]
     urls: set[str] = set()
     errors: list[str] = []
+    limited: list[str] = []
     searched = 0
     total = Usage()
     run_id: int | None = None
@@ -283,18 +319,23 @@ async def fetch_news(
         total = total + result.usage
         previous = result.usage
         run_id = result.agent_run_id
-        searched += _search_results(message, urls, errors)
+        searched += _search_results(message, urls, errors, limited)
         report = result.value
         if report is not None:
-            facts, dropped = _facts(report, targets, urls=urls, since=since, today=today)
+            found = _facts(report, targets, urls=urls, since=since, today=today)
+            if limited:
+                log.info("news.max_uses_exceeded", attempts=len(limited), max_uses=max_uses)
             return NewsOutcome(
-                facts=facts,
+                facts=found.facts,
                 searches=total.web_searches,
                 search_errors=tuple(errors),
-                dropped=dropped,
+                dropped=found.dropped,
                 agent_run_id=run_id,
                 usage=total,
                 searched=searched > 0,
+                limited=len(limited),
+                misplaced=found.misplaced,
+                reported=found.reported,
             )
         if message.stop_reason == "pause_turn":
             if continuations >= config.news_max_pause_continuations:

@@ -92,6 +92,9 @@ class AgentConfig(BaseModel):
     analysis_model: ModelId = "claude-opus-5-5"
     analysis_effort: Effort = "medium"
     analysis_max_tokens: int = Field(default=16000, ge=1024, le=128000)
+    # Меньше этого max_tokens вызов оценки не урезается, когда остатка потолка или лимита
+    # не хватает на весь analysis_max_tokens (app/services/ai_access.py, fit_call)
+    analysis_min_tokens: int = Field(default=6000, ge=1024, le=128000)
     analysis_stream_timeout_s: int = Field(default=120, ge=10, le=600)
     analysis_step_timeout_s: int = Field(default=300, ge=30, le=900)
     analysis_max_iterations: int = Field(default=3, ge=1, le=5)

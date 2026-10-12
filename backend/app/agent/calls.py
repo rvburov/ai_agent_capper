@@ -54,9 +54,18 @@ class StepHooks(Protocol):
     """Связь шага с сервисом: разрешение на вызов и учет."""
 
     async def before_call(
-        self, *, kind: str, model: str, input_tokens: int, max_tokens: int, searches: int
-    ) -> None:
-        """Перед вызовом: худший случай укладывается в лимиты, иначе ClaudeStepError."""
+        self,
+        *,
+        kind: str,
+        model: str,
+        input_tokens: int,
+        max_tokens: int,
+        min_tokens: int,
+        searches: int,
+    ) -> int | None:
+        """Перед вызовом: худший случай укладывается в лимиты, иначе ClaudeStepError.
+        Может урезать max_tokens, но не ниже min_tokens: возвращает max_tokens вызова
+        (None — как просили)."""
         ...
 
     async def after_call(self, info: CallInfo) -> int | None:
@@ -76,6 +85,8 @@ class CallSpec:
     input_tokens: int
     max_tokens: int
     searches: int = 0
+    # Ниже этого max_tokens урезать нельзя (None — не урезать вовсе)
+    min_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -102,7 +113,11 @@ class CallTrace:
     usage: Usage | None = None
 
 
-Send = Callable[[CallTrace], Awaitable[Message]]
+class Send(Protocol):
+    """Отправка запроса: trace заполняется по ходу, overrides меняют параметры запроса
+    (max_tokens, урезанный проверкой лимитов)."""
+
+    def __call__(self, trace: CallTrace, /, **overrides: Any) -> Awaitable[Message]: ...
 
 
 def _request_id(message: Message) -> str | None:
@@ -123,13 +138,17 @@ async def call[T](
     read разбирает ответ до записи учета: его ClaudeStepError (ответ не по схеме) и
     метка (второе значение, например «checks» — ответ не прошел проверки кода) попадают
     в agent_runs.error."""
-    await hooks.before_call(
+    granted = await hooks.before_call(
         kind=spec.kind,
         model=spec.model,
         input_tokens=spec.input_tokens,
         max_tokens=spec.max_tokens,
+        min_tokens=spec.min_tokens if spec.min_tokens is not None else spec.max_tokens,
         searches=spec.searches,
     )
+    overrides: dict[str, Any] = {}
+    if granted is not None and granted != spec.max_tokens:
+        overrides["max_tokens"] = granted
     started = time.monotonic()
 
     def info(
@@ -152,7 +171,7 @@ async def call[T](
     try:
         with claude_errors():
             async with asyncio.timeout(timeout_s):
-                message = await send(trace)
+                message = await send(trace, **overrides)
     except ClaudeStepError as exc:
         await hooks.after_call(
             info(trace.usage or Usage(), None, exc.detail, exc.request_id or trace.request_id)

@@ -13,7 +13,13 @@ from app.schemas.analyses import DecimalOut, Market
 
 OddsTakenIn = Annotated[Decimal, Field(gt=0, max_digits=6, decimal_places=3)]
 StakeIn = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=2)]
-BookmakerIn = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+# Одна строка без управляющих символов (NUL дал бы 500 из PostgreSQL)
+BookmakerIn = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=64, pattern=r"^[^\x00-\x1f\x7f]*$"
+    ),
+]
 # Ключ идемпотентности от фронтенда: повтор с тем же ключом вернет ту же ставку
 ClientRef = Annotated[
     str, StringConstraints(strip_whitespace=True, pattern=r"^[A-Za-z0-9_-]{8,64}$")

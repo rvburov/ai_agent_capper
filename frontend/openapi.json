@@ -1727,7 +1727,7 @@
           "ai"
         ],
         "summary": "Save Own Key",
-        "description": "Свой ключ: проверяется запросами к Claude API (список моделей и доступ к моделям\nиз настроек), сохраняется только проверенный, режим становится own. Не прошел —\n400 ai.key_format / ai.key_rejected / ai.key_models, 502 ai.key_check_failed,\n503 ai.key_unavailable. Администратору — 409 ai.admin_key_only.",
+        "description": "Свой ключ: проверяется запросами к Claude API (список моделей и доступ к моделям\nиз настроек), сохраняется только проверенный, режим становится own. Не прошел —\n400 ai.key_format / ai.key_rejected / ai.key_models, 502 ai.key_check_failed,\n503 ai.key_unavailable. Администратору — 409 ai.admin_key_only. Проверок ключа не\nбольше 10 в час на участника и на IP — иначе 429 common.rate_limited.",
         "operationId": "save_own_key_api_me_ai_key_put",
         "requestBody": {
           "content": {
@@ -1799,7 +1799,7 @@
           "ai"
         ],
         "summary": "Check Own Key",
-        "description": "Проверяет сохраненный ключ и записывает итог. Нет ключа — 404 ai.no_own_key,\nнет связи с Anthropic — 503 ai.key_unavailable.",
+        "description": "Проверяет сохраненный ключ и записывает итог. Нет ключа — 404 ai.no_own_key,\nнет связи с Anthropic — 503 ai.key_unavailable, больше 10 проверок в час — 429\ncommon.rate_limited.",
         "operationId": "check_own_key_api_me_ai_key_check_post",
         "responses": {
           "200": {
@@ -2679,7 +2679,7 @@
           "analyses"
         ],
         "summary": "Analysis Events",
-        "description": "Ход анализа: снимок из базы, затем события шагов; конец — done, failed,\ncancelled. Анализ не в работе — только снимок. Heartbeat раз в 15 с, retry 3 с.",
+        "description": "Ход анализа: снимок из базы, затем события шагов; конец — done, failed,\ncancelled. Анализ не в работе — только снимок. Heartbeat раз в 15 с, retry 3 с. Больше\n5 потоков анализов в работе у участника одновременно — 429 common.rate_limited.",
         "operationId": "analysis_events_api_analyses__analysis_id__events_get",
         "parameters": [
           {
@@ -2862,6 +2862,7 @@
             "schema": {
               "type": "string",
               "maxLength": 200,
+              "pattern": "^[^\\x00]*$",
               "title": "Q"
             }
           },
@@ -4051,6 +4052,17 @@
               }
             ],
             "title": "Strategy Version"
+          },
+          "restart": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RestartOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Только у остановленного анализа (failed, cancelled) с событиями"
           }
         },
         "type": "object",
@@ -4077,7 +4089,8 @@
           "cost_usd",
           "bank",
           "bookmaker",
-          "strategy_version"
+          "strategy_version",
+          "restart"
         ],
         "title": "AnalysisOut"
       },
@@ -4363,6 +4376,7 @@
             "type": "string",
             "maxLength": 64,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
             "title": "Bookmaker"
           },
           "legs": {
@@ -4757,7 +4771,8 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 64
+                "maxLength": 64,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$"
               },
               {
                 "type": "null"
@@ -5446,7 +5461,8 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 200
+                "maxLength": 200,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$"
               },
               {
                 "type": "null"
@@ -5489,6 +5505,7 @@
           "round": {
             "type": "string",
             "maxLength": 16,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
             "title": "Round",
             "default": ""
           },
@@ -5499,7 +5516,8 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 64
+                "maxLength": 64,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$"
               },
               {
                 "type": "null"
@@ -8192,6 +8210,51 @@
           "new_password"
         ],
         "title": "ResetIn"
+      },
+      "RestartOut": {
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "title": "Allowed"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "reason_params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Reason Params"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "allowed",
+          "reason_code",
+          "reason_params",
+          "retry_at"
+        ],
+        "title": "RestartOut",
+        "description": "Можно ли сейчас перезапустить остановленный анализ: та же проверка, что при запуске,\nбез резерва. reason_code — почему нет (ключ errors.<код> и reason_params);\nanalysis.step_running — шаг, начатый до отмены, еще идет: retry_at — не позже чего он\nзакончится."
       },
       "ResultOut": {
         "properties": {

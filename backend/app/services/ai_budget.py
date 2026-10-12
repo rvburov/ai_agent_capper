@@ -24,11 +24,14 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anthropic
+from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.config import default_per_analysis, load_agent_config
 from app.core.errors import AppError
+from app.core.ratelimit import RateRule, hit_ip_limit
+from app.core.redis import redis_key
 from app.db.models import DEFAULT_TZ, AgentRun, AiLimit, Analysis, AppSettings, User, UserSecret
 from app.schemas.admin import LimitOut
 from app.schemas.ai import (
@@ -56,6 +59,10 @@ from app.services.claude_key import SECRET_KIND, KeyCheck, check_anthropic_key, 
 from app.services.sessions import utcnow
 
 AVG_STEP = Decimal("0.0001")
+# Проверок своего ключа (сохранение и «Проверить») в час на участника и на IP
+KEY_CHECKS = 10
+KEY_CHECK_WINDOW_SECONDS = 3600
+KEY_CHECK_IP_RULE = RateRule("ai_key_check", KEY_CHECKS, KEY_CHECK_WINDOW_SECONDS)
 # Самый восточный пояс опережает UTC на 14 ч: анализы «сегодня» любого пояса — за 2 суток
 _TODAY_WINDOW = timedelta(days=2)
 
@@ -154,28 +161,53 @@ def own_key_out(status: ai_keys.OwnKeyStatus, check: KeyCheckResult | None = Non
     )
 
 
+async def hit_key_check_limit(redis: Redis, user_id: int, ip: str) -> None:
+    """Проверка ключа — 4 запроса к Anthropic с адреса сервера (список моделей и три
+    модели): не больше KEY_CHECKS в час на участника и на IP. Иначе сервер становится
+    проверяльщиком чужих ключей, а поток запросов идет с его адреса. Сверх — 429
+    common.rate_limited с retry_after."""
+    wait = await hit_ip_limit(redis, ip, KEY_CHECK_IP_RULE)
+    key = redis_key("rl", "ai_key_check", user_id)
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.incr(key)
+        pipe.expire(key, KEY_CHECK_WINDOW_SECONDS, nx=True)
+        count = int((await pipe.execute())[0])
+    if count > KEY_CHECKS:
+        wait = max(wait, int(await redis.ttl(key)), 1)
+    if wait:
+        raise AppError(429, "common.rate_limited", retry_after=wait)
+
+
 async def save_own_key(
     db: AsyncSession,
+    redis: Redis,
     user: User,
     key: str,
     *,
+    ip: str,
     http_client: anthropic.DefaultAsyncHttpxClient | None = None,
 ) -> OwnKeyOut:
     """Свой ключ участника: сохраняется только проверенный, режим становится own (Р7).
     Не прошел проверку — AppError (ai.key_format, ai.key_rejected, ai.key_models,
-    ai.key_check_failed, ai.key_unavailable), ничего не сохраняется."""
+    ai.key_check_failed, ai.key_unavailable), ничего не сохраняется. Проверок ключа — не
+    больше KEY_CHECKS в час (429 common.rate_limited)."""
     _member_only(user)
+    await hit_key_check_limit(redis, user.id, ip)
     status = await ai_keys.save_own_key(db, user, key, http_client=http_client)
     return own_key_out(status, "ok")
 
 
 async def check_own_key(
     db: AsyncSession,
+    redis: Redis,
     user: User,
     *,
+    ip: str,
     http_client: anthropic.DefaultAsyncHttpxClient | None = None,
 ) -> OwnKeyOut:
-    """Кнопка «Проверить»: итог пишется к ключу (verified_at или last_error)."""
+    """Кнопка «Проверить»: итог пишется к ключу (verified_at или last_error). Проверок
+    ключа — не больше KEY_CHECKS в час (429 common.rate_limited)."""
+    await hit_key_check_limit(redis, user.id, ip)
     status = await ai_keys.check_own_key(db, user, http_client=http_client)
     return own_key_out(status, _check_result(status))
 

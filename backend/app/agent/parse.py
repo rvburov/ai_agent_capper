@@ -5,6 +5,8 @@
 поиск игроков и турниров — дело кода (app/services/analysis_input.py).
 """
 
+from functools import partial
+
 import anthropic
 
 from app.agent.calls import CallSpec, StepHooks, call, create, estimate_tokens
@@ -33,9 +35,9 @@ async def parse_text(
     result = await call(
         hooks,
         spec,
-        lambda trace: create(
+        partial(
+            create,
             client,
-            trace,
             model=config.parse_model,
             max_tokens=config.parse_max_tokens,
             system=[{"type": "text", "text": prompt.text}],

@@ -15,7 +15,8 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.db.models import AgentRun, Analysis
+from app.core.errors import AppError
+from app.db.models import AgentRun, Analysis, User
 from app.db.session import create_sessionmaker
 from app.services import analyses as analyses_service
 from app.services.analysis_run import execute, reap_stuck
@@ -141,6 +142,10 @@ async def test_parallel_calls_stay_under_analysis_cap(
     # расход не выходит за потолок (раньше оба проходили и сумма была $1,03 при $0,80)
     assert analysis.error_code == "ai.analysis_cap"
     assert total <= cap and analysis.cost_usd <= cap
+    # need — до скольких мог стоить вызов, которому не хватило места (текст на экране)
+    params = analysis.error_params or {}
+    assert params["cap"] == "0,80"
+    assert total + Decimal(params["need"].replace(",", ".")) > cap
     assert len([row for row in runs if row.kind == "analysis"]) == 2
     assert analysis.budget_reserved_usd == 0
 
@@ -239,17 +244,22 @@ async def test_daily_search_limit_with_parallel_analyses(
 # --- перезапуск при живой задаче старого запуска ---
 
 
-async def test_old_job_stops_after_cancel_and_restart(
+async def test_continue_waits_for_call_of_cancelled_attempt(
     db: AsyncSession,
     engine: AsyncEngine,
     redis: Redis,
     make_user: UserFactory,
     world: dict[str, int],
 ) -> None:
+    """«Отменить» во время вызова Opus и сразу «Продолжить»: пока вызов старого запуска
+    идет, продолжение отвечает 409 analysis.step_running. Раньше новый запуск покупал
+    оценку того же матча второй раз (3 вызова на 2 матча), а расход старого вызова не
+    попадал в шаги: экран показывал меньше, чем списано."""
     fake = FakeClaude()
-    gates = Gates(1, 3)
+    gates = Gates(1)
     with _claude(fake, gates):
         member = await make_user()
+        member_id = member.id
         analysis_id = await make_analysis(
             db, redis, member.user, world, ("sinner", "rune"), ("djokovic", "rublev")
         )
@@ -257,33 +267,137 @@ async def test_old_job_stops_after_cancel_and_restart(
         old = asyncio.create_task(execute(analysis_id, maker, redis, attempt=1))
         await gates.event(gates.entered, 1).wait()  # старая задача ждет ответа по матчу 1
         await analyses_service.cancel(db, redis, member.user, analysis_id)
+        # Экран узнает об этом из поля restart и ждет не дольше retry_at
+        state = await analyses_service.restart_state(
+            db, member.user, await _analysis(db, analysis_id)
+        )
+        assert state is not None and state.reason_code == "analysis.step_running"
+        assert not state.allowed and state.retry_at is not None and state.retry_at > utcnow()
+        with pytest.raises(AppError) as running:
+            await analyses_service.start_run(
+                db, redis, member.user, analysis_id, None, enqueue=_no_queue
+            )
+        assert (running.value.status_code, running.value.code) == (409, "analysis.step_running")
+        await db.rollback()
+        gates.event(gates.released, 1).set()  # старый вызов доработал и записан в шаг
+        assert await asyncio.wait_for(old, 10) == "cancelled"
+        state = await analyses_service.restart_state(
+            db, await db.get_one(User, member_id), await _analysis(db, analysis_id)
+        )
+        assert state is not None and state.allowed and state.retry_at is None
         again = await analyses_service.start_run(
-            db, redis, member.user, analysis_id, None, enqueue=_no_queue
+            db, redis, await db.get_one(User, member_id), analysis_id, None, enqueue=_no_queue
         )
         assert again.attempt == 2
-        new = asyncio.create_task(execute(analysis_id, maker, redis, attempt=2))
-        await gates.event(gates.entered, 3).wait()  # новая: матч 1 готов, ждет матч 2
-        gates.event(gates.released, 1).set()  # старая получила ответ
-        old_status = await asyncio.wait_for(old, 10)
-        gates.event(gates.released, 3).set()
-        new_status = await asyncio.wait_for(new, 10)
-    # Старая задача учла свой вызов и остановилась: ни новых вызовов, ни записи статуса
-    assert old_status == "llm_review" and new_status == "done"
-    assert len(fake.calls("analysis")) == 3
-    assert len(await _runs(db, analysis_id, "analysis")) == 3
+        assert await execute(analysis_id, maker, redis, attempt=2) == "done"
+    # Одна оценка на матч, и сумма шагов (итог на экране) равна списанному
+    assert len(fake.calls("analysis")) == 2
+    assert len(await _runs(db, analysis_id, "analysis")) == 2
     analysis = await _analysis(db, analysis_id)
     assert analysis.status == "done" and analysis.attempt == 2
+    steps_total = sum(Decimal(str(step["cost_usd"])) for step in analysis.checkpoint["steps"])
+    assert steps_total == analysis.cost_usd
+    assert analysis.result is not None
+    assert Decimal(str(analysis.result["costs"]["cost_usd"])) == analysis.cost_usd
 
 
-async def test_old_job_failure_does_not_fail_new_attempt(
+async def test_waiting_call_after_cancel_does_not_block_continue(
     db: AsyncSession,
     engine: AsyncEngine,
     redis: Redis,
     make_user: UserFactory,
     world: dict[str, int],
 ) -> None:
+    """Вызов, который ждал места в потолке (свои вызовы в полете), после отмены так и не
+    начался: его шаг снова ждет, и «Продолжить» доступно сразу, как только доработал
+    идущий вызов. Иначе шаг «в работе» держал бы 409 analysis.step_running до 5 минут."""
     fake = FakeClaude()
-    gates = Gates(1, 2)
+    gates = Gates(2)
+    with _claude(fake, gates):
+        member = await make_user()
+        analysis_id = await make_analysis(
+            db,
+            redis,
+            member.user,
+            world,
+            ("sinner", "rune"),
+            ("djokovic", "rublev"),
+            ("alcaraz", "medvedev"),
+        )
+        # Второй и третий вызовы Opus по худшему случаю ($0,355) вместе не помещаются
+        await db.execute(
+            update(Analysis).where(Analysis.id == analysis_id).values(cost_cap_usd=Decimal("0.75"))
+        )
+        await db.commit()
+        maker = create_sessionmaker(engine)
+        old = asyncio.create_task(execute(analysis_id, maker, redis, attempt=1))
+        await gates.event(gates.entered, 2).wait()  # матч 2 в вызове, матч 3 ждет места
+        await asyncio.sleep(0.2)
+        analysis = await _analysis(db, analysis_id)
+        claude = [step for step in analysis.checkpoint["steps"] if step["kind"] == "claude"]
+        assert sorted(step["state"] for step in claude) == ["done", "running", "running"]
+        assert gates.count == 2
+        await analyses_service.cancel(db, redis, member.user, analysis_id)
+        gates.event(gates.released, 2).set()
+        assert await asyncio.wait_for(old, 10) == "cancelled"
+        analysis = await _analysis(db, analysis_id)
+        claude = [step for step in analysis.checkpoint["steps"] if step["kind"] == "claude"]
+        assert sorted(step["state"] for step in claude) == ["done", "done", "pending"]
+        await analyses_service.start_run(
+            db, redis, member.user, analysis_id, None, enqueue=_no_queue
+        )
+        assert await execute(analysis_id, maker, redis, attempt=2) == "done"
+    assert len(fake.calls("analysis")) == 3
+
+
+async def test_stale_running_step_does_not_block_continue(
+    db: AsyncSession, redis: Redis, make_user: UserFactory, world: dict[str, int]
+) -> None:
+    """Воркер умер посреди шага отмененного анализа: шаг «в работе» не держит анализ
+    дольше предела шага."""
+    member = await make_user()
+    member_id = member.id
+    analysis_id = await make_analysis(db, redis, member.user, world, ("sinner", "rune"))
+    analysis = await _analysis(db, analysis_id)
+    steps = [
+        {**step, "state": "running"} if step["kind"] == "claude" else step
+        for step in analysis.checkpoint["steps"]
+    ]
+    await db.execute(
+        update(Analysis)
+        .where(Analysis.id == analysis_id)
+        .values(status="cancelled", checkpoint={**analysis.checkpoint, "steps": steps})
+    )
+    await db.commit()
+    with pytest.raises(AppError) as running:
+        await analyses_service.start_run(
+            db, redis, member.user, analysis_id, None, enqueue=_no_queue
+        )
+    assert running.value.code == "analysis.step_running"
+    await db.rollback()
+    await db.execute(
+        update(Analysis)
+        .where(Analysis.id == analysis_id)
+        .values(updated_at=utcnow() - timedelta(minutes=6))
+    )
+    await db.commit()
+    again = await analyses_service.start_run(
+        db, redis, await db.get_one(User, member_id), analysis_id, None, enqueue=_no_queue
+    )
+    assert again.status == "queued"
+
+
+async def test_old_job_failure_after_cancel_does_not_block_continue(
+    db: AsyncSession,
+    engine: AsyncEngine,
+    redis: Redis,
+    make_user: UserFactory,
+    world: dict[str, int],
+) -> None:
+    """Вызов отмененного анализа упал (529): анализ остается отмененным, шаг снова ждет,
+    и «Продолжить» сразу запускает новую попытку, которая доходит до конца."""
+    fake = FakeClaude()
+    gates = Gates(1)
     with _claude(fake, gates):
         member = await make_user()
         analysis_id = await make_analysis(db, redis, member.user, world, ("sinner", "rune"))
@@ -292,15 +406,19 @@ async def test_old_job_failure_does_not_fail_new_attempt(
         old = asyncio.create_task(execute(analysis_id, maker, redis, attempt=1))
         await gates.event(gates.entered, 1).wait()
         await analyses_service.cancel(db, redis, member.user, analysis_id)
+        gates.event(gates.released, 1).set()  # старой задаче — 529
+        assert await asyncio.wait_for(old, 10) == "cancelled"
+        analysis = await _analysis(db, analysis_id)
+        assert analysis.status == "cancelled" and analysis.error_code is None
+        assert {step["state"] for step in analysis.checkpoint["steps"]} <= {
+            "done",
+            "skipped",
+            "pending",
+        }
         await analyses_service.start_run(
             db, redis, member.user, analysis_id, None, enqueue=_no_queue
         )
-        new = asyncio.create_task(execute(analysis_id, maker, redis, attempt=2))
-        await gates.event(gates.entered, 2).wait()
-        gates.event(gates.released, 1).set()  # старой задаче — 529
-        await asyncio.wait_for(old, 10)
-        gates.event(gates.released, 2).set()
-        assert await asyncio.wait_for(new, 10) == "done"
+        assert await asyncio.wait_for(execute(analysis_id, maker, redis, attempt=2), 10) == "done"
     analysis = await _analysis(db, analysis_id)
     assert analysis.status == "done" and analysis.error_code is None
 

@@ -211,11 +211,12 @@ async def make_analysis(
     world: dict[str, int],
     *pairs: Sequence[str],
     bank: str | None = "10000",
+    tournament: str | None = "Test Open 9",
 ) -> int:
     """Анализ из формы, запущенный (queued) без воркера. Возвращает id."""
     analysis = await analyses_service.create_form(db, user)
     body = ConfirmIn(
-        events=[event_in(world, pair[0], pair[1]) for pair in pairs],
+        events=[event_in(world, pair[0], pair[1], tournament=tournament) for pair in pairs],
         bank=Decimal(bank) if bank is not None else None,
         bookmaker="Fonbet",
     )

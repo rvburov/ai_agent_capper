@@ -10,7 +10,15 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.errors import ClaudeStepError
-from app.agent.runs import Usage, cost_usd, price_for, record_run, usage_from, worst_case_usd
+from app.agent.runs import (
+    Usage,
+    cost_usd,
+    max_tokens_within,
+    price_for,
+    record_run,
+    usage_from,
+    worst_case_usd,
+)
 from app.db.models import AgentRun, Analysis, User
 from tests.claude_mock import PRICES_FROM, price_row, seed_prices, text_message
 from tests.support import UserFactory
@@ -146,6 +154,27 @@ def test_worst_case() -> None:
     assert worst_case_usd(HAIKU, input_tokens=200_000, max_tokens=0) == Decimal("0.125000")
     # Округление вверх: худший случай не занижается
     assert worst_case_usd(HAIKU, input_tokens=1, max_tokens=0) == Decimal("0.000001")
+
+
+def test_max_tokens_within() -> None:
+    """Наибольший max_tokens, худший случай которого помещается в сумму: обратная к
+    worst_case_usd с запасом на ее округление вверх."""
+    # $0,30 − 7 тыс. × $5 = $0,265 → 13 249 токенов по $20 (запас в миллионную долю)
+    tokens = max_tokens_within(OPUS, budget_usd=Decimal("0.30"), input_tokens=7000)
+    assert tokens == 13_249
+    assert worst_case_usd(OPUS, input_tokens=7000, max_tokens=tokens) <= Decimal("0.30")
+    assert worst_case_usd(OPUS, input_tokens=7000, max_tokens=tokens + 2) > Decimal("0.30")
+    # Не помещается даже вход
+    assert max_tokens_within(OPUS, budget_usd=Decimal("0.03"), input_tokens=7000) == 0
+    # Поиски и длинный вход Haiku
+    with_search = max_tokens_within(
+        SONNET, budget_usd=Decimal("0.15"), input_tokens=15_000, searches=3
+    )
+    assert worst_case_usd(SONNET, input_tokens=15_000, max_tokens=with_search, searches=3) <= (
+        Decimal("0.15")
+    )
+    long = max_tokens_within(HAIKU, budget_usd=Decimal("0.2"), input_tokens=200_000)
+    assert worst_case_usd(HAIKU, input_tokens=200_000, max_tokens=long) <= Decimal("0.2")
 
 
 async def test_price_for_picks_current_row(db: AsyncSession) -> None:

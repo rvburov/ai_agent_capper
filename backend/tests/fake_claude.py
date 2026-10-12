@@ -15,7 +15,7 @@ POST /_fake/fail {"step": "analysis", "error": "overloaded", "times": 1} у се
 переменная окружения FAKE_CLAUDE_FAIL=analysis:overloaded[,news:search_error]. step —
 parse, news, analysis или any; error — overloaded (529), rate_limited (429),
 key_rejected (401), server (500), refusal, max_tokens, bad_json, bad_checks (ответ не
-проходит проверку кода), search_error (ошибка поиска max_uses_exceeded), no_record
+проходит проверку кода), search_error (ошибка поиска unavailable), no_record
 (новости без record_news).
 
 Запуск сервера:
@@ -393,7 +393,7 @@ class FakeClaude:
                     "tool_use_id": "srvtoolu_fake",
                     "content": {
                         "type": "web_search_tool_result_error",
-                        "error_code": "max_uses_exceeded",
+                        "error_code": "unavailable",
                     },
                 }
             )

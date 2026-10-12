@@ -129,6 +129,25 @@ def worst_case_usd(
     return total.quantize(USD_STEP, rounding=ROUND_UP)
 
 
+def max_tokens_within(
+    price: ModelPrice, *, budget_usd: Decimal, input_tokens: int, searches: int = 0
+) -> int:
+    """Наибольший max_tokens, при котором худший случай вызова (worst_case_usd) не больше
+    budget_usd. 0 — не помещается даже вход. Выход бесплатный — без предела (большое
+    число, вызывающий сам ограничит его настройкой)."""
+    per_input = max(price.input, price.cache_write_5m)
+    factor = _long_factor(price, input_tokens)
+    fixed = input_tokens * per_input / MTOK * factor + searches * price.search_price
+    per_output = price.output * factor / MTOK
+    # Запас в миллионную долю: worst_case_usd округляет сумму вверх до нее
+    rest = budget_usd - fixed - USD_STEP
+    if rest < 0:
+        return 0
+    if per_output <= 0:
+        return 10**9
+    return int(rest / per_output)
+
+
 async def price_for(db: AsyncSession, model: str, *, at: datetime | None = None) -> ModelPrice:
     """Цена модели, действующая на момент at (по умолчанию — сейчас). Нет цены —
     ClaudeStepError ai.no_price: без цены расход не посчитать, вызывать Claude нельзя."""

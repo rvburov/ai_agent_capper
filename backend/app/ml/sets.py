@@ -88,8 +88,20 @@ class Probs3:
     def markets(self) -> dict[tuple[str, int], float]:
         return market_probs(self.p1_win, self.p1_cover, self.p2_cover)
 
+    def shown(self) -> "Probs3":
+        """Числа, как их видит Claude в досье (SHOWN_DIGITS знаков): с ними сравнивается
+        его ответ (расхождение больше 8 п.п.), иначе правило промпта и проверка кода
+        расходятся на округлении."""
+        return Probs3(
+            round(self.p1_win, SHOWN_DIGITS),
+            round(self.p1_cover, SHOWN_DIGITS),
+            round(self.p2_cover, SHOWN_DIGITS),
+        )
+
 
 PROBS3_FIELDS: tuple[str, ...] = ("p1_win", "p1_cover", "p2_cover")
+# Знаков после запятой у вероятностей в досье (app/services/dossier.py)
+SHOWN_DIGITS = 3
 
 
 def base_probs(p1_win: float, best_of: int) -> Probs3:

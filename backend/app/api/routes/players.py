@@ -18,7 +18,8 @@ SUGGEST_LIMIT = 10
 async def find_players(
     user: CurrentUser,
     db: DbSession,
-    q: Annotated[str, Query(max_length=200)],
+    # NUL PostgreSQL в тексте не принимает: без проверки запрос падал бы с 500
+    q: Annotated[str, Query(max_length=200, pattern=r"^[^\x00]*$")],
     limit: Annotated[int, Query(ge=1, le=SUGGEST_LIMIT)] = SUGGEST_LIMIT,
 ) -> list[PlayerHitOut]:
     """До 10 игроков, похожих на запрос. Пустой или длинный запрос — 422

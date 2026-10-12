@@ -23,7 +23,6 @@ from app.schemas.analyses import (
 )
 from app.services import analyses as analyses_service
 from app.services import progress
-from app.services.analysis_view import analysis_out
 
 router = APIRouter(prefix="/analyses", tags=["analyses"])
 
@@ -62,7 +61,7 @@ async def create_analysis(
         analysis = await analyses_service.create_form(db, user)
     else:
         analysis = await analyses_service.create_from_text(db, redis, user, body.text or "")
-    return await analysis_out(db, analysis)
+    return await analyses_service.analysis_view(db, user, analysis)
 
 
 @router.get("")
@@ -83,7 +82,7 @@ async def list_analyses(
 @router.get("/{analysis_id}")
 async def get_analysis(analysis_id: RowId, user: CurrentUser, db: DbSession) -> AnalysisOut:
     analysis = await analyses_service.get_owned(db, user, analysis_id)
-    return await analysis_out(db, analysis)
+    return await analyses_service.analysis_view(db, user, analysis)
 
 
 @router.post("/{analysis_id}/preview")
@@ -112,7 +111,7 @@ async def run_analysis(
     analysis = await analyses_service.start_run(
         db, redis, user, analysis_id, body, enqueue=enqueue_analysis
     )
-    return await analysis_out(db, analysis)
+    return await analyses_service.analysis_view(db, user, analysis)
 
 
 @router.post("/{analysis_id}/cancel")
@@ -120,7 +119,7 @@ async def cancel_analysis(
     analysis_id: RowId, user: CurrentUser, db: DbSession, redis: RedisClient
 ) -> AnalysisOut:
     analysis = await analyses_service.cancel(db, redis, user, analysis_id)
-    return await analysis_out(db, analysis)
+    return await analyses_service.analysis_view(db, user, analysis)
 
 
 @router.put("/{analysis_id}/decision")
@@ -129,7 +128,7 @@ async def set_decision(
 ) -> AnalysisOut:
     """«Не ставить» (skip) или снять решение (null)."""
     analysis = await analyses_service.set_decision(db, user, analysis_id, body.decision)
-    return await analysis_out(db, analysis)
+    return await analyses_service.analysis_view(db, user, analysis)
 
 
 @router.get(
@@ -155,7 +154,8 @@ async def analysis_events(
     last_event_id: Annotated[str | None, Header(alias="Last-Event-ID", max_length=64)] = None,
 ) -> EventStreamResponse:
     """Ход анализа: снимок из базы, затем события шагов; конец — done, failed,
-    cancelled. Анализ не в работе — только снимок. Heartbeat раз в 15 с, retry 3 с."""
+    cancelled. Анализ не в работе — только снимок. Heartbeat раз в 15 с, retry 3 с. Больше
+    5 потоков анализов в работе у участника одновременно — 429 common.rate_limited."""
     start = await analyses_service.stream_start(db, redis, user, analysis_id)
     return EventStreamResponse(
         progress.event_stream(
@@ -166,6 +166,7 @@ async def analysis_events(
             live=start.live,
             resume_id=last_event_id,
             recheck=start.recheck,
+            on_close=start.release,
         ),
         headers=SSE_HEADERS,
     )

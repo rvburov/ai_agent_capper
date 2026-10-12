@@ -23,7 +23,7 @@ from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from typing import Any, Protocol, Self
 
 from app.core.i18n import t
-from app.ml.sets import MARKET_MINUS, MARKETS, PROBS3_FIELDS, Probs3
+from app.ml.sets import MARKET_MINUS, MARKETS, PROBS3_FIELDS, SHOWN_DIGITS, Probs3
 
 CURRENCIES: tuple[str, ...] = ("RUB", "USD", "EUR")
 # Ключи правил адаптации суммы в params.adapt (карточка «Адаптации ставки» макета)
@@ -808,7 +808,9 @@ def apply_claude(p_base3: Probs3, p_claude3: Probs3, params: StrategyParams) -> 
         final = min(high, max(low, _clip01(claude)))
         if round(claude, _FLOAT_DIGITS) != round(final, _FLOAT_DIGITS):
             clamped.append(name)
-        if round(abs(claude - base), _FLOAT_DIGITS) > params.claude_highlight:
+        # Подсветка — по числу из досье (3 знака), как проверка ответа Claude: иначе
+        # подсветка без пояснения, которого проверка не потребовала
+        if round(abs(claude - round(base, SHOWN_DIGITS)), _FLOAT_DIGITS) > params.claude_highlight:
             divergent.append(name)
         values[name] = final
     reconciled: list[str] = []

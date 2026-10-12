@@ -3,14 +3,15 @@
 
 import asyncio
 from collections.abc import Iterator
+from decimal import Decimal
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.admin import cli
-from app.db.models import AgentRun, PlayerNews, Prediction
-from app.services.agent_smoke import run_smoke
+from app.db.models import AgentRun, Dossier, Match, PlayerNews, Prediction, Tournament
+from app.services.agent_smoke import SmokeCall, SmokeReport, run_smoke, smoke_match
 from tests.analysis_helpers import install, seed_world, set_admin_key
 from tests.claude_mock import seed_prices
 from tests.fake_claude import FakeClaude
@@ -58,3 +59,75 @@ async def test_smoke_command(
     assert "Чтение кэша во втором вызове анализа" in out
     assert "sk-ant-" not in out
     assert len(fake.calls("analysis")) == 2
+
+
+async def test_smoke_fails_when_model_did_not_search(
+    db: AsyncSession,
+    world: dict[str, int],
+    fake: FakeClaude,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Главная цель проверки — web_search и record_news в одном запросе. Модель вызвала
+    record_news, но ни один поиск не прошел: раньше команда выходила с кодом 0 и строкой
+    «Поиски 0», теперь — код 1 и что именно не подтвердилось."""
+    fake.fail("news", "search_error")
+    assert await asyncio.to_thread(cli.main, ["agent-smoke", "--yes"]) == 1
+    printed = capsys.readouterr()
+    assert "в худшем случае до $" in printed.out
+    assert "Проверка не пройдена" in printed.err
+    assert "шаг новостей не выполнил ни одного поиска" in printed.err
+
+
+def test_smoke_problems() -> None:
+    report = SmokeReport(
+        calls=[SmokeCall("news", "m", 1, 0, 0, 1, 0, Decimal(0), None)],
+        parsed_events=0,
+        news_searched=True,
+    )
+    assert [key for key, _ in report.problems()] == ["events", "search", "cache"]
+    good = SmokeReport(
+        calls=[
+            SmokeCall("news", "m", 1, 0, 0, 1, 2, Decimal(0), None),
+            SmokeCall("analysis", "m", 1, 10, 0, 1, 0, Decimal(0), None),
+            SmokeCall("analysis", "m", 1, 0, 10, 1, 0, Decimal(0), None),
+        ],
+        parsed_events=1,
+        news_searched=True,
+    )
+    assert good.problems() == []
+
+
+async def test_smoke_on_archive_without_match_dates(
+    db: AsyncSession, world: dict[str, int], fake: FakeClaude
+) -> None:
+    """У матчей архива Сакманна нет даты (только у tennis-data): раньше проверка без
+    --match отвечала «Не найдено» еще до вызова Claude. Теперь берется последний матч по
+    началу турнира, а досье — на день матча: его результат в досье не попадает."""
+    await db.execute(update(Match).values(match_date=None))
+    await db.commit()
+    latest = await smoke_match(db, None)
+    start = await db.scalar(
+        select(Tournament.start_date).where(Tournament.id == latest.tournament_id)
+    )
+    newest = await db.scalar(select(func.max(Tournament.start_date)))
+    assert start is not None and start == newest
+    report = await run_smoke(db, match_id=latest.id)
+    dossier = await db.scalar(
+        select(Dossier).where(Dossier.match_id == latest.id).order_by(Dossier.id.desc()).limit(1)
+    )
+    assert dossier is not None and dossier.content["as_of"] == start.isoformat()
+    rows = dossier.content["p1"]["form"]["m"] + dossier.content["h2h"].get("last", [])
+    assert all(row["d"] < start.isoformat() for row in rows)
+    assert report.problems() == []
+
+
+async def test_smoke_without_matches_says_what_to_do(
+    db: AsyncSession, capsys: pytest.CaptureFixture[str]
+) -> None:
+    await seed_prices(db)
+    await set_admin_key(db)
+    assert await asyncio.to_thread(cli.main, ["agent-smoke", "--yes"]) == 1
+    err = capsys.readouterr().err
+    assert "В базе нет сыгранных матчей" in err and "--match" in err
+    assert await asyncio.to_thread(cli.main, ["agent-smoke", "--match", "999999", "--yes"]) == 1
+    assert "Матча 999999 нет в базе" in capsys.readouterr().err

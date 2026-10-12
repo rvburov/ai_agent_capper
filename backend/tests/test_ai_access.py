@@ -5,14 +5,16 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.agent.config import AgentConfig
+from app.agent.config import AgentConfig, load_agent_config
 from app.agent.errors import ClaudeStepError
+from app.agent.runs import worst_case_usd
 from app.core.errors import AppError
 from app.core.i18n import has_key
 from app.core.security import crypto
@@ -21,14 +23,17 @@ from app.db.session import create_sessionmaker
 from app.services.ai_access import (
     ACCESS_REASONS,
     ACCESS_STATUS,
+    Room,
     access_for,
     after_run_notifications,
     budget_overview,
     call_need_usd,
     check_before_call,
     estimate_cost,
+    fit_call,
     release_reservation,
     reserve_for_run,
+    restart_access,
 )
 from app.services.sessions import utcnow
 from tests.claude_mock import KEY, price_row, seed_prices
@@ -366,9 +371,10 @@ async def test_restart_cap_counts_spent(db: AsyncSession, make_user: UserFactory
         db,
         await db.get_one(User, ids["member"]),
         await db.get_one(Analysis, ids["analysis"]),
-        estimate_usd=D("0.05"),
+        estimate_usd=D(0),
     )
-    assert reservation.reserved_usd == D("1.00") == reservation.cap_usd
+    assert reservation.reserved_usd == D("0.95")
+    assert reservation.cap_usd == D("1.00")
     await db.rollback()
 
     # Свой ключ: то же со своим потолком
@@ -377,11 +383,53 @@ async def test_restart_cap_counts_spent(db: AsyncSession, make_user: UserFactory
             db,
             await db.get_one(User, ids["own"]),
             await db.get_one(Analysis, ids["own_a"]),
-            estimate_usd=D("0.10"),
+            estimate_usd=D("0.20"),
         )
     assert own_caught.value.code == "ai.own_cap"
-    assert own_caught.value.params == {"cap": "0,50", "estimate": "0,55"}
+    assert own_caught.value.params == {"cap": "0,50", "estimate": "0,65"}
     await db.rollback()
+
+
+async def test_restart_cap_needs_room_for_one_call(
+    db: AsyncSession, make_user: UserFactory
+) -> None:
+    """Перезапуск с остатком работы пускают, только если в потолок помещается худший
+    случай самого маленького вызова оценки матча (call_need_usd, $0,155 по ценам теста):
+    его же требует fit_call перед вызовом. Раньше хватало оценки ($0,05), и перезапуск
+    тут же падал на первом вызове с той же ai.analysis_cap."""
+    member = await make_user()
+    await seed_prices(db)
+    await _set_admin_key(db)
+    await _limit(db, member.id, per="1.00")
+    analysis = await _analysis(
+        db, member.id, status="failed", key_source="admin", started_at=utcnow(), cost="0.90"
+    )
+    ids = (member.id, analysis.id)
+    assert await call_need_usd(db, await load_agent_config(db), utcnow()) == D("0.155")
+
+    # 0,90 + 0,05 помещается в $1, но 0,90 + 0,155 — нет
+    with pytest.raises(AppError) as caught:
+        await reserve_for_run(db, member.user, analysis, estimate_usd=D("0.05"))
+    assert caught.value.code == "ai.analysis_cap"
+    await db.rollback()
+    user, row = await db.get_one(User, ids[0]), await db.get_one(Analysis, ids[1])
+    assert (await restart_access(db, user, row, estimate_usd=D("0.05"))).reason == (
+        "ai.analysis_cap"
+    )
+
+    # Вызовов не осталось (оценка 0) — места на вызов не нужно
+    assert (await restart_access(db, user, row, estimate_usd=D(0))).reason is None
+    reservation = await reserve_for_run(db, user, row, estimate_usd=D(0))
+    assert reservation.reserved_usd == D("0.90")
+    await db.rollback()
+
+    # 0,845 + 0,155 = $1 ровно: пускают, резерв — по оценке (0,845 + 0,05 вверх до цента)
+    await db.execute(update(Analysis).where(Analysis.id == ids[1]).values(cost_usd=D("0.845")))
+    await db.commit()
+    user, row = await db.get_one(User, ids[0]), await db.get_one(Analysis, ids[1])
+    assert (await restart_access(db, user, row, estimate_usd=D("0.05"))).reason is None
+    reservation = await reserve_for_run(db, user, row, estimate_usd=D("0.05"))
+    assert reservation.reserved_usd == D("0.90")
 
 
 async def test_reserve_writes_analysis(db: AsyncSession, make_user: UserFactory) -> None:
@@ -523,28 +571,87 @@ async def test_check_before_call(db: AsyncSession, make_user: UserFactory) -> No
     await check_before_call(db, analysis, D("0.10"))
 
 
+OPUS = price_row("claude-opus-5-5")
+SONNET = price_row("claude-sonnet-5-5")
+
+
+def _fit(rooms: list[Room], *, in_flight: str = "0", min_tokens: int = 6000) -> Any:
+    return fit_call(
+        rooms,
+        OPUS,
+        input_tokens=7000,
+        max_tokens=16_000,
+        min_tokens=min_tokens,
+        searches=0,
+        in_flight_usd=D(in_flight),
+    )
+
+
+def _room(left: str, code: str = "ai.analysis_cap") -> Room:
+    return Room(D(left), code, {})
+
+
+def test_fit_call_waits_for_own_calls_and_cuts_max_tokens() -> None:
+    """Перед вызовом: худший случай одного вызова Opus — $0,355 (7 тыс. × $5 + 16 тыс. ×
+    $20), три таких в полете дороже потолка $1 (Р13). Не помещается только из-за своих
+    вызовов в полете — ждать, а не останавливать анализ; не помещается и без них —
+    урезать max_tokens до остатка, но не ниже min_tokens; меньше — ждать или отказ."""
+    full = worst_case_usd(OPUS, input_tokens=7000, max_tokens=16_000)
+    assert full == D("0.355")
+    # Помещается целиком
+    fit = _fit([_room("1.00")])
+    assert (fit.max_tokens, fit.worst_usd, fit.wait, fit.refuse) == (16_000, full, False, None)
+    # Два вызова в полете: третий ждет (раньше — отказ ai.analysis_cap при пустом расходе)
+    assert _fit([_room("1.00")], in_flight="0.71").wait
+    # Без вызовов в полете остатка $0,30 не хватает на весь max_tokens: урезаем
+    cut = _fit([_room("0.30")])
+    assert cut.max_tokens == 13_249 and cut.worst_usd <= D("0.30") and not cut.wait
+    # Остаток минус вызовы в полете меньше 6 тыс. токенов, без них хватит — ждать
+    assert _fit([_room("0.30")], in_flight="0.20").wait
+    # Меньше min_tokens и ждать некого — отказ по первому ограничению, куда не влезает
+    # самый маленький вызов ($0,155)
+    refused = _fit(
+        [_room("0.50"), _room("0.10", "ai.monthly_limit"), _room("5", "ai.budget_exhausted")]
+    )
+    assert refused.refuse is not None and refused.refuse.code == "ai.monthly_limit"
+    # Остаток — меньшее из ограничений
+    tight = _fit([_room("0.40"), _room("0.20", "ai.monthly_limit")])
+    assert tight.max_tokens == 8249 and tight.worst_usd <= D("0.20")
+    # Шаг без урезания (новости: min_tokens = max_tokens) — отказ, как раньше
+    news = fit_call(
+        [_room("0.10")],
+        SONNET,
+        input_tokens=15_000,
+        max_tokens=8000,
+        min_tokens=8000,
+        searches=3,
+        in_flight_usd=D(0),
+    )
+    assert news.refuse is not None and news.max_tokens is None
+
+
 async def test_launch_needs_room_for_one_call(db: AsyncSession, make_user: UserFactory) -> None:
-    """До запуска — та же мера, что перед вызовом (check_before_call): свободным должен быть
-    худший случай одного вызова оценки матча, а не только оценка анализа. Иначе при остатке
-    $0,33 анализ по оценке $0,12 запускался и останавливался на первом вызове Opus, а
-    перезапуск упирался в то же (тупик)."""
+    """До запуска — та же мера, что перед вызовом (fit_call): свободным должен быть худший
+    случай самого маленького допустимого вызова оценки матча (max_tokens урезается не ниже
+    analysis_min_tokens), а не только оценка анализа. Иначе анализ запускался и
+    останавливался на первом вызове Opus, а перезапуск упирался в то же (тупик)."""
     member = await make_user()
     admin = await make_user(role="admin")
     await seed_prices(db)
     await _set_admin_key(db)
     limit = await _limit(db, member.id, monthly="1.00", daily=30)
-    await _spend(db, member.id, "0.67")
+    await _spend(db, member.id, "0.86")
     need = await call_need_usd(db, AgentConfig(), utcnow())
-    # 7 тыс. входа по цене записи кэша $5 и 16 тыс. выхода по $20 за 1 млн токенов
-    assert need == D("0.355")
+    # 7 тыс. входа по цене записи кэша $5 и 6 тыс. выхода (analysis_min_tokens) по $20
+    assert need == D("0.155")
     for estimate in (None, D("0.115")):
         access = await access_for(db, member.user, estimate_usd=estimate)
-        assert (access.reason, access.left_month_usd) == ("ai.monthly_limit", D("0.33"))
+        assert (access.reason, access.left_month_usd) == ("ai.monthly_limit", D("0.14"))
     # Все оценки матчей уже есть (перезапуск после шага оценки): вызовов Claude не будет
     assert (await access_for(db, member.user, estimate_usd=D("0"))).allowed
 
     # Остатка хватает на худший случай вызова: запуск можно, и вызов пройдет проверку
-    limit.monthly_usd = D("1.03")
+    limit.monthly_usd = D("1.015")
     await db.commit()
     assert (await access_for(db, member.user, estimate_usd=None)).allowed
     analysis = await _analysis(db, member.id)
@@ -556,7 +663,7 @@ async def test_launch_needs_room_for_one_call(db: AsyncSession, make_user: UserF
     # Общий бюджет — так же (администратор без личного лимита)
     settings = await _settings(db)
     budget_spent = await _sum_spent(db)
-    settings.monthly_budget_usd = budget_spent + D("0.12") + D("0.33")
+    settings.monthly_budget_usd = budget_spent + D("0.12") + D("0.14")
     await db.commit()
     assert (await access_for(db, admin.user, estimate_usd=D("0.115"))).reason == (
         "ai.budget_exhausted"
@@ -564,6 +671,26 @@ async def test_launch_needs_room_for_one_call(db: AsyncSession, make_user: UserF
     settings.monthly_budget_usd = budget_spent + D("0.12") + need
     await db.commit()
     assert (await access_for(db, admin.user, estimate_usd=D("0.115"))).allowed
+
+
+async def test_launch_needs_news_plus_opus_call(db: AsyncSession, make_user: UserFactory) -> None:
+    """Новости оплачиваются раньше Opus: до запуска свободной должна быть оценка шагов до
+    последнего вызова Opus плюс худший случай этого вызова, а не максимум из оценки и
+    худшего случая. Иначе при остатке $0,22 анализ по оценке $0,1975 (новости $0,0825 и
+    Opus $0,115) запускался, платил за новости и останавливался на Opus (остаток $0,14
+    меньше $0,155)."""
+    member = await make_user()
+    await seed_prices(db)
+    await _set_admin_key(db)
+    limit = await _limit(db, member.id, monthly="1.00", daily=30)
+    await _spend(db, member.id, "0.78")
+    estimate = D("0.1975")
+    # 0,1975 + (0,155 − 0,115) = 0,2375 > 0,22
+    access = await access_for(db, member.user, estimate_usd=estimate)
+    assert (access.reason, access.left_month_usd) == ("ai.monthly_limit", D("0.22"))
+    limit.monthly_usd = D("1.0175")
+    await db.commit()
+    assert (await access_for(db, member.user, estimate_usd=estimate)).allowed
 
 
 async def _sum_spent(db: AsyncSession) -> Decimal:
@@ -647,6 +774,42 @@ async def test_spending_alerts_once_per_month(db: AsyncSession, make_user: UserF
     assert await after_run_notifications(db, own.id) == []
     await db.commit()
     assert {n.kind for n in await _notes(db, member.id)} == {"limit_80", "limit_100"}
+
+
+async def test_limit_100_when_left_is_less_than_one_call(
+    db: AsyncSession, make_user: UserFactory
+) -> None:
+    """Порог 100% — когда остатка не хватает на самый маленький вызов оценки матча ($0,155):
+    анализы уже не запускаются, хотя потрачено меньше лимита. Раньше limit_100 и
+    budget_100 приходили только при расходе ≥ 100%, которого проверки перед вызовом не
+    допускают, и участник останавливался без уведомления."""
+    await seed_prices(db)
+    admin = await make_user(role="admin")
+    member = await make_user()
+    await _limit(db, member.id, monthly="1.00")
+    settings = await _settings(db)
+    settings.monthly_budget_usd = D("60")
+    await db.commit()
+    await _spend(db, member.id, "0.84")  # остаток 0,16 ≥ 0,155 — пока 80%
+    assert {(n.user_id, n.kind) for n in await after_run_notifications(db, member.id)} == {
+        (member.id, "limit_80"),
+        (admin.id, "limit_80"),
+    }
+    await _spend(db, member.id, "0.05")  # остаток 0,11 — анализ не запустится
+    access = await access_for(db, member.user, estimate_usd=None)
+    assert access.reason == "ai.monthly_limit"
+    assert {(n.user_id, n.kind) for n in await after_run_notifications(db, member.id)} == {
+        (member.id, "limit_100"),
+        (admin.id, "limit_100"),
+    }
+    [*_, note] = await _notes(db, member.id)
+    assert note.title == "Лимит на ИИ исчерпан" and "0,89" in note.body
+    # Общий бюджет: остаток 0,10 — budget_100 администраторам
+    await _spend(db, None, "59.01")
+    assert [(n.user_id, n.kind) for n in await after_run_notifications(db, None)] == [
+        (admin.id, "budget_100")
+    ]
+    await db.commit()
 
 
 async def test_alert_of_previous_month_does_not_block(

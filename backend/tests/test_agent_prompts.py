@@ -34,7 +34,9 @@ PUBLISHED = {
     "analysis_request.v1": "aea6172f99724b88238e87b82074382b2cf65cbbb5d829d29a647c9109a82621",
     "analysis_retry.v1": "8504ae95151ae604a206e2b765cfcbf2ee968b6df795f4c8ab01b3290e6eee9c",
     "news.v1": "2993309576d631053ddce2a95cda6e162923f268ad1eb97177e8238a03268915",
+    "news.v2": "0d7766c72ee82a1c2fa71e396ffcf005c5fb3c23b36a5077da847a426eb10b21",
     "news_request.v1": "c086524b071306191ca0e7503e6ce73553169d7d82b6b8fcba9469a71e9e97af",
+    "news_request.v2": "4ec0f4d796e31bb8faf017e83edc173509a786c92ab182f3691fb5d70dceb026",
     "news_retry.v1": "a3f33a19f390523250626ff698135b6f1ec015123678052f7ae4d5b447917f4f",
     "parse_input.v1": "7bbb18f5a817f99878923cde98a05014850f9f6597f919ce2aa71a66f710c5bb",
 }
@@ -81,9 +83,9 @@ def test_prompt_texts_are_clean(path: Path) -> None:
 
 def test_templates_take_their_fields() -> None:
     news = load_prompt(*NEWS_REQUEST).format(
-        today="2026-10-11", since="2026-09-27", days=14, match="A vs B", players="1. A"
+        today="2026-10-11", since="2026-09-27", days=14, match="A vs B", players="2. B", max_uses=2
     )
-    assert "2026-10-11" in news and "1. A" in news
+    assert "2026-10-11" in news and "2. B" in news and "не больше 2 " in news
     assert "2026-10-11" in load_prompt(*ANALYSIS_REQUEST).format(today="2026-10-11")
     assert "- x" in load_prompt(*ANALYSIS_RETRY).format(problems="- x")
 

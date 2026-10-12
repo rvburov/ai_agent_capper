@@ -16,7 +16,7 @@ cancelled, а без событий раз в 15 с уходит коммент�
 import json
 import re
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any, cast
 
 from redis.asyncio import Redis
@@ -105,16 +105,54 @@ async def event_stream(
     live: bool,
     resume_id: str | None = None,
     recheck: Callable[[], Awaitable[Mapping[str, Any] | None]] | None = None,
+    on_close: Callable[[], Awaitable[None]] | None = None,
     heartbeat_s: float = HEARTBEAT_SECONDS,
     recheck_s: float = RECHECK_SECONDS,
     block_ms: int = READ_BLOCK_MS,
     max_seconds: float = MAX_STREAM_SECONDS,
     clock: Callable[[], float] = time.monotonic,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str]:
     """Поток SSE анализа. start_id — последнее событие потока, прочитанное до снимка
     (события после него снимок не видел). live — анализ в работе: иначе снимок и конец
     потока. resume_id — Last-Event-ID переподключения. recheck — итог из базы (снимок),
-    если анализ уже не в работе, иначе None."""
+    если анализ уже не в работе, иначе None. on_close — по концу потока (и обрыву
+    соединения): освободить место потока участника."""
+    try:
+        async for chunk in _stream(
+            redis,
+            analysis_id,
+            snapshot=snapshot,
+            start_id=start_id,
+            live=live,
+            resume_id=resume_id,
+            recheck=recheck,
+            heartbeat_s=heartbeat_s,
+            recheck_s=recheck_s,
+            block_ms=block_ms,
+            max_seconds=max_seconds,
+            clock=clock,
+        ):
+            yield chunk
+    finally:
+        if on_close is not None:
+            await on_close()
+
+
+async def _stream(
+    redis: Redis,
+    analysis_id: int,
+    *,
+    snapshot: Mapping[str, Any],
+    start_id: str,
+    live: bool,
+    resume_id: str | None,
+    recheck: Callable[[], Awaitable[Mapping[str, Any] | None]] | None,
+    heartbeat_s: float,
+    recheck_s: float,
+    block_ms: int,
+    max_seconds: float,
+    clock: Callable[[], float],
+) -> AsyncIterator[str]:
     yield f"retry: {RETRY_MS}\n\n"
     if not live:
         yield sse_message(snapshot, event_id=start_id)

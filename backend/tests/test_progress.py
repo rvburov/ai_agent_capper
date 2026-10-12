@@ -171,3 +171,23 @@ async def test_lost_terminal_event_closes_by_recheck(redis: Redis) -> None:
     # Событие конца не записалось в Redis: итог берется из базы, поток закрывается
     assert len(checks) == 2
     assert _data(chunks[-1]) == final and len(chunks) == 3
+
+
+async def test_stream_calls_on_close_at_end_and_on_disconnect(redis: Redis) -> None:
+    """Место потока участника освобождается по концу потока и при обрыве соединения."""
+    closed: list[str] = []
+
+    async def on_close() -> None:
+        closed.append("x")
+
+    await _collect(
+        event_stream(redis, 7, snapshot=SNAPSHOT, start_id=EMPTY_ID, live=False, on_close=on_close)
+    )
+    assert closed == ["x"]
+    stream = event_stream(
+        redis, 7, snapshot=SNAPSHOT, start_id=EMPTY_ID, live=True, block_ms=10, on_close=on_close
+    )
+    assert "retry" in await stream.__anext__()
+    await stream.__anext__()  # снимок
+    await stream.aclose()  # браузер закрыл страницу
+    assert closed == ["x", "x"]

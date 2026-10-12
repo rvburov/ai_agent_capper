@@ -304,7 +304,8 @@ async def _agent_smoke(args: argparse.Namespace) -> None:
         config = await agent_config.load_agent_config(db)
         match = await agent_smoke.smoke_match(db, args.match)
         estimate = await agent_smoke.estimate_smoke(db, config)
-        _say(t("cli.agent_smoke.estimate", usd=estimate, match=match.id))
+        worst = await agent_smoke.max_smoke(db, config)
+        _say(t("cli.agent_smoke.estimate", usd=estimate, max=worst, match=match.id))
         if not args.yes and not _confirmed("cli.agent_smoke.confirm"):
             raise CliError("cancelled")
         report = agent_smoke.SmokeReport()
@@ -366,6 +367,16 @@ async def _agent_smoke(args: argparse.Namespace) -> None:
         _say(t("cli.agent_smoke.cache", tokens=report.second_cache_read))
     else:
         _say(t("cli.agent_smoke.no_cache"))
+    # Команда — единственная живая проверка до запуска: то, что она должна подтвердить
+    # (одно событие разбора, поиск перед record_news, чтение кэша), без этого — код 1
+    problems = report.problems()
+    if problems:
+        raise CliError(
+            "agent_smoke.checks_failed",
+            problems="; ".join(
+                t(f"cli.agent_smoke.problems.{key}", **params) for key, params in problems
+            ),
+        )
 
 
 # --- игроки (этап 2) ---

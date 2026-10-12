@@ -13,6 +13,8 @@
 
 import asyncio
 import math
+import secrets
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -48,6 +50,7 @@ from app.ml.strategy import StrategyParams, margin
 from app.schemas.analyses import (
     AnalysisListItem,
     AnalysisListOut,
+    AnalysisOut,
     ConfirmIn,
     CorridorOut,
     EstimateOut,
@@ -58,10 +61,18 @@ from app.schemas.analyses import (
     PreviewEvent,
     PreviewOut,
     PreviewPlayer,
+    RestartOut,
     TextKey,
 )
 from app.services import progress
-from app.services.ai_access import access_for, release_reservation, reserve_for_run
+from app.services.ai_access import (
+    LIMIT_REFUSALS,
+    access_for,
+    after_run_notifications,
+    release_reservation,
+    reserve_for_run,
+    restart_access,
+)
 from app.services.ai_keys import report_key_failure
 from app.services.analysis_input import (
     Confirmed,
@@ -81,8 +92,15 @@ from app.services.analysis_input import (
     to_odds,
 )
 from app.services.analysis_result import fair_probs
-from app.services.analysis_run import plan_steps, record_call, reset_steps
-from app.services.analysis_view import access_out, parse_cost, progress_event
+from app.services.analysis_run import (
+    RestartWork,
+    plan_steps,
+    record_call,
+    reset_steps,
+    restart_work,
+    running_claude_steps,
+)
+from app.services.analysis_view import access_out, analysis_out, parse_cost, progress_event
 from app.services.app_settings import get_app_settings
 from app.services.claude_key import key_for
 from app.services.progress import publish
@@ -102,6 +120,7 @@ CREATE_LIMIT = 30
 CREATE_WINDOW_SECONDS = 3600
 LIST_LIMIT = 20
 RUNNABLE = ("needs_confirmation", "failed", "cancelled")
+STOPPED = ("failed", "cancelled")
 CANCELLABLE = (*ANALYSIS_ACTIVE_STATUSES, "needs_confirmation")
 MTOK = Decimal(1_000_000)
 ESTIMATE_STEP = Decimal("0.0001")
@@ -110,6 +129,11 @@ ESTIMATE_STEP = Decimal("0.0001")
 SECONDS_BASE = 5
 SECONDS_NEWS = 30
 SECONDS_ANALYSIS = 60
+# Потоков прогресса (SSE) анализа в работе у одного участника одновременно; место
+# незакрытого потока освобождается само чуть позже предела потока (30 мин)
+STREAM_SLOTS = 5
+STREAM_SLOT_SECONDS = progress.MAX_STREAM_SECONDS + 60
+RETRY_STREAM_SECONDS = 30
 # Статус ответа API на сбой разбора по коду ошибки
 _PARSE_STATUS = {
     "ai.rate_limited": 429,
@@ -152,6 +176,18 @@ async def _hit_create_limit(redis: Redis, user_id: int) -> None:
         raise AppError(429, "common.rate_limited", retry_after=wait)
 
 
+async def _limit_refused(db: AsyncSession, user_id: int, code: str, *, rollback: bool) -> None:
+    """Отказ по лимиту месяца или общему бюджету: порог 100% мог пройти без вызова Claude
+    (администратор снизил лимит, выросла цена) — предупреждения о расходе, как после
+    вызова (не чаще раза в месяц)."""
+    if code not in LIMIT_REFUSALS:
+        return
+    if rollback:
+        await db.rollback()
+    await after_run_notifications(db, user_id)
+    await db.commit()
+
+
 class _ParseHooks:
     """Учет вызова разбора в запросе API (сеанс запроса, commit после каждого вызова).
     Транзакция закрывается до вызова: соединение из пула API не ждет ответа Claude."""
@@ -164,10 +200,18 @@ class _ParseHooks:
         self.calls = 0
 
     async def before_call(
-        self, *, kind: str, model: str, input_tokens: int, max_tokens: int, searches: int
-    ) -> None:
+        self,
+        *,
+        kind: str,
+        model: str,
+        input_tokens: int,
+        max_tokens: int,
+        min_tokens: int,
+        searches: int,
+    ) -> int | None:
         await price_for(self.db, model)
         await self.db.commit()
+        return None
 
     async def after_call(self, info: CallInfo) -> int | None:
         self.calls += 1
@@ -236,6 +280,7 @@ async def create_from_text(db: AsyncSession, redis: Redis, user: User, text: str
         raise AppError(422, "analysis.text_too_long", max=TEXT_MAX)
     access = await access_for(db, user, estimate_usd=None)
     if not access.allowed:
+        await _limit_refused(db, user.id, access.reason or "", rollback=False)
         raise AppError(409, access.reason or "ai.no_key", **access.reason_params)
     await _hit_create_limit(redis, user.id)
     config = await load_agent_config(db)
@@ -352,12 +397,36 @@ async def _reusable_match(
         .join(Dossier, Dossier.id == MatchAssessment.dossier_id)
         .where(
             Dossier.match_id == match_id,
-            MatchAssessment.model == config.analysis_model,
-            MatchAssessment.effort == config.analysis_effort,
-            MatchAssessment.prompt_version == prompt_version,
-            MatchAssessment.schema_version == ASSESSMENT_SCHEMA_VERSION,
-            MatchAssessment.created_at >= now - timedelta(hours=config.assessment_reuse_hours),
+            *_assessment_key(config, prompt_version, now),
             Dossier.as_of >= datetime.combine(now.date(), datetime.min.time(), UTC),
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
+def _assessment_key(config: AgentConfig, prompt_version: str, now: datetime) -> list[Any]:
+    return [
+        MatchAssessment.model == config.analysis_model,
+        MatchAssessment.effort == config.analysis_effort,
+        MatchAssessment.prompt_version == prompt_version,
+        MatchAssessment.schema_version == ASSESSMENT_SCHEMA_VERSION,
+        MatchAssessment.created_at >= now - timedelta(hours=config.assessment_reuse_hours),
+    ]
+
+
+async def _reusable_dossier(
+    db: AsyncSession, dossier_id: int, config: AgentConfig, prompt_version: str, now: datetime
+) -> bool:
+    """Свежая оценка по досье из чекпойнта: перезапуск возьмет его, а не соберет новое
+    (как _Runner._reusable)."""
+    if config.assessment_reuse_hours <= 0:
+        return False
+    found = await db.scalar(
+        select(MatchAssessment.id)
+        .where(
+            MatchAssessment.dossier_id == dossier_id,
+            *_assessment_key(config, prompt_version, now),
         )
         .limit(1)
     )
@@ -375,10 +444,14 @@ async def estimate_run(
     *,
     prompt_version: str,
     now: datetime,
+    done: RestartWork | None = None,
 ) -> Estimate:
     """Оценка анализа до запуска: новости — только у матчей с устаревшими новостями
-    игроков, анализ Claude — у матчей без свежей оценки (ее берут бесплатно)."""
+    игроков, анализ Claude — у матчей без свежей оценки (ее берут бесплатно). done —
+    повторный запуск: шаги, которые воркер не повторит (новости, оценки, досье из
+    чекпойнта), в оценку и резерв не входят."""
     prices = await _prices(db, config)
+    work = done or RestartWork(news=frozenset(), assessed=frozenset(), dossiers={})
     ids = {pid for event in events for pid in (event.player1_id, event.player2_id)}
     cutoff = now - timedelta(hours=config.news_ttl_hours)
     checked: dict[int, datetime | None] = {
@@ -389,6 +462,7 @@ async def estimate_run(
     }
     stale_players = {pid for pid in ids if _stale(checked.get(pid), cutoff)}
     news_matches = 0
+    news_players: set[int] = set()
     analysed = 0
     reused: set[int] = set()
     for event in events:
@@ -396,10 +470,17 @@ async def estimate_run(
         if match_id is None:
             found = await find_match(db, event.player1_id, event.player2_id, day=now.date())
             match_id = found.id if found is not None else None
-        if config.news_enabled and {event.player1_id, event.player2_id} & stale_players:
+        pair = {event.player1_id, event.player2_id}
+        if config.news_enabled and match_id not in work.news and pair & stale_players:
             news_matches += 1
-        if match_id is not None and await _reusable_match(
-            db, match_id, config, prompt_version, now
+            news_players |= pair & stale_players
+        if match_id is not None and (
+            match_id in work.assessed
+            or (
+                await _reusable_dossier(db, work.dossiers[match_id], config, prompt_version, now)
+                if match_id in work.dossiers
+                else await _reusable_match(db, match_id, config, prompt_version, now)
+            )
         ):
             reused.add(event.position)
         else:
@@ -428,7 +509,7 @@ async def estimate_run(
     return Estimate(
         cost_usd=cost.quantize(ESTIMATE_STEP, rounding=ROUND_UP),
         seconds=seconds,
-        news_players=len(stale_players) if config.news_enabled else 0,
+        news_players=len(news_players),
         reused_matches=len(reused),
         reused=frozenset(reused),
     )
@@ -581,6 +662,8 @@ async def start_run(
     now = utcnow()
     today = now.date()
     config = await load_agent_config(db)
+    if _call_still_running(analysis, config, now):
+        raise AppError(409, "analysis.step_running")
     settings = await get_app_settings(db)
     if new_events:
         assert body is not None and body.events is not None
@@ -597,9 +680,19 @@ async def start_run(
         raise AppError(422, "analysis.no_events")
     version = await active_version(db, user.id)
     estimate = await estimate_run(
-        db, config, confirmed.events, prompt_version=prompt_version_of(version), now=now
+        db,
+        config,
+        confirmed.events,
+        prompt_version=prompt_version_of(version),
+        now=now,
+        done=None if new_events else restart_work(analysis.checkpoint),
     )
-    await reserve_for_run(db, user, analysis, estimate_usd=estimate.cost_usd)
+    user_id = user.id
+    try:
+        await reserve_for_run(db, user, analysis, estimate_usd=estimate.cost_usd)
+    except AppError as exc:
+        await _limit_refused(db, user_id, exc.code, rollback=True)
+        raise
     # Под блокировкой строки анализа: второй запуск того же анализа ждал здесь
     if analysis.status not in RUNNABLE or (new_events and analysis.confirmed):
         # Статус — до rollback: после него объект устарел, а ленивая загрузка в async — сбой
@@ -657,6 +750,63 @@ async def start_run(
     return analysis
 
 
+def _step_window(config: AgentConfig) -> timedelta:
+    return timedelta(seconds=max(config.analysis_step_timeout_s, config.news_timeout_s))
+
+
+def _call_still_running(analysis: Analysis, config: AgentConfig, now: datetime) -> bool:
+    """Отмененный анализ, в котором вызов Claude еще идет: задача старого запуска
+    доработает шаг и запишет его в чекпойнт. Перезапуск сейчас купил бы тот же шаг второй
+    раз, а резерв не учел бы худший случай идущего вызова. Шаг не может идти дольше
+    предела шага: зависший после остановки воркера не держит анализ дольше."""
+    if analysis.status != "cancelled" or not running_claude_steps(analysis.checkpoint):
+        return False
+    return analysis.updated_at > now - _step_window(config)
+
+
+async def restart_state(db: AsyncSession, user: User, analysis: Analysis) -> RestartOut | None:
+    """Пустит ли сейчас start_run повторный запуск остановленного анализа: шаг, начатый до
+    отмены; оценка по чекпойнту; лимиты и потолок (ai_access.restart_access). Без резерва
+    и без записи. Экран включает «Перезапустить» и «Продолжить» по этому ответу, а не
+    угадывает по /api/ai/budget. None — анализ не остановлен или событий нет."""
+    if analysis.status not in STOPPED or not analysis.confirmed:
+        return None
+    if analysis.status == "cancelled" and running_claude_steps(analysis.checkpoint):
+        # updated_at пересчитывает база (onupdate): после commit отмены он не загружен, а
+        # ленивая загрузка в async — сбой
+        await db.refresh(analysis, attribute_names=["updated_at"])
+    now = utcnow()
+    config = await load_agent_config(db)
+    if _call_still_running(analysis, config, now):
+        return RestartOut(
+            allowed=False,
+            reason_code="analysis.step_running",
+            reason_params={},
+            retry_at=analysis.updated_at + _step_window(config),
+        )
+    version = await active_version(db, user.id)
+    estimate = await estimate_run(
+        db,
+        config,
+        Confirmed.from_json(analysis.confirmed).events,
+        prompt_version=prompt_version_of(version),
+        now=now,
+        done=restart_work(analysis.checkpoint),
+    )
+    access = await restart_access(db, user, analysis, estimate_usd=estimate.cost_usd)
+    return RestartOut(
+        allowed=access.allowed,
+        reason_code=access.reason,
+        reason_params=dict(access.reason_params),
+        retry_at=None,
+    )
+
+
+async def analysis_view(db: AsyncSession, user: User, analysis: Analysis) -> AnalysisOut:
+    """Анализ для экрана; у остановленного — можно ли его перезапустить сейчас."""
+    return await analysis_out(db, analysis, restart=await restart_state(db, user, analysis))
+
+
 async def _parse_usage(db: AsyncSession, analysis_id: int) -> tuple[int, Decimal]:
     row = (
         await db.execute(
@@ -688,25 +838,62 @@ async def _publish(redis: Redis, analysis: Analysis, kind: str) -> None:
 
 @dataclass(frozen=True)
 class StreamStart:
-    """Начало потока SSE: снимок из базы, позиция потока до снимка, идет ли анализ и
-    проверка итога в базе (на случай, если событие конца не записалось в Redis)."""
+    """Начало потока SSE: снимок из базы, позиция потока до снимка, идет ли анализ,
+    проверка итога в базе (на случай, если событие конца не записалось в Redis) и
+    освобождение места потока участника (по концу потока)."""
 
     snapshot: dict[str, Any]
     start_id: str
     live: bool
     recheck: Callable[[], Awaitable[dict[str, Any] | None]]
+    release: Callable[[], Awaitable[None]]
+
+
+async def _take_stream_slot(redis: Redis, user_id: int) -> Callable[[], Awaitable[None]]:
+    """Место потока участника: поток анализа в работе держит соединение Redis и
+    2 дескриптора API до 30 минут, и без предела один участник занял бы их все (общие с
+    очередью и лимитами входа). Место — запись в sorted set с моментом начала: место
+    потока, который не закрылся (сбой процесса), освобождается само через
+    STREAM_SLOT_SECONDS. Сверх STREAM_SLOTS — 429 common.rate_limited (экран при ошибке
+    потока опрашивает анализ сам). Возвращает освобождение места."""
+    key = redis_key("analysis", "streams", user_id)
+    token = secrets.token_hex(8)
+    now = time.time()
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.zremrangebyscore(key, "-inf", now - STREAM_SLOT_SECONDS)
+        pipe.zadd(key, {token: now})
+        pipe.zcard(key)
+        pipe.expire(key, STREAM_SLOT_SECONDS)
+        taken = int((await pipe.execute())[2])
+
+    async def release() -> None:
+        try:
+            await redis.zrem(key, token)
+        except Exception:
+            log.warning("analysis.stream_slot_release_failed", user_id=user_id)
+
+    if taken > STREAM_SLOTS:
+        await release()
+        raise AppError(429, "common.rate_limited", retry_after=RETRY_STREAM_SECONDS)
+    return release
+
+
+async def _nothing() -> None:
+    return None
 
 
 async def stream_start(db: AsyncSession, redis: Redis, user: User, analysis_id: int) -> StreamStart:
     """Свой анализ (чужой — 404) и все, что нужно потоку. Соединение БД запроса
     освобождается здесь: поток дальше читает только Redis, а итог проверяет коротким
-    сеансом раз в полминуты."""
+    сеансом раз в полминуты. Поток анализа в работе занимает место участника (не больше
+    STREAM_SLOTS одновременно)."""
     analysis = await get_owned(db, user, analysis_id)
     # Позиция потока — до снимка: события после нее снимок мог не увидеть
     start = await progress.last_event_id(redis, analysis_id)
     await db.refresh(analysis)
     snapshot = progress_event(analysis, "snapshot", with_steps=True)
     live = analysis.status in ANALYSIS_ACTIVE_STATUSES
+    release = await _take_stream_slot(redis, user.id) if live else _nothing
     maker = create_sessionmaker(cast(AsyncEngine, db.bind))
     await db.close()
 
@@ -717,7 +904,9 @@ async def stream_start(db: AsyncSession, redis: Redis, user: User, analysis_id: 
                 return None
             return progress_event(found, "snapshot", with_steps=True)
 
-    return StreamStart(snapshot=snapshot, start_id=start, live=live, recheck=recheck)
+    return StreamStart(
+        snapshot=snapshot, start_id=start, live=live, recheck=recheck, release=release
+    )
 
 
 # --- отмена, решение, список ---

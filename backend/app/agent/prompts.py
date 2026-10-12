@@ -21,8 +21,8 @@ _VERSION_ID = re.compile(r"^([a-z_]+)\.v([1-9][0-9]*)$")
 
 # Версии промптов, с которыми работает код сейчас
 PARSE_PROMPT = ("parse_input", 1)
-NEWS_PROMPT = ("news", 1)
-NEWS_REQUEST = ("news_request", 1)
+NEWS_PROMPT = ("news", 2)
+NEWS_REQUEST = ("news_request", 2)
 NEWS_RETRY = ("news_retry", 1)
 ANALYSIS_PROMPT = ("analysis", 1)
 ANALYSIS_REQUEST = ("analysis_request", 1)

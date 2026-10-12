@@ -693,7 +693,8 @@ export interface paths {
          * @description Свой ключ: проверяется запросами к Claude API (список моделей и доступ к моделям
          *     из настроек), сохраняется только проверенный, режим становится own. Не прошел —
          *     400 ai.key_format / ai.key_rejected / ai.key_models, 502 ai.key_check_failed,
-         *     503 ai.key_unavailable. Администратору — 409 ai.admin_key_only.
+         *     503 ai.key_unavailable. Администратору — 409 ai.admin_key_only. Проверок ключа не
+         *     больше 10 в час на участника и на IP — иначе 429 common.rate_limited.
          */
         put: operations["save_own_key_api_me_ai_key_put"];
         post?: never;
@@ -720,7 +721,8 @@ export interface paths {
         /**
          * Check Own Key
          * @description Проверяет сохраненный ключ и записывает итог. Нет ключа — 404 ai.no_own_key,
-         *     нет связи с Anthropic — 503 ai.key_unavailable.
+         *     нет связи с Anthropic — 503 ai.key_unavailable, больше 10 проверок в час — 429
+         *     common.rate_limited.
          */
         post: operations["check_own_key_api_me_ai_key_check_post"];
         delete?: never;
@@ -1070,7 +1072,8 @@ export interface paths {
         /**
          * Analysis Events
          * @description Ход анализа: снимок из базы, затем события шагов; конец — done, failed,
-         *     cancelled. Анализ не в работе — только снимок. Heartbeat раз в 15 с, retry 3 с.
+         *     cancelled. Анализ не в работе — только снимок. Heartbeat раз в 15 с, retry 3 с. Больше
+         *     5 потоков анализов в работе у участника одновременно — 429 common.rate_limited.
          */
         get: operations["analysis_events_api_analyses__analysis_id__events_get"];
         put?: never;
@@ -1595,6 +1598,8 @@ export interface components {
             bookmaker: string | null;
             /** Strategy Version */
             strategy_version: string | null;
+            /** @description Только у остановленного анализа (failed, cancelled) с событиями */
+            restart: components["schemas"]["RestartOut"] | null;
         };
         /**
          * AuditOut
@@ -2966,6 +2971,25 @@ export interface components {
             code: string;
             /** New Password */
             new_password: string;
+        };
+        /**
+         * RestartOut
+         * @description Можно ли сейчас перезапустить остановленный анализ: та же проверка, что при запуске,
+         *     без резерва. reason_code — почему нет (ключ errors.<код> и reason_params);
+         *     analysis.step_running — шаг, начатый до отмены, еще идет: retry_at — не позже чего он
+         *     закончится.
+         */
+        RestartOut: {
+            /** Allowed */
+            allowed: boolean;
+            /** Reason Code */
+            reason_code: string | null;
+            /** Reason Params */
+            reason_params: {
+                [key: string]: unknown;
+            };
+            /** Retry At */
+            retry_at: string | null;
         };
         /** ResultOut */
         ResultOut: {

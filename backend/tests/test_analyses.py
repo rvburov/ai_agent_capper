@@ -10,14 +10,16 @@ import anthropic
 import httpx2
 import pytest
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.agent.client import set_http_client_for_tests
 from app.api.routes import analyses as analyses_routes
-from app.db.models import AgentRun, AiLimit, Analysis, Match, OddsSnapshot
+from app.core.errors import AppError
+from app.db.models import AgentRun, AiLimit, Analysis, Match, OddsSnapshot, Player
 from app.schemas.analyses import AnalysisOut
 from app.services import analyses as analyses_service
+from app.services.sessions import utcnow
 from tests.analysis_helpers import (
     install,
     make_analysis,
@@ -458,6 +460,120 @@ async def test_cancel_and_restart(
     ]
 
 
+async def test_stopped_analysis_tells_if_restart_is_allowed(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    db: AsyncSession,
+    world: dict[str, int],
+    queued: list[tuple[int, int, str]],
+) -> None:
+    """Поле restart: можно ли сейчас перезапустить остановленный анализ, по той же
+    проверке, что в запуске. /api/ai/budget отвечает про новый анализ: последний анализ
+    дня уже в дневном счетчике, но его перезапуск сервер пускает (ux-2). Потолок
+    проверяется с потраченным и местом на один вызов оценки матча."""
+    member = await _member(make_client, make_user, login)
+    db.add(
+        AiLimit(
+            user_id=member.id,
+            monthly_usd=Decimal("10"),
+            daily_analyses=1,
+            per_analysis_usd=Decimal("1"),
+        )
+    )
+    await db.commit()
+    created = (await member.client.post("/api/analyses", json={"input_kind": "form"})).json()
+    assert created["restart"] is None
+    base = f"/api/analyses/{created['id']}"
+    body = {"events": [_event(world, "sinner", "rune")]}
+    started = await member.client.post(f"{base}/run", json=body)
+    assert started.status_code == 202 and started.json()["restart"] is None
+    # Воркер упал на вызове Claude (529): анализ остановлен, резерв снят
+    await db.execute(
+        update(Analysis)
+        .where(Analysis.id == created["id"])
+        .values(
+            status="failed",
+            error_code="ai.overloaded",
+            failed_step="claude",
+            budget_reserved_usd=Decimal(0),
+        )
+    )
+    await db.commit()
+    budget = (await member.client.get("/api/ai/budget")).json()
+    assert budget["reason_code"] == "ai.daily_limit"
+    view = (await member.client.get(base)).json()
+    assert view["restart"] == {
+        "allowed": True,
+        "reason_code": None,
+        "reason_params": {},
+        "retry_at": None,
+    }
+
+    # Новости свежие, осталась только оценка матча ($0,115). Потрачено $0,86: оценка
+    # влезает в потолок $1, а худший случай самого маленького вызова ($0,155) — нет, и
+    # воркер остановился бы на нем же. Раньше такой перезапуск пускали
+    await db.execute(update(Player).values(news_checked_at=utcnow()))
+    await db.execute(
+        update(Analysis).where(Analysis.id == created["id"]).values(cost_usd=Decimal("0.86"))
+    )
+    await db.commit()
+    restart = (await member.client.get(base)).json()["restart"]
+    assert restart["allowed"] is False and restart["reason_code"] == "ai.analysis_cap"
+    assert restart["reason_params"]["cap"] == "1,00"
+    refused = await member.client.post(f"{base}/run")
+    assert refused.status_code == 409 and error_code(refused) == "ai.analysis_cap"
+
+    # Администратор поднял потолок — перезапуск можно, и запуск это подтверждает
+    await db.execute(
+        update(AiLimit).where(AiLimit.user_id == member.id).values(per_analysis_usd=Decimal("2"))
+    )
+    await db.commit()
+    assert (await member.client.get(base)).json()["restart"]["allowed"] is True
+    again = await member.client.post(f"{base}/run")
+    assert again.status_code == 202 and again.json()["attempt"] == 2
+    assert again.json()["restart"] is None
+    assert len(queued) == 2
+
+
+async def test_cancel_during_claude_call_says_when_to_continue(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    db: AsyncSession,
+    world: dict[str, int],
+    queued: list[tuple[int, int, str]],
+) -> None:
+    """Отмена, пока идет вызов Claude: ответ отмены уже говорит, что продолжить можно
+    после retry_at (analysis.step_running). updated_at пересчитывает база, и после commit
+    отмены его нельзя читать лениво: раньше здесь был 500."""
+    member = await _member(make_client, make_user, login)
+    created = (await member.client.post("/api/analyses", json={"input_kind": "form"})).json()
+    base = f"/api/analyses/{created['id']}"
+    body = {"events": [_event(world, "sinner", "rune")]}
+    assert (await member.client.post(f"{base}/run", json=body)).status_code == 202
+    analysis = await db.get_one(Analysis, created["id"], populate_existing=True)
+    checkpoint = dict(analysis.checkpoint or {})
+    checkpoint["steps"] = [
+        {**step, "state": "running"} if step["kind"] == "claude" else step
+        for step in checkpoint["steps"]
+    ]
+    await db.execute(
+        update(Analysis)
+        .where(Analysis.id == created["id"])
+        .values(status="llm_review", checkpoint=checkpoint)
+    )
+    await db.commit()
+    response = await member.client.post(f"{base}/cancel")
+    assert response.status_code == 200, response.text
+    restart = response.json()["restart"]
+    assert restart["allowed"] is False and restart["reason_code"] == "analysis.step_running"
+    assert restart["retry_at"] is not None
+    again = (await member.client.get(base)).json()["restart"]
+    assert again["reason_code"] == "analysis.step_running"
+    assert again["retry_at"] == restart["retry_at"]
+
+
 async def test_double_run_is_conflict_not_error(
     make_client: ClientFactory,
     make_user: UserFactory,
@@ -678,3 +794,35 @@ async def test_every_step_uses_only_whitelisted_tools(
         tools = [(tool.get("type"), tool["name"]) for tool in body.get("tools") or []]
         assert tools == TOOL_WHITELIST[step_of(body)]
         assert "tool_choice" not in body
+
+
+async def test_live_streams_are_limited_per_member(
+    db: AsyncSession, redis: Redis, make_user: UserFactory, world: dict[str, int]
+) -> None:
+    """Поток анализа в работе держит соединение Redis и 2 дескриптора API до 30 минут:
+    у участника их не больше 5 одновременно, шестой — 429 (экран тогда опрашивает анализ).
+    Раньше 300 потоков одного участника занимали 620 дескрипторов и 300 соединений Redis.
+    Поток готового анализа места не занимает, у другого участника — свои места."""
+    member = await make_user()
+    analysis_id = await make_analysis(db, redis, member.user, world, ("sinner", "rune"))
+    starts = [
+        await analyses_service.stream_start(db, redis, member.user, analysis_id)
+        for _ in range(analyses_service.STREAM_SLOTS)
+    ]
+    with pytest.raises(AppError) as caught:
+        await analyses_service.stream_start(db, redis, member.user, analysis_id)
+    assert (caught.value.status_code, caught.value.code) == (429, "common.rate_limited")
+    other = await make_user()
+    other_id = await make_analysis(db, redis, other.user, world, ("djokovic", "rublev"))
+    await (await analyses_service.stream_start(db, redis, other.user, other_id)).release()
+    # Поток закрылся — место свободно
+    await starts[0].release()
+    again = await analyses_service.stream_start(db, redis, member.user, analysis_id)
+    await again.release()
+    for start in starts[1:]:
+        await start.release()
+    # Готовый анализ: только снимок, место не нужно
+    await db.execute(update(Analysis).where(Analysis.id == analysis_id).values(status="done"))
+    await db.commit()
+    for _ in range(analyses_service.STREAM_SLOTS + 2):
+        await analyses_service.stream_start(db, redis, member.user, analysis_id)

@@ -46,25 +46,35 @@ REFS = {"elo", "form", "news:5"}
 class Hooks:
     """StepHooks для тестов: что спросили до вызова и что записали после."""
 
-    def __init__(self, *, refuse: ClaudeStepError | None = None) -> None:
+    def __init__(self, *, refuse: ClaudeStepError | None = None, grant: int | None = None) -> None:
         self.before: list[dict[str, Any]] = []
         self.after: list[CallInfo] = []
         self.refuse = refuse
+        self.grant = grant
 
     async def before_call(
-        self, *, kind: str, model: str, input_tokens: int, max_tokens: int, searches: int
-    ) -> None:
+        self,
+        *,
+        kind: str,
+        model: str,
+        input_tokens: int,
+        max_tokens: int,
+        min_tokens: int,
+        searches: int,
+    ) -> int | None:
         self.before.append(
             {
                 "kind": kind,
                 "model": model,
                 "input_tokens": input_tokens,
                 "max_tokens": max_tokens,
+                "min_tokens": min_tokens,
                 "searches": searches,
             }
         )
         if self.refuse is not None:
             raise self.refuse
+        return self.grant
 
     async def after_call(self, info: CallInfo) -> int | None:
         self.after.append(info)
@@ -272,22 +282,53 @@ async def test_news_pause_turn_and_url_check(claude: ClaudeMock) -> None:
     assert outcome.searched is True
 
 
-async def test_news_search_error_code(claude: ClaudeMock) -> None:
-    error_block = {
+def _search_error(code: str) -> dict[str, Any]:
+    return {
         "type": "web_search_tool_result",
         "tool_use_id": "srv1",
-        "content": {"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"},
+        "content": {"type": "web_search_tool_result_error", "error_code": code},
     }
+
+
+async def test_news_search_error_code(claude: ClaudeMock) -> None:
     claude.add(
         message(
-            [error_block, _record([{"player": 1, "items": []}, {"player": 2, "items": []}])],
+            [
+                _search_error("unavailable"),
+                _record([{"player": 1, "items": []}, {"player": 2, "items": []}]),
+            ],
             stop_reason="tool_use",
         )
     )
     outcome = await _news(Hooks())
-    assert outcome.search_errors == ("max_uses_exceeded",) and outcome.facts == []
+    assert outcome.search_errors == ("unavailable",) and outcome.facts == []
     # Ни один поиск не удался: новости не проверены (сервис не отметит игроков)
     assert outcome.searched is False
+
+
+async def test_max_uses_exceeded_is_not_a_search_failure(claude: ClaudeMock) -> None:
+    """Модель попробовала четвертый поиск при max_uses = 3: API отвечает блоком
+    max_uses_exceeded. Разрешенные поиски прошли — это не сбой поиска, и участник не
+    видит «часть поисков не удалась». Сколько поисков разрешено, модель видит в
+    сообщении."""
+    claude.add(
+        message(
+            [
+                *_search([URL1]),
+                *_search([URL2]),
+                *_search([URL1]),
+                _search_error("max_uses_exceeded"),
+                _record([{"player": 1, "items": [_item(URL1)]}, {"player": 2, "items": []}]),
+            ],
+            stop_reason="tool_use",
+            model="claude-sonnet-5-5",
+        )
+    )
+    outcome = await _news(Hooks())
+    assert outcome.search_errors == () and outcome.limited == 1
+    assert outcome.searched is True and len(outcome.facts) == 1
+    text = claude.bodies[0]["messages"][0]["content"]
+    assert "Поисков у тебя не больше 3 на весь запрос" in text
 
 
 async def test_news_without_record_asks_once(claude: ClaudeMock) -> None:
@@ -330,6 +371,19 @@ def _assessment(**fields: Any) -> dict[str, Any]:
 
 def _out(**fields: Any) -> MatchAssessmentOut:
     return MatchAssessmentOut.model_validate(_assessment(**fields))
+
+
+def test_divergence_is_measured_from_p_base_shown_in_dossier() -> None:
+    """Модель видит p_base в досье с 3 знаками (0,6996 → 0,7) и по правилу промпта не
+    обязана пояснять ответ 0,78 (ровно 8 п.п.). Раньше код сравнивал с неокругленным
+    p_base, требовал пояснение («|0.780 - p_base 0.700| > 0.08») и платил за лишний вызов
+    Opus с сообщением, которое противоречит само себе."""
+    p_base = Probs3(0.6996, 0.4404, 0.1196)
+    exact = _out(p1_win=0.78, p1_cover=0.44, p2_cover=0.12)
+    assert check_assessment(exact, p_base=p_base, refs=REFS, highlight=0.08) == []
+    beyond = _out(p1_win=0.781, p1_cover=0.44, p2_cover=0.12)
+    [problem] = check_assessment(beyond, p_base=p_base, refs=REFS, highlight=0.08)
+    assert "|0.781 - p_base 0.700| > 0.08" in problem
 
 
 def test_check_assessment_rules() -> None:

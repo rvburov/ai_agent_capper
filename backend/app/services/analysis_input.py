@@ -38,6 +38,8 @@ MATCH_SCORE = 0.9
 CHECK_SCORE = 0.7
 # Два кандидата ближе друг к другу — даже высокое сходство требует проверки (Зверевы)
 AMBIGUOUS_GAP = 0.05
+# Игрок без матчей в базе дольше этого — не действующий: уступает тезке (resolve_player)
+INACTIVE_DAYS = 3 * 365
 CANDIDATES = 3
 MAX_EVENTS = 5
 ODDS_MIN = Decimal("1.01")
@@ -45,9 +47,36 @@ ODDS_MAX = Decimal("50")
 ODDS_STEP = Decimal("0.001")
 MONEY_STEP = Decimal("0.01")
 MATCH_WINDOW_DAYS = 3
-TOURNAMENT_SCORE = 0.45
+# Сходство отличительной части названия (без общих слов): «Test Open 9» и «Test Open 5»
+# дают 0,71 — это разные турниры
+TOURNAMENT_SCORE = 0.75
 # Разница сходства, при которой турниры считаются одинаково похожими на запрос
 TOURNAMENT_TIE = 0.01
+# Общие слова названий турниров: по ним турниры не различить
+GENERIC_WORDS = frozenset(
+    {
+        "open",
+        "opens",
+        "masters",
+        "master",
+        "cup",
+        "finals",
+        "championships",
+        "championship",
+        "international",
+        "internationals",
+        "atp",
+        "tennis",
+        "tour",
+        "tournament",
+        "250",
+        "500",
+        "1000",
+    }
+)
+GENERIC_SQL = r"\m(" + "|".join(sorted(GENERIC_WORDS)) + r")\M"
+# Название турнира из ввода: одна строка (как NameText в app/schemas/analyses.py)
+NAME_MAX = 200
 ELO_RANK_DAYS = 364
 DEFAULT_BEST_OF = 3
 SLAMS = ("australian open", "roland garros", "french open", "wimbledon", "us open")
@@ -203,6 +232,23 @@ class Pick:
     candidates: tuple[Candidate, ...]
 
 
+async def _by_activity(db: AsyncSession, found: list[Candidate]) -> list[Candidate]:
+    """Кандидаты по сходству, а при равном — по свежести последнего матча. Игрок без
+    матчей за INACTIVE_DAYS уступает действующему с почти тем же сходством (на
+    AMBIGUOUS_GAP): у старых тезок id меньше, и раньше фамилия из линии букмекера
+    («Medvedev», «Зверев», «Ruud») предлагала Андрея Медведева вместо Даниила."""
+    last = await last_match_days(db, [item.player_id for item in found])
+    since = datetime.now(UTC).date() - timedelta(days=INACTIVE_DAYS)
+
+    def key(item: Candidate) -> tuple[float, int, int]:
+        day = last.get(item.player_id)
+        inactive = day is None or day < since
+        adjusted = item.score - (AMBIGUOUS_GAP if inactive else 0.0)
+        return (-adjusted, -(day.toordinal() if day else 0), item.player_id)
+
+    return sorted(found, key=key)
+
+
 async def resolve_player(db: AsyncSession, raw: str, latin: str | None) -> Pick:
     """Игрок по имени из текста: поиск по написанию в тексте и латиницей разбора."""
     found: dict[int, Candidate] = {}
@@ -219,7 +265,7 @@ async def resolve_player(db: AsyncSession, raw: str, latin: str | None) -> Pick:
                 found[hit.player.id] = Candidate(
                     hit.player.id, hit.player.name, hit.player.country, float(hit.score)
                 )
-    ranked = sorted(found.values(), key=lambda item: (-item.score, item.player_id))
+    ranked = await _by_activity(db, list(found.values()))
     candidates = tuple(ranked[:CANDIDATES])
     if not ranked or ranked[0].score < CHECK_SCORE:
         return Pick("missing", raw, None, candidates)
@@ -248,33 +294,53 @@ def _is_slam(name: str) -> bool:
     return any(slam in folded for slam in SLAMS)
 
 
+def one_line(value: str, limit: int) -> str:
+    """Текст одной строкой: без управляющих символов, пробелы схлопнуты, не длиннее
+    limit. Название из ввода и из ответа разбора идет в черновик и обратно в запрос."""
+    printable = "".join(" " if ord(char) < 32 or ord(char) == 127 else char for char in value)
+    return " ".join(printable.split())[:limit]
+
+
+def _core(folded: str) -> str:
+    """Отличительная часть названия: без общих слов (open, masters, cup…)."""
+    return " ".join(word for word in folded.split() if word not in GENERIC_WORDS)
+
+
 async def resolve_tournament(
     db: AsyncSession, name: str | None, *, today: date
 ) -> TournamentGuess | None:
     """Турнир по названию или городу: текущего года — найден; иначе последний выпуск
-    дает покрытие, категорию и формат; иначе — только название."""
+    дает покрытие, категорию и формат; иначе — только название.
+
+    Сходство считается без общих слов (Open, Masters, Cup…): иначе «Japan Open» (у
+    Сакманна — Tokyo) находил Australian Open текущего года и матч получал формат до трех
+    побед, а «Davis Cup» — один из матчей Кубка Дэвиса на грунте. Турнир годится, только
+    если его отличительная часть почти целиком есть в запросе (или совпадает город).
+    Турниры из ввода участников (source = 'user') не подставляются: это свободный текст
+    другого участника."""
     if not name or not name.strip():
         return None
-    query = fold(name.strip())
+    title = one_line(name, NAME_MAX)
+    best_of_guess = 5 if _is_slam(title) else None
+    query = _core(fold(title))
     if not query:
-        return None
+        return TournamentGuess(None, title, None, None, best_of_guess) if title else None
+    core = func.regexp_replace(func.lower(Tournament.name), GENERIC_SQL, " ", "g")
     score = func.greatest(
-        func.similarity(func.lower(Tournament.name), query),
-        func.word_similarity(query, func.lower(Tournament.name)),
+        func.similarity(core, query),
+        func.word_similarity(core, query),
         func.similarity(func.lower(func.coalesce(Tournament.city, "")), query),
     ).label("score")
     rows = (
         await db.execute(
             select(Tournament, score)
-            .where(score >= TOURNAMENT_SCORE)
+            .where(score >= TOURNAMENT_SCORE, Tournament.source != "user")
             .order_by(score.desc(), Tournament.start_date.desc().nulls_last(), Tournament.id)
             .limit(30)
         )
     ).all()
-    best_of_guess = 5 if _is_slam(name) else None
     # Выпуск текущего года берем, только если это тот же турнир, что и лучший по сходству:
-    # иначе «Shanghai Masters» без выпуска этого года нашел бы «Rome Masters» этого года
-    # (общее слово Masters дает word_similarity 0,47)
+    # иначе «Shanghai Masters» без выпуска этого года нашел бы другой турнир этого года
     best = rows[0][1] if rows else 0.0
     current = [
         (tournament, value)
@@ -306,7 +372,7 @@ async def resolve_tournament(
             tournament.surface,
             tournament.best_of or best_of_guess,
         )
-    return TournamentGuess(None, name.strip()[:200], None, None, best_of_guess)
+    return TournamentGuess(None, title, None, None, best_of_guess)
 
 
 # --- кэфы ---
@@ -506,10 +572,15 @@ async def check_events(
     ids = {pid for event in events for pid in (event.player1_id, event.player2_id) if pid}
     known = set(await db.scalars(select(Player.id).where(Player.id.in_(ids)))) if ids else set()
     tournament_ids = {event.tournament_id for event in events if event.tournament_id}
+    # Турнир из ввода другого участника по id не подставляется: его название — чужой текст
     tournaments = (
         {
             row.id: row
-            for row in await db.scalars(select(Tournament).where(Tournament.id.in_(tournament_ids)))
+            for row in await db.scalars(
+                select(Tournament).where(
+                    Tournament.id.in_(tournament_ids), Tournament.source != "user"
+                )
+            )
         }
         if tournament_ids
         else {}
@@ -599,7 +670,7 @@ async def _user_tournament(db: AsyncSession, event: ConfirmedEvent, *, today: da
     guess = await resolve_tournament(db, event.tournament_name, today=today)
     if guess is not None and guess.id is not None:
         return guess.id
-    name = (guess.name if guess else event.tournament_name)[:200]
+    name = one_line(guess.name if guess else event.tournament_name, NAME_MAX)
     ref = f"user:{today.year}:{tournament_slug(name)}"
     await db.execute(
         pg_insert(Tournament)

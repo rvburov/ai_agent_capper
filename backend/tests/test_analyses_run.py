@@ -4,6 +4,7 @@
 
 import json
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
@@ -36,7 +37,7 @@ from tests.analysis_helpers import (
     set_own_key,
 )
 from tests.claude_mock import KEY, OTHER_KEY, seed_prices
-from tests.fake_claude import FakeClaude
+from tests.fake_claude import FakeClaude, _user_text
 from tests.support import UserFactory
 
 ACTIVE_FLOW = ["building_dossier", "modelling", "llm_review", "composing"]
@@ -319,7 +320,7 @@ async def test_news_failure_is_a_warning(
     if error == "search_error":
         # Ошибка поиска приходит ответом 200: ни один поиск не удался — новости не
         # получены, анализ идет дальше, а игроки не отмечены проверенными
-        assert news_step["detail_params"] == {"code": "max_uses_exceeded"}
+        assert news_step["detail_params"] == {"code": "unavailable"}
         checked = await db.scalars(
             select(Player.news_checked_at)
             .where(Player.id.in_((world["sinner"], world["rune"])))
@@ -558,3 +559,86 @@ async def test_worker_job_runs_only_its_attempt(
     assert fake.requests == []
     assert await run_analysis(ctx, analysis_id, 1) == "done"
     assert await reap_stuck_analyses(ctx) == 0
+
+
+@contextmanager
+def _installed(fake: FakeClaude) -> Iterator[FakeClaude]:
+    yield from install(fake)
+
+
+class NumbersByMatchLine(FakeClaude):
+    """Модель нумерует игроков по строке «Матч: A vs B», а не по списку запроса."""
+
+    def _news(self, body: dict[str, Any], model: str, error: str | None) -> dict[str, Any]:
+        msg = super()._news(body, model, error)
+        line = next(row for row in _user_text(body).splitlines() if row.startswith("Матч: "))
+        first = line.removeprefix("Матч: ").split(" vs ")[0]
+        for block in msg["content"]:
+            if block.get("type") == "tool_use":
+                for group in block["input"]["players"]:
+                    name = group["items"][0]["summary"].split(":")[0]
+                    group["player"] = 1 if name == first else 2
+        return msg
+
+
+async def test_news_of_second_player_only_keeps_his_number(
+    db: AsyncSession,
+    engine: AsyncEngine,
+    redis: Redis,
+    make_user: UserFactory,
+    world: dict[str, int],
+) -> None:
+    """Новости устарели только у второго игрока: в запросе он остается номером 2, как в
+    строке «Матч». Раньше он шел под номером 1, модель записывала его факты как player 2,
+    код их отбрасывал, а игрока отмечал проверенным: найденная травма терялась на 12 ч."""
+    with _installed(NumbersByMatchLine()) as fake:
+        await db.execute(
+            update(Player).where(Player.id == world["sinner"]).values(news_checked_at=utcnow())
+        )
+        await db.commit()
+        member = await make_user()
+        analysis_id = await make_analysis(db, redis, member.user, world, ("sinner", "rune"))
+        assert await run(engine, redis, analysis_id) == "done"
+    text = _user_text(fake.calls("news")[0])
+    assert "\n2. Holger Rune\n" in text and "1. " not in text.split("Игроки")[1]
+    facts = list(
+        await db.scalars(select(PlayerNews.player_id).where(PlayerNews.player_id == world["rune"]))
+    )
+    assert facts == [world["rune"]]
+
+
+class WrongNumber(FakeClaude):
+    """Модель записала факты под номером игрока, которого нет в запросе."""
+
+    def _news(self, body: dict[str, Any], model: str, error: str | None) -> dict[str, Any]:
+        msg = super()._news(body, model, error)
+        for block in msg["content"]:
+            if block.get("type") == "tool_use":
+                for group in block["input"]["players"]:
+                    group["player"] = 3 - group["player"]
+        return msg
+
+
+async def test_misplaced_news_do_not_mark_player_checked(
+    db: AsyncSession,
+    engine: AsyncEngine,
+    redis: Redis,
+    make_user: UserFactory,
+    world: dict[str, int],
+) -> None:
+    """Все факты ответа — под номером не из запроса: чьи они, неизвестно. Игрок не
+    отмечается проверенным (следующий анализ поищет снова), шаг — «новости не получены»."""
+    with _installed(WrongNumber()):
+        await db.execute(
+            update(Player).where(Player.id == world["sinner"]).values(news_checked_at=utcnow())
+        )
+        await db.commit()
+        member = await make_user()
+        analysis_id = await make_analysis(db, redis, member.user, world, ("sinner", "rune"))
+        assert await run(engine, redis, analysis_id) == "done"
+    rune = await db.get_one(Player, world["rune"], populate_existing=True)
+    assert rune.news_checked_at is None
+    analysis = await _analysis(db, analysis_id)
+    news = [step for step in analysis.checkpoint["steps"] if step["kind"] == "news"]
+    assert news[0]["detail_key"] == "analysis.steps.news_failed"
+    assert news[0]["detail_params"] == {"code": "bad_player"}

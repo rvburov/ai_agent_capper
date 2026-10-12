@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter, Response, status
 
-from app.core.deps import ClientIp, CurrentUser, DbSession
+from app.core.deps import ClientIp, CurrentUser, DbSession, RedisClient
 from app.schemas.ai import (
     AiBudgetOut,
     AiModeIn,
@@ -31,12 +31,15 @@ async def budget(user: CurrentUser, db: DbSession) -> AiBudgetOut:
 
 
 @router.put("/me/ai-key")
-async def save_own_key(body: OwnKeyIn, user: CurrentUser, db: DbSession) -> OwnKeyOut:
+async def save_own_key(
+    body: OwnKeyIn, user: CurrentUser, db: DbSession, redis: RedisClient, ip: ClientIp
+) -> OwnKeyOut:
     """Свой ключ: проверяется запросами к Claude API (список моделей и доступ к моделям
     из настроек), сохраняется только проверенный, режим становится own. Не прошел —
     400 ai.key_format / ai.key_rejected / ai.key_models, 502 ai.key_check_failed,
-    503 ai.key_unavailable. Администратору — 409 ai.admin_key_only."""
-    return await ai_budget.save_own_key(db, user, body.key)
+    503 ai.key_unavailable. Администратору — 409 ai.admin_key_only. Проверок ключа не
+    больше 10 в час на участника и на IP — иначе 429 common.rate_limited."""
+    return await ai_budget.save_own_key(db, redis, user, body.key, ip=ip)
 
 
 @router.delete("/me/ai-key")
@@ -47,10 +50,13 @@ async def delete_own_key(user: CurrentUser, db: DbSession, ip: ClientIp) -> OwnK
 
 
 @router.post("/me/ai-key/check")
-async def check_own_key(user: CurrentUser, db: DbSession) -> OwnKeyOut:
+async def check_own_key(
+    user: CurrentUser, db: DbSession, redis: RedisClient, ip: ClientIp
+) -> OwnKeyOut:
     """Проверяет сохраненный ключ и записывает итог. Нет ключа — 404 ai.no_own_key,
-    нет связи с Anthropic — 503 ai.key_unavailable."""
-    return await ai_budget.check_own_key(db, user)
+    нет связи с Anthropic — 503 ai.key_unavailable, больше 10 проверок в час — 429
+    common.rate_limited."""
+    return await ai_budget.check_own_key(db, redis, user, ip=ip)
 
 
 @router.put("/me/ai-mode")

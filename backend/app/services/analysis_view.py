@@ -28,6 +28,7 @@ from app.schemas.analyses import (
     PlayerBrief,
     PlayerCandidate,
     PlayerPick,
+    RestartOut,
     ResultOut,
     StepOut,
     TextKey,
@@ -353,9 +354,14 @@ async def bet_brief(db: AsyncSession, analysis_id: int) -> BetBrief | None:
 
 
 async def analysis_out(
-    db: AsyncSession, analysis: Analysis, *, today: date | None = None
+    db: AsyncSession,
+    analysis: Analysis,
+    *,
+    today: date | None = None,
+    restart: RestartOut | None = None,
 ) -> AnalysisOut:
-    """Анализ целиком для экрана."""
+    """Анализ целиком для экрана. restart — можно ли перезапустить остановленный анализ
+    (analyses.restart_state)."""
     day = today or datetime.now(UTC).date()
     draft = None
     if analysis.status == "needs_confirmation" or (
@@ -394,4 +400,5 @@ async def analysis_out(
         bank=analysis.bank_input,
         bookmaker=analysis.bookmaker,
         strategy_version=version_code,
+        restart=restart,
     )

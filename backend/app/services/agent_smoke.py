@@ -4,16 +4,20 @@
 
 Прогнозы и новости не пишутся. Каждый вызов — строка agent_runs (деньги потрачены, они
 входят в бюджет месяца), досье — в dossiers (общие данные). Цена — около $0,30
-(estimate_smoke).
+(estimate_smoke), в худшем случае больше (max_smoke: продолжения поиска и итерации
+анализа). Досье собирается на день матча: результат самого матча в него не попадает.
+Итог проверяет команда (problems): разбор нашел одно событие, модель искала перед
+record_news, второй вызов анализа прочитал кэш — иначе проверка не пройдена.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from decimal import ROUND_UP, Decimal
+from typing import Any
 
 import anthropic
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.analysis import assess_match
@@ -23,7 +27,7 @@ from app.agent.config import AgentConfig, load_agent_config
 from app.agent.news import NewsTarget, fetch_news
 from app.agent.parse import parse_text
 from app.agent.prompts import ANALYSIS_PROMPT, load_prompt
-from app.agent.runs import price_for
+from app.agent.runs import price_for, worst_case_usd
 from app.core.errors import AppError
 from app.db.models import Match, Player, Tournament
 from app.ml.elo import RESULT_STATUSES
@@ -42,6 +46,8 @@ SAMPLE_TEXT = """Текущий банк: 10 000 ₽
 ESTIMATE_STEP = Decimal("0.01")
 MTOK = Decimal(1_000_000)
 PARSE_TOKENS = (2000, 1000)
+# Поисков в запросе новостей проверки
+NEWS_USES = 2
 
 
 @dataclass(frozen=True)
@@ -65,9 +71,26 @@ class SmokeReport:
     parsed_events: int = 0
     news_facts: int = 0
     news_errors: tuple[str, ...] = ()
+    news_searched: bool = False
     match_id: int | None = None
     p_base: float | None = None
     p_claude: float | None = None
+
+    @property
+    def news_searches(self) -> int:
+        return sum(call.web_searches for call in self.calls if call.step == "news")
+
+    def problems(self) -> list[tuple[str, dict[str, Any]]]:
+        """Что проверка не подтвердила (ключ cli.agent_smoke.problems.* и параметры):
+        пустой список — конвейер работает на живом API."""
+        found: list[tuple[str, dict[str, Any]]] = []
+        if self.parsed_events != 1:
+            found.append(("events", {"events": self.parsed_events}))
+        if not self.news_searched or self.news_searches == 0:
+            found.append(("search", {}))
+        if self.second_cache_read == 0:
+            found.append(("cache", {}))
+        return found
 
     @property
     def total_usd(self) -> Decimal:
@@ -86,11 +109,19 @@ class _Hooks:
         self.report = report
 
     async def before_call(
-        self, *, kind: str, model: str, input_tokens: int, max_tokens: int, searches: int
-    ) -> None:
+        self,
+        *,
+        kind: str,
+        model: str,
+        input_tokens: int,
+        max_tokens: int,
+        min_tokens: int,
+        searches: int,
+    ) -> int | None:
         await price_for(self.db, model)
         # Транзакция не висит открытой, пока ждем Claude
         await self.db.commit()
+        return None
 
     async def after_call(self, info: CallInfo) -> int | None:
         run = await record_call(
@@ -140,20 +171,67 @@ async def estimate_smoke(db: AsyncSession, config: AgentConfig) -> Decimal:
     return total.quantize(ESTIMATE_STEP, rounding=ROUND_UP)
 
 
+async def max_smoke(db: AsyncSession, config: AgentConfig) -> Decimal:
+    """Худший случай проверки: разбор, разговор новостей со всеми продолжениями и
+    просьбой (поиски каждого запроса), два разговора анализа со всеми итерациями — все
+    по худшему случаю вызова (весь max_tokens)."""
+    parse = await price_for(db, config.parse_model)
+    news = await price_for(db, config.news_model)
+    analysis = await price_for(db, config.analysis_model)
+    total = worst_case_usd(parse, input_tokens=PARSE_TOKENS[0], max_tokens=config.parse_max_tokens)
+    total += (config.news_max_pause_continuations + 2) * worst_case_usd(
+        news,
+        input_tokens=config.estimate_news_input_tokens,
+        max_tokens=config.news_max_tokens,
+        searches=min(config.news_max_uses, NEWS_USES),
+    )
+    total += (
+        2
+        * config.analysis_max_iterations
+        * worst_case_usd(
+            analysis,
+            input_tokens=config.estimate_analysis_input_tokens,
+            max_tokens=config.analysis_max_tokens,
+        )
+    )
+    return total.quantize(ESTIMATE_STEP, rounding=ROUND_UP)
+
+
+def _match_day() -> Any:
+    return func.coalesce(Match.match_date, Tournament.start_date)
+
+
 async def smoke_match(db: AsyncSession, match_id: int | None) -> Match:
-    """Матч для анализа: указанный или последний сыгранный в базе."""
+    """Матч для анализа: указанный или последний сыгранный в базе (у матча без даты —
+    начало турнира, как в досье: у архива Сакманна дат матчей нет)."""
     if match_id is not None:
         match = await db.get(Match, match_id)
-    else:
-        match = await db.scalar(
-            select(Match)
-            .where(Match.status.in_(RESULT_STATUSES), Match.match_date.is_not(None))
-            .order_by(Match.match_date.desc(), Match.id.desc())
-            .limit(1)
+        if match is None:
+            raise AppError(404, "agent_smoke.match_not_found", match=match_id)
+        return match
+    found = await db.scalar(
+        select(Match)
+        .outerjoin(Tournament, Tournament.id == Match.tournament_id)
+        .where(Match.status.in_(RESULT_STATUSES), _match_day().is_not(None))
+        .order_by(_match_day().desc(), Match.id.desc())
+        .limit(1)
+    )
+    if found is None:
+        raise AppError(404, "agent_smoke.no_matches")
+    return found
+
+
+async def _dossier_moment(db: AsyncSession, match: Match) -> datetime:
+    """День матча: досье видит только матчи строго раньше него, поэтому результат самого
+    матча (форма, личные встречи) в досье не попадает. Дня нет — сейчас."""
+    day = match.match_date
+    if day is None and match.tournament_id is not None:
+        day = await db.scalar(
+            select(Tournament.start_date).where(Tournament.id == match.tournament_id)
         )
-    if match is None:
-        raise AppError(404, "common.not_found")
-    return match
+    if day is None:
+        return datetime.now(UTC)
+    return datetime.combine(day, time(0), UTC)
 
 
 async def run_smoke(
@@ -188,10 +266,11 @@ async def run_smoke(
         today=datetime.now(UTC).date(),
         config=config,
         hooks=hooks,
-        max_uses=min(config.news_max_uses, 2),
+        max_uses=min(config.news_max_uses, NEWS_USES),
     )
     report.news_facts = len(outcome.facts)
     report.news_errors = outcome.search_errors
+    report.news_searched = outcome.searched
 
     say("dossier")
     surface = await db.scalar(
@@ -200,7 +279,7 @@ async def run_smoke(
     dossier = await build_dossier(
         db,
         match,
-        as_of=datetime.now(UTC),
+        as_of=await _dossier_moment(db, match),
         best_of=match.best_of or 3,
         surface=surface or "hard",
     )

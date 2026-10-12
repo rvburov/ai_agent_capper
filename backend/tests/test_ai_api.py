@@ -481,3 +481,33 @@ async def test_key_not_in_logs(
     for text in (caplog.text, printed.out, printed.err):
         assert KEY not in text
         assert KEY[:-4] not in text
+
+
+async def test_key_checks_are_rate_limited(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    claude: ClaudeMock,
+) -> None:
+    """Каждая проверка ключа — 4 запроса к Anthropic с адреса сервера: не больше 10 в час
+    на участника и на IP (сохранение и «Проверить» — один счетчик). Раньше 40 PUT и 40
+    проверок за 2 с проходили все, сервер делал 320 запросов к /v1/models."""
+    member = await signed_in(make_client, make_user, login, ip="10.0.0.7")
+    for _ in range(10):
+        response = await member.client.put("/api/me/ai-key", json={"key": "sk-proj-123"})
+        assert response.status_code == 400
+    for request in (
+        member.client.put("/api/me/ai-key", json={"key": KEY}),
+        member.client.post("/api/me/ai-key/check"),
+    ):
+        limited = await request
+        assert limited.status_code == 429 and error_code(limited) == "common.rate_limited"
+        assert int(limited.headers["Retry-After"]) > 0
+    assert claude.requests == []
+    # Другой участник с другого IP — свой счетчик; с того же IP — общий лимит адреса
+    other = await signed_in(make_client, make_user, login, ip="10.0.0.8")
+    response = await other.client.put("/api/me/ai-key", json={"key": "sk-proj-123"})
+    assert response.status_code == 400
+    neighbour = await signed_in(make_client, make_user, login, ip="10.0.0.7")
+    response = await neighbour.client.post("/api/me/ai-key/check")
+    assert response.status_code == 429

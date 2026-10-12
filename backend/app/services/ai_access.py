@@ -22,13 +22,18 @@ analyses — один порядок во всех функциях), commit —
 У администратора на ключе администратора нет личных лимитов (как в макете), но потолок
 анализа (per_analysis_hard_usd) действует.
 
-Лимит месяца и общий бюджет до запуска проверяются той же мерой, что перед вызовом
-(check_before_call): свободным должен быть не только расход по оценке, но и худший случай
-одного вызова оценки матча (весь max_tokens Opus, около $0,36). Иначе анализ запускался
-по оценке ($0,12) и останавливался на первом же вызове Opus, а перезапуск упирался в то же.
+Перед каждым вызовом (fit_call) худший случай вызова плюс худший случай уже идущих вызовов
+этого анализа должен поместиться в потолок анализа, лимит месяца и общий бюджет. Не
+помещается только из-за своих вызовов в полете — вызов ждет их конца; не помещается и
+без них — max_tokens оценки матча урезается до остатка, но не ниже analysis_min_tokens.
+Лимит месяца и общий бюджет до запуска проверяются той же мерой (launch_need_usd):
+свободной должна быть оценка шагов до последнего вызова Opus плюс худший случай самого
+маленького допустимого вызова Opus (около $0,16). Иначе анализ запускался, платил за
+новости и останавливался на вызове Opus.
 """
 
 import calendar
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_UP, Decimal
@@ -40,7 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.config import AgentConfig, default_per_analysis, load_agent_config
 from app.agent.errors import ClaudeStepError
-from app.agent.runs import worst_case_usd
+from app.agent.runs import max_tokens_within, worst_case_usd
 from app.core.errors import AppError
 from app.db.models import (
     ANALYSIS_ACTIVE_STATUSES,
@@ -301,9 +306,10 @@ async def missing_prices(
 
 
 async def call_need_usd(db: AsyncSession, config: AgentConfig, now: datetime) -> Decimal:
-    """Сколько должно быть свободно, чтобы check_before_call пропустил вызов оценки матча:
-    худший случай самого дорогого вызова анализа (вход по оценке estimate_analysis_input_tokens,
-    выход — весь analysis_max_tokens). Нет цены модели — 0: тогда отказ ai.no_price."""
+    """Сколько должно быть свободно, чтобы перед вызовом оценки матча его пропустили
+    (fit_call): худший случай самого маленького допустимого вызова — вход по оценке
+    estimate_analysis_input_tokens, выход analysis_min_tokens (меньше max_tokens не
+    урезается). Нет цены модели — 0: тогда отказ ai.no_price."""
     price = await db.scalar(
         select(ModelPrice)
         .where(ModelPrice.model == config.analysis_model, ModelPrice.valid_from <= now)
@@ -315,8 +321,39 @@ async def call_need_usd(db: AsyncSession, config: AgentConfig, now: datetime) ->
     return worst_case_usd(
         price,
         input_tokens=config.estimate_analysis_input_tokens,
-        max_tokens=config.analysis_max_tokens,
+        max_tokens=min(config.analysis_min_tokens, config.analysis_max_tokens),
     )
+
+
+async def launch_need_usd(
+    db: AsyncSession, config: AgentConfig, now: datetime, estimate_usd: Decimal | None
+) -> Decimal:
+    """Сколько должно быть свободно в лимите месяца и общем бюджете, чтобы запустить
+    анализ с оценкой estimate_usd. Вызовы оплачиваются по ходу, а последний вызов оценки
+    матча проверяется по худшему случаю: свободным должна быть оценка шагов до него
+    (новости, другие матчи) плюс худший случай этого вызова (call_need_usd), а не
+    максимум из двух. Иначе анализ запускался, платил за новости и останавливался на
+    вызове Opus. estimate_usd None — без оценки: хватит ли хотя бы на один вызов; 0 —
+    вызовов Claude не будет (перезапуск после всех оценок)."""
+    need = await call_need_usd(db, config, now)
+    if estimate_usd is None:
+        return need
+    if estimate_usd <= 0:
+        return ZERO
+    price = await db.scalar(
+        select(ModelPrice)
+        .where(ModelPrice.model == config.analysis_model, ModelPrice.valid_from <= now)
+        .order_by(ModelPrice.valid_from.desc())
+        .limit(1)
+    )
+    if price is None:
+        return estimate_usd
+    per_input = max(price.input, price.cache_write_5m)
+    one_call = (
+        config.estimate_analysis_input_tokens * per_input
+        + config.estimate_analysis_output_tokens * price.output
+    ) / Decimal(1_000_000)
+    return estimate_usd + max(ZERO, need - one_call)
 
 
 async def _settings(db: AsyncSession, *, lock: bool) -> AppSettings:
@@ -351,16 +388,20 @@ async def _evaluate(
 ) -> Access:
     """analysis_spent_usd — уже потраченное анализом при повторном запуске: потолок анализа
     сравнивается с ним плюс оценкой (как в check_before_call), лимиты месяца — с оценкой
-    (потраченное уже в расходе месяца). Для лимита месяца и общего бюджета нужна еще и
-    свобода на худший случай одного вызова оценки матча (call_need_usd), если вызовы
-    Claude впереди: оценка больше нуля или не задана (можно ли сейчас запустить анализ).
-    Оценка 0 — все оценки матчей уже есть (перезапуск после них): вызовов не будет."""
+    (потраченное уже в расходе месяца). Для лимита месяца и общего бюджета свободной
+    должна быть оценка плюс запас на худший случай последнего вызова оценки матча
+    (launch_need_usd). Оценка 0 — все оценки матчей уже есть (перезапуск после них):
+    вызовов не будет."""
     config = await load_agent_config(db)
     limits = limits_of(limit_row, settings)
     cost = estimate_usd if estimate_usd is not None else ZERO
     total = analysis_spent_usd + cost
-    calls_ahead = estimate_usd is None or estimate_usd > 0
-    need = max(cost, await call_need_usd(db, config, now)) if calls_ahead else cost
+    if cost > 0:
+        # Вызов оценки матча пропустят, только если в потолок помещается худший случай
+        # самого маленького допустимого вызова (fit_call). Перезапуск, которому осталась
+        # одна дешевая по оценке оценка матча, иначе упал бы на ней сразу же
+        total = max(total, analysis_spent_usd + await call_need_usd(db, config, now))
+    need = await launch_need_usd(db, config, now, estimate_usd)
     reason: str | None = None
     params: dict[str, Any] = {}
 
@@ -483,6 +524,33 @@ def estimate_cost(config: AgentConfig, prices: dict[str, ModelPrice], *, matches
 # --- резерв ---
 
 
+def _counted_today(analysis: Analysis) -> bool:
+    """Анализ уже в «анализах за день»: запускался на ключе администратора."""
+    return analysis.started_at is not None and analysis.key_source == "admin"
+
+
+async def restart_access(
+    db: AsyncSession, user: User, analysis: Analysis, *, estimate_usd: Decimal
+) -> Access:
+    """Пустит ли сейчас reserve_for_run повторный запуск анализа с оценкой estimate_usd:
+    та же проверка, но без блокировок и резерва. /api/ai/budget отвечает про новый
+    анализ, а у перезапуска свои правила: дневной счетчик не проверяется у засчитанного
+    анализа, потолок — с уже потраченным, резерв самого анализа не мешает."""
+    settings = await _settings(db, lock=False)
+    limit_row = await _limit_row(db, user.id, lock=False)
+    return await _evaluate(
+        db,
+        user,
+        settings=settings,
+        limit_row=limit_row,
+        estimate_usd=estimate_usd.quantize(ESTIMATE_STEP, rounding=ROUND_UP),
+        now=utcnow(),
+        check_daily=not _counted_today(analysis),
+        exclude_analysis_id=analysis.id,
+        analysis_spent_usd=analysis.cost_usd,
+    )
+
+
 async def reserve_for_run(
     db: AsyncSession, user: User, analysis: Analysis, *, estimate_usd: Decimal
 ) -> Reservation:
@@ -516,8 +584,7 @@ async def reserve_for_run(
     if row is None:
         raise AppError(404, "common.not_found")
     estimate = estimate_usd.quantize(ESTIMATE_STEP, rounding=ROUND_UP)
-    # Анализ уже в «анализах за день»: запускался на ключе администратора
-    counted = row.started_at is not None and row.key_source == "admin"
+    counted = _counted_today(row)
     access = await _evaluate(
         db,
         locked_user,
@@ -556,11 +623,21 @@ async def release_reservation(db: AsyncSession, analysis: Analysis) -> None:
     await db.flush()
 
 
-async def check_before_call(db: AsyncSession, analysis: Analysis, worst_case_usd: Decimal) -> None:
-    """Перед каждым вызовом Claude в анализе: расход анализа плюс худший случай вызова
-    (runs.worst_case_usd) не больше потолка анализа; на ключе администратора — еще пауза,
-    лимит месяца участника и общий бюджет с учетом резервов других анализов. Нельзя —
-    ClaudeStepError с кодом причины: анализ останавливается до вызова."""
+@dataclass(frozen=True)
+class Room:
+    """Сколько еще можно потратить на вызовы анализа по одному из ограничений (потолок
+    анализа, лимит месяца участника, общий бюджет) и код отказа, если не хватит."""
+
+    left_usd: Decimal
+    code: str
+    params: dict[str, Any]
+
+
+async def call_rooms(db: AsyncSession, analysis: Analysis) -> list[Room]:
+    """Остатки ограничений перед вызовом Claude в анализе, по порядку проверок: потолок
+    анализа; на ключе администратора — лимит месяца участника (с резервами его других
+    анализов) и общий бюджет (с резервами всех других анализов). Пауза участника —
+    ClaudeStepError ai.paused сразу: на паузе вызов нельзя при любом остатке."""
     now = utcnow()
     spent = await _sum(
         db, select(func.sum(AgentRun.cost_usd)).where(AgentRun.analysis_id == analysis.id)
@@ -569,10 +646,9 @@ async def check_before_call(db: AsyncSession, analysis: Analysis, worst_case_usd
     cap = analysis.cost_cap_usd
     if cap is None:
         cap = settings.per_analysis_hard_usd
-    if spent + worst_case_usd > cap:
-        raise ClaudeStepError("ai.analysis_cap", cap=usd_text(cap))
+    rooms = [Room(cap - spent, "ai.analysis_cap", {"cap": usd_text(cap)})]
     if analysis.key_source != "admin":
-        return
+        return rooms
     user = await db.get(User, analysis.user_id)
     if user is not None and user.role != "admin":
         limits = limits_of(await _limit_row(db, user.id, lock=False), settings)
@@ -580,15 +656,107 @@ async def check_before_call(db: AsyncSession, analysis: Analysis, worst_case_usd
             raise ClaudeStepError("ai.paused")
         member = await member_spent(db, user.id, now)
         others = await _reserved(db, user_id=user.id, exclude_analysis_id=analysis.id)
-        if member + others + worst_case_usd > limits.monthly_usd:
-            raise ClaudeStepError("ai.monthly_limit", limit=usd_text(limits.monthly_usd))
+        rooms.append(
+            Room(
+                limits.monthly_usd - member - others,
+                "ai.monthly_limit",
+                {"limit": usd_text(limits.monthly_usd)},
+            )
+        )
     total = await _budget_spent(db, now)
     others_all = await _reserved(db, user_id=None, exclude_analysis_id=analysis.id)
-    if total + others_all + worst_case_usd > settings.monthly_budget_usd:
-        raise ClaudeStepError("ai.budget_exhausted")
+    rooms.append(Room(settings.monthly_budget_usd - total - others_all, "ai.budget_exhausted", {}))
+    return rooms
+
+
+def short_room(rooms: Sequence[Room], need_usd: Decimal) -> Room | None:
+    """Первое по порядку ограничение, в которое need_usd не помещается (None — все)."""
+    for room in rooms:
+        if need_usd > room.left_usd:
+            return room
+    return None
+
+
+async def check_before_call(db: AsyncSession, analysis: Analysis, worst_case_usd: Decimal) -> None:
+    """Перед каждым вызовом Claude в анализе: расход анализа плюс худший случай вызова
+    (runs.worst_case_usd) не больше потолка анализа; на ключе администратора — еще пауза,
+    лимит месяца участника и общий бюджет с учетом резервов других анализов. Нельзя —
+    ClaudeStepError с кодом причины: анализ останавливается до вызова."""
+    short = short_room(await call_rooms(db, analysis), worst_case_usd)
+    if short is not None:
+        raise ClaudeStepError(short.code, **short.params)
+
+
+@dataclass(frozen=True)
+class CallFit:
+    """Решение перед вызовом: max_tokens вызова и его худший случай (резерв вызова в
+    полете); wait — подождать свои вызовы в полете; refuse — отказ с этой причиной, тогда
+    worst_usd — худший случай самого маленького допустимого вызова (сколько не хватило)."""
+
+    max_tokens: int | None = None
+    worst_usd: Decimal = ZERO
+    wait: bool = False
+    refuse: Room | None = None
+
+
+def fit_call(
+    rooms: Sequence[Room],
+    price: ModelPrice,
+    *,
+    input_tokens: int,
+    max_tokens: int,
+    min_tokens: int,
+    searches: int,
+    in_flight_usd: Decimal,
+) -> CallFit:
+    """Можно ли вызвать Claude сейчас и с каким max_tokens (PLAN.md, раздел 6, «Резерв
+    бюджета»). Худший случай вызова плюс худший случай уже идущих вызовов этого анализа
+    (in_flight_usd) должен поместиться во все остатки. Не помещается:
+    - только из-за своих вызовов в полете — ждать их конца (они вернут неистраченное);
+    - и без них — урезать max_tokens до остатка, но не ниже min_tokens;
+    - меньше min_tokens — ждать своих вызовов в полете, если без них поместится, иначе
+      отказ с причиной первого ограничения, в которое не влезает даже такой вызов.
+    Ошибку дает только «потрачено + худший случай одного вызова больше остатка»: потолок
+    $1 (Р13) меньше трех параллельных вызовов Opus по худшему случаю ($0,35 каждый)."""
+
+    def worst(tokens: int) -> Decimal:
+        return worst_case_usd(
+            price, input_tokens=input_tokens, max_tokens=tokens, searches=searches
+        )
+
+    full = worst(max_tokens)
+    if short_room(rooms, full + in_flight_usd) is None:
+        return CallFit(max_tokens=max_tokens, worst_usd=full)
+    room = min(item.left_usd for item in rooms)
+    if in_flight_usd > 0 and full <= room:
+        return CallFit(wait=True)
+    smallest = min(min_tokens, max_tokens)
+    fits = min(
+        max_tokens,
+        max_tokens_within(
+            price, budget_usd=room - in_flight_usd, input_tokens=input_tokens, searches=searches
+        ),
+    )
+    if fits >= smallest:
+        return CallFit(max_tokens=fits, worst_usd=worst(fits))
+    if in_flight_usd > 0 and short_room(rooms, worst(smallest)) is None:
+        return CallFit(wait=True)
+    return CallFit(refuse=short_room(rooms, worst(smallest)) or rooms[0], worst_usd=worst(smallest))
+
+
+def refusal_params(fit: CallFit) -> dict[str, Any]:
+    """Параметры ошибки отказа перед вызовом: причина ограничения и need — до скольких
+    мог стоить следующий вызов (с округлением вверх до цента), как в тексте макета
+    «Следующий вызов Claude может стоить до $0,16»."""
+    assert fit.refuse is not None
+    return {**fit.refuse.params, "need": usd_text(fit.worst_usd.quantize(CENT, rounding=ROUND_UP))}
 
 
 # --- предупреждения о расходе ---
+
+# Отказы, после которых стоит проверить порог 100%: лимит мог кончиться без вызова
+# (администратор снизил лимит, выросла цена модели)
+LIMIT_REFUSALS = frozenset({"ai.monthly_limit", "ai.budget_exhausted"})
 
 
 async def _active_admins(db: AsyncSession) -> list[User]:
@@ -615,11 +783,13 @@ async def _already_sent(
     return found is not None
 
 
-def _threshold(spent: Decimal, total: Decimal, pct: int) -> str | None:
-    """Пройденный порог: 100 — израсходовано все, alert — budget_alert_pct процентов."""
+def _threshold(spent: Decimal, total: Decimal, pct: int, need: Decimal) -> str | None:
+    """Пройденный порог: 100 — остатка не хватает даже на самый маленький вызов оценки
+    матча (need, call_need_usd): анализы уже не запускаются, хотя до 100% расхода может
+    не хватать нескольких центов; alert — budget_alert_pct процентов."""
     if total <= 0:
         return None
-    if spent >= total:
+    if spent >= total or total - spent < need:
         return "100"
     if spent * 100 >= total * pct:
         return "80"
@@ -669,14 +839,16 @@ async def _send_once(
 
 
 async def after_run_notifications(db: AsyncSession, user_id: int | None) -> list[Notification]:
-    """После вызова Claude на ключе администратора: предупреждения о расходе.
-    limit_80 и limit_100 — участнику и администраторам (порог — budget_alert_pct и 100%
-    личного лимита), budget_80 и budget_100 — администраторам (общий бюджет). Каждый
-    порог — не чаще раза в месяц на получателя. flush; commit — за вызывающим."""
+    """После вызова Claude на ключе администратора и при отказе в нем по лимиту месяца или
+    общему бюджету: предупреждения о расходе. limit_80 и limit_100 — участнику и
+    администраторам (порог — budget_alert_pct и остаток лимита меньше самого маленького
+    вызова оценки матча), budget_80 и budget_100 — администраторам (общий бюджет, так же).
+    Каждый порог — не чаще раза в месяц на получателя. flush; commit — за вызывающим."""
     now = utcnow()
     since = month_start(now)
     await db.execute(select(func.pg_advisory_xact_lock(AI_ALERTS_LOCK)))
     settings = await _settings(db, lock=False)
+    need = await call_need_usd(db, await load_agent_config(db), now)
     admins = await _active_admins(db)
     admin_ids = {admin.id for admin in admins}
     created: list[Notification] = []
@@ -689,7 +861,7 @@ async def after_run_notifications(db: AsyncSession, user_id: int | None) -> list
     ):
         limits = limits_of(await _limit_row(db, user.id, lock=False), settings)
         spent = await member_spent(db, user.id, now)
-        level = _threshold(spent, limits.monthly_usd, settings.budget_alert_pct)
+        level = _threshold(spent, limits.monthly_usd, settings.budget_alert_pct, need)
         if level is not None:
             created += await _send_once(
                 db,
@@ -708,7 +880,7 @@ async def after_run_notifications(db: AsyncSession, user_id: int | None) -> list
                 admin_ids=admin_ids,
             )
     spent_all = await _budget_spent(db, now)
-    level = _threshold(spent_all, settings.monthly_budget_usd, settings.budget_alert_pct)
+    level = _threshold(spent_all, settings.monthly_budget_usd, settings.budget_alert_pct, need)
     if level is not None:
         created += await _send_once(
             db,

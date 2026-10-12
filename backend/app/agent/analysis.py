@@ -6,9 +6,10 @@
 structured outputs, затем проверка кодом (check_assessment). Нашлись ошибки — тот же
 разговор продолжается сообщением со списком ошибок (ответ ассистента возвращается как
 есть), всего не больше analysis_max_iterations вызовов; вторая итерация читает кэш.
-Ошибки после последней итерации — ai.bad_output. analysis_step_timeout_s — предел всего
-шага (всех итераций), а не каждого вызова: иначе оценка одного матча шла бы до
-3 × 300 с, дольше предела задачи воркера.
+Ошибки после последней итерации — ai.bad_output. Сервис может урезать max_tokens вызова до
+остатка потолка анализа или лимита, но не ниже analysis_min_tokens (StepHooks.before_call).
+analysis_step_timeout_s — предел всего шага (всех итераций), а не каждого вызова: иначе
+оценка одного матча шла бы до 3 × 300 с, дольше предела задачи воркера.
 """
 
 import asyncio
@@ -75,10 +76,13 @@ def check_assessment(
         problems.append(f"p1_cover ({cover1:.3f}) > p1_win ({win:.3f})")
     if round(cover2 - (1.0 - win), _DIGITS) > 0:
         problems.append(f"p2_cover ({cover2:.3f}) > 1 - p1_win ({1.0 - win:.3f})")
+    # p_base — как в досье (3 знака): модель сравнивает с ним, и текст ошибки с теми же
+    # числами (раньше 0,6996 давал «|0.780 - 0.700| > 0.08» и лишний вызов Opus)
+    shown = p_base.shown()
     divergent = [
-        f"{name}: |{values[name]:.3f} - p_base {float(getattr(p_base, name)):.3f}| > {highlight}"
+        f"{name}: |{values[name]:.3f} - p_base {float(getattr(shown, name)):.3f}| > {highlight}"
         for name in PROBS3_FIELDS
-        if round(abs(values[name] - float(getattr(p_base, name))), _DIGITS) > highlight
+        if round(abs(values[name] - float(getattr(shown, name))), _DIGITS) > highlight
     ]
     if divergent and not assessment.divergence_note.strip():
         problems.append("divergence_note is empty, but " + "; ".join(divergent))
@@ -158,6 +162,7 @@ async def assess_match(
             schema_version=ASSESSMENT_SCHEMA_VERSION,
             input_tokens=input_tokens,
             max_tokens=config.analysis_max_tokens,
+            min_tokens=min(config.analysis_min_tokens, config.analysis_max_tokens),
         )
         result = await call(
             hooks,

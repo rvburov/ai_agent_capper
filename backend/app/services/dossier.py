@@ -75,6 +75,8 @@ LOAD_DAYS = 14
 SERVE_DAYS = 364
 # Матч без даты виден через столько дней после начала турнира (как TOURNAMENT_DAYS Эло)
 UNDATED_DAYS = timedelta(days=16)
+# Название турнира в досье и запросе новостей
+TOUR_NAME_MAX = 80
 
 _SET = re.compile(r"^\[?(\d+)-(\d+)(\(\d+\))?\]?$")
 # Подробности свежего результата из поиска (player_news.details, kind='result'): ключ
@@ -541,6 +543,38 @@ def _load(rows: Sequence[_Played], day: date, last: date | None) -> dict[str, An
     }
 
 
+async def archive_tournament(
+    db: AsyncSession, tournament_id: int | None
+) -> tuple[str | None, str | None]:
+    """Название и категория турнира для запросов Claude (досье, сообщение шага новостей)
+    и для экрана других участников: только из архивов. Турнир из ввода участника
+    (source = 'user') — его свободный текст (до 200 символов): название берется, только
+    если такое же есть у турнира из архива (новый выпуск известного турнира). Иначе текст
+    одного участника попадал бы в досье, промпт и экран другого и через общий кэш
+    новостей и повтор оценки влиял бы на анализы всех."""
+    if tournament_id is None:
+        return None, None
+    row = (
+        await db.execute(
+            select(Tournament.name, Tournament.category, Tournament.source).where(
+                Tournament.id == tournament_id
+            )
+        )
+    ).first()
+    if row is None:
+        return None, None
+    name, category, source = row
+    if source == "user":
+        known = await db.scalar(
+            select(Tournament.id)
+            .where(Tournament.source != "user", func.lower(Tournament.name) == name.lower())
+            .limit(1)
+        )
+        if known is None:
+            return None, None
+    return " ".join(name.split())[:TOUR_NAME_MAX], category
+
+
 async def build_dossier(
     db: AsyncSession, match: Match, *, as_of: datetime, best_of: int, surface: str
 ) -> DossierResult:
@@ -594,11 +628,7 @@ async def build_dossier(
     }
     names = {player_id: row.name for player_id, row in people.items()}
 
-    tournament = (
-        await db.execute(
-            select(Tournament.name, Tournament.category).where(Tournament.id == match.tournament_id)
-        )
-    ).first()
+    tour, level = await archive_tournament(db, match.tournament_id)
 
     refs: dict[str, str] = {"elo": "p1.elo p2.elo p_base", "h2h": "h2h"}
     blocks: dict[str, dict[str, Any]] = {}
@@ -647,14 +677,12 @@ async def build_dossier(
             "id": match.id,
             "surface": surface,
             "bo": best_of,
-            "tour": tournament.name if tournament else None,
-            "level": tournament.category if tournament else None,
+            "tour": tour,
+            "level": level,
             "round": match.round or "",
         },
         "p_base": {
-            "p1_win": round(p_base.p1_win, 3),
-            "p1_cover": round(p_base.p1_cover, 3),
-            "p2_cover": round(p_base.p2_cover, 3),
+            **p_base.shown().as_dict(),
             "elo_p": round(p_raw, 3),
             "cal": platt is not None,
         },

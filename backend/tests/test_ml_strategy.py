@@ -349,6 +349,14 @@ def test_apply_claude_clamps_and_flags() -> None:
     assert final.reconciled == ()
 
 
+def test_highlight_uses_p_base_shown_in_dossier() -> None:
+    """Подсветка расхождения — по p_base из досье (3 знака), как и проверка ответа:
+    0,78 при p_base 0,6996 (в досье 0,7) — ровно 8 п.п., без подсветки и без пояснения."""
+    final = apply_claude(Probs3(0.6996, 0.4404, 0.1196), Probs3(0.78, 0.44, 0.12), PARAMS)
+    assert final.divergent == ()
+    assert final.p_final.p1_win == pytest.approx(0.78)
+
+
 def test_apply_claude_reconciles() -> None:
     base = Probs3(0.60, 0.35, 0.20)
     # Claude поднял фору П1 выше победы и фору П2 выше 1 − победы

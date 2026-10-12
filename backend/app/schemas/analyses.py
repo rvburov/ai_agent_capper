@@ -45,9 +45,19 @@ DecimalOut = Annotated[Decimal, PlainSerializer(str, return_type=str, when_used=
 # 1.01–50 проверяет сервис (errors.analysis.odds_range)
 OddsIn = Annotated[Decimal, Field(ge=0, max_digits=6, decimal_places=3)]
 MoneyIn = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2)]
-ShortText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=64)]
-NameText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)]
-RoundText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=16)]
+# Одна строка без управляющих символов: PostgreSQL не хранит NUL в тексте (запрос падал бы
+# с 500), а перевод строки в названии турнира попадал бы в запрос Claude отдельной строкой
+# (подмена списка игроков, «инструкции»). Отказ — 422
+ONE_LINE = r"^[^\x00-\x1f\x7f]*$"
+ShortText = Annotated[
+    str, StringConstraints(strip_whitespace=True, max_length=64, pattern=ONE_LINE)
+]
+NameText = Annotated[
+    str, StringConstraints(strip_whitespace=True, max_length=200, pattern=ONE_LINE)
+]
+RoundText = Annotated[
+    str, StringConstraints(strip_whitespace=True, max_length=16, pattern=ONE_LINE)
+]
 InputText = Annotated[str, StringConstraints(max_length=20000)]
 
 
@@ -509,6 +519,18 @@ class BetBrief(BaseModel):
     legs: list[BetLegBrief]
 
 
+class RestartOut(BaseModel):
+    """Можно ли сейчас перезапустить остановленный анализ: та же проверка, что при запуске,
+    без резерва. reason_code — почему нет (ключ errors.<код> и reason_params);
+    analysis.step_running — шаг, начатый до отмены, еще идет: retry_at — не позже чего он
+    закончится."""
+
+    allowed: bool
+    reason_code: str | None
+    reason_params: dict[str, Any]
+    retry_at: datetime | None
+
+
 class AnalysisOut(BaseModel):
     id: int
     status: AnalysisStatus
@@ -533,6 +555,9 @@ class AnalysisOut(BaseModel):
     bank: DecimalOut | None
     bookmaker: str | None
     strategy_version: str | None
+    restart: RestartOut | None = Field(
+        description="Только у остановленного анализа (failed, cancelled) с событиями"
+    )
 
 
 class PairName(BaseModel):
