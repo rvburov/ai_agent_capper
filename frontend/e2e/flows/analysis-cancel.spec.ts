@@ -38,7 +38,10 @@ test('отмена анализа и продолжение с того же ш�
     await expect(steps.locator('.is-active')).toHaveCount(0);
 
     await resetFake();
-    await banner.getByRole('button', { name: /^Продолжить с шага \d+$/ }).click();
+    // Шаг, который шел при отмене, дорабатывает (без повторной оплаты): «Продолжить» — после него
+    const resume = banner.getByRole('button', { name: /^Продолжить с шага \d+$/ });
+    await expect(resume).toBeEnabled({ timeout: 30_000 });
+    await resume.click();
     await expect(page.getByRole('heading', { level: 2, name: /^Экспресс из \d событий|^Анализ 3 матчей готов$/ })).toBeVisible({ timeout: 30_000 });
   });
 

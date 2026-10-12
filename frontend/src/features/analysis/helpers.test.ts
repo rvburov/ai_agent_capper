@@ -20,7 +20,7 @@ import {
 } from './draft';
 import { formatShare, marketDescription, marketLabel, modelName, ppDelta, shownMarkets, usdSmall } from './markets';
 import { analysisNumber } from './number';
-import { roundLabel } from './rounds';
+import { categoryLabel, roundLabel } from './rounds';
 import { moneyRules, payout, shareOf, stakeForShare, stakeProblem, totalOdds } from './stake';
 import { analysisDone, analysisDraft, strategyV3 } from './testData';
 
@@ -69,6 +69,29 @@ describe('сумма ставки', () => {
     expect(totalOdds([1.47, 1.32])).toBe(1.94);
     expect(payout(1320, 1.885, rub)).toBe(2488);
     expect(payout(13.2, 1.885, usd)).toBe(24.88);
+  });
+
+  it('итоговый кэф и выплата — как Decimal с ROUND_HALF_UP на сервере, без ошибок float', () => {
+    // 1.15 × 1.65 = 1.8975 → 1.898 (в float 1.89749… → 1.897)
+    expect(totalOdds([1.15, 1.65])).toBe(1.898);
+    expect(payout(1000, totalOdds([1.15, 1.65]), rub)).toBe(1898);
+    expect(totalOdds([1.45, 1.55])).toBe(2.248);
+    expect(totalOdds([1.65, 1.35])).toBe(2.228);
+    expect(totalOdds([1.2, 1.3, 1.4])).toBe(2.184);
+    expect(totalOdds([1.5])).toBe(1.5);
+    expect(totalOdds([])).toBe(1);
+    // половина копейки — вверх: $1 × 1.885 = 1.885 → $1.89 (в float 188.4999… центов → 1.88)
+    expect(payout(1, 1.885, usd)).toBe(1.89);
+  });
+
+  it('итоговый кэф совпадает с Decimal на всем коридоре кэфов ног 1.13–1.80', () => {
+    // Эталон — точная арифметика в целых: a·b в десятитысячных, половина вверх до тысячных
+    for (let a = 113; a <= 180; a += 1) {
+      for (let b = 113; b <= 180; b += 1) {
+        const exact = Math.floor((a * b * 10 + 50) / 100) / 1000;
+        expect(totalOdds([a / 100, b / 100])).toBe(exact);
+      }
+    }
   });
 
   it('доля банка вниз до шага округления', () => {
@@ -195,6 +218,13 @@ describe('исходы и подписи', () => {
     expect(roundLabel('R16')).toBe('1/8 финала');
     expect(roundLabel('Q1')).toBe('Q1');
     expect(roundLabel(null)).toBe('');
+    // категория турнира — подписью из ru.json, а не кодом базы (masters, grand_slam)
+    expect(categoryLabel('masters')).toBe('Masters 1000');
+    expect(categoryLabel('grand_slam')).toBe('Большой шлем');
+    expect(categoryLabel('500')).toBe('ATP 500');
+    expect(categoryLabel('davis_cup')).toBe('Кубок Дэвиса');
+    expect(categoryLabel('challenger')).toBe('');
+    expect(categoryLabel(null)).toBe('');
   });
 });
 

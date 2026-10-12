@@ -66,6 +66,29 @@ export function isSettling(analysis: Analysis | undefined, now = Date.now()): bo
   return Number.isFinite(finished) && now - finished < SETTLE_MS;
 }
 
+// Вызов Claude (новости, оценка), начатый до отмены, сервер ждет не дольше предела шага
+// (analysis_step_timeout_s, 5 мин): до тех пор «Продолжить» купило бы этот шаг второй раз,
+// и сервер отвечает 409 analysis.step_running
+const FINISH_MS = 5 * 60_000;
+
+/**
+ * До какого момента (мс) дорабатывает шаг с вызовом Claude, шедший при отмене; null — не ждем.
+ * Сервер говорит это сам в поле restart (analysis.step_running и retry_at); без поля — догадка
+ * по времени отмены.
+ */
+export function stepFinishingUntil(analysis: Analysis | undefined): number | null {
+  if (analysis?.status !== 'cancelled') return null;
+  const restart = analysis.restart ?? null;
+  if (restart) {
+    if (restart.reason_code !== 'analysis.step_running' || !restart.retry_at) return null;
+    const until = Date.parse(restart.retry_at);
+    return Number.isFinite(until) ? until : null;
+  }
+  if (!analysis.steps.some((s) => s.state === 'running' && (s.kind === 'news' || s.kind === 'claude'))) return null;
+  const finished = analysis.finished_at ? Date.parse(analysis.finished_at) : Number.NaN;
+  return Number.isFinite(finished) ? finished + FINISH_MS : null;
+}
+
 /** Разбор текста не удался: такой анализ — несостоявшийся черновик (его место — «Новый анализ»). */
 export function isParseFailed(analysis: Pick<Analysis, 'status' | 'error'>): boolean {
   return analysis.status === 'failed' && analysis.error?.step === 'parse';

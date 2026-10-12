@@ -1,5 +1,6 @@
 import { isApiError } from '../../api/errors';
 import i18n from '../../i18n';
+import { adminReasonText, aiParams } from '../ai/reasons';
 import { formatDate, formatDateTime, formatMoney, type Currency } from '../../lib/format';
 
 // Тексты по ключам и кодам с сервера (analysis.steps.*, analysis.rules.*, errors.*): сервер
@@ -75,7 +76,17 @@ export function codeText(
   options: TextOptions = {},
 ): string {
   if (!code) return fallback;
-  return keyText(code.startsWith('errors.') ? code : `errors.${code}`, params, fallback, options);
+  const key = code.startsWith('errors.') ? code : `errors.${code}`;
+  return keyText(key, key.startsWith('errors.ai.') ? aiParams(key, params) : params, fallback, options);
+}
+
+/** Текст причины запрета для того, кто смотрит: администратору — что сделать самому. */
+export function reasonText(
+  code: string | null | undefined,
+  params: Record<string, unknown> = {},
+  { isAdmin = false, fallback = '' }: { isAdmin?: boolean; fallback?: string } = {},
+): string {
+  return adminReasonText(code, isAdmin) ?? codeText(code, params, fallback);
 }
 
 /**

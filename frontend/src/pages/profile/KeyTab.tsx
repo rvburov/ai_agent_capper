@@ -192,11 +192,17 @@ function ModeCard({ budget, admin, view, onChoose }: ModeCardProps) {
               <span className="profile-mode-body">
                 <span className="profile-mode-title">
                   {option.title}
-                  {actual === option.id && (
-                    <Chip kind="good" icon="check">
-                      {t('profile.key.mode.active')}
-                    </Chip>
-                  )}
+                  {/* администратор без ключа: режим не «действует», пока ключ не задан */}
+                  {actual === option.id &&
+                    (admin && option.id === 'shared' && !budget.has_key ? (
+                      <Chip kind="bad" icon="alert">
+                        {t('profile.key.owner.missing')}
+                      </Chip>
+                    ) : (
+                      <Chip kind="good" icon="check">
+                        {t('profile.key.mode.active')}
+                      </Chip>
+                    ))}
                   {option.id === 'shared' && requested && (
                     <Chip kind="info" icon="clock">
                       {t('profile.key.mode.requested')}

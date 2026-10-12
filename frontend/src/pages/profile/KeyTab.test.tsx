@@ -116,9 +116,12 @@ describe('Личный кабинет: ключ Claude, участник на к
     renderKey();
     const limit = await card('Ключ администратора');
     expect(within(limit).getByText('Анализы остановлены')).toBeInTheDocument();
-    expect(
-      within(limit).getByText(/^Лимита на ИИ в этом месяце \(\$1,00\) не хватает на анализ: остаток меньше, чем может стоить вызов Claude/),
-    ).toBeInTheDocument();
+    const why = limit.querySelector('.callout');
+    expect(why).toHaveTextContent(
+      'Остатка лимита ($0,33) не хватает на вызов Claude — анализы остановлены до решения администратора. Он может поднять лимит. Или перейдите на свой ключ — это можно сразу.',
+    );
+    // совет «поднять лимит или свой ключ» — один раз, а не дважды подряд
+    expect(why?.textContent?.match(/свой ключ/g)).toHaveLength(1);
     expect(within(limit).queryByText(/Лимит исчерпан/)).not.toBeInTheDocument();
     expect(limit.querySelector('.profile-keyline')).toHaveTextContent('осталось $0,33');
   });
@@ -366,6 +369,30 @@ describe('Личный кабинет: ключ Claude у администрат
     );
     expect(within(owner).getByText('без ограничения')).toBeInTheDocument();
     expect(within(owner).getByText(/общие фоновые задачи \(\$3,10 за октябрь\)/)).toBeInTheDocument();
+  });
+
+  it('ключ администратора не задан: администратору — задать его в «Ключ и бюджет», без «Действует»', async () => {
+    mockFetch(
+      routes(
+        ME_ADMIN,
+        aiBudget({
+          has_key: false,
+          monthly_usd: null,
+          left_usd: null,
+          daily_analyses: null,
+          budget: adminBudget(),
+          reason_code: 'ai.no_admin_key',
+        }),
+        { 'GET /api/admin/ai/key': () => json(adminKey({ status: 'missing', last4: null, verified_at: null })) },
+      ),
+    );
+    renderKey(ME_ADMIN);
+    const owner = await card('Ключ администратора');
+    expect(within(owner).getByText('Ключ Claude администратора не задан. Задайте его в «Администрирование → Ключ и бюджет».')).toBeInTheDocument();
+    expect(screen.queryByText(/Напишите администратору/)).not.toBeInTheDocument();
+    const modes = screen.getByRole('radiogroup', { name: 'Чей ключ Claude использовать' });
+    expect(within(modes).queryByText('Действует')).not.toBeInTheDocument();
+    expect(within(modes).getByText('Ключа нет')).toBeInTheDocument();
   });
 
   it('на телефоне — та же вкладка и выбор режима', async () => {

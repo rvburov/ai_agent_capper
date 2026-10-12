@@ -5,7 +5,7 @@ import ru from '../../i18n/locales/ru.json';
 import { keyMask, keyProblem, spelled } from './keyFormat';
 import { aiKeys, invalidateAiBudget } from './keys';
 import { modelLabel, modelList } from './models';
-import { aiErrorText, keyErrorText } from './reasons';
+import { adminFixes, aiErrorText, aiReasonText, keyErrorText } from './reasons';
 
 // Локаль сервера: коды errors.ai.* приходят из API ключами, тексты для них — во фронтенде
 const backend = import.meta.glob<{ errors: { ai: Record<string, string> } }>(
@@ -31,9 +31,29 @@ describe('коды ИИ из API', () => {
     }
   });
 
+  it('нет ключа и общий бюджет: администратору — что сделать самому, участнику — текст сервера', () => {
+    expect(aiReasonText('ai.no_admin_key', {}, true)).toBe(
+      'Ключ Claude администратора не задан. Задайте его в «Администрирование → Ключ и бюджет»',
+    );
+    expect(aiReasonText('ai.no_admin_key', {}, false)).toBe(ru.errors.ai.no_admin_key);
+    expect(aiReasonText('ai.budget_exhausted', {}, true)).toMatch(/Поднимите бюджет в «Администрирование → Ключ и бюджет»$/);
+    expect(aiReasonText('ai.budget_exhausted', {}, false)).toBe(ru.errors.ai.budget_exhausted);
+    expect(aiReasonText('ai.paused', {}, true)).toBe(ru.errors.ai.paused);
+    expect(adminFixes('ai.no_admin_key', true)).toBe(true);
+    expect(adminFixes('ai.no_admin_key', false)).toBe(false);
+    expect(adminFixes('ai.paused', true)).toBe(false);
+    expect(adminFixes('toString', true)).toBe(false);
+  });
+
   it('текст причины по коду и параметрам; неизвестный код — общий текст', () => {
     expect(aiErrorText('ai.daily_limit', { daily: 3 })).toBe('На сегодня анализы закончились: 3 в день');
-    expect(aiErrorText('ai.analysis_cap', { cap: '1,00' })).toBe('Анализ дороже потолка $1,00 на один анализ');
+    // лимиты и потолки — как в карточках и макете: $1 и $10, но $1,50 (сервер шлет «1,00»)
+    expect(aiErrorText('ai.analysis_cap', { cap: '1,00' })).toBe('Анализ дороже потолка $1 на один анализ');
+    expect(aiErrorText('ai.monthly_limit', { limit: '1,50' })).toMatch(/^Лимита на ИИ в этом месяце \(\$1,50\) не хватает/);
+    expect(aiErrorText('ai.own_cap', { cap: '2,00', estimate: '2,36' })).toMatch(/потолка \$2 на один анализ \(оценка \$2,36\)/);
+    expect(aiErrorText('ai.cap_above_month', { cap: '12,00', limit: '10,00' })).toBe(
+      'Потолок на анализ ($12) не может быть больше месячного лимита ($10)',
+    );
     expect(aiErrorText('ai.paused')).toBe('Анализы на паузе — решение администратора');
     expect(aiErrorText('ai.nothing_like_this')).toBe(ru.errors.unknown);
     expect(aiErrorText('ai.toString')).toBe(ru.errors.unknown);

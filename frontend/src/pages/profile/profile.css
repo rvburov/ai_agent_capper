@@ -172,6 +172,8 @@
 .profile-cap .input { width: 120px; flex: none; font-variant-numeric: tabular-nums; }
 .profile-foot-link { margin-left: auto; }
 .profile-strong-link { font-weight: 600; }
+/* «Открыть» в плашке администратора стоит отдельно: на телефоне зона нажатия не меньше 40px */
+@media (max-width: 960px) { .profile-strong-link { display: inline-flex; align-items: center; min-height: var(--tap); } }
 .profile-admin-note { gap: 6px 12px; }
 .profile-admin-note > span { min-width: 0; flex: 1 1 280px; }
 .profile-plain { margin: 0; }

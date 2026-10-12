@@ -27,7 +27,7 @@ import { ExpressCard, NoExpressCard, type ExpressState } from './ExpressCard';
 import { MatchCard, type MatchNames } from './MatchCard';
 import { DoneCard, ResultSkeleton, RunningCard, StopBanner, StoppedCard } from './Progress';
 import { stopInfo } from './stopInfo';
-import { matchNames, type StepContext } from './stepsView';
+import { matchNames, newsMissing, type StepContext } from './stepsView';
 import { MetaLine, WhyCard } from './WhyCard';
 import './analysis.css';
 
@@ -196,12 +196,14 @@ export function AnalysisPage() {
 
   let title: string;
   let lead: string;
+  // Новости не получены хотя бы по одному матчу — не «поправил по свежим новостям»
+  const leadDone = newsMissing(result?.warnings ?? []) ? 'analysis.head.leadDoneNoNews' : 'analysis.head.leadDone';
   if (done && expressData) {
     title = t('analysis.head.express', { count: expressData.legs.length, total: formatOdds(expressData.total_odds) });
-    lead = t('analysis.head.leadDone', { code: strategyCode });
+    lead = t(leadDone, { code: strategyCode });
   } else if (done) {
     title = t('analysis.head.doneNoExpress', { count: matchesCount });
-    lead = t('analysis.head.leadDone', { code: strategyCode });
+    lead = t(leadDone, { code: strategyCode });
   } else if (analysis.status === 'cancelled') {
     title = t('analysis.head.cancelled', { count: matchesCount });
     lead = t('analysis.head.leadCancelled');

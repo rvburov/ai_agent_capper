@@ -16,6 +16,7 @@ import {
   useRunAnalysis,
   useStrategy,
 } from '../../features/analysis/api';
+import { adminReasonText } from '../../features/ai/reasons';
 import { amountForApi, parseAmount } from '../../features/analysis/amount';
 import { apiErrorText } from '../../features/analysis/codes';
 import {
@@ -36,7 +37,7 @@ import { FormatModal } from './FormatModal';
 import { FormPanel, TextPanel } from './InputPanels';
 import { LaunchCard } from './LaunchCard';
 import { FlowCard, RecentCard, RulesCard } from './SideCards';
-import { summarize } from './summary';
+import { parseErrorText, summarize, type ParseError } from './summary';
 import './new.css';
 
 /*
@@ -104,7 +105,9 @@ export function NewAnalysisPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const userId = useMe().data?.id ?? null;
+  const me = useMe().data;
+  const userId = me?.id ?? null;
+  const isAdmin = me?.role === 'admin';
   const draftParam = Number(params.get('draft')) || null;
 
   const [initial] = useState(() => initialDraft(draftParam, userId));
@@ -119,7 +122,7 @@ export function NewAnalysisPage() {
   }, [loadId, loaded.data]);
 
   const [parsing, setParsing] = useState(false);
-  const [parseError, setParseError] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<ParseError | null>(null);
   const [textError, setTextError] = useState<string | null>(null);
   const [formatOpen, setFormatOpen] = useState(false);
   const [launching, setLaunching] = useState(false);
@@ -240,6 +243,7 @@ export function NewAnalysisPage() {
   const summary = summarize(state, previewData, access.data, {
     parsing,
     t,
+    isAdmin,
     previewError: preview.isError && state.analysisId !== null ? apiErrorText(preview.error) : null,
     draftError,
   });
@@ -292,9 +296,9 @@ export function NewAnalysisPage() {
         { icon: n ? 'check' : 'alert' },
       );
     } catch (error) {
-      const message = apiErrorText(error);
+      const message = parseErrorText(error, { isAdmin, t });
       if (isApiError(error) && (error.code === 'analysis.text_empty' || error.code === 'analysis.text_too_long')) {
-        setTextError(message);
+        setTextError(message.text);
       } else {
         setParseError(message);
       }
@@ -388,7 +392,8 @@ export function NewAnalysisPage() {
       toast.show(t('new.toast.launched', { events: t('new.result.events', { count: state.events.length }) }), { icon: 'spark' });
       navigate(paths.analysis(analysis.id));
     } catch (error) {
-      toast.show(apiErrorText(error), { icon: 'alert', duration: 6000 });
+      const own = adminReasonText(isApiError(error) ? error.code : null, isAdmin);
+      toast.show(own ?? apiErrorText(error), { icon: 'alert', duration: 6000 });
     } finally {
       setLaunching(false);
     }
@@ -470,7 +475,14 @@ export function NewAnalysisPage() {
                   parseError={
                     parseError && (
                       <Callout kind="bad" role="alert">
-                        {parseError}
+                        <div>{parseError.text}</div>
+                        {parseError.adminKey && (
+                          <div className="row new-callout-actions">
+                            <Button size="sm" icon="key" to={paths.admin('key')}>
+                              {t('new.reason.toAdminKey')}
+                            </Button>
+                          </div>
+                        )}
                       </Callout>
                     )
                   }

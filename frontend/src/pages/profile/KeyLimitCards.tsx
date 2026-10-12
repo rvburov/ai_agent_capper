@@ -7,7 +7,7 @@ import { spendMonth, whenInline } from '../../features/admin/display';
 import { formatLimitUsd } from '../../features/admin/limits';
 import { useAdminKey } from '../../features/admin/useAdminAi';
 import { keyMask, spelled } from '../../features/ai/keyFormat';
-import { aiErrorText } from '../../features/ai/reasons';
+import { aiErrorText, aiReasonText } from '../../features/ai/reasons';
 import type { AiBudget } from '../../features/ai/types';
 import i18n from '../../i18n';
 import { formatDayMonth, formatPercent, formatUsd } from '../../lib/format';
@@ -112,10 +112,11 @@ export function MemberLimitCard({ budget }: { budget: AiBudget }) {
   } else if (stopped) {
     why = (
       <Callout kind="bad" icon="pause">
+        {/* короткая причина, как в макете: совет «поднять лимит или свой ключ» — одной строкой ниже */}
         <b>
           {exhausted
             ? t('profile.key.limit.stoppedStrong')
-            : t('profile.key.reason', { text: aiErrorText('ai.monthly_limit', budget.reason_params) })}
+            : t('profile.key.limit.shortStrong', { left: formatUsd(left) })}
         </b>{' '}
         {t('profile.key.limit.stopped')}
       </Callout>
@@ -283,7 +284,8 @@ export function AdminOwnerCard({ budget }: { budget: AiBudget }) {
       )}
       {budget.reason_code && (
         <Callout kind="warn" icon="alert">
-          <b>{t('profile.key.reason', { text: aiErrorText(budget.reason_code, budget.reason_params) })}</b>
+          {/* причину (нет ключа, бюджет) администратор устраняет сам — текст для него */}
+          <b>{t('profile.key.reason', { text: aiReasonText(budget.reason_code, budget.reason_params, true) })}</b>
         </Callout>
       )}
       <dl className="profile-kfacts">

@@ -233,6 +233,11 @@ export function LaunchCard({ summary, access, launching, onLaunch, onRetry, butt
               {t('common.retry')}
             </Button>
           )}
+          {summary.adminKey && (
+            <Button size="sm" icon="key" to={paths.admin('key')}>
+              {t('new.reason.toAdminKey')}
+            </Button>
+          )}
         </>
       ) : (
         <p className="xsmall muted">{t('new.launch.ready', { time: seconds === null ? '' : formatEstimate(seconds) })}</p>

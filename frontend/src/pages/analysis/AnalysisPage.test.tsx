@@ -293,6 +293,50 @@ describe('Анализ готов: итог и экспресс', () => {
     expect(within(expressRegion()).getByText(/проигрывает примерно 1 раз из 10\./)).toBeInTheDocument();
   });
 
+  it('новости не получены по двум матчам: одна фраза с названиями матчей и подзаголовок без «свежих новостей»', async () => {
+    const done = analysisDone();
+    done.result!.warnings = [
+      { key: 'analysis.warnings.news_failed', params: { match_id: 91, code: 'ai.overloaded' } },
+      { key: 'analysis.warnings.news_failed', params: { match_id: 92, code: 'ai.overloaded' } },
+    ];
+    mockFetch(routes(done));
+    renderAnalysis(1);
+    await screen.findByRole('heading', { level: 2, name: /Экспресс из 2 событий/ });
+    const callout = screen.getByText('Готов с предупреждением.').closest('.callout')!;
+    expect(callout).toHaveTextContent(
+      'Готов с предупреждением. Новости не получены: Синнер — Руне, Джокович — Рублев — анализ шел без них. Перед ставкой проверьте новости игрока сами.',
+    );
+    expect(screen.queryByText(/поправил их по свежим новостям/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Claude поправил их по досье и тем новостям, что удалось получить/)).toBeInTheDocument();
+  });
+
+  it('повтор оценки Claude: строка шага и заметка — разные, а не одна фраза дважды', async () => {
+    const user = userEvent.setup();
+    const done = analysisDone();
+    done.steps = done.steps.map((step) =>
+      step.index === 7
+        ? { ...step, model: null, tokens: 0, cost_usd: 0, detail_key: 'analysis.steps.claude_reused', detail_params: { at: '2026-10-11T12:51:00Z' } }
+        : step,
+    );
+    mockFetch(routes(done));
+    renderAnalysis(1);
+    await user.click(await screen.findByRole('button', { name: 'Показать шаги' }));
+    const steps = screen.getByRole('list', { name: 'Шаги анализа' });
+    const reused = within(steps).getByText('Claude: Джокович — Рублев').closest('li')!;
+    expect(within(reused).getAllByText(/^Оценка Claude из анализа .*, без новых затрат$/)).toHaveLength(1);
+    expect(within(reused).getByText('Досье матча не изменилось — валуй пересчитан по вашим кэфам')).toBeInTheDocument();
+  });
+
+  it('вероятность ноги экспресса читается программой чтения с экрана (без aria-label на div без роли)', async () => {
+    mockFetch(routes(analysisDone()));
+    renderAnalysis(1);
+    await screen.findByRole('heading', { level: 2, name: /Экспресс из 2 событий/ });
+    const express = expressRegion();
+    expect(express.querySelectorAll('.analysis-leg-p[aria-label]')).toHaveLength(0);
+    expect(within(express).getByText('Вероятность 90%')).toHaveClass('sr-only');
+    expect(within(express).getByText('Вероятность 99%')).toBeInTheDocument();
+  });
+
   it('числа готового анализа сверху и в строке расходов — одни и те же (учет agent_runs)', async () => {
     const done = analysisDone({ cost_usd: 0.161977 });
     done.totals = { ...done.totals, cost_usd: 0.129159, tokens: 30638 };
@@ -538,6 +582,10 @@ describe('Анализ остановлен', () => {
       const steps = screen.getByRole('list', { name: 'Шаги анализа' });
       expect(steps.querySelector('.is-active')).toBeNull();
       expect(within(steps).getAllByRole('listitem')[6]).toHaveTextContent('не выполнялся');
+      // Вызов Claude, шедший при отмене, дорабатывает: «Продолжить» сейчас купило бы шаг второй
+      // раз (сервер ответит 409 analysis.step_running) — кнопка ждет, пояснение рядом
+      expect(within(banner).getByRole('button', { name: 'Продолжить с шага 7' })).toBeDisabled();
+      expect(banner).toHaveTextContent('Шаг, который шел при отмене, еще дорабатывает');
 
       // Сервер записал итог шага 7: экран перечитывает отмененный анализ, пока шаг «идет»
       current = {
@@ -545,7 +593,60 @@ describe('Анализ остановлен', () => {
         steps: base.steps.map((s) => (s.index === 6 ? { ...s, state: 'done', tokens: 5467, cost_usd: 0.0383 } : s)),
       };
       await act(() => vi.advanceTimersByTimeAsync(5500));
-      expect(await screen.findByRole('button', { name: 'Продолжить с шага 8' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Продолжить с шага 8' })).toBeEnabled();
+      expect(screen.getByRole('alert')).not.toHaveTextContent('еще дорабатывает');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('сервер сам говорит, когда продолжить отмененный анализ (restart.retry_at)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const running = analysisRunning();
+      // Шаги уже не «в работе», но сервер знает: вызов старого запуска еще идет (минуту)
+      const steps = running.steps.map((s) => (s.index === 6 ? { ...s, state: 'pending' as const } : s));
+      const current: Analysis = {
+        ...running,
+        steps,
+        status: 'cancelled',
+        finished_at: new Date().toISOString(),
+        restart: {
+          allowed: false,
+          reason_code: 'analysis.step_running',
+          reason_params: {},
+          retry_at: new Date(Date.now() + 60_000).toISOString(),
+        },
+      };
+      mockFetch(routes(() => current));
+      renderAnalysis(1);
+      const banner = await screen.findByRole('alert');
+      expect(within(banner).getByRole('button', { name: 'Продолжить с шага 7' })).toBeDisabled();
+      expect(banner).toHaveTextContent('Шаг, который шел при отмене, еще дорабатывает');
+      await act(() => vi.advanceTimersByTimeAsync(61_000));
+      await waitFor(() => expect(within(screen.getByRole('alert')).getByRole('button', { name: 'Продолжить с шага 7' })).toBeEnabled());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('остановка потолком: кнопку включает ответ сервера (restart), а не потолок из бюджета', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const error = { code: 'ai.analysis_cap', params: { cap: '1,00', need: '0,16' }, step: 'claude' as const };
+      // Потолок уже $2, но сервер считает: в него не помещается худший случай вызова
+      let restart: Analysis['restart'] = { allowed: false, reason_code: 'ai.analysis_cap', reason_params: { cap: '2,00' }, retry_at: null };
+      mockFetch({
+        ...routes(() => analysisFailed({ error, restart })),
+        'GET /api/ai/budget': () => json(aiBudget({ per_analysis_usd: 2 })),
+      });
+      renderAnalysis(1);
+      const banner = await screen.findByRole('alert');
+      expect(banner.textContent?.replace(/\s/g, ' ')).toContain('Следующий вызов Claude может стоить до $0,16, а вместе с уже потраченными $0,06 это больше потолка $1 на один анализ');
+      expect(within(banner).getByRole('button', { name: 'Перезапустить с этого шага' })).toBeDisabled();
+      restart = { allowed: true, reason_code: null, reason_params: {}, retry_at: null };
+      await act(() => vi.advanceTimersByTimeAsync(31_000));
+      await waitFor(() => expect(within(screen.getByRole('alert')).getByRole('button', { name: 'Перезапустить с этого шага' })).toBeEnabled());
     } finally {
       vi.useRealTimers();
     }

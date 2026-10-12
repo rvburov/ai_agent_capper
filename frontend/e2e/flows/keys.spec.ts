@@ -165,5 +165,9 @@ test('ключ администратора с кодом 2FA, бюджет и �
   const [mid, end] = [await scale.locator('.mid').boundingBox(), await scale.locator('.end').boundingBox()];
   const sameRow = mid!.y < end!.y + end!.height && end!.y < mid!.y + mid!.height;
   expect(sameRow && mid!.x + mid!.width > end!.x).toBe(false);
+  // «Открыть» в плашке администратора — путь к ключу с этой вкладки: на телефоне не меньше 40 px
+  await expect(admin.page.getByRole('link', { name: 'Открыть', exact: true })).toHaveAttribute('href', '/admin/key');
+  const open = await admin.page.getByRole('link', { name: 'Открыть', exact: true }).boundingBox();
+  if ((admin.page.viewportSize()?.width ?? 1366) <= 960) expect(open!.height).toBeGreaterThanOrEqual(40);
   await expectNoHorizontalScroll(admin.page);
 });

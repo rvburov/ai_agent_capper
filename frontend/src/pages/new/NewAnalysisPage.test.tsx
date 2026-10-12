@@ -112,6 +112,8 @@ describe('Новый анализ: текст', () => {
     expect(await post!.clone().json()).toMatchObject({ input_kind: 'text' });
     expect(screen.getAllByText('Янник Синнер').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Андрей Рублев').length).toBeGreaterThan(0);
+    // категория турнира — подписью, а не кодом базы
+    expect(document.querySelector('.new-ev-meta-text')).toHaveTextContent(/ · ATP 500( · |$)/);
     await waitFor(() => expect(router.state.location.search).toBe('?draft=6'));
 
     // «Перед запуском» — по расчету сервера: цена и время
@@ -127,6 +129,35 @@ describe('Новый анализ: текст', () => {
       [3, 5],
     ]);
     expect(sent.run?.events?.[0]?.odds.ML).toEqual(['1.3', '3.6']);
+  });
+
+  it('другое название турнира — формат матча (до 2 или 3 побед) не переносится со старого', async () => {
+    const user = userEvent.setup();
+    const sent: { run: ConfirmIn | null } = { run: null };
+    mockFetch(
+      routes({
+        'POST /api/analyses/6/run': async (request) => {
+          sent.run = (await request.json()) as ConfirmIn;
+          return json(analysisRunning({ id: 6 }), 202);
+        },
+      }),
+    );
+    renderNew();
+    await user.type(screen.getByLabelText('Текст событий'), TEXT.replace(/\n/g, '{Shift>}{Enter}{/Shift}'));
+    await user.click(screen.getByRole('button', { name: 'Разобрать' }));
+    await user.click(await screen.findByRole('button', { name: 'Исправить событие 1' }));
+    const tour = screen.getByLabelText('Турнир');
+    await user.clear(tour);
+    await user.type(tour, 'Japan Open');
+    await user.click(screen.getByRole('button', { name: 'Готово' }));
+    const launch = await screen.findByRole('button', { name: 'Запустить анализ' });
+    await waitFor(() => expect(launch).toBeEnabled());
+    await user.click(launch);
+    await waitFor(() => expect(sent.run).not.toBeNull());
+    expect(sent.run?.events?.map((e) => [e.tournament_name, e.best_of])).toEqual([
+      ['Japan Open', null],
+      ['Test Open 5', 3],
+    ]);
   });
 
   it('Ctrl+Enter разбирает текст; 429 — через сколько минут повторить', async () => {
@@ -294,6 +325,63 @@ describe('Новый анализ: черновик и «Изменить соб
     renderNew('/new', ME_MEMBER);
     expect(await screen.findByLabelText('Текст событий')).toHaveValue('');
     expect(loadDraft(ME_ADMIN.id)).toBeNull();
+  });
+
+  it('сбой Claude при разборе: «нажмите «Разобрать» еще раз», причина — текст не разобран', async () => {
+    const user = userEvent.setup();
+    const codes = ['ai.overloaded', 'ai.bad_output'];
+    mockFetch(routes({ 'POST /api/analyses': () => apiError(503, codes.shift() ?? 'ai.timeout', 'Claude') }));
+    renderNew();
+    await user.type(screen.getByLabelText('Текст событий'), 'Синнер vs Руне');
+    // текст есть, разбора не было — не «Добавьте хотя бы одно событие»
+    expect(launchReason()).toHaveTextContent('Текст не разобран — нажмите «Разобрать»');
+    await user.click(screen.getByRole('button', { name: 'Разобрать' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Claude сейчас перегружен. Нажмите «Разобрать» еще раз через несколько минут');
+    expect(alert).not.toHaveTextContent(/Перезапустите анализ/);
+    expect(launchReason()).toHaveTextContent('Текст не разобран — нажмите «Разобрать»');
+    await user.click(screen.getByRole('button', { name: 'Разобрать' }));
+    expect(await screen.findByText('Claude ответил не по схеме. Нажмите «Разобрать» еще раз')).toBeInTheDocument();
+  });
+
+  it('нет ключа администратора: администратору — задать ключ и ссылка, участнику — написать администратору', async () => {
+    const user = userEvent.setup();
+    const noKey = {
+      'GET /api/ai/budget': () =>
+        json(aiBudget({ has_key: false, monthly_usd: null, left_usd: null, daily_analyses: null, reason_code: 'ai.no_admin_key' })),
+      'POST /api/analyses': () => apiError(409, 'ai.no_admin_key', 'Ключ Claude администратора не задан. Напишите администратору'),
+    };
+    mockFetch(routes(noKey));
+    renderNew('/new', ME_ADMIN);
+    await waitFor(() =>
+      expect(launchReason()).toHaveTextContent('Ключ Claude администратора не задан. Задайте его в «Администрирование → Ключ и бюджет»'),
+    );
+    expect(screen.getByRole('link', { name: 'Открыть «Ключ и бюджет»' })).toHaveAttribute('href', '/admin/key');
+    await user.type(screen.getByLabelText('Текст событий'), 'Синнер vs Руне');
+    await user.click(screen.getByRole('button', { name: 'Разобрать' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Задайте его в «Администрирование → Ключ и бюджет»');
+    expect(within(alert).getByRole('link', { name: 'Открыть «Ключ и бюджет»' })).toHaveAttribute('href', '/admin/key');
+    cleanup();
+
+    mockFetch(routes(noKey));
+    renderNew('/new', ME_MEMBER);
+    await waitFor(() => expect(launchReason()).toHaveTextContent('Ключ Claude администратора не задан. Напишите администратору'));
+    expect(screen.queryByRole('link', { name: 'Открыть «Ключ и бюджет»' })).not.toBeInTheDocument();
+  });
+
+  it('общего бюджета не хватает на этот анализ: администратору — поднять бюджет', async () => {
+    const preview = previewOut();
+    preview.access = { ...preview.access, allowed: false, reason_code: 'ai.budget_exhausted', reason_params: {} };
+    mockFetch(
+      routes({
+        'GET /api/analyses/6': () => json(analysisDraft()),
+        'POST /api/analyses/6/preview': () => json(preview),
+      }),
+    );
+    renderNew('/new?draft=6', ME_ADMIN);
+    await waitFor(() => expect(launchReason()).toHaveTextContent(/Поднимите бюджет в «Администрирование → Ключ и бюджет»/));
+    expect(screen.getByRole('link', { name: 'Открыть «Ключ и бюджет»' })).toHaveAttribute('href', '/admin/key');
   });
 
   it('сбой разбора: текст снова в поле, черновик не привязан к упавшему анализу', async () => {

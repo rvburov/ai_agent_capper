@@ -17,6 +17,8 @@ const LIMIT_POLL_MS = 30_000;
  * Анализ (GET /api/analyses/{id}). poll — запасной опрос раз в 3 с, пока анализ идет, а поток
  * событий недоступен (useAnalysisEvents сам решает, когда он нужен). Отмененный анализ с шагом
  * «в работе» перечитывается раз в 5 с: вызов, начатый до отмены, доработает и будет записан.
+ * Остановленный, который сервер сейчас не перезапустит (поле restart: лимит, потолок), — раз в
+ * 30 с: администратор поднимет лимит, и кнопка перезапуска оживет без перезагрузки.
  */
 export function useAnalysis(id: number | null, { poll = false }: { poll?: boolean } = {}) {
   return useQuery({
@@ -27,7 +29,8 @@ export function useAnalysis(id: number | null, { poll = false }: { poll?: boolea
     refetchInterval: (query) => {
       const analysis = query.state.data;
       if (poll && isActive(analysis?.status)) return POLL_MS;
-      return isSettling(analysis) ? SETTLE_POLL_MS : false;
+      if (isSettling(analysis)) return SETTLE_POLL_MS;
+      return analysis?.restart && !analysis.restart.allowed ? LIMIT_POLL_MS : false;
     },
   });
 }

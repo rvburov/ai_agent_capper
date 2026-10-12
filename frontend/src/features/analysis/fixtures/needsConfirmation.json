@@ -192,5 +192,6 @@
   "cost_usd": 0.000265,
   "bank": null,
   "bookmaker": "Fonbet",
-  "strategy_version": null
+  "strategy_version": null,
+  "restart": null
 }

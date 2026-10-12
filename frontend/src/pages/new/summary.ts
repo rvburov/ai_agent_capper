@@ -1,7 +1,9 @@
 import type { TFunction } from 'i18next';
 
 import type { Freshness } from '../../components';
-import { codeText, inlineDateTime, keyText } from '../../features/analysis/codes';
+import { isApiError } from '../../api/errors';
+import { adminFixes, adminReasonText } from '../../features/ai/reasons';
+import { apiErrorText, inlineDateTime, keyText, reasonText } from '../../features/analysis/codes';
 import { checkEvent, displayName, resolvedPlayer, shortName, type EditEvent } from '../../features/analysis/draft';
 import type { DraftState } from '../../features/analysis/draftStore';
 import type { AiBudget, Preview, PreviewPlayer } from '../../features/analysis/types';
@@ -34,6 +36,8 @@ export interface LaunchSummary {
   reason: string | null;
   /** Причина не зависит от событий (пауза, нет ключа, анализы на сегодня закончились). */
   blocked: boolean;
+  /** Причину устраняет сам администратор: ссылка на «Администрирование → Ключ и бюджет». */
+  adminKey: boolean;
 }
 
 function newsText(info: PreviewPlayer | undefined, t: TFunction): string {
@@ -50,11 +54,14 @@ export function summarize(
   {
     parsing,
     t,
+    isAdmin = false,
     previewError = null,
     draftError = null,
   }: {
     parsing: boolean;
     t: TFunction;
+    /** Смотрит администратор: нет ключа и бюджет он решает сам (тексты по роли). */
+    isAdmin?: boolean;
     /** Расчет «Перед запуском» не удался (текст ошибки). */
     previewError?: string | null;
     /** Черновик на сервере для событий формы не создался (текст ошибки). */
@@ -94,12 +101,18 @@ export function summarize(
 
   // Сначала то, что не зависит от событий (как DATA.ai.access(me, 0) в макете), потом ввод,
   // потом цена этого анализа (доступ из «Перед запуском»)
-  const blockedText = access?.reason_code ? codeText(access.reason_code, access.reason_params, access.reason_code) : null;
+  const blockedText = access?.reason_code
+    ? reasonText(access.reason_code, access.reason_params, { isAdmin, fallback: access.reason_code })
+    : null;
   let retry: LaunchSummary['retry'] = null;
   const inputReason = (): string | null => {
     if (state.tab === 'text' && parsing) return t('new.reason.parsing');
     if (state.tab === 'text' && !state.text.trim() && !events.length) return t('new.reason.noText');
     if (state.tab === 'text' && state.parse && state.parsedText !== state.text) return t('new.reason.dirty');
+    // Текст есть, но не разобран (или разбор не удался): событий нет, потому что не нажали «Разобрать»
+    if (state.tab === 'text' && !events.length && state.text.trim() && state.parsedText !== state.text) {
+      return t('new.reason.needParse');
+    }
     if (!events.length) return t('new.reason.noEvents');
     const bad = events.findIndex((event) => checkEvent(event).issues.length > 0);
     if (bad >= 0) return t('new.reason.event', { n: bad + 1, issue: firstIssue(events[bad] as EditEvent, t) });
@@ -122,11 +135,12 @@ export function summarize(
     if (!preview) return t('new.reason.estimating');
     return null;
   };
-  const costReason =
-    preview && !preview.access.allowed && preview.access.reason_code
-      ? codeText(preview.access.reason_code, preview.access.reason_params, preview.access.reason_code)
-      : null;
+  const costCode = preview && !preview.access.allowed ? preview.access.reason_code : null;
+  const costReason = costCode
+    ? reasonText(costCode, preview?.access.reason_params, { isAdmin, fallback: costCode })
+    : null;
   const reason = blockedText ?? inputReason() ?? costReason;
+  const reasonCode = reason === null ? null : reason === blockedText ? access?.reason_code : reason === costReason ? costCode : null;
   const valid =
     events.length > 0 &&
     !preview?.problems.length &&
@@ -142,6 +156,7 @@ export function summarize(
     reusedMatches: preview?.estimate.reused_matches ?? 0,
     reason,
     blocked: Boolean(blockedText),
+    adminKey: adminFixes(reasonCode, isAdmin),
   };
 }
 
@@ -153,4 +168,33 @@ function firstIssue(event: EditEvent, t: TFunction): string {
       ? t('new.check.oddsRange', { list: issue.keys.map((key) => t(`new.odds.${key}`)).join(', ') })
       : t(`new.check.${issue.kind}`);
   return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+// Сбой Claude при разборе: анализа еще нет, поэтому «нажмите «Разобрать» еще раз», а не
+// «перезапустите анализ» (тексты errors.ai.* — для шагов анализа)
+const PARSE_RETRY = {
+  'ai.overloaded': 'new.errors.parse.overloaded',
+  'ai.rate_limited': 'new.errors.parse.rate_limited',
+  'ai.unavailable': 'new.errors.parse.unavailable',
+  'ai.timeout': 'new.errors.parse.timeout',
+  'ai.bad_output': 'new.errors.parse.bad_output',
+  'ai.max_tokens': 'new.errors.parse.max_tokens',
+} as const;
+
+export interface ParseError {
+  text: string;
+  /** Причину устраняет сам администратор: ссылка на «Ключ и бюджет». */
+  adminKey: boolean;
+}
+
+/** Текст ошибки разбора для того, кто смотрит. */
+export function parseErrorText(error: unknown, { isAdmin, t }: { isAdmin: boolean; t: TFunction }): ParseError {
+  if (isApiError(error)) {
+    if (Object.hasOwn(PARSE_RETRY, error.code)) {
+      return { text: t(PARSE_RETRY[error.code as keyof typeof PARSE_RETRY]), adminKey: false };
+    }
+    const own = adminReasonText(error.code, isAdmin);
+    if (own) return { text: own, adminKey: true };
+  }
+  return { text: apiErrorText(error), adminKey: false };
 }

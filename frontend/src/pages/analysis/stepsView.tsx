@@ -1,7 +1,7 @@
 import type { TFunction } from 'i18next';
 
 import { Chip, type TimelineStep } from '../../components';
-import { keyText } from '../../features/analysis/codes';
+import { keyText, type TextOptions } from '../../features/analysis/codes';
 import { displayName, shortName } from '../../features/analysis/draft';
 import { modelName, usdSmall } from '../../features/analysis/markets';
 import type { Analysis, Step } from '../../features/analysis/types';
@@ -88,6 +88,43 @@ function chipFor(step: Step, t: TFunction) {
   );
 }
 
+// Предупреждения о новостях приходят по одному на матч: одна фраза на вид предупреждения с
+// названиями матчей, а не одна и та же фраза столько раз, сколько матчей
+const MATCH_WARN = {
+  'analysis.warnings.news_failed': 'analysis.done.warn.newsFailed',
+  'analysis.warnings.news_limit': 'analysis.done.warn.newsLimit',
+  'analysis.warnings.search_errors': 'analysis.done.warn.searchErrors',
+} as const;
+
+/** Новости не получены хотя бы по одному матчу: Claude поправил вероятности без них. */
+export function newsMissing(warnings: readonly { key: string }[]): boolean {
+  return warnings.some((w) => w.key === 'analysis.warnings.news_failed' || w.key === 'analysis.warnings.news_limit');
+}
+
+/** Тексты предупреждений итога: без повторов, у предупреждений по матчам — их названия. */
+export function warningTexts(
+  warnings: readonly { key: string; params: Record<string, unknown> }[],
+  names: Map<number, string>,
+  t: TFunction,
+  options: TextOptions = {},
+): string[] {
+  const items: ({ text: string } | { key: keyof typeof MATCH_WARN; matches: string[] })[] = [];
+  for (const warning of warnings) {
+    const id = Number(warning.params.match_id);
+    if (Object.hasOwn(MATCH_WARN, warning.key) && Number.isFinite(id)) {
+      const key = warning.key as keyof typeof MATCH_WARN;
+      const name = names.get(id) ?? t('analysis.steps.someMatch');
+      const group = items.find((item) => 'key' in item && item.key === key);
+      if (!group) items.push({ key, matches: [name] });
+      else if ('matches' in group && !group.matches.includes(name)) group.matches.push(name);
+      continue;
+    }
+    const text = keyText(warning.key, warning.params, warning.key, options);
+    if (!items.some((item) => 'text' in item && item.text === text)) items.push({ text });
+  }
+  return items.map((item) => ('text' in item ? item.text : t(MATCH_WARN[item.key], { matches: item.matches.join(', ') })));
+}
+
 export interface StepContext {
   names: Map<number, string>;
   inputKind: string;
@@ -99,6 +136,7 @@ export interface StepContext {
 
 export function stepView(step: Step, ctx: StepContext, t: TFunction): TimelineStep {
   const warn = isWarnStep(step);
+  const reused = step.detail_key === 'analysis.steps.claude_reused';
   const state = step.state === 'running' ? 'active' : warn ? 'warn' : step.state === 'skipped' ? 'skipped' : step.state;
   const detail =
     step.kind === 'parse' && step.state === 'done' && !step.detail_key
@@ -114,8 +152,9 @@ export function stepView(step: Step, ctx: StepContext, t: TFunction): TimelineSt
     key: String(step.index),
     title: stepTitle(step, ctx.names, t, ctx.inputKind),
     chip: chipFor(step, t),
-    detail: state === 'failed' || warn ? undefined : detail || undefined,
-    note: step.detail_key === 'analysis.steps.claude_reused' ? detail : undefined,
+    // Повтор оценки: «из анализа …, без новых затрат» — заметкой, а строкой шага — почему так можно
+    detail: state === 'failed' || warn ? undefined : reused ? t('analysis.steps.reusedDetail') : detail || undefined,
+    note: reused ? detail : undefined,
     message:
       state === 'failed'
         ? t('analysis.steps.failed', { reason: keyText(step.detail_key, step.detail_params, ctx.failText) })

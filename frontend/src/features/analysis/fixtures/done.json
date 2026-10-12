@@ -856,5 +856,6 @@
   "cost_usd": 0.130904,
   "bank": "48000.00",
   "bookmaker": "Fonbet",
-  "strategy_version": "v3"
+  "strategy_version": "v3",
+  "restart": null
 }

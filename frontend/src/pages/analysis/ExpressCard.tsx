@@ -233,9 +233,11 @@ export function ExpressCard(props: ExpressCardProps) {
                 <div className="analysis-leg-meta">{props.legMeta[i]?.desc}</div>
               </div>
               <div className="analysis-leg-right">
-                <div className="analysis-leg-p" aria-label={t('analysis.express.chanceAria', { p: formatProb(express.legs[i]?.p) })}>
+                {/* aria-label у div без роли не читается: вероятность — скрытым текстом */}
+                <div className="analysis-leg-p">
                   <span aria-hidden="true">{t('analysis.express.chance')}</span>
                   <b aria-hidden="true">{formatProb(express.legs[i]?.p)}</b>
+                  <span className="sr-only">{t('analysis.express.chanceAria', { p: formatProb(express.legs[i]?.p) })}</span>
                 </div>
                 <OddsBox
                   label={Math.abs((taken[i] ?? 0) - leg.odds) > 0.0005 ? t('analysis.express.atBet') : t('analysis.express.odds')}

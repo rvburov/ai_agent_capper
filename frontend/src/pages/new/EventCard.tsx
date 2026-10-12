@@ -35,7 +35,7 @@ import {
 } from '../../features/analysis/draft';
 import { formatProb } from '../../features/analysis/markets';
 import { inlineDateTime, keyText } from '../../features/analysis/codes';
-import { ROUND_CODES, roundLabel } from '../../features/analysis/rounds';
+import { categoryLabel, ROUND_CODES, roundLabel } from '../../features/analysis/rounds';
 import type { PreviewEvent, PreviewPlayer } from '../../features/analysis/types';
 import { usePlayerSearch, type PlayerHit } from '../../features/players/api';
 import { formatOdds, formatPercent } from '../../lib/format';
@@ -336,7 +336,7 @@ export function eventTitle(event: EditEvent, t: TFunction): string {
 
 function Meta({ event }: { event: EditEvent }) {
   const { t } = useTranslation();
-  const parts = [event.tournamentName || t('new.event.noTournament'), event.category, roundLabel(event.round)].filter(Boolean);
+  const parts = [event.tournamentName || t('new.event.noTournament'), categoryLabel(event.category), roundLabel(event.round)].filter(Boolean);
   return (
     <div className="new-ev-meta">
       <SurfaceChip surface={event.surface} />
@@ -453,7 +453,8 @@ function Editor({ event, onChange }: { event: EditEvent; onChange: (next: EditEv
           placeholder={t('new.event.tournamentPlaceholder')}
           autoComplete="off"
           maxLength={200}
-          onChange={(e) => onChange({ ...event, blank: false, tournamentName: e.target.value, tournamentId: null, category: null })}
+          // Другой турнир — и формат матча (до 2 или 3 побед) сервер определит заново по названию
+          onChange={(e) => onChange({ ...event, blank: false, tournamentName: e.target.value, tournamentId: null, category: null, bestOf: null })}
         />
       </FieldShell>
       <FieldShell id={roundId} label={t('new.event.round')}>

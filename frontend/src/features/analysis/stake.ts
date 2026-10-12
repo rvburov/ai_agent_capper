@@ -31,15 +31,31 @@ export function roundMoney(value: number, rules: MoneyRules): number {
   return cents(value, rules.decimals) / 10 ** rules.decimals;
 }
 
-/** Итоговый кэф экспресса — произведение кэфов ног (3 знака, как у сервера). */
-export function totalOdds(odds: readonly number[]): number {
-  const product = odds.reduce((acc, x) => acc * x, 1);
-  return Math.round(product * 1000) / 1000;
+/** Деление целых с округлением половины вверх (как ROUND_HALF_UP у Decimal), для x ≥ 0. */
+function divHalfUp(x: bigint, d: bigint): bigint {
+  return (x * 2n + d) / (d * 2n);
 }
 
-/** Выплата при выигрыше: сумма × итоговый кэф, до знаков валюты. */
+// Кэфы и суммы — целыми тысячными и копейками: произведение в float дает 1.15 × 1.65 =
+// 1.89749… вместо 1.8975, и окно показало бы 1.897, а сервер записал бы 1.898.
+const MILLI = 1000n;
+
+/** Итоговый кэф экспресса — произведение кэфов ног, 3 знака с округлением половины вверх (как у сервера). */
+export function totalOdds(odds: readonly number[]): number {
+  let product = 1n;
+  let scale = 1n;
+  for (const x of odds) {
+    product *= BigInt(Math.round(x * 1000));
+    scale *= MILLI;
+  }
+  return Number(divHalfUp(product * MILLI, scale)) / 1000;
+}
+
+/** Выплата при выигрыше: сумма × итоговый кэф, до знаков валюты с округлением половины вверх. */
 export function payout(stake: number, total: number, rules: MoneyRules): number {
-  return roundMoney(stake * total, rules);
+  const unit = 10 ** rules.decimals;
+  const minor = BigInt(Math.round(stake * unit)) * BigInt(Math.round(total * 1000));
+  return Number(divHalfUp(minor, MILLI)) / unit;
 }
 
 /** Сумма для доли банка: вниз до шага округления стратегии (как у суммы по стратегии). */

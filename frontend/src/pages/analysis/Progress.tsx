@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { paths } from '../../app/paths';
@@ -14,14 +14,13 @@ import {
   ProgressBar,
   StepTimeline,
 } from '../../components';
-import { keyText } from '../../features/analysis/codes';
 import { usdSmall } from '../../features/analysis/markets';
 import { analysisNumber } from '../../features/analysis/number';
-import type { Analysis, Step } from '../../features/analysis/types';
+import { stepFinishingUntil, type Analysis, type Step } from '../../features/analysis/types';
 import { formatDuration, formatTokens, formatUsd, type Currency } from '../../lib/format';
 import { appPath } from './links';
 import type { StopInfo } from './stopInfo';
-import { STATE_LABELS, stepTitle, stepView, type StepContext } from './stepsView';
+import { STATE_LABELS, stepTitle, stepView, warningTexts, type StepContext } from './stepsView';
 
 // Ход анализа: идет (шаги и счетчики, «Отменить анализ»), остановлен или отменен (причина и
 // «Перезапустить с этого шага»), готов (счетчики, «Показать шаги»). progressRunning,
@@ -236,6 +235,18 @@ export function StopBanner({ analysis, steps, ctx, info, restarting, onRestart }
     .map((s) => stepTitle(s, ctx.names, t, ctx.inputKind));
   const editTo = `${paths.newAnalysis}?draft=${analysis.id}`;
   const spent = usd(runNumbers(analysis).costUsd);
+  // Шаг, который шел при отмене, дорабатывает: «Продолжить» — когда он закончится (экран
+  // перечитывает анализ), иначе сервер ответит 409 и шаг был бы оплачен дважды
+  const finishUntil = stepFinishingUntil(analysis);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (finishUntil === null) return;
+    const left = finishUntil - Date.now();
+    if (left <= 0) return;
+    const timer = window.setTimeout(() => setNow(Date.now()), left + 500);
+    return () => window.clearTimeout(timer);
+  }, [finishUntil]);
+  const finishing = finishUntil !== null && Math.max(now, Date.now()) < finishUntil;
   if (cancelled) {
     return (
       <div className="callout analysis-stop" role="alert">
@@ -243,13 +254,19 @@ export function StopBanner({ analysis, steps, ctx, info, restarting, onRestart }
         <div className="callout-body">
           <b>{t('analysis.stop.cancelledTitle', { n: at, total })}</b> {t('analysis.stop.cancelledText', { spent })}
           <div className="analysis-stop-acts">
-            <Button kind="primary" size="sm" icon="refresh" loading={restarting} onClick={onRestart}>
+            <Button kind="primary" size="sm" icon="refresh" disabled={finishing} loading={restarting} onClick={onRestart}>
               {t('analysis.stop.continue', { n: at })}
             </Button>
             <Button size="sm" icon="edit" to={editTo}>
               {t('analysis.edit')}
             </Button>
           </div>
+          {finishing && (
+            <div className="analysis-stop-note">
+              <Icon name="clock" />
+              <span>{t('analysis.stop.finishing')}</span>
+            </div>
+          )}
           <div className="analysis-stop-note">
             <Icon name="check" />
             <span>{t('analysis.stop.paidOnce')}</span>
@@ -369,7 +386,7 @@ export function DoneCard({ analysis, steps, ctx, currency }: { analysis: Analysi
         </div>
         {warnings.length > 0 && (
           <Callout kind="warn">
-            <b>{t('analysis.done.warnTitle')}</b> {warnings.map((w) => keyText(w.key, w.params, w.key, { currency })).join('. ')}.{' '}
+            <b>{t('analysis.done.warnTitle')}</b> {warningTexts(warnings, ctx.names, t, { currency }).join('. ')}.{' '}
             {t('analysis.done.warnTail')}
           </Callout>
         )}
