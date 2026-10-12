@@ -318,7 +318,7 @@ async def _agent_smoke(args: argparse.Namespace) -> None:
                 report=report,
             )
         except ClaudeStepError as exc:
-            failure = exc.message
+            failure = agent_smoke.failure_text(exc)
     header = [
         t(f"cli.agent_smoke.columns.{name}")
         for name in (

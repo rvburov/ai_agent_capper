@@ -45,6 +45,7 @@ ERRORS = {
     "rate_limited": (429, "rate_limit_error"),
     "key_rejected": (401, "authentication_error"),
     "server": (500, "api_error"),
+    "bad_request": (400, "invalid_request_error"),
 }
 SHIFT = 0.02
 

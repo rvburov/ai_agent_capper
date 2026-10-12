@@ -5,10 +5,14 @@
 failed и error_code = код, пользователь видит текст из ru.json, а не текст ответа
 Anthropic. detail — короткая метка для agent_runs.error и лога: «529:overloaded_error»,
 «refusal:cyber», «max_tokens», «connection», «incomplete». Заголовки запроса (в них ключ)
-и текст ошибки Anthropic в detail не попадают.
+в detail не попадают. Текст ошибки Anthropic хранится только у отказа «наш запрос
+неверен» (400 invalid_request_error, код ai.bad_request): без него такую ошибку не
+найти. Он идет в журнал вызовов и в вывод agent-smoke, но не участнику; строки вида
+sk-ant-… в нем маскируются.
 """
 
 import json
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -63,6 +67,9 @@ _BILLING_MARKERS = ("credit balance", "usage limit", "spend limit")
 # дописан, а usage знает только вход
 _COMPLETE_STOPS = frozenset({"end_turn", "tool_use", "pause_turn", "stop_sequence"})
 _DETAIL_LENGTH = 64
+# Текст ошибки Anthropic в журнале: коротко и без ключей
+_API_MESSAGE_LENGTH = 300
+_KEY_TEXT = re.compile(r"sk-ant-[A-Za-z0-9_\-]*")
 
 
 class ClaudeStepError(Exception):
@@ -75,13 +82,22 @@ class ClaudeStepError(Exception):
         *,
         detail: str | None = None,
         request_id: str | None = None,
+        api_message: str | None = None,
         **params: Any,
     ) -> None:
         super().__init__(code)
         self.code = code
         self.detail = detail or code
         self.request_id = request_id
+        self.api_message = api_message
         self.params = params
+
+    @property
+    def journal_detail(self) -> str:
+        """Метка для agent_runs.error: detail и, если есть, текст отказа Anthropic."""
+        if self.api_message:
+            return f"{self.detail} | {self.api_message}"
+        return self.detail
 
     @property
     def message(self) -> str:
@@ -96,13 +112,27 @@ def _status_detail(exc: anthropic.APIStatusError) -> str:
     return f"{exc.status_code}:{exc.type or 'error'}"
 
 
-def _is_billing(exc: anthropic.APIStatusError) -> bool:
-    """400 invalid_request_error о деньгах: «credit balance is too low», «reached your
-    specified API usage limits»."""
+def _error_text(exc: anthropic.APIStatusError) -> str | None:
     body = exc.body
     error = body.get("error") if isinstance(body, dict) else None
     text = error.get("message") if isinstance(error, dict) else None
-    if not isinstance(text, str):
+    return text if isinstance(text, str) else None
+
+
+def api_message(exc: anthropic.APIStatusError) -> str | None:
+    """Текст отказа Anthropic для журнала: одна строка, без ключей, не длиннее 300."""
+    text = _error_text(exc)
+    if not text:
+        return None
+    cleaned = " ".join(_KEY_TEXT.sub("sk-ant-***", text).split())
+    return cleaned[:_API_MESSAGE_LENGTH] or None
+
+
+def _is_billing(exc: anthropic.APIStatusError) -> bool:
+    """400 invalid_request_error о деньгах: «credit balance is too low», «reached your
+    specified API usage limits»."""
+    text = _error_text(exc)
+    if text is None:
         return False
     lowered = text.lower()
     return any(marker in lowered for marker in _BILLING_MARKERS)
@@ -136,7 +166,14 @@ def error_from_exception(exc: BaseException) -> ClaudeStepError:
             code = "ai.unavailable"
         else:
             code = "ai.bad_request"
-        return ClaudeStepError(code, detail=detail, request_id=request_id, status=exc.status_code)
+        message = api_message(exc) if code == "ai.bad_request" else None
+        return ClaudeStepError(
+            code,
+            detail=detail,
+            request_id=request_id,
+            api_message=message,
+            status=exc.status_code,
+        )
     # Сеть SDK оборачивает в APIConnectionError только до ответа. Обрыв и зависание
     # потока после ответа 200 приходят исключением httpx2 при чтении тела
     if isinstance(exc, anthropic.APITimeoutError | TimeoutError | httpx2.TimeoutException):

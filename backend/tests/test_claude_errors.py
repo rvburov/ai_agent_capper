@@ -327,3 +327,19 @@ async def test_close_keeps_test_http_client(claude: ClaudeMock) -> None:
     await close_client()
     await _call()
     assert len(claude.requests) == 2
+
+
+async def test_bad_request_keeps_anthropic_text(claude: ClaudeMock) -> None:
+    """Ошибка нашего запроса (400 invalid_request_error): текст Anthropic нужен, чтобы ее
+    найти, — он хранится отдельно от текста для участника, одной строкой, без ключа."""
+    text = "tools.0: Extra inputs\n are not permitted; key sk-ant-api03-abcDEF_123 " + "x" * 400
+    claude.add(api_error(400, "invalid_request_error", message=text))
+    with pytest.raises(ClaudeStepError) as caught:
+        await _call()
+    exc = caught.value
+    assert exc.code == "ai.bad_request"
+    assert exc.api_message is not None
+    assert exc.api_message.startswith("tools.0: Extra inputs are not permitted; key sk-ant-***")
+    assert "abcDEF" not in exc.api_message and len(exc.api_message) == 300
+    assert exc.journal_detail == f"400:invalid_request_error | {exc.api_message}"
+    assert "Extra inputs" not in exc.message

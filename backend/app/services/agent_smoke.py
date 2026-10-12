@@ -7,7 +7,9 @@
 (estimate_smoke), в худшем случае больше (max_smoke: продолжения поиска и итерации
 анализа). Досье собирается на день матча: результат самого матча в него не попадает.
 Итог проверяет команда (problems): разбор нашел одно событие, модель искала перед
-record_news, второй вызов анализа прочитал кэш — иначе проверка не пройдена.
+record_news, второй вызов анализа прочитал кэш — иначе проверка не пройдена. Сбой шага
+новостей проверку не останавливает (в анализе он тоже лишь предупреждение): анализ матча
+все равно проверяется, а причина сбоя попадает в итог.
 """
 
 from collections.abc import Callable
@@ -24,6 +26,7 @@ from app.agent.analysis import assess_match
 from app.agent.calls import CallInfo
 from app.agent.client import client_for
 from app.agent.config import AgentConfig, load_agent_config
+from app.agent.errors import ClaudeStepError
 from app.agent.news import NewsTarget, fetch_news
 from app.agent.parse import parse_text
 from app.agent.prompts import ANALYSIS_PROMPT, load_prompt
@@ -72,6 +75,8 @@ class SmokeReport:
     news_facts: int = 0
     news_errors: tuple[str, ...] = ()
     news_searched: bool = False
+    # Шаг новостей не выполнен: текст ошибки и ответ Anthropic, если он есть
+    news_failure: str | None = None
     match_id: int | None = None
     p_base: float | None = None
     p_claude: float | None = None
@@ -86,7 +91,9 @@ class SmokeReport:
         found: list[tuple[str, dict[str, Any]]] = []
         if self.parsed_events != 1:
             found.append(("events", {"events": self.parsed_events}))
-        if not self.news_searched or self.news_searches == 0:
+        if self.news_failure is not None:
+            found.append(("news_failed", {"message": self.news_failure}))
+        elif not self.news_searched or self.news_searches == 0:
             found.append(("search", {}))
         if self.second_cache_read == 0:
             found.append(("cache", {}))
@@ -143,6 +150,13 @@ class _Hooks:
         )
         await self.db.commit()
         return run_id
+
+
+def failure_text(exc: ClaudeStepError) -> str:
+    """Текст сбоя шага для вывода команды: сообщение и ответ Anthropic, если он есть."""
+    if exc.api_message:
+        return f"{exc.message} ({exc.api_message})"
+    return exc.message
 
 
 def _tokens_cost(price_input: Decimal, price_output: Decimal, inp: int, out: int) -> Decimal:
@@ -259,18 +273,24 @@ async def run_smoke(
     report.match_id = match.id
     player = await db.get_one(Player, match.player1_id)
     say("news")
-    outcome = await fetch_news(
-        client_for(key, timeout=float(config.news_timeout_s)),
-        targets=[NewsTarget(position=1, player_id=player.id, name=player.name)],
-        match_label=player.name,
-        today=datetime.now(UTC).date(),
-        config=config,
-        hooks=hooks,
-        max_uses=min(config.news_max_uses, NEWS_USES),
-    )
-    report.news_facts = len(outcome.facts)
-    report.news_errors = outcome.search_errors
-    report.news_searched = outcome.searched
+    try:
+        outcome = await fetch_news(
+            client_for(key, timeout=float(config.news_timeout_s)),
+            targets=[NewsTarget(position=1, player_id=player.id, name=player.name)],
+            match_label=player.name,
+            today=datetime.now(UTC).date(),
+            config=config,
+            hooks=hooks,
+            max_uses=min(config.news_max_uses, NEWS_USES),
+        )
+    except ClaudeStepError as exc:
+        if exc.is_key_failure:
+            raise
+        report.news_failure = failure_text(exc)
+    else:
+        report.news_facts = len(outcome.facts)
+        report.news_errors = outcome.search_errors
+        report.news_searched = outcome.searched
 
     say("dossier")
     surface = await db.scalar(

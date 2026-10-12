@@ -131,3 +131,27 @@ async def test_smoke_without_matches_says_what_to_do(
     assert "В базе нет сыгранных матчей" in err and "--match" in err
     assert await asyncio.to_thread(cli.main, ["agent-smoke", "--match", "999999", "--yes"]) == 1
     assert "Матча 999999 нет в базе" in capsys.readouterr().err
+
+
+async def test_smoke_goes_on_after_news_rejected(
+    db: AsyncSession,
+    world: dict[str, int],
+    fake: FakeClaude,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Живой API отклонил запрос новостей (400): проверка не обрывается на нем — анализ
+    матча тоже проверяется, а в итоге видна причина отказа Anthropic (без нее ошибку
+    нашего запроса не найти)."""
+    fake.fail("news", "bad_request")
+    report = await run_smoke(db)
+    assert [call.step for call in report.calls] == ["parse", "news", "analysis", "analysis"]
+    assert report.news_failure is not None and "(fake)" in report.news_failure
+    assert ("news_failed", {"message": report.news_failure}) in report.problems()
+    news_run = await db.scalar(select(AgentRun).where(AgentRun.kind == "news"))
+    assert news_run is not None and news_run.error == "400:invalid_request_error | fake"
+
+    fake.fail("news", "bad_request")
+    assert await asyncio.to_thread(cli.main, ["agent-smoke", "--yes"]) == 1
+    printed = capsys.readouterr()
+    assert "Чтение кэша во втором вызове анализа" in printed.out
+    assert "шаг новостей не выполнен" in printed.err and "(fake)" in printed.err

@@ -173,8 +173,22 @@ async def call[T](
             async with asyncio.timeout(timeout_s):
                 message = await send(trace, **overrides)
     except ClaudeStepError as exc:
+        if exc.api_message:
+            log.warning(
+                "agent.request_rejected",
+                step=spec.kind,
+                model=spec.model,
+                detail=exc.detail,
+                request_id=exc.request_id,
+                api_message=exc.api_message,
+            )
         await hooks.after_call(
-            info(trace.usage or Usage(), None, exc.detail, exc.request_id or trace.request_id)
+            info(
+                trace.usage or Usage(),
+                None,
+                exc.journal_detail,
+                exc.request_id or trace.request_id,
+            )
         )
         raise
     except BaseException as exc:
