@@ -67,28 +67,36 @@
   // Потолок на один анализ для своего ключа задает сам участник (личный кабинет), администратор только видит
   const ownCap = u => u.ownCap != null ? u.ownCap : A.defaults.perAnalysis;
   const maskCode = c => c.slice(0, 4) + '••••-' + c.slice(-4);
-  // Средняя цена анализа — по всем запускам «Анализ матчей», как на экране «ИИ и расходы»
-  const avgAnalysis = () => { const rs = AI.runs.filter(r => r.type === 'analysis'); return rs.length ? sum(rs, r => r.cost) / rs.length : 0; };
+  // Средняя цена анализа — по анализам, а не по вызовам: анализ — это разбор текста, новости и оценки матчей
+  const avgAnalysis = () => { const rs = AI.runs.filter(r => r.analysis); const n = new Set(rs.map(r => r.analysis)).size; return n ? sum(rs, r => r.cost) / n : 0; };
   // День месяца в макете (для подписей «за 1–7 окт»); конец месяца — по daysLeft из DATA.ai.budget()
   const DAY = parts(TODAY)[2];
   const monthEnd = b => DAY + b.daysLeft;
+  // Месяц расходов — по UTC (PLAN, раздел 6): «Октябрь, 1–7», «за 1–7 октября»
+  const MONTHS_NOM = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  const MONTH = parts(TODAY)[1] - 1;
+  const monthSpan = () => MONTHS_NOM[MONTH] + ', 1–' + DAY;
+  const monthSpanGen = () => '1–' + DAY + ' ' + MONTHS_GEN[MONTH];
 
-  // Расход по задачам. В демо-данных запуски (DATA.ai.runs) есть только у одного человека, поэтому личный
-  // расход каждого делим по задачам в тех же долях; общие фоновые задачи — как есть. Сумма сходится с бюджетом.
+  // Расход по задачам — по коду этапа 3 (Т19): разбор текста (Haiku 5.5), новости перед анализом (Sonnet 5.5
+  // с веб-поиском), оценка матча (Opus 5.5, один вызов на матч). В демо-данных вызовы (DATA.ai.runs) есть только
+  // у одного человека, поэтому расход каждого участника делим по задачам в тех же долях; общие фоновые задачи
+  // (вызовы без участника — приемка) — отдельной строкой. Сумма сходится с бюджетом. Проверки (eval) — вне бюджета.
   function taskBreakdown() {
-    const runs = AI.runs, personal = runs.filter(r => r.type !== 'refresh');
+    const runs = AI.runs, personal = runs.filter(r => !AI.isShared(r));
     const pCost = sum(personal, r => r.cost) || 1;
     const b = AI.budget(), membersSpent = b.spent - b.shared;
-    const SHORT = { analysis: 'Анализ матчей', refresh: 'Профили', postmortem: 'Разбор ставок', parse: 'Разбор текста' };
-    return AI.runTypes.map(t => {
-      const rs = runs.filter(r => r.type === t.id);
+    const SHORT = { analysis: 'Оценка матча', news: 'Новости', parse: 'Разбор текста' };
+    const WHAT = { analysis: 'Opus 5.5 · effort medium · один вызов на матч', news: 'Sonnet 5.5 + веб-поиск · effort low · 2 поиска на матч', parse: 'Haiku 5.5 · effort low' };
+    const rows = AI.runTypes.map(t => {
+      const rs = personal.filter(r => r.type === t.id);
       const input = sum(rs, r => r.input), cached = sum(rs, r => r.cached);
-      const shared = t.id === 'refresh';
-      return {
-        id: t.id, label: shared ? 'Обновление профилей (общая задача, пакетом)' : t.label, short: SHORT[t.id] || t.label, model: t.model, shared,
-        cost: shared ? b.shared : sum(rs, r => r.cost) / pCost * membersSpent, cache: input ? cached / input : 0,
-      };
-    }).sort((a, b) => b.cost - a.cost);
+      return { id: t.id, label: t.label, short: SHORT[t.id] || t.label, model: t.model, what: WHAT[t.id], cost: sum(rs, r => r.cost) / pCost * membersSpent, cache: input ? cached / input : 0 };
+    });
+    const sh = runs.filter(r => AI.isShared(r));
+    const shIn = sum(sh, r => r.input);
+    rows.push({ id: 'shared', label: 'Общие фоновые задачи', short: 'Без участника', model: 'Sonnet 5.5, Opus 5.5', what: 'вызовы без участника — сейчас приемка (agent-smoke)', shared: true, cost: b.shared, cache: shIn ? sum(sh, r => r.cached) / shIn : 0 });
+    return rows.sort((a, b) => b.cost - a.cost);
   }
 
   // ---------- журнал ----------
@@ -413,6 +421,11 @@
     .adm-stack > i + i { box-shadow: inset 2px 0 0 var(--surface); }
     .adm-urows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
     .adm-urow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 11px 0; border-bottom: 1px solid var(--line); align-items: center; }
+    .adm-eval { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 14px; border: 1px dashed var(--line-strong); border-radius: var(--r-md); align-items: center; }
+    .adm-eval .adm-urow-name svg { color: var(--fg-3); }
+    /* у проверок пояснение длинное: сумма — в первой строке, пояснение — на всю ширину под ней */
+    .adm-eval .adm-urow-val { grid-row: 1; }
+    .adm-eval .adm-urow-meta { grid-column: 1 / -1; }
     .adm-urow:first-child { padding-top: 2px; }
     .adm-urow:last-child { border-bottom: 0; padding-bottom: 0; }
     .adm-urow-name { font-weight: 600; display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
@@ -1269,7 +1282,7 @@
     return h('li', { class: 'adm-urow adm-total' },
       h('div', { class: 'adm-urow-name' }, 'Итого с вашего ключа'),
       h('div', { class: 'adm-urow-val' }, h('b', null, usd(b.spent)), h('small', null, pctOf(b.spent, b.monthly, 1) + ' бюджета')),
-      h('div', { class: 'adm-urow-meta' }, 'за 1–' + DAY + ' октября'));
+      h('div', { class: 'adm-urow-meta' }, 'за ' + monthSpanGen()));
   }
   // Кто тратит ключ администратора: все с расходом на нем; если людей много — первые трое и «остальные»
   function spendersList(b) {
@@ -1278,7 +1291,7 @@
     const noteOf = u => { const L = AI.limitOf(u); return u.aiMode === 'own' ? 'до перехода на свой ключ' : L ? 'лимит ' + usdL(L.monthly) : 'без личного лимита'; };
     const rows = top.map(u => ({ name: u.name, me: isMe(u), gone: u.status === 'deleted', spent: AI.keySpent(u), r: ratio(u), note: noteOf(u) }))
       .concat(rest.length ? [{ name: 'Остальные: ' + rest.length, spent: Math.round(sum(rest, AI.keySpent) * 100) / 100, note: rest.map(u => u.name.split(' ')[0]).join(', ') }] : [])
-      .concat([{ name: 'Общие фоновые задачи', spent: b.shared, note: 'обновление профилей игроков', shared: true }]);
+      .concat([{ name: 'Общие фоновые задачи', spent: b.shared, note: 'вызовы без участника: приемка этапа', shared: true }]);
     const max = Math.max(...rows.map(x => x.spent)) || 1;
     return h('ul', { class: 'adm-urows compact', 'aria-label': 'Кто тратит' }, rows.map(x => h('li', { class: 'adm-urow' },
       h('div', { class: 'adm-urow-name' }, x.name, x.me && chip('вы', 'accent'), x.gone && chip('удален', 'outline')),
@@ -1752,17 +1765,18 @@
     const metaOf = u => {
       const L = AI.limitOf(u), own = AI.ownSpent(u);
       if (u.aiMode === 'own') return 'до перехода на свой ключ';
-      return (own ? 'вернулся со своего ключа · ' : '') + pl(u.analyses, 'анализ', 'анализа', 'анализов') + ' за октябрь · ' + (L ? 'лимит ' + usdL(L.monthly) + (L.paused ? ', пауза' : '') : 'без личного лимита');
+      return (own ? 'вернулся со своего ключа · ' : '') + pl(u.analyses, 'анализ', 'анализа', 'анализов') + ' за ' + monthSpanGen() + ' · ' + (L ? 'лимит ' + usdL(L.monthly) + (L.paused ? ', пауза' : '') : 'без личного лимита');
     };
+    const E = AI.eval;
 
     const tiles = h('div', { class: 'grid' },
       UI.stat({ class: 'col-3 half-mobile', icon: 'coins', label: 'С вашего ключа', value: usd(b.spent), hint: pctOf(b.spent, b.monthly) + ' бюджета ' + usdL(b.monthly) }),
       UI.stat({ class: 'col-3 half-mobile', icon: 'spark', label: 'Анализов на вашем ключе', value: String(analyses), hint: '≈ ' + usd(avgAnalysis()) + ' за анализ' }),
-      UI.stat({ class: 'col-3 half-mobile', icon: 'database', label: 'Вход из кэша', value: fmt.pct(AI.cacheShare, 0), hint: 'по всем задачам за октябрь' }),
+      UI.stat({ class: 'col-3 half-mobile', icon: 'database', label: 'Вход из кэша', value: fmt.pct(AI.cacheShare, 0), hint: 'по всем задачам за ' + monthSpanGen() }),
       UI.stat({ class: 'col-3 half-mobile', icon: 'key', label: 'На своих ключах', value: usd(ownTotal), hint: 'в ваш бюджет не входит' }));
 
     const peopleCard = card({
-      title: 'По людям', subtitle: 'Октябрь, 1–' + DAY + ' · из чего складываются ' + usd(b.spent), id: 'adm-usage-people',
+      title: 'По людям', subtitle: monthSpan() + ' · из чего складываются ' + usd(b.spent), id: 'adm-usage-people',
       body: [
         h('div', { class: 'adm-stack', role: 'img', 'aria-label': 'Состав расхода: ' + segs.map(s => s.label + ' ' + usd(s.value)).join(', ') },
           segs.map(s => h('i', { style: { width: (s.value / total * 100) + '%', background: s.color }, title: s.label + ': ' + usd(s.value) }))),
@@ -1776,7 +1790,7 @@
           h('li', { class: 'adm-urow' },
             h('div', { class: 'adm-urow-name' }, h('i', { class: 'adm-sw', style: { background: 'var(--fg-3)' } }), 'Общие фоновые задачи'),
             h('div', { class: 'adm-urow-val' }, h('b', null, usd(b.shared)), h('small', null, pctOf(b.shared, b.monthly, 1) + ' бюджета')),
-            h('div', { class: 'adm-urow-meta' }, 'Обновление профилей игроков ночью пакетом — для всех сразу'),
+            h('div', { class: 'adm-urow-meta' }, 'Вызовы на вашем ключе без участника — сейчас приемка этапа (agent-smoke)'),
             h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: (b.shared / max * 100) + '%', background: 'var(--fg-3)' } }))),
           totalRow(b)),
         howto('Длина полосы — расход, справа — доля месячного бюджета ' + usdL(b.monthly) + '. Ставки и банк участников здесь не показываются.'),
@@ -1785,18 +1799,23 @@
 
     const tasks = taskBreakdown();
     const tasksCard = card({
-      title: 'По задачам', subtitle: 'Те же ' + usd(b.spent) + ' по типам запусков · справа — доля бюджета',
+      title: 'По задачам', subtitle: 'Те же ' + usd(b.spent) + ' по задачам анализа · справа — доля бюджета',
       body: [
         UI.hbars({ items: tasks.map(t => ({ label: t.short, value: t.cost, note: pctOf(t.cost, b.monthly, 1), color: t.shared ? 'var(--fg-3)' : 'var(--s1)', dot: false })), valueFormat: v => usd(v) }),
         h('div', { class: 'adm-bleed' }, UI.table({
           columns: [
-            { label: 'Задача', render: t => t.label },
-            { label: 'Модель', render: t => h('span', { class: 'adm-nowrap' }, t.model) },
+            { label: 'Задача', render: t => h('div', null, h('div', null, t.label), h('div', { class: 'xsmall muted' }, t.what)) },
             { label: 'Кэш', align: 'r', render: t => t.cache ? fmt.pct(t.cache * 100, 0) : 'нет' },
           ],
           rows: tasks,
         })),
-        howto('Кэш — какая часть входных токенов читается из кэша: это в 10–20 раз дешевле обычного входа. Разбор текста короткий, его не кэшируем.'),
+        // Проверки (eval) — отдельной строкой: свой бюджет на ключе администратора, в общий не входит (PLAN, раздел 6)
+        h('div', { class: 'adm-eval' },
+          h('div', { class: 'adm-urow-name' }, icon('flask', { width: 16, height: 16 }), 'Проверки (eval)'),
+          h('div', { class: 'adm-urow-val' }, h('b', null, usd(E.spent)), h('small', null, 'из ' + usdL(E.monthly) + ' бюджета проверок')),
+          h('div', { class: 'adm-urow-meta' }, E.runs.map(r => r.what + ' — ' + usd(r.cost)).join('; ') + '. В общий бюджет ' + usdL(b.monthly) + ' не входит.'),
+          h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: Math.min(100, E.spent / E.monthly * 100) + '%', background: 'var(--fg-3)' } }))),
+        howto('Кэш — какая часть входных токенов читается из кэша: это в 10–20 раз дешевле обычного входа. Новости больше пишут в кэш, чем читают из него, поэтому общая доля невысокая. Разбор ставки ИИ появится на этапе 5; профили игроков ИИ не собирает.'),
       ],
     });
 
@@ -1813,7 +1832,7 @@
     });
 
     return [
-      h('div', { class: 'row-between' }, h('div', { class: 'small soft' }, 'Октябрь, 1–' + DAY + ' · все суммы в долларах, как считает Anthropic'), button('Ключ и бюджет', { kind: 'ghost', size: 'sm', icon: 'key', onClick: () => switchTab('key') })),
+      h('div', { class: 'row-between' }, h('div', { class: 'small soft' }, monthSpan() + ' (дни по UTC) · все суммы в долларах, как считает Anthropic'), button('Ключ и бюджет', { kind: 'ghost', size: 'sm', icon: 'key', onClick: () => switchTab('key') })),
       tiles,
       h('div', { class: 'adm-main' }, peopleCard, h('div', { class: 'adm-col' }, tasksCard, ownCard)),
     ];
@@ -1908,7 +1927,7 @@
           type: 'button', class: 'adm-choice', 'aria-pressed': String(code === c.code), 'data-cur': code,
           on: { click: () => { if (code !== c.code) currencyModal(code); } },
         }, h('span', { class: 'adm-choice-sym', 'aria-hidden': 'true' }, L[code].sym), h('span', null, h('b', null, L[code].label), h('small', null, code === c.code ? 'сейчас' : code === 'RUB' || c.code === 'RUB' ? 'курс вводится вручную' : 'подсказка — курс ЕЦБ'))))),
-        UI.kv([['Букмекеры', 'список каждый участник ведет сам'], ['Эталон рынка', 'кэф ' + D.marketRef]]),
+        UI.kv([['Букмекеры', 'список каждый участник ведет сам'], ['Эталон рынка', h('span', null, D.marketRefRule, h('small', { class: 'xsmall muted', style: 'display:block' }, 'первый по порядку, у кого есть кэфы обеих сторон; закрывающий кэф для CLV участник может внести и своего букмекера'))]]),
       ],
     });
   }

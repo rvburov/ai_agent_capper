@@ -177,6 +177,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 button.demo-pill { border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-family: inherit; min-height: 26px; }
 button.demo-pill svg { width: 14px; height: 14px; }
 button.demo-pill:hover { filter: brightness(.97); }
+/* плашка остается низкой, а зона нажатия на телефоне — 40px */
+button.demo-pill.demo-role { position: relative; }
+button.demo-pill.demo-role::before { content: ""; position: absolute; inset: -7px 0; }
 .role-opt {
   display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left; padding: 14px; border-radius: var(--r-md);
   border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; font: inherit;
@@ -229,7 +232,7 @@ button.demo-pill:hover { filter: brightness(.97); }
 .notif-time { font-size: var(--fs-xs); color: var(--fg-3); }
 .notif-dot { width: 8px; height: 8px; margin-top: 8px; border-radius: 50%; background: var(--accent); flex: none; }
 .notif-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px 12px; border-top: 1px solid var(--line); flex: none; }
-.notif-foot a { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-ink); font-weight: 600; font-size: var(--fs-sm); text-decoration: none; min-height: 32px; }
+.notif-foot a { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-ink); font-weight: 600; font-size: var(--fs-sm); text-decoration: none; min-height: 40px; }
 .notif-foot a svg { width: 16px; height: 16px; }
 .notif-pop.sheet .notif-item { padding: 12px; }
 
@@ -342,7 +345,7 @@ button.demo-pill:hover { filter: brightness(.97); }
 .btn.sm.icon-only { width: 32px; }
 .btn[disabled] { opacity: .5; cursor: not-allowed; }
 /* на телефоне — цели касания не меньше 40px (после базовых размеров, чтобы перекрывать их) */
-@media (max-width: 960px) { .btn.sm { height: 40px; } .btn.sm.icon-only { width: 40px; } .segmented button { min-height: 40px; } .switch input { inset: -8px -4px; } }
+@media (max-width: 960px) { .btn.sm { height: 40px; } .btn.sm.icon-only { width: 40px; } .segmented button { min-height: 40px; } }
 
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field-label { font-size: var(--fs-sm); font-weight: 500; color: var(--fg-2); display: flex; justify-content: space-between; gap: 8px; }
@@ -429,6 +432,8 @@ button.dd-trigger.select { padding: 0 12px 0 14px; } /* отступы один�
 .check input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); flex: none; }
 .switch { position: relative; display: inline-block; vertical-align: middle; width: 40px; height: 24px; flex: none; }
 .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+/* на телефоне зона нажатия переключателя 40px (после базового правила, чтобы перекрывать его) */
+@media (max-width: 960px) { .switch input { inset: -8px -4px; } }
 .switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--surface-3); transition: background .15s; pointer-events: none; }
 .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
 .switch input:checked + span { background: var(--accent); }

@@ -31,8 +31,8 @@
   // новости ищутся у первых трех таких матчей, у остальных шаг пропускается (лимит поисков)
   const NEWS = { cost: 0.11, secs: 25, maxMatches: 3 };
   const PARSE_COST = '≈$' + fmt.dec(0.001, 3);
-  // Дата последнего матча игрока в базе (архив ATP и tennis-data): в макете — одна для всех игроков сегодняшних матчей
-  const LAST_MATCH = '2026-10-05';
+  // Последний матч игрока в базе (архив ATP и tennis-data) — как в карточке игрока (DATA.playerBase из players.js)
+  const lastMatch = p => { const m = D.playerBase && D.playerBase.last(p.id); return m ? fmt.date(m.date) : 'нет'; };
   // Букмекеры: свой список у каждого (Р17), меняется в «Личном кабинете → Букмекеры» — поэтому читаем его при отрисовке.
   // По умолчанию — первый из списка; эталон рынка для CLV — DATA.marketRef.
   const OTHER_BK = 'Другой';
@@ -692,7 +692,7 @@
   function updatedText(r) {
     if (!r.p) return 'нет в базе ATP — проверьте имя';
     if (!r.sure) return 'похоже на ' + r.p.name;
-    return 'последний матч в базе ' + fmt.date(LAST_MATCH) + ' · ' + newsWhen(r.p) + (r.fresh === 'stale' ? ' — поищем перед анализом' : '');
+    return 'последний матч в базе ' + lastMatch(r.p) + ' · ' + newsWhen(r.p) + (r.fresh === 'stale' ? ' — поищем перед анализом' : '');
   }
 
   function fillPlayer(node, ev, k) {
@@ -957,7 +957,7 @@
     bankIn.addEventListener('blur', () => { if (state.bank > 0) bankIn.value = amountText(state.bank); });
     const list = bookmakers(), bkNow = curBk();
     const opts = list.includes(bkNow) ? list : [bkNow].concat(list); // букмекер из текста, которого нет в списке, тоже показываем
-    const bk = UI.field({ label: 'Букмекер', id: 'new-bk', value: bkNow, options: opts, hint: 'Список — ваши букмекеры из личного кабинета. CLV считаем по закрывающему кэфу ' + D.marketRef + ' — эталону рынка', attrs: { 'data-fk': 'bk' } });
+    const bk = UI.field({ label: 'Букмекер', id: 'new-bk', value: bkNow, options: opts, hint: 'Список — ваши букмекеры из личного кабинета. CLV считаем по закрывающему кэфу, который вы внесете: эталона (' + D.marketRefRule + ') или своего букмекера', attrs: { 'data-fk': 'bk' } });
     bk.querySelector('select').addEventListener('change', e => { state.bookmaker = e.target.value; renderSide(); });
     const fromText = state.events.some(e => e.raw1 || e.raw2);
     return h('div', { class: 'stack', style: 'gap:16px' },

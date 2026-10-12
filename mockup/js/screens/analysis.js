@@ -42,33 +42,33 @@
       cmp: [
         { label: 'Эло на харде', l: fmt.int(D.P.sinner.elo.hard), r: fmt.int(D.P.rune.elo.hard), better: 'l' },
         { label: 'Форма, 10 матчей', form: true, better: 'l' },
-        { label: 'Матчей за 14 дней', l: '3', ls: 'Пекин — 1 (снялся), Шанхай — 2', r: '4', rs: 'Токио — 2, Шанхай — 2', rsWarn: true, better: 'l' },
+        { label: 'Матчей за 14 дней', m14: true }, // по матчам в базе (DATA.playerBase), см. baseRows()
         { label: 'Очки на 1-й подаче', l: D.P.sinner.serve.firstWon + '%', r: D.P.rune.serve.firstWon + '%', better: 'l' },
         { label: 'Выиграно на приеме', l: '42%', r: '38%', better: 'l' },
         { label: 'Тай-брейки, 52 недели', l: '21–9', ls: '70%', r: '10–12', rs: '45%', better: 'l' },
         { label: 'Личные встречи', l: '3', ls: 'на харде 2–0', r: '1', better: 'l' },
       ],
       pro: [
-        { t: 'Синнер свежее: за 14 дней 3 матча — после 1-го круга Пекина он снялся, чтобы восстановиться к Шанхаю. У Руне 4 матча, последний (5 окт) — три сета с Тиафо', src: 'база матчей (архив ATP) · ubitennis.com, 1 окт' },
+        { t: 'Синнер свежее: за 14 дней 3 матча — после 1-го круга Пекина он снялся, чтобы восстановиться к Шанхаю. У Руне 4 матча, последний (5 окт) — три сета с Тиафо', src: 'база матчей (по 2 окт) · новости: atptour.com, 5 окт; tennismajors.com, 1 окт' },
         { t: 'За 2 сезона у Синнера 48 побед на харде, 34 из них — 2:0 (71%)', src: 'база матчей (архив ATP)' },
         { t: 'Тай-брейки за 52 недели: у Синнера 70%, у Руне 45% — сет, дошедший до тай-брейка, скорее за Синнером', src: 'база матчей (архив ATP)' },
       ],
       con: [
         { t: 'Руне взял сет в 3 из 4 личных встреч с Синнером', src: 'база матчей (архив ATP), H2H' },
         { t: 'Корты в Шанхае быстрее прошлогодних, эйсов на 18% больше: тай-брейков будет больше, а один отданный сет ломает 2:0', src: 'tennis.com, 5 окт' },
-        { t: 'Руне выиграл оба тай-брейка у Мунара в 1/32 (4 окт) — на своей подаче он держится', src: 'база матчей (архив ATP)' },
+        { t: 'Руне выиграл оба тай-брейка у Мунара в 1/32 (4 окт) — на своей подаче он держится', src: 'новости: atptour.com, 4 окт' },
       ],
     },
     {
       id: 'm2', a: 'djokovic', b: 'rublev', pick: 'p1', conf: 'high',
-      confNote: 'Все данные свежие, источники согласуются',
-      fresh: 'последний матч в базе — 5 окт у обоих · новости Джоковича 02:30, Рублева 6 окт 21:50',
+      confNote: 'Новости свежие, источники согласуются',
+      news: 'новости Джоковича 02:30, Рублева 6 окт 21:50',
       probs: { p1: [0.78, 0.79], h1m: [0.50, 0.54] },
       // цифры совпадают с карточками игроков (#player-djokovic, #player-rublev)
       cmp: [
         { label: 'Эло на харде', l: fmt.int(D.P.djokovic.elo.hard), r: fmt.int(D.P.rublev.elo.hard), better: 'l' },
         { label: 'Форма, 10 матчей', form: true, better: 'l' },
-        { label: 'Матчей за 14 дней', l: '2', ls: 'Шанхай — 2', r: '3', rs: 'Токио — 1, Шанхай — 2', better: 'l' },
+        { label: 'Матчей за 14 дней', m14: true },
         { label: 'Очки на 1-й подаче', l: D.P.djokovic.serve.firstWon + '%', r: D.P.rublev.serve.firstWon + '%', better: 'l' },
         { label: 'Выиграно на приеме', l: '43%', r: '37%', better: 'l' },
         { label: 'Тай-брейки, 52 недели', l: '13–8', ls: '62%', r: '10–13', rs: '43%', better: 'l' },
@@ -80,8 +80,8 @@
         { t: 'Против топ-10 за 52 недели у Рублева 4–11 (27%), у Джоковича 7–7', src: 'база матчей (архив ATP)' },
       ],
       con: [
-        { t: 'Джоковичу 39; в 1/32 (4 окт) он провел на корте 2 ч 38 мин в трех сетах, а на следующий день сыграл еще матч', src: 'база матчей (архив ATP), 4–5 окт' },
-        { t: 'Рублев выиграл оба матча в Шанхае без потери сета: у Бублика (№18) — два тай-брейка, у Корды (№31) — 6:2 6:4', src: 'база матчей (архив ATP), 4–5 окт' },
+        { t: 'Джоковичу 39; в 1/32 (4 окт) он провел на корте 2 ч 38 мин в трех сетах, а на следующий день сыграл еще матч', src: 'новости: atptour.com, 4–5 окт' },
+        { t: 'Рублев выиграл оба матча в Шанхае без потери сета: у Бублика (№18) — два тай-брейка, у Корды (№31) — 6:2 6:4', src: 'новости: atptour.com, 4–5 окт' },
       ],
     },
   ];
@@ -165,6 +165,26 @@
 
   // Время последнего прогона новостей и оценки, которые можно взять повторно (состояние «Оценка из прошлого анализа»)
   const REUSED_FROM = { id: 'A-0141', at: '09:12' };
+  // Досье считает код по матчам в базе — те же форма, последний матч и нагрузка, что в карточке игрока
+  // (DATA.playerBase из players.js). Архив в демо не обновлялся с 3 окт: Шанхая в базе нет, о нем Claude знает из новостей.
+  const formOf = id => (D.playerBase ? D.playerBase.form(id) : D.P[id].form);
+  // результаты в базе — по день до последней загрузки архива (как в players.js)
+  const ARCH_AT = () => (D.archive ? D.archive.lastLoad : D.today + 'T04:10');
+  const ARCHIVE_TO = () => new Date(Date.parse(ARCH_AT().slice(0, 10) + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
+  function baseRows() {
+    const PB = D.playerBase;
+    MX.forEach(m => {
+      if (!PB) { m.fresh = m.news; return; }
+      const last = id => { const x = PB.last(id); return D.P[id].short + ' — ' + (x ? fmt.date(x.date) + ', ' + x.event : 'нет'); };
+      m.fresh = 'матчи в базе по ' + fmt.date(PB.archiveTo) + ' (последний: ' + last(m.a) + '; ' + last(m.b) + ') · ' + m.news;
+      const row = m.cmp.find(r => r.m14);
+      if (!row) return;
+      const l = PB.m14(m.a), r = PB.m14(m.b);
+      Object.assign(row, { l: String(l), r: String(r), ls: 'в базе', rs: 'в базе', better: l <= r ? 'l' : 'r' });
+    });
+    const row = MX[0].cmp.find(r => r.m14);
+    if (row) { row.ls = 'в базе; Шанхай — по новостям'; row.rs = row.ls; }
+  }
   function buildSteps() {
     const price = MODE.price;
     const c1 = (AI.prefix * price.write + AI.dossier * price.in + AI.out1 * price.out) / 1e6;
@@ -178,8 +198,8 @@
         detail: '2 матча, 8 рынков, кэфы ' + BK + (ODDS_EDITED ? ' с вашими правками' : ' на 09:39') + ' · выполнен до запуска',
         live: ['Синнер — Руне: П1/П2 и фора ±1.5', 'Джокович — Рублев: П1/П2 и фора ±1.5'] },
       { kind: 'players', title: 'Проверка базы игроков', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
-        detail: 'Все четыре игрока есть в базе · последний матч в базе — 5 окт',
-        live: ['Синнер, Руне, Джокович, Рублев — найдены', 'Архив матчей обновлен 6 окт'] },
+        detail: 'Все четыре игрока есть в базе · результаты в базе по ' + fmt.date(ARCHIVE_TO()) + ' (архив не обновлялся с ' + fmt.date(ARCH_AT().slice(0, 10)) + ')',
+        live: ['Синнер, Руне, Джокович, Рублев — найдены', 'Архив матчей загружен ' + fmt.date(ARCH_AT().slice(0, 10)) + ': свежие матчи — из новостей'] },
       reused
         ? { kind: 'news', match: 0, title: 'Новости: Синнер — Руне', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
           detail: 'Из кэша: найдены в анализе #' + REUSED_FROM.id + ' в ' + REUSED_FROM.at + ', моложе 12 ч',
@@ -192,7 +212,7 @@
             detail: 'Синнер — из кэша (04:10) · Руне — 2 запроса (atptour.com, tennis.com), effort low · найдено: 1/16 финала с Тиафо, слух о плече без подтверждения',
             live: ['Синнер — из кэша, моложе 12 ч', 'Руне: atptour.com — 5 окт, 1/16 финала, 4:6 6:3 6:4 с Тиафо', 'Слух о плече из соцсетей без подтверждения — по L-019 не учитываем'] },
       { kind: 'news', match: 1, title: 'Новости: Джокович — Рублев', model: null, sec: 1, tokens: 0, cost: 0, dur: 250,
-        detail: 'Из кэша: обновлены ночью, моложе 12 ч — повторный поиск не нужен',
+        detail: 'Из кэша: найдены в анализах других участников, моложе 12 ч — повторный поиск не нужен',
         live: ['Джокович — 02:30, Рублев — 6 окт 21:50', 'Новых травм и снятий нет'] },
       { kind: 'dossier', title: 'Досье матчей', model: null, sec: 1, tokens: 0, cost: 0, dur: 300,
         detail: 'Эло на харде, форма, подача и прием за 52 недели, личные встречи, нагрузка за 14 дней, новости — из базы, считает код',
@@ -265,7 +285,8 @@
     });
     const reused = SCEN.id === 'reused', newsFail = SCEN.id === 'news';
     MX[0].confNote = newsFail ? 'Свежих новостей Руне нет: поиск не ответил' : 'Слух о плече Руне не подтвержден';
-    MX[0].fresh = 'последний матч в базе — 5 окт у обоих · новости Синнера 04:10, Руне — ' + (newsFail ? 'не получены' : reused ? REUSED_FROM.at : 'найдены в этом анализе');
+    MX[0].news = 'новости Синнера 04:10, Руне — ' + (newsFail ? 'не получены' : reused ? REUSED_FROM.at : 'найдены в этом анализе');
+    baseRows();
     MX.forEach(m => { m.reused = reused; });
     FOREIGN = !!REQ && !(evs.length === MX.length && MX.every(m => m.entered));
     ODDS_EDITED = MX.some(m => m.entered && m.rows.some(r => r.edited));
@@ -296,14 +317,16 @@
   const GROWTH = (S0.bank - S0.start) / S0.start * 100;                 // рост банка к стартовому, %
   const WEEK_BASE = D.bankHistory.filter(x => x.date <= addDaysIso(TODAY, -7)).pop() || D.bankHistory[0];
   const WEEK = (S0.bank - WEEK_BASE.bank) / WEEK_BASE.bank * 100;       // итог недели, %
-  const GROWTH_ON = GROWTH >= 15 && S0.winrate >= 60;                   // потолок доли 4% вместо 3%
+  // В7: правила включены или выключены — как в DATA.strategy.adapt («рост банка» и «прибыльная неделя» по умолчанию выключены)
+  const RULE_ON = key => { const r = (STRAT.adapt || []).find(x => x.key === key); return !r || r.on; };
+  const GROWTH_ON = RULE_ON('up15') && GROWTH >= 15 && S0.winrate >= 60; // потолок доли 4% вместо 3%
   function addDaysIso(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
-  // now — сейчас, active — что правило делает с суммой (null — не действует)
+  // now — сейчас, active — что правило делает с суммой (null — не действует); выключенные правила в расчет не входят
   function adaptRows() {
     return [
-      { now: 'просадка от пика ' + fmt.signedPct(DD), active: DD <= -20 ? 'защитный режим: 1,5% банка, 2 события до 1.50' : DD <= -10 ? 'не больше 2,5% банка' : null },
-      { now: 'банк ' + fmt.signedPct(GROWTH) + ' к старту при винрейте ' + fmt.pct(S0.winrate), active: GROWTH_ON ? 'потолок 4% вместо 3%' : null },
-      { now: 'за 7 дней ' + fmt.signedPct(WEEK), active: WEEK <= -5 ? 'не больше 2% банка' : WEEK >= 10 ? '+0,5 п.п. к доле' : null },
+      { now: 'просадка от пика ' + fmt.signedPct(DD), active: RULE_ON('dd20') && DD <= -20 ? 'защитный режим: 1,5% банка, 2 события до 1.50' : RULE_ON('dd10') && DD <= -10 ? 'не больше 2,5% банка' : null },
+      { now: 'банк ' + fmt.signedPct(GROWTH) + ' к старту при винрейте ' + fmt.pct(S0.winrate) + (RULE_ON('up15') ? '' : ' (правило роста выключено)'), active: GROWTH_ON ? 'потолок 4% вместо 3%' : null },
+      { now: 'за 7 дней ' + fmt.signedPct(WEEK), active: RULE_ON('week_loss') && WEEK <= -5 ? 'не больше 2% банка' : RULE_ON('week_win') && WEEK >= 10 ? '+0,5 п.п. к доле' : null },
     ];
   }
 
@@ -990,7 +1013,7 @@
     const val = (row, side) => {
       const better = row.better === side;
       const main = row.form
-        ? h('span', { class: 'analysis-vs-form' }, UI.formDots((side === 'l' ? m.A : m.B).form), h('span', { class: 'analysis-vs-num' }, better && icon('check'), wl((side === 'l' ? m.A : m.B).form)))
+        ? h('span', { class: 'analysis-vs-form' }, UI.formDots(formOf(side === 'l' ? m.a : m.b)), h('span', { class: 'analysis-vs-num' }, better && icon('check'), wl(formOf(side === 'l' ? m.a : m.b))))
         : h('span', { class: 'analysis-vs-num' }, better && icon('check'), side === 'l' ? row.l : row.r);
       const sub = side === 'l' ? row.ls : row.rs;
       return h('div', { class: ['analysis-vs-side', side, better && 'is-better'] },
@@ -1126,7 +1149,9 @@
     const rowsA = adaptRows(), active = rowsA.filter(r => r.active);
     const adapt = UI.callout('accent', 'history',
       h('b', null, 'Адаптации: '), rowsA.map(r => r.now).join(', ') + ' — ' + (active.length ? active.map(r => r.active).join('; ') + '. ' : 'сейчас не действуют, сумма по таблице. '),
-      'Правила те же, что в «Личном кабинете → Банк и стратегия»: −10% от пика → не больше 2,5%, −20% → 1,5% и 2 события до 1.50; банк +15% и винрейт от 60% → потолок 4%; неделя −5% → не больше 2%, +10% → +0,5 п.п. Правил серий нет.');
+      'Правила те же, что в «Личном кабинете → Банк и стратегия»: −10% от пика → не больше 2,5%, −20% → 1,5% и 2 события до 1.50; неделя −5% → не больше 2%'
+        + (RULE_ON('up15') ? '; банк +15% и винрейт от 60% → потолок 4%' : '') + (RULE_ON('week_win') ? '; неделя +10% → +0,5 п.п.' : '') + '. '
+        + (RULE_ON('up15') && RULE_ON('week_win') ? '' : 'Рост банка и прибыльная неделя по умолчанию выключены — в расчет не входят. ') + 'Правил серий нет.');
 
     const calc = h('dl', { class: 'analysis-calc' },
       h('dt', null, !sameMoney(BANK, D.stats.bank) ? 'Банк из вашего ввода' : 'Банк сейчас'), h('dd', null, fmt.money(BANK)),
@@ -1253,9 +1278,11 @@
       h('div', { class: 'analysis-legodds' }, rows),
       h('div', { class: 'field-hint' }, 'По умолчанию — кэфы из ввода. Если букмекер дал другой, поправьте: от него считаются выплата, результат и CLV.'));
   }
-  // Предупреждение о доле банка — по правилу роста банка из личного кабинета (потолок 4% только при росте +15% и винрейте от 60%)
+  // Предупреждение о доле банка — по правилу роста банка из личного кабинета (потолок 4% только при росте +15% и винрейте от 60%);
+  // правило выключено (по умолчанию, В7) — потолок всегда 3%
   function shareWarn(pct) {
     if (pct > 4) return UI.callout('bad', 'alert', 'Больше 4% банка — выше любого лимита стратегии. Неудачная неделя заметно ударит по банку.');
+    if (pct > 3 && !RULE_ON('up15')) return UI.callout('warn', 'alert', 'Больше 3% банка — выше потолка стратегии. Правило «Рост банка» (до 4% при росте банка на 15% и винрейте от 60%) по умолчанию выключено.');
     if (pct > 3 && !GROWTH_ON) return UI.callout('warn', 'alert', 'Больше 3% банка: до 4% стратегия разрешает только при росте банка на 15% к стартовому и винрейте от 60% (сейчас ' + fmt.signedPct(GROWTH) + ' и ' + fmt.pct(D.stats.winrate) + ') — правило «Рост банка» в личном кабинете.');
     if (pct > 3) return UI.callout('info', 'info', 'Больше 3% банка: правило роста банка действует (банк ' + fmt.signedPct(GROWTH) + ', винрейт ' + fmt.pct(D.stats.winrate) + '), потолок — 4%.');
     return null;
@@ -1411,7 +1438,7 @@
     return '5 доводов модели и проверка по ' + rs.length + ' правилам' + (bad ? ' · не выполнено: ' + bad : '');
   }
   function rules() {
-    const form5 = id => { const f = D.P[id].form.slice(0, 5); return f.filter(x => x === 'W').length; }; // form[0] — последний матч
+    const form5 = id => { const f = formOf(id).slice(0, 5); return f.filter(x => x === 'W').length; }; // form[0] — последний матч в базе
     const who = l => (MK[l.market].who === 'A' ? l.p1 : l.p2);
     const fora = LEGS.filter(l => l.market === 'h1m');
     const list = [
@@ -1517,6 +1544,7 @@
       // демо-состояние прошлого анализа (сбой, отмена) к новому не переносится
       if ((D.pendingAnalysis || null) !== REQ) { SCEN = SCENARIOS[0]; OPENED = null; setup(D.pendingAnalysis); resetRun(); }
       const opened = param ? applyParam(param) : null;
+      baseRows(); // players.js загружается после этого файла: досье по базе собираем при показе
       setHead();
       // при «уменьшении движения» анализ сразу показывается завершенным
       if (RUN.startedAt == null) { startRun(); scheduleRecord(); }

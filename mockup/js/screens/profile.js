@@ -47,17 +47,21 @@
   const inPlay = () => openBets().reduce((a, b) => a + b.stake, 0);
   const todayBets = () => D.bets.filter(b => b.date === TODAY);
   const settledBets = D.bets.filter(b => b.status !== 'open');
-  const staleN = D.players.filter(p => p.fresh === 'stale').length;
-  const missingN = D.players.filter(p => p.fresh === 'missing').length;
-  const refreshSearches = D.ai.runs.filter(r => r.type === 'refresh').map(r => r.searches);
+  const botBets = D.bets.filter(b => b.source === 'bot');
   const analysisRuns = D.ai.runs.filter(r => r.type === 'analysis');
-  const avgAnalysis = analysisRuns.reduce((a, r) => a + r.cost, 0) / Math.max(1, analysisRuns.length);
-  // Запуски ИИ самого пользователя: без общих фоновых задач (их оплачивает администратор), как в «ИИ и расходы»
-  const myRunsN = D.ai.runs.filter(r => r.type !== 'refresh').length;
+  // Средняя цена анализа — по анализам (вызовы разбора, новостей и оценки матчей вместе), как в «ИИ и расходы»
+  const avgAnalysis = (() => {
+    const ids = Array.from(new Set(D.ai.runs.filter(r => r.analysis).map(r => r.analysis)));
+    if (!ids.length) return analysisRuns.reduce((a, r) => a + r.cost, 0) / Math.max(1, analysisRuns.length);
+    return ids.reduce((a, id) => a + D.ai.runs.filter(r => r.analysis === id).reduce((x, r) => x + r.cost, 0), 0) / ids.length;
+  })();
+  // Вызовы ИИ самого пользователя: без общих фоновых задач (их оплачивает администратор), как в «ИИ и расходы»
+  const isSharedRun = r => (D.ai.isShared ? D.ai.isShared(r) : !!r.shared);
+  const myRunsN = D.ai.runs.filter(r => !isSharedRun(r)).length;
   const activeVersion = D.strategyVersions.find(v => v.status === 'active');
   const modelsByUse = (() => {
     const g = {};
-    D.ai.runTypes.forEach(t => { (g[t.model] = g[t.model] || []).push(t.label.replace(' (Batch)', '')); });
+    D.ai.runTypes.forEach(t => { (g[t.model] = g[t.model] || []).push(t.label); });
     return Object.entries(g).map(([model, uses]) => [uses.map((u, i) => (i ? lower1(u) : u)).join(', '), model]);
   })();
 
@@ -68,30 +72,32 @@
     return Array.from({ length: 8 }, () => { let c = ''; for (let i = 0; i < 8; i++) c += A[r()]; return c.slice(0, 4) + '-' + c.slice(4); });
   }
 
-  // ---------- мои букмекеры ----------
+  // ---------- мои букмекеры (В9) ----------
+  // Только список: добавить, переименовать, скрыть. Балансов и сверки с банком нет. Список — DATA.user.bookmakers
+  // (его же показывают «Новый анализ» и сохранение ставки); скрытые — в состоянии кабинета.
   const BOOK_COUNT = name => D.bets.filter(b => b.bookmaker === name).length;
   const BOOK_OPEN = name => openBets().filter(b => b.bookmaker === name);
   const BOOK_INPLAY = name => BOOK_OPEN(name).reduce((a, b) => a + b.stake, 0);
-  // Сверенный баланс (base) уже включает все ставки, рассчитанные до открытия макета. Результат ставок,
-  // рассчитанных в этой сессии на экране «Ставки», добавляем к балансу их букмекера — сверка продолжает сходиться.
-  const SETTLED_AT_LOAD = new Set(settledBets.map(b => b.id));
-  const sessionProfit = name => D.bets.filter(b => b.bookmaker === name && b.status !== 'open' && !SETTLED_AT_LOAD.has(b.id)).reduce((a, b) => a + b.profit, 0);
-  const BENCHMARK = D.marketRef; // эталон рынка для CLV (Р17)
-  // Сам список — DATA.user.bookmakers (его же показывает «Новый анализ»); здесь — сверенные балансы по названию
-  const BOOKS0 = {
-    bet365: { mark: 'B3', base: 21480, checked: '2026-10-06' },
-    Unibet: { mark: 'UB', base: 16800, checked: '2026-10-06' },
-    Pinnacle: { mark: 'PN', base: S.bank - 21480 - 16800, checked: '2026-10-03' },
-  };
+  // Эталон рынка для CLV и Brier — не букмекер участника, а правило Р17
+  const MARKET_RULE = D.marketRefRule || 'Pinnacle → Betfair → средний по рынку';
   const bookMark = name => name.replace(/[^A-Za-zА-Яа-яЕе0-9]/g, '').slice(0, 2).toUpperCase() || '?';
   const myBooks = () => { const U = user(); if (!Array.isArray(U.bookmakers)) U.bookmakers = []; return U.bookmakers; };
-  // Карточки букмекеров в порядке списка пользователя: баланс = сверенный + результат ставок, рассчитанных в этой сессии
-  function books() {
-    return myBooks().map(name => {
-      const info = st.bookInfo[name] || (st.bookInfo[name] = Object.assign({ mark: bookMark(name), base: 0, checked: null }, BOOKS0[name] || {}));
-      return { name, mark: info.mark, checked: info.checked, bets: BOOK_COUNT(name), inPlay: BOOK_INPLAY(name), balance: info.base + sessionProfit(name) };
-    });
-  }
+  const books = () => myBooks().map(name => ({ name, mark: bookMark(name), bets: BOOK_COUNT(name), open: BOOK_OPEN(name).length, inPlay: BOOK_INPLAY(name) }));
+
+  // ---------- правила стратегии (Т20) и адаптации (Р22, В7) — по коду этапа 3, только просмотр ----------
+  const STRAT = Object.assign({
+    minProb: 65, oddsMin: 1.13, oddsMax: 1.80, maxLegs: 3, totalMax: 3.24, coverMinProb: 55, formMinWins: 3,
+    triple: { minProb: 70, legOddsMax: 1.60, totalMin: 1.44, totalMax: 4.10 },
+    stakeTable: [{ range: '1.28–1.70', pctNum: 2.75 }, { range: '1.71–2.20', pctNum: 2.25 }, { range: '2.21–3.24', pctNum: 1.75 }, { range: '3.25–4.10', pctNum: 1.75, triple: true }],
+    adapt: [
+      { key: 'dd10', label: 'Просадка от пика −10%', effect: 'ставка не больше 2,5% банка', on: true },
+      { key: 'dd20', label: 'Просадка от пика −20%', effect: 'защитный режим: 1,5% банка, только 2 события с кэфами до 1.50', on: true },
+      { key: 'week_loss', label: 'Итог 7 дней −5% и хуже', effect: 'ставка не больше 2% банка', on: true },
+      { key: 'up15', label: 'Банк +15% к вложенному и винрейт от 60%', effect: 'потолок ставки 4% вместо 3%', on: false },
+      { key: 'week_win', label: 'Итог 7 дней +10% и лучше', effect: 'ставка +0,5 п.п.', on: false },
+    ],
+  }, D.strategy || {});
+  const pctTxt = n => fmt.dec(n, Number.isInteger(n * 10) ? 1 : 2).replace(/,0$/, '') + '%';
 
   // ---------- устройства и входы демо-пользователей ----------
   // Первая запись журнала — последний вход из DATA.users (lastLogin), он же текущий сеанс.
@@ -156,9 +162,10 @@
     { t: 'Небольшой', d: '5–9%', v: 'без поправки' },
     { t: 'Нет', d: 'меньше 5%', v: '−0,25%' },
   ];
-  // Итог недели: банк сейчас к банку на конец дня неделю назад
+  // Итог недели: результат ставок за 7 дней к банку неделю назад с учетом пополнений и выводов за неделю
+  // (как week_change в services/bank.py; движения в макете записываются «сейчас», то есть в эту неделю)
   const weekBase = D.bankHistory.filter(x => x.date <= addDays(TODAY, -7)).pop() || D.bankHistory[0];
-  const weekPct = (S.bank - weekBase.bank) / weekBase.bank * 100;
+  const weekPctNow = () => (S.bank - weekBase.bank) / (weekBase.bank + st.bankAdj) * 100;
 
   // ---------- состояние (отдельное для каждого пользователя) ----------
   const states = {};
@@ -175,20 +182,15 @@
       passkeys: [],
       sessions: P.sessions.map(s => Object.assign({}, s)),
       log, susp: P.suspicious, suspicious: !!P.suspicious, logFilter: 'all',
-      bookInfo: {}, bankAdj: 0,
-      ruleEdits: [],
-      rules: { minProb: D.strategy.minProb, oddsMin: D.strategy.oddsMin, oddsMax: D.strategy.oddsMax, maxLegs: D.strategy.maxLegs, totalMax: D.strategy.totalMax },
-      stakes: D.strategy.stakeTable.map(r => { const [a, b] = r.pct.split('–'); return { range: r.range, min: num(a), max: num(b) }; }),
-      // Р22: правил серий нет — только просадка, рост банка и итог недели
-      adapt: { dd10: true, dd20: true, up15: true, weekLoss: true, weekWin: true },
+      // банк: движения (пополнение, вывод, корректировка) и скрытые букмекеры (В9)
+      bankAdj: 0, moves: [], moveKind: 'deposit', hiddenBooks: [],
       limits: { count: 3, amount: 4000 }, limitsPending: null,
       pauseDays: '7', pauseConfirm: false, pause: null,
       // ключ Claude: keyView — какая карточка режима выбрана на экране; сам режим — в DATA.me.aiMode
       keyView: mode, seenMode: mode, keyDraft: '', keyShow: false, keyErr: null, keyReplace: false, keyDelConfirm: false,
-      push: { on: P.push, device: P.push ? P.sessions.find(s => s.current).name : null },
-      notif: { bet: { site: true, push: true }, stale: { site: true, push: false }, ai: { site: true, push: true }, login: { site: true, push: true }, msg: { site: true, push: true }, requests: { site: true, push: true }, users: { site: true, push: false } },
-      quiet: { on: true, from: '23:00', to: '08:00' },
-      exportFmt: 'json', exportState: 'idle',
+      // что присылать на сайт — по видам уведомлений (notifications.kind); push и тихие часы — этап 6
+      notif: { bet: { site: true }, limit: { site: true }, key: { site: true }, decision: { site: true }, requests: { site: true }, users: { site: true }, budget: { site: true }, archive: { site: true }, alert: { site: true } },
+      quiet: { from: '23:00', to: '08:00' },
       deletion: null,
     };
   }
@@ -350,6 +352,7 @@
     .profile-usage > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: var(--fs-sm); color: var(--fg-2); }
     .profile-usage b { color: var(--fg); font-variant-numeric: tabular-nums; }
     .card.profile-rg { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+    #profile-moves .segmented, #profile-rg .segmented { align-self: flex-start; }
 
     .profile-secret { display: flex; align-items: center; gap: 6px 10px; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2); min-width: 0; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--fg-2); }
     .profile-secret > svg { width: 18px; height: 18px; color: var(--fg-3); flex: none; }
@@ -452,6 +455,9 @@
       .profile-facts > div:first-child { grid-column: span 2; }
       .profile-fields.collapse { grid-template-columns: minmax(0, 1fr); }
       .profile-fields.collapse .span-2 { grid-column: auto; }
+      /* Переключатели на всю ширину карточки: на 360 px подписи не обрезаются и не прокручиваются */
+      #profile-moves .segmented, #profile-rg .segmented { display: flex; width: 100%; }
+      #profile-moves .segmented button, #profile-rg .segmented button { flex: 1 1 auto; min-width: 0; padding: 6px 4px; }
       .profile-item.wrap-mobile { grid-template-columns: 40px minmax(0, 1fr); }
       .profile-item.wrap-mobile .profile-item-side { grid-column: 2; justify-content: flex-start; }
       .profile-notif-head, .profile-notif-row { grid-template-columns: minmax(0, 1fr) 58px 50px; gap: 6px; }
@@ -469,6 +475,23 @@
       .profile-kfacts dd { font-size: var(--fs-md); }
       .profile-del-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     }
+    /* правила стратегии — только просмотр */
+    .profile-srules { margin: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); }
+    .profile-srule { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+    .profile-srule:last-child { border-bottom: 0; }
+    .profile-srule dt { font-weight: 500; min-width: 0; }
+    .profile-srule dt small { display: block; font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
+    .profile-srule dd { margin: 0; font-family: var(--font-mono); font-weight: 500; font-size: var(--fs-sm); text-align: right; white-space: nowrap; }
+    .profile-stake-pct { font-family: var(--font-mono); font-weight: 600; text-align: right; white-space: nowrap; }
+    .profile-stake-pct small { display: block; font-family: inherit; font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
+    .profile-notif-head small { display: block; font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+    @media (max-width: 960px) { .tabs.profile-tabs button { min-height: 42px; } }
+    /* выключенный переключатель (только просмотр, этап 6) */
+    .profile-panel .switch input:disabled { cursor: not-allowed; }
+    .profile-panel .switch input:disabled + span { opacity: .5; }
+    /* зона нажатия переключателя на телефоне — не меньше 40 px (общий стиль в index.html перекрывается базовым правилом) */
+    @media (max-width: 960px) { .profile-panel .switch input { inset: -8px -4px; } }
+    @media (max-width: 720px) { .profile-srule { grid-template-columns: minmax(0, 1fr); } .profile-srule dd { text-align: left; } }
     /* длинная подпись кнопки в подвале карточки («Попросить администратора вернуть ключ») на телефоне переносится */
     @media (max-width: 480px) {
       .profile-panel .card-foot .btn { white-space: normal; height: auto; min-height: 40px; padding-block: 8px; max-width: 100%; }
@@ -769,7 +792,7 @@
           ['Ваша роль', adm ? user().roleLabel : user().roleLabel + ' · назначает администратор'],
           ['Вход', 'email + пароль + код 2FA'],
           adm
-            ? ['Участники', h('a', { href: '#admin-users' }, others.length + ' ' + pl(others.length, 'человек', 'человека', 'человек') + (waiting ? ' · ' + waiting + ' ' + pl(waiting, 'приглашение ждет', 'приглашения ждут', 'приглашений ждут') : ''))]
+            ? ['Участники', h('a', { href: '#admin-users', class: 'profile-strong-link' }, others.length + ' ' + pl(others.length, 'человек', 'человека', 'человек') + (waiting ? ' · ' + waiting + ' ' + pl(waiting, 'приглашение ждет', 'приглашения ждут', 'приглашений ждут') : ''))]
             : ['Другие участники', 'закрытый круг · приглашает администратор'],
         ]),
         h('p', { class: 'xsmall muted' }, adm
@@ -1023,158 +1046,122 @@
   // =====================================================================
   // 3. БАНК И СТРАТЕГИЯ
   // =====================================================================
+  // Банк — капитал с учетом ставок в игре (Т7). Пополнение, вывод и корректировка меняют банк, но не прибыль и ROI.
+  const MOVE = {
+    deposit: { t: 'Пополнение', ic: 'wallet', sign: 1 },
+    withdrawal: { t: 'Вывод', ic: 'arrowDown', sign: -1 },
+    adjustment: { t: 'Корректировка', ic: 'edit', sign: 1 },
+  };
+  const moveSigned = m => (m.kind === 'withdrawal' ? -m.amount : m.amount);
+  // Как bank_from_entries (services/bank.py): «Вложено» — старт и все движения банка, с корректировками;
+  // движение сдвигает капитал (банк со ставками в игре) и пик в одной доле, поэтому просадка от него не меняется (Р22)
+  const invested = () => S.start + st.moves.reduce((a, m) => a + moveSigned(m), 0);
+  function peakNow() {
+    let cap = S.bank, peak = S.peak;
+    st.moves.forEach(m => {
+      const before = cap;
+      cap += moveSigned(m);
+      peak = before > 0 && cap > 0 ? peak * cap / before : Math.max(cap, 0);
+      peak = Math.max(peak, cap);
+    });
+    return Math.max(peak, bankNow());
+  }
+
   function panelBank() {
     const mobile = UI.isMobile();
-    const b = bankNow();
-    const growth = (b - S.start) / S.start * 100;
-    const dd = Math.min(0, (b - S.peak) / S.peak * 100);
+    const b = bankNow(), inv = invested();
+    const growth = (b - inv) / inv * 100;
+    // просадка — только от ставок: пик сдвигается вместе с движениями банка
+    const peak = peakNow();
+    const dd = peak > 0 ? Math.min(0, (b - peak) / peak * 100) : 0;
     const tiles = h('div', { class: 'grid profile-tiles' },
-      h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Стартовый банк', icon: 'wallet', value: fmt.money(S.start), hint: 'с ' + dateLong(D.bankHistory[0].date) })),
-      h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Текущий банк', icon: 'coins', value: fmt.money(b), delta: fmt.signedPct(growth), trend: growth >= 0 ? 'up' : 'down', hint: 'к старту' })),
+      h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Вложено', icon: 'wallet', value: fmt.money(inv), hint: st.moves.length ? 'старт и движения банка' : 'стартовый банк ' + dateLong(D.bankHistory[0].date) })),
+      h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Банк', icon: 'coins', value: fmt.money(b), delta: fmt.signedPct(growth), trend: growth >= 0 ? 'up' : 'down', hint: 'к вложенному · со ставками в игре' })),
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'В игре', icon: 'clock', value: fmt.money(inPlay()), hint: openBets().length + ' ' + pl(openBets().length, 'ставка', 'ставки', 'ставок') + ' · ' + fmt.pct(inPlay() / b * 100) + ' банка' })),
-      h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'От пика банка', icon: 'arrowDown', value: dd ? fmt.signedPct(dd) : '0%', hint: 'пик ' + fmt.money(S.peak) })));
-    if (mobile) return h('div', { class: 'profile-panel' }, currencyNote(), tiles, responsibleCard(), booksCard(), strategyCard(), adaptCard(dd, growth), historyCard());
+      h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'От пика банка', icon: 'arrowDown', value: dd ? fmt.signedPct(dd) : '0%', hint: 'пик ' + fmt.money(peak) + (st.moves.length ? ' · сдвинут вместе с банком' : '') })));
+    if (mobile) return h('div', { class: 'profile-panel' }, currencyNote(), tiles, responsibleCard(), adaptCard(dd, growth), strategyCard(), movesCard(), booksCard());
     return h('div', { class: 'profile-panel' }, currencyNote(), tiles,
       h('div', { class: 'grid' },
-        h('div', { class: 'col-7 profile-col' }, strategyCard(), historyCard()),
+        h('div', { class: 'col-7 profile-col' }, strategyCard(), movesCard()),
         h('div', { class: 'col-5 profile-col' }, responsibleCard(), booksCard())),
       adaptCard(dd, growth));
   }
 
+  // Правила стратегии — из параметров действующей версии (strategy_versions.params, код этапа 3), только просмотр.
+  // Менять их можно будет через версии стратегии на этапе 5: новая версия сначала проверяется на истории.
   function strategyCard() {
-    const r = st.rules;
-    const nf = (id, label, value, o = {}) => UI.field(Object.assign({ label, id: 'profile-r-' + id, value, inputmode: 'decimal', autocomplete: 'off' }, o));
-    const F = {
-      minProb: nf('prob', 'Мин. вероятность события', String(r.minProb), { suffix: '%' }),
-      maxLegs: nf('legs', 'Событий в экспрессе, не больше', String(r.maxLegs), { inputmode: 'numeric' }),
-      oddsMin: nf('omin', 'Кэф события от', fmt.odds(r.oddsMin)),
-      oddsMax: nf('omax', 'Кэф события до', fmt.odds(r.oddsMax)),
-      totalMax: nf('total', 'Итоговый кэф экспресса, не выше', fmt.odds(r.totalMax), { class: 'span-2', hint: 'При ' + r.maxLegs + ' событиях по ' + fmt.odds(r.oddsMax) + ' вышло бы ' + fmt.odds(Math.pow(r.oddsMax, r.maxLegs)) + ' — такие экспрессы ИИ урезает до меньшего числа событий' }),
-    };
     const b = bankNow();
-    const stakeRows = st.stakes.map((s, i) => {
-      const money = h('div', { class: 'xsmall muted' });
-      const inp = (key, label) => {
-        const el = h('input', { class: 'input has-suffix', id: 'profile-stake-' + i + '-' + key, value: dec(s[key]), inputmode: 'decimal', autocomplete: 'off', 'aria-label': label + ', % банка, итоговый кэф ' + s.range });
-        return { el, wrap: h('div', { class: 'input-wrap' }, el, h('span', { class: 'input-suffix', 'aria-hidden': 'true' }, '%')) };
-      };
-      const lo = inp('min', 'От'), hi = inp('max', 'До');
-      const upd = () => { const a = num(lo.el.value), c = num(hi.el.value); UI.clear(money); UI.append(money, isFinite(a) && isFinite(c) ? ['Сейчас это ', h('span', { style: 'white-space:nowrap' }, moneyBare(roundStake(b * a / 100)) + '–' + fmt.money(roundStake(b * c / 100)))] : 'Введите проценты'); };
-      upd();
-      [lo.el, hi.el].forEach(el => el.addEventListener('input', upd));
-      return { row: h('div', { class: 'profile-stake' }, h('div', { style: 'min-width:0' }, h('div', { class: 'profile-stake-range' }, s.range), money), h('div', { class: 'profile-stake-inputs' }, lo.wrap, h('span', { 'aria-hidden': 'true' }, '–'), hi.wrap)), lo, hi };
-    });
-    const risk = h('div', { 'aria-live': 'polite' });
-    const save = button('Сохранить правила', { kind: 'primary', type: 'submit', icon: 'check', disabled: true });
-    const reset = button('Вернуть как было', { kind: 'ghost', attrs: { hidden: true }, onClick: () => { drawPanel(); UI.toast('Изменения отменены', 'refresh'); } });
-    function read() {
-      return {
-        minProb: num(valOf(F.minProb)), maxLegs: num(valOf(F.maxLegs)), oddsMin: num(valOf(F.oddsMin)), oddsMax: num(valOf(F.oddsMax)), totalMax: num(valOf(F.totalMax)),
-        stakes: stakeRows.map((x, i) => ({ range: st.stakes[i].range, min: num(x.lo.el.value), max: num(x.hi.el.value) })),
-      };
-    }
-    function checkRisk() {
-      const v = read(), why = [];
-      if (v.minProb < 60) why.push('порог вероятности ниже 60%');
-      if (v.maxLegs > 3) why.push('больше 3 событий в экспрессе');
-      if (v.totalMax > 3.5) why.push('итоговый кэф выше 3.50');
-      if (v.oddsMax > 2) why.push('кэф события выше 2.00');
-      if (v.stakes.some(s => s.max > 3)) why.push('ставка больше 3% банка');
-      UI.clear(risk);
-      if (why.length) risk.appendChild(UI.callout('warn', 'alert', h('b', null, 'Правила стали рискованнее: '), why.join(', ') + '. ', 'Модель проверена на истории с правилами ' + activeVersion.name.split(' · ')[0] + ' — на новых ее оценка ROI менее надежна. Сначала прогоните их на истории в разделе ', h('a', { href: '#learning' }, 'Обучение модели'), '.'));
-    }
-    const roundText = 'до ' + fmt.money(fmt.fromMoney(isRub() ? 10 : 1));
-    return formCard({
-      id: 'profile-strategy', title: 'Правила стратегии',
-      subtitle: h('span', null, 'Действует ', h('a', { href: '#learning' }, activeVersion.name), ' · ИИ не предложит событие вне этих рамок'),
+    const step = isRub() ? 10 : 1; // сумма округляется вниз: рубли — до 10, доллары и евро — до целых
+    const stakeMoney = pct => { const v = Math.floor(fmt.moneyNum(b * pct / 100) / step) * step; return fmt.money(fmt.fromMoney(v)); };
+    const T = STRAT.triple || {};
+    const rule = (t, v, note) => h('div', { class: 'profile-srule' }, h('dt', null, t, note ? h('small', null, note) : null), h('dd', null, v));
+    const minStake = isRub() ? fmt.money(50) : fmt.money(fmt.fromMoney(0.5));
+    return card({
+      id: 'profile-strategy', class: 'profile-anchor', title: 'Правила стратегии',
+      subtitle: h('span', null, 'Действует ', activeVersion ? activeVersion.id : 'v3', ' — стратегия этапа 3 · ИИ не предложит событие вне этих рамок'),
+      actions: [chip('Только просмотр', 'outline', 'lock')],
       body: [
-        h('div', { class: 'profile-fields bottom' }, F.minProb, F.maxLegs, F.oddsMin, F.oddsMax, F.totalMax),
+        h('div', { class: 'stack', style: 'gap:8px' },
+          h('h4', null, 'Отбор событий'),
+          h('dl', { class: 'profile-srules' },
+            rule('Рынки', '6 исходов', 'победа и фора ±1.5 по сетам на каждого игрока'),
+            rule('Вероятность события', 'от ' + STRAT.minProb + '%', 'в экспрессе из 3 событий — от ' + (T.minProb || 70) + '%'),
+            rule('Кэф события', fmt.odds(STRAT.oddsMin) + '–' + fmt.odds(STRAT.oddsMax), 'в экспрессе из 3 событий — до ' + fmt.odds(T.legOddsMax || 1.6)),
+            rule('Валуй', 'обязателен', 'нет перевеса над рынком — нет ставки'),
+            rule('Фора −1.5', 'от ' + (STRAT.coverMinProb || 55) + '%', 'вероятность победы с разницей в 2 сета и больше'),
+            rule('Форма', 'от ' + (STRAT.formMinWins || 3) + '–' + (5 - (STRAT.formMinWins || 3)), 'побед в последних 5 матчах'))),
+        h('div', { class: 'stack', style: 'gap:8px' },
+          h('h4', null, 'Экспресс'),
+          h('dl', { class: 'profile-srules' },
+            rule('Из 2 событий', 'итоговый кэф ' + fmt.odds(1.28) + '–' + fmt.odds(STRAT.totalMax)),
+            rule('Из 3 событий', 'итоговый кэф ' + fmt.odds(T.totalMin || 1.44) + '–' + fmt.odds(T.totalMax || 4.10)))),
         h('hr', { class: 'divider' }),
         h('div', { class: 'stack', style: 'gap:8px' },
           h('div', { class: 'profile-section-title' }, h('h4', null, 'Ставка по итоговому кэфу'), h('span', { class: 'xsmall muted' }, '% от банка ' + fmt.money(b))),
-          h('div', { class: 'profile-stakes' }, stakeRows.map(x => x.row)),
+          h('div', { class: 'profile-stakes' }, STRAT.stakeTable.map(s => {
+            const pct = s.pctNum != null ? s.pctNum : num(String(s.pct));
+            return h('div', { class: 'profile-stake' },
+              h('div', { style: 'min-width:0' }, h('div', { class: 'profile-stake-range' }, s.range), h('div', { class: 'xsmall muted' }, s.triple ? 'только экспресс из 3 событий' : 'сейчас это ' + stakeMoney(pct))),
+              h('div', { class: 'profile-stake-pct' }, pctTxt(pct), s.triple ? h('small', null, stakeMoney(pct)) : null));
+          })),
           h('div', { class: 'profile-section-title', style: 'margin-top:6px' }, h('h4', null, 'Поправка на валуй'), h('span', { class: 'xsmall muted' }, 'средний перевес ног экспресса')),
           h('dl', { class: 'profile-value', 'aria-label': 'Поправка ставки на валуй, в процентах банка' }, VALUE_ADJ.map(x => h('div', null, h('dt', null, x.t, h('small', null, x.d)), h('dd', null, x.v)))),
-          h('p', { class: 'xsmall muted' }, 'Чем выше итоговый кэф, тем меньше ставка. Внутри диапазона берется середина, затем поправка на валуй и адаптации ниже; суммы округляются ' + roundText + '.')),
-        risk,
+          h('p', { class: 'xsmall muted' }, 'Процент из таблицы, затем поправка на валуй и адаптации ниже; потолок — 3% банка. Сумма округляется вниз до ' + fmt.money(fmt.fromMoney(step)) + '; меньше ' + minStake + ' — ставки нет.')),
+        h('p', { class: 'profile-note' }, icon('lock'), h('span', null, 'Правила только для просмотра. Менять их можно будет через версии стратегии на этапе 5: новая версия сначала проверяется на истории, потом вы ее принимаете.')),
       ],
-      foot: [save, reset],
-      onInput: () => { save.disabled = false; reset.hidden = false; checkRisk(); [F.minProb, F.maxLegs, F.oddsMin, F.oddsMax, F.totalMax].forEach(f => setFieldError(f, null)); },
-      onSubmit: () => {
-        const v = read();
-        let ok = true;
-        if (!(v.minProb >= 50 && v.minProb <= 95)) ok = setFieldError(F.minProb, 'От 50 до 95%');
-        if (!(Number.isInteger(v.maxLegs) && v.maxLegs >= 1 && v.maxLegs <= 5)) ok = setFieldError(F.maxLegs, 'Целое число от 1 до 5');
-        if (!(v.oddsMin >= 1.01)) ok = setFieldError(F.oddsMin, 'Кэф не меньше 1.01');
-        if (!(v.oddsMax > v.oddsMin)) ok = setFieldError(F.oddsMax, 'Должен быть больше нижней границы');
-        if (!(v.totalMax >= v.oddsMin)) ok = setFieldError(F.totalMax, 'Не меньше кэфа события');
-        const badStake = v.stakes.findIndex(s => !(s.min > 0 && s.max >= s.min && s.max <= 5));
-        if (badStake >= 0) { ok = false; UI.toast('Проверьте ставку для кэфа ' + v.stakes[badStake].range + ': от 0 до 5%, «от» не больше «до»', 'alert'); }
-        if (!ok) return;
-        const was = st.rules, diff = [];
-        if (v.minProb !== was.minProb) diff.push('мин. вероятность ' + was.minProb + '% → ' + v.minProb + '%');
-        if (v.maxLegs !== was.maxLegs) diff.push('событий до ' + v.maxLegs);
-        if (v.oddsMin !== was.oddsMin || v.oddsMax !== was.oddsMax) diff.push('кэф события ' + fmt.odds(v.oddsMin) + '–' + fmt.odds(v.oddsMax));
-        if (v.totalMax !== was.totalMax) diff.push('итоговый кэф до ' + fmt.odds(v.totalMax));
-        if (v.stakes.some((x, i) => x.min !== st.stakes[i].min || x.max !== st.stakes[i].max)) diff.push('таблица ставок');
-        st.ruleEdits.unshift({ at: new Date().toTimeString().slice(0, 5), what: diff.length ? diff.join(', ') : 'без изменений в цифрах' });
-        st.rules = { minProb: v.minProb, maxLegs: v.maxLegs, oddsMin: v.oddsMin, oddsMax: v.oddsMax, totalMax: v.totalMax };
-        st.stakes = v.stakes;
-        drawPanel();
-        UI.toast('Правила сохранены и записаны в историю стратегии. ИИ применит их со следующего анализа', 'check');
-      },
     });
   }
 
-  function historyCard() {
-    const VST = { active: ['Действует', 'good', 'check'], candidate: ['Кандидат', 'info', 'flask'], archived: ['Архив', 'outline', null] };
-    const versions = D.strategyVersions.slice().reverse();
-    return card({
-      id: 'profile-history', class: 'profile-anchor', title: 'История стратегии',
-      subtitle: 'Каждая правка правил и инструкций сохраняется — можно сравнить и откатить',
-      body: h('div', { class: 'profile-list' },
-        st.ruleEdits.map(e => item({ ic: 'edit', icKind: 'good', title: 'Правила изменены вами', titleExtra: chip('Не проверено на истории', 'warn', 'alert'), meta: 'Сегодня, ' + e.at + ' · ' + e.what, below: true })),
-        versions.map(v => item({
-          mark: v.id, title: (s => s.charAt(0).toUpperCase() + s.slice(1))(v.name.split(' · ')[1] || v.name), titleExtra: chip(VST[v.status][0], VST[v.status][1], VST[v.status][2]),
-          meta: dateLong(v.date) + ' · лог-лосс ' + fmt.dec(v.logloss, 3) + ' · Brier ' + fmt.dec(v.brier, 3) + ' на ' + v.n + ' событиях',
-          icKind: v.status === 'active' ? 'good' : null,
-        }))),
-      foot: [button('Сравнить версии', { kind: 'secondary', icon: 'layers', href: '#learning' }), h('span', { class: 'xsmall muted' }, 'Кандидата принимаете вы, после проверки на истории')],
-    });
-  }
-
+  // Адаптации ставки (Р22): защита банка включена, рост ставки выключен по умолчанию (В7). Переключатели только показывают
+  // состояние: правило меняется новой версией стратегии (этап 5).
   function adaptCard(dd, growth) {
+    const weekPct = weekPctNow();
     const ddAbs = Math.abs(dd), max = 25;
-    const GROUPS = [
-      { id: 'bank', title: 'Банк', rules: [
-        { id: 'dd10', t: 'Банк −10% от пика → ставка не больше 2,5%', d: 'Пока банк не поднимется выше этой отметки', active: dd <= -10, now: 'Сейчас ' + fmt.signedPct(dd) + ' от пика' },
-        { id: 'dd20', t: 'Банк −20% от пика → защитный режим', d: 'Только 2 события, кэф события ≤ 1.50, ставка 1,5% банка', active: dd <= -20, now: 'Сейчас ' + fmt.signedPct(dd) + ' от пика' },
-        { id: 'up15', t: 'Банк +15% к старту и винрейт ≥ 60% → ставка до 4%', d: 'Потолок поднимается с 3% до 4%, пока выполнены оба условия', active: growth >= 15 && S.winrate >= 60, now: 'Сейчас банк ' + fmt.signedPct(growth) + ', винрейт ' + fmt.pct(S.winrate) },
-      ] },
-      { id: 'week', title: 'Итог недели', rules: [
-        { id: 'weekLoss', t: 'Убыточная неделя (−5% и больше) → ставка не больше 2%', d: 'Считаем по банку за последние 7 дней', active: weekPct <= -5, now: 'За 7 дней ' + fmt.signedPct(weekPct) },
-        { id: 'weekWin', t: 'Прибыльная неделя (+10% и больше) → ставка +0,5%', d: 'К проценту из таблицы, но не выше потолка', active: weekPct >= 10, now: 'За 7 дней ' + fmt.signedPct(weekPct) },
-      ] },
-    ];
-    const RULES = GROUPS.reduce((a, g) => a.concat(g.rules), []);
-    const ruleChip = r => !st.adapt[r.id] ? chip('Выключено', 'outline', 'pause') : r.active ? chip('Действует сейчас', 'warn', 'bolt') : chip('Ждет условия', 'outline', 'clock');
-    const anyActive = RULES.some(r => r.active && st.adapt[r.id]);
-    const ruleRow = r => {
-      const id = 'profile-rule-' + r.id;
-      const chipSlot = h('span', null, ruleChip(r));
-      return h('div', { class: 'profile-rule' },
-        h('label', { class: 'profile-rule-text', for: id }, h('span', { class: 'profile-rule-title' }, r.t), h('span', { class: 'profile-rule-hint' }, r.d)),
-        switchInput(id, st.adapt[r.id], r.t, v => {
-          st.adapt[r.id] = v; UI.clear(chipSlot).appendChild(ruleChip(r));
-          UI.toast((v ? 'Правило включено: ' : 'Правило выключено: ') + r.t, v ? 'check' : 'pause');
-        }),
-        h('div', { class: 'profile-rule-status' }, chipSlot, h('span', { class: 'xsmall muted' }, r.now)));
+    const STATE = {
+      dd10: { active: dd <= -10, now: 'Сейчас ' + fmt.signedPct(dd) + ' от пика' },
+      dd20: { active: dd <= -20, now: 'Сейчас ' + fmt.signedPct(dd) + ' от пика' },
+      week_loss: { active: weekPct <= -5, now: 'За 7 дней ' + fmt.signedPct(weekPct) },
+      up15: { active: growth >= 15 && S.winrate >= 60, now: 'Сейчас банк ' + fmt.signedPct(growth) + ' к вложенному, винрейт ' + fmt.pct(S.winrate) },
+      week_win: { active: weekPct >= 10, now: 'За 7 дней ' + fmt.signedPct(weekPct) },
     };
+    const RULES = STRAT.adapt.map(r => Object.assign({}, r, STATE[r.key] || { active: false, now: '' }));
+    const ruleChip = r => !r.on ? chip('Выключено', 'outline', 'pause') : r.active ? chip('Действует сейчас', 'warn', 'bolt') : chip('Ждет условия', 'outline', 'clock');
+    const anyActive = RULES.some(r => r.on && r.active);
+    const ruleRow = r => {
+      const id = 'profile-rule-' + r.key;
+      return h('div', { class: 'profile-rule' },
+        h('label', { class: 'profile-rule-text', for: id }, h('span', { class: 'profile-rule-title' }, r.label + ' → ' + r.effect)),
+        switchInput(id, r.on, r.label + ': ' + (r.on ? 'включено' : 'выключено') + ', только просмотр', () => {}, true),
+        h('div', { class: 'profile-rule-status' }, ruleChip(r), h('span', { class: 'xsmall muted' }, r.now + (!r.on ? (r.active ? ' — с правилом оно бы действовало' : ' — условие и так не выполнено') : ''))));
+    };
+    const on = RULES.filter(r => r.on), off = RULES.filter(r => !r.on);
+    const offActive = off.filter(r => r.active);
     return card({
-      id: 'profile-adapt', class: 'profile-anchor', title: 'Адаптации ставки', subtitle: 'Меняют размер ставки по просадке от пика, росту банка и итогу недели · правил серий нет (Р22)',
+      id: 'profile-adapt', class: 'profile-anchor', title: 'Адаптации ставки', subtitle: 'Меняют размер ставки по просадке от пика и итогу недели · правил серий нет',
+      actions: [chip('Только просмотр', 'outline', 'lock')],
       body: [
         h('div', { class: 'profile-dd' },
-          h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Просадка от пика ' + fmt.money(S.peak)), h('b', { class: 'num' }, fmt.signedPct(dd))),
+          h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Просадка от пика ' + fmt.money(peakNow())), h('b', { class: 'num' }, fmt.signedPct(dd))),
           h('div', { class: 'profile-dd-track', role: 'meter', 'aria-label': 'Просадка от пика банка', 'aria-valuenow': ddAbs.toFixed(1), 'aria-valuemin': 0, 'aria-valuemax': max },
             h('i', { class: ['profile-dd-fill', ddAbs >= 20 ? 'bad' : ddAbs >= 10 ? 'warn' : null], style: { width: Math.min(100, ddAbs / max * 100) + '%' } }),
             h('span', { class: 'profile-dd-mark', style: { left: (10 / max * 100) + '%' } }),
@@ -1182,10 +1169,20 @@
           h('div', { class: 'profile-dd-scale', 'aria-hidden': 'true' }, h('span', { style: 'left:0' }, '0%'), h('span', { style: { left: (10 / max * 100) + '%' } }, '−10%'), h('span', { style: { left: (20 / max * 100) + '%' } }, '−20%')),
           h('div', { class: 'xsmall muted' }, anyActive
             ? 'Сейчас действует хотя бы одно правило — ставки в новых анализах изменены.'
-            : 'Просадка ' + fmt.signedPct(dd) + ', банк ' + fmt.signedPct(growth) + ' к старту, за 7 дней ' + fmt.signedPct(weekPct) + ': ни одно правило сейчас не действует.')),
-        h('div', { class: 'profile-rule-groups' }, GROUPS.map(g => h('div', { class: 'profile-rule-group', role: 'group', 'aria-labelledby': 'profile-rg-' + g.id },
-          h('div', { class: 'profile-rule-group-head' }, h('h4', { id: 'profile-rg-' + g.id }, g.title)),
-          g.rules.map(ruleRow)))),
+            : 'Просадка ' + fmt.signedPct(dd) + ', за 7 дней ' + fmt.signedPct(weekPct) + ': ни одно включенное правило сейчас не действует.')),
+        h('div', { class: 'profile-rule-groups' },
+          h('div', { class: 'profile-rule-group', role: 'group', 'aria-labelledby': 'profile-rg-on' },
+            h('div', { class: 'profile-rule-group-head' }, h('h4', { id: 'profile-rg-on' }, 'Защита банка'), chip('Включены', 'good', 'check')),
+            on.map(ruleRow)),
+          off.length ? h('div', { class: 'profile-rule-group', role: 'group', 'aria-labelledby': 'profile-rg-off' },
+            h('div', { class: 'profile-rule-group-head' }, h('h4', { id: 'profile-rg-off' }, 'Рост ставки'), chip('Выключены по умолчанию', 'outline', 'pause')),
+            off.map(ruleRow),
+            UI.callout('warn', 'alert', h('div', { class: 'stack', style: 'gap:6px' },
+              h('b', null, 'Нужно ваше согласие (решение В7).'),
+              h('span', null, 'В коде этапа 3 эти правила включены. Предлагаем выключить: их нет в согласованных правилах стратегии, а винрейт и итог недели на десятках ставок — шум, и правило поднимает ставку после удачной серии.'),
+              h('span', null, 'Это меняет суммы следующих ставок: при росте банка на 15% и винрейте от 60% потолок останется 3% вместо 4%, а после прибыльной недели ставка не вырастет на 0,5 п.п. ',
+                offActive.length ? 'Сейчас условие выполнено (' + offActive.map(r => lower1(r.label)).join(', ') + '): ближайшие ставки станут меньше.' : 'Сейчас ни одно из условий не выполнено — ближайшие ставки не изменятся.')))) : null),
+        h('p', { class: 'profile-note' }, icon('lock'), h('span', null, 'Переключатели показывают состояние правил. Включить или выключить правило можно будет новой версией стратегии (этап 5).')),
       ],
     });
   }
@@ -1209,12 +1206,12 @@
         button('Отмена', { kind: 'ghost', onClick: () => { st.pauseConfirm = false; drawPanel(); } })));
     const pauseBlock = st.pause
       ? h('div', { class: 'stack', style: 'gap:10px' },
-          UI.callout('accent', 'pause', h('b', null, 'Пауза до ' + dateLong(st.pause.until) + '. '), 'ИИ не формирует экспрессы, «Новый анализ» и ставки недоступны, уведомления о матчах выключены. Результаты уже открытых ставок придут как обычно.'),
+          UI.callout('accent', 'pause', h('b', null, 'Пауза до ' + dateLong(st.pause.until) + '. '), 'Сервер не запускает анализы ни на каком ключе и не сохраняет новые ставки. Результаты уже открытых ставок вносятся как обычно.'),
           h('div', { class: 'row' }, button('Снять паузу (только в макете)', { kind: 'ghost', size: 'sm', icon: 'x', onClick: () => { st.pause = null; drawHero(); drawPanel(); UI.toast('Пауза снята — в рабочей версии так сделать нельзя', 'info'); } })))
       : h('div', { class: 'stack', style: 'gap:10px' },
-          h('p', { class: 'small soft' }, 'На время паузы ИИ не формирует экспрессы, новый анализ недоступен, уведомления о матчах выключены. Досрочно не отменяется.'),
+          h('p', { class: 'small soft' }, 'На время паузы анализы не запускаются ни на каком ключе, новые ставки не сохраняются. Досрочно не отменяется.'),
           UI.segmented({ label: 'Длительность паузы', items: [{ id: '1', label: '1 день' }, { id: '7', label: '7 дней' }, { id: '30', label: '30 дней' }, { id: '90', label: '90 дней' }], active: st.pauseDays, onChange: id => { st.pauseDays = id; st.pauseConfirm = false; drawPanel(); } }),
-          confirmBox || h('div', { class: 'row' }, button('Взять паузу на ' + st.pauseDays + ' ' + pl(+st.pauseDays, 'день', 'дня', 'дней'), { kind: 'secondary', icon: 'pause', onClick: () => { st.pauseConfirm = true; drawPanel(); setTimeout(() => { const b = document.querySelector('#profile-rg .profile-confirm .btn.primary'); if (b) b.focus(); }, 30); } })));
+          confirmBox || h('div', { class: 'row' }, button('Взять паузу на ' + st.pauseDays + ' ' + pl(+st.pauseDays, 'день', 'дня', 'дней'), { kind: 'secondary', icon: 'pause', onClick: () => { st.pauseConfirm = true; drawPanel(); setTimeout(() => { const btn = document.querySelector('#profile-rg .profile-confirm .btn.primary'); if (btn) btn.focus(); }, 30); } })));
     const P = st.limitsPending;
     return formCard({
       id: 'profile-rg', class: 'profile-rg', eyebrow: 'Важно', title: 'Ответственная игра',
@@ -1225,7 +1222,7 @@
           usage('Ставок сегодня', todayN, L.count, todayN + ' из ' + L.count),
           usage('Сумма сегодня', todaySum, L.amount, moneyBare(todaySum) + ' из ' + fmt.money(L.amount))),
         h('div', { class: 'profile-fields bottom' }, cF, aF),
-        h('p', { class: 'xsmall muted' }, 'При достижении лимита кнопка «Сохранить ставку» блокируется до полуночи по вашему времени. Понизить лимит можно сразу, повысить — через 24 часа после запроса.'),
+        h('p', { class: 'xsmall muted' }, 'Лимит проверяет сервер: при достижении новые ставки не сохраняются и анализы не запускаются до полуночи по вашему времени — на любом ключе. Понизить лимит можно сразу, повысить — через 24 часа после запроса.'),
         P && UI.callout('info', 'clock', h('div', { class: 'stack', style: 'gap:8px' },
           h('div', null, 'Запрошено повышение: ' + [P.count && 'до ' + P.count + ' ' + pl(P.count, 'ставки', 'ставок', 'ставок'), P.amount && 'до ' + fmt.money(P.amount)].filter(Boolean).join(' и ') + ' в день. Вступит в силу ' + dateDay(addDays(TODAY, 1)) + ', через 24 часа.'),
           h('div', { class: 'row' }, button('Отменить запрос', { kind: 'ghost', size: 'sm', onClick: () => { st.limitsPending = null; drawPanel(); UI.toast('Запрос на повышение лимита отменен', 'x'); } })))),
@@ -1254,78 +1251,108 @@
     });
   }
 
-  function booksCard() {
-    const list = books();
-    const sum = list.reduce((a, b) => a + b.balance, 0);
-    const diff = sum - bankNow();
-    const same = fmt.moneyNum(diff) === 0;
-    return card({
-      id: 'profile-books', class: 'profile-anchor', title: 'Мои букмекеры', subtitle: 'Список ведете вы сами · балансы сверяйте раз в неделю',
+  // Движение банка: пополнение, вывод и корректировка — отдельно от ставок, в прибыль и ROI не входят
+  function movesCard() {
+    const b = bankNow(), free = b - inPlay();
+    const kindSeg = UI.segmented({ label: 'Что записать', items: Object.keys(MOVE).map(k => ({ id: k, label: MOVE[k].t })), active: st.moveKind, onChange: k => { st.moveKind = k; drawPanel(); requestAnimationFrame(() => { const i = document.getElementById('profile-move-amount'); if (i) i.focus({ preventScroll: true }); }); } });
+    const adj = st.moveKind === 'adjustment';
+    const aF = UI.field({ label: adj ? 'Сумма со знаком' : 'Сумма', id: 'profile-move-amount', suffix: fmt.cur(), inputmode: adj ? 'text' : 'decimal', autocomplete: 'off', placeholder: adj ? '−500 или 500' : '',
+      hint: st.moveKind === 'withdrawal' ? 'Свободно ' + fmt.money(free) + ': ставки в игре вывести нельзя' : adj ? 'Исправление ошибки учета: минус уменьшает банк' : 'Сколько вы положили на счета букмекеров' });
+    const cF = UI.field({ label: 'Комментарий', id: 'profile-move-note', autocomplete: 'off', placeholder: adj ? 'Например: ставка №12 учтена дважды' : 'Необязательно' });
+    // Журнал: стартовый банк и движения, новые сверху; банк после — от текущего назад
+    const start = { at: D.bankHistory[0].date + 'T09:00', kind: 'deposit', amount: S.start, note: 'Стартовый банк', start: true };
+    const rows = st.moves.slice().reverse().concat([start]);
+    let after = b;
+    const list = rows.map(m => {
+      const signed = m.kind === 'withdrawal' ? -m.amount : m.amount;
+      const row = item({ ic: MOVE[m.kind].ic, icKind: m.kind === 'withdrawal' ? null : 'good', title: m.start ? 'Стартовый банк' : MOVE[m.kind].t, wrap: true,
+        meta: (m.start ? dateLong(m.at) : when(m.at)) + (m.note && !m.start ? ' · ' + m.note : '') + (m.start ? '' : ' · банк после ' + fmt.money(after)),
+        side: h('span', { class: 'profile-money' }, fmt.signedMoney(signed)) });
+      after -= signed;
+      return row;
+    });
+    return formCard({
+      id: 'profile-moves', title: 'Движение банка', subtitle: 'Пополнение, вывод и корректировка · в прибыль и ROI не входят',
       body: [
-        list.length ? h('div', { class: 'profile-list' }, list.map(b => item({
-          mark: b.mark, title: b.name, wrap: true,
-          titleExtra: b.name === BENCHMARK ? chip('Эталон для CLV', 'info', 'target') : null,
-          meta: b.bets + ' ' + pl(b.bets, 'ставка', 'ставки', 'ставок') + (b.inPlay ? ' · в игре ' + fmt.money(b.inPlay) : '') + ' · ' + (!b.checked ? 'баланс не сверен' : 'сверено ' + (b.checked === TODAY ? 'сегодня' : dateDay(b.checked).replace(' ', ' '))),
-          side: [h('span', { class: 'profile-money' }, fmt.money(b.balance)),
-            button('', { kind: 'ghost', size: 'sm', icon: 'edit', title: 'Сверить баланс ' + b.name, onClick: () => bookModal(b) }),
-            button('', { kind: 'ghost', size: 'sm', icon: 'trash', title: 'Удалить ' + b.name + ' из списка', onClick: () => bookDeleteModal(b) })],
-        }))) : UI.empty('Список пуст. Добавьте букмекеров, у которых лежит банк.'),
-        h('div', { class: 'row-between', style: 'padding-top:10px;border-top:1px solid var(--line)' },
-          h('div', { style: 'min-width:0' }, h('div', { class: 'small soft' }, 'Сумма балансов'), h('div', { class: 'profile-money', style: 'font-size:var(--fs-lg)' }, fmt.money(sum))),
-          same ? chip('Сходится с учетом', 'good', 'check') : chip('Расхождение ' + fmt.signedMoney(diff), 'warn', 'alert')),
-        !same && UI.callout('warn', 'info', h('div', { class: 'stack', style: 'gap:8px' },
-          h('div', null, 'Балансы у букмекеров на ' + fmt.money(Math.abs(diff)) + (diff > 0 ? ' больше' : ' меньше') + ', чем банк в учете (' + fmt.money(bankNow()) + '). Это ' + (diff > 0 ? 'пополнение' : 'вывод') + ' или ставка мимо приложения?'),
-          h('div', { class: 'row' }, button('Учесть как ' + (diff > 0 ? 'пополнение' : 'вывод'), { kind: 'secondary', size: 'sm', onClick: () => { st.bankAdj += diff; drawPanel(); UI.toast((diff > 0 ? 'Пополнение ' : 'Вывод ') + fmt.signedMoney(diff) + ' записан в историю банка. В ROI не входит', 'wallet'); } })))),
-        h('p', { class: 'profile-note' }, icon('target'), h('span', null, 'Эталон рынка для CLV — кэф ' + BENCHMARK + ': с его закрывающей линией сравниваем ваши кэфы, даже если вы там не ставите. Этот же список — в выборе букмекера в «Новом анализе» и при сохранении ставки.')),
+        kindSeg,
+        h('div', { class: 'profile-fields collapse' }, aF, cF),
+        h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'Журнал'), h('div', { class: 'profile-list' }, list)),
+        h('p', { class: 'xsmall muted' }, 'Ставки пишутся в журнал банка сами: сумма ставки, выплата, возврат и исправление результата — их видно на «Ставках». Здесь — только деньги, которые вы кладете и выводите.'),
       ],
-      foot: [button('Добавить букмекера', { kind: 'secondary', icon: 'plus', onClick: () => bookModal(null) })],
+      foot: [button('Записать', { kind: 'primary', type: 'submit', icon: 'check' })],
+      onInput: e => { if (e && e.target && e.target.id === 'profile-move-amount') setFieldError(aF, null); },
+      onSubmit: () => {
+        const raw = valOf(aF).trim().replace(/^[−–]/, '-');
+        const v = num(raw); // в валюте программы
+        const kind = st.moveKind;
+        if (!isFinite(v) || v === 0 || (kind !== 'adjustment' && v < 0)) return setFieldError(aF, kind === 'adjustment' ? 'Введите сумму со знаком, например −500' : 'Введите сумму больше нуля');
+        const rub = fmt.fromMoney(Math.abs(v)) * (v < 0 ? -1 : 1);
+        if (kind === 'withdrawal' && rub > free) return setFieldError(aF, 'Больше свободного остатка ' + fmt.money(free));
+        const signed = kind === 'withdrawal' ? -rub : rub;
+        st.moves.push({ at: nowIso(), kind, amount: kind === 'adjustment' ? rub : Math.abs(rub), note: valOf(cF).trim() });
+        st.bankAdj += signed;
+        drawPanel();
+        UI.toast(MOVE[kind].t + ' ' + fmt.signedMoney(signed) + ' записано. Банк ' + fmt.money(bankNow()) + ', в ROI не входит', 'wallet');
+      },
     });
   }
 
-  function bookModal(b) {
-    const isNew = !b;
-    const nameF = isNew && UI.field({ label: 'Букмекер', id: 'profile-bk-name', placeholder: 'Например, Betfair', autocomplete: 'off' });
-    const balF = UI.field({ label: isNew ? 'Баланс сейчас' : 'Баланс в ' + b.name, id: 'profile-bk-bal', value: isNew ? '' : moneyInput(b.balance), suffix: fmt.cur(), inputmode: 'decimal', autocomplete: 'off',
-      hint: isNew ? 'Сумма на счете, включая нерассчитанные ставки' : 'Сверьте с личным кабинетом букмекера. Включая ставки в игре' + (b.inPlay ? ': ' + fmt.money(b.inPlay) : '') });
+  function booksCard() {
+    const list = books();
+    const hidden = st.hiddenBooks;
+    return card({
+      id: 'profile-books', class: 'profile-anchor', title: 'Мои букмекеры', subtitle: 'Список для выбора при анализе и сохранении ставки',
+      body: [
+        list.length ? h('div', { class: 'profile-list' }, list.map(x => item({
+          mark: x.mark, title: x.name, wrap: true,
+          meta: x.bets + ' ' + pl(x.bets, 'ставка', 'ставки', 'ставок') + (x.inPlay ? ' · в игре ' + fmt.money(x.inPlay) : ''),
+          side: [button('', { kind: 'ghost', size: 'sm', icon: 'edit', title: 'Переименовать ' + x.name, onClick: () => bookModal(x) }),
+            button('', { kind: 'ghost', size: 'sm', icon: 'eyeOff', title: 'Скрыть ' + x.name, onClick: () => bookHideModal(x) })],
+        }))) : UI.empty('Список пуст. Добавьте букмекеров, у которых ставите.'),
+        hidden.length ? h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'eyebrow' }, 'Скрытые'),
+          h('div', { class: 'profile-list' }, hidden.map(name => item({ mark: bookMark(name), title: name, wrap: true, meta: BOOK_COUNT(name) + ' ' + pl(BOOK_COUNT(name), 'ставка', 'ставки', 'ставок') + ' · в выборе не показывается',
+            side: button('Вернуть', { kind: 'secondary', size: 'sm', icon: 'refresh', onClick: () => { st.hiddenBooks = hidden.filter(n => n !== name); myBooks().push(name); drawPanel(); UI.toast(name + ' снова в списке', 'check'); } }) })))) : null,
+        h('p', { class: 'profile-note' }, icon('target'), h('span', null, 'Закрывающий кэф для CLV вы вносите на «Ставках»: эталона (' + MARKET_RULE + ') или своего букмекера из этого списка. Сравнение модели с рынком в «Аналитике» — по кэфам вашего букмекера в момент прогноза, без маржи.')),
+      ],
+      foot: [button('Добавить букмекера', { kind: 'secondary', icon: 'plus', onClick: () => bookModal(null) }), h('span', { class: 'xsmall muted' }, 'Балансы и сверку с банком добавим позже')],
+    });
+  }
+
+  function bookModal(x) {
+    const isNew = !x;
+    const nameF = UI.field({ label: isNew ? 'Букмекер' : 'Новое название', id: 'profile-bk-name', value: isNew ? '' : x.name, placeholder: 'Например, Betfair', autocomplete: 'off',
+      hint: isNew ? 'Появится в выборе при анализе и сохранении ставки' : 'В уже сохраненных ставках останется прежнее название' });
     const m = UI.modal({
-      title: isNew ? 'Новый букмекер' : 'Сверка баланса',
-      body: h('form', { id: 'profile-bk-form', class: 'stack', novalidate: true, on: { submit: e => { e.preventDefault(); submit(); } } }, nameF, balF),
-      actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button(isNew ? 'Добавить' : 'Сохранить баланс', { kind: 'primary', type: 'submit', icon: 'check', attrs: { form: 'profile-bk-form' } })],
+      title: isNew ? 'Новый букмекер' : 'Переименовать ' + x.name,
+      body: h('form', { id: 'profile-bk-form', class: 'stack', novalidate: true, on: { submit: e => { e.preventDefault(); submit(); } } }, nameF),
+      actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button(isNew ? 'Добавить' : 'Сохранить', { kind: 'primary', type: 'submit', icon: 'check', attrs: { form: 'profile-bk-form' } })],
     });
     function submit() {
-      let ok = true;
-      const v = num(valOf(balF)); // в валюте программы
-      const name = isNew ? valOf(nameF).trim() : b.name;
-      if (isNew && !name) ok = setFieldError(nameF, 'Укажите название');
-      else if (isNew && /^другой$/i.test(name)) ok = setFieldError(nameF, '«Другой» уже есть в выборе при анализе — укажите название букмекера');
-      else if (isNew && myBooks().some(x => x.toLowerCase() === name.toLowerCase())) ok = setFieldError(nameF, name + ' уже есть в списке');
-      if (!(v >= 0)) ok = setFieldError(balF, 'Введите сумму числом, например 250');
-      if (!ok) return;
-      const rub = Math.round(fmt.fromMoney(v));
-      st.bookInfo[name] = Object.assign(st.bookInfo[name] || { mark: bookMark(name) }, { base: rub - sessionProfit(name), checked: TODAY });
-      if (isNew) myBooks().push(name); // DATA.user.bookmakers — его читает «Новый анализ»
+      const name = valOf(nameF).trim();
+      const taken = myBooks().concat(st.hiddenBooks).some(n => n.toLowerCase() === name.toLowerCase() && (isNew || n !== x.name));
+      if (!name) return setFieldError(nameF, 'Укажите название');
+      if (/^другой$/i.test(name)) return setFieldError(nameF, '«Другой» уже есть в выборе при анализе — укажите название букмекера');
+      if (taken) return setFieldError(nameF, name + ' уже есть в списке');
+      if (isNew) myBooks().push(name);
+      else { const L = myBooks(), i = L.indexOf(x.name); if (i >= 0) L[i] = name; }
       m.close(); drawPanel();
-      UI.toast(isNew ? name + ' добавлен' : 'Баланс ' + name + ' сверен: ' + fmt.money(rub), 'wallet');
+      UI.toast(isNew ? name + ' добавлен' : x.name + ' теперь называется ' + name, 'check');
     }
   }
 
-  function bookDeleteModal(b) {
-    const open = BOOK_OPEN(b.name).length;
-    if (open) {
+  function bookHideModal(x) {
+    if (x.open) {
       UI.modal({
-        title: 'Пока нельзя удалить ' + b.name,
-        body: h('p', { class: 'small soft' }, 'В игре ' + open + ' ' + pl(open, 'ставка', 'ставки', 'ставок') + ' у ' + b.name + ' на ' + fmt.money(b.inPlay) + '. Удалить букмекера из списка можно после расчета.'),
+        title: 'Пока нельзя скрыть ' + x.name,
+        body: h('p', { class: 'small soft' }, 'В игре ' + x.open + ' ' + pl(x.open, 'ставка', 'ставки', 'ставок') + ' у ' + x.name + ' на ' + fmt.money(x.inPlay) + '. Скрыть букмекера можно после расчета.'),
         actions: close => [button('Понятно', { kind: 'primary', onClick: close })],
       });
       return;
     }
     UI.modal({
-      title: 'Удалить ' + b.name + ' из списка?',
-      body: h('div', { class: 'stack' },
-        h('p', { class: 'small soft' }, 'Букмекер пропадет из списка и из выбора в «Новом анализе» и при сохранении ставки. История ставок у него (' + b.bets + ') останется.'),
-        b.balance ? UI.callout('warn', 'alert', 'Баланс ' + fmt.money(b.balance) + ' перестанет учитываться в сверке. Если деньги выведены, учтите это как вывод.') : null,
-        b.name === BENCHMARK ? UI.callout('info', 'target', 'Эталоном для CLV кэф ' + BENCHMARK + ' останется: для него счет у букмекера не нужен.') : null),
-      actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Удалить', { kind: 'danger', icon: 'trash', onClick: () => { const L = myBooks(), i = L.indexOf(b.name); if (i >= 0) L.splice(i, 1); delete st.bookInfo[b.name]; close(); drawPanel(); UI.toast(b.name + ' удален из списка. История ставок осталась', 'trash'); } })],
+      title: 'Скрыть ' + x.name + '?',
+      body: h('p', { class: 'small soft' }, 'Букмекер пропадет из выбора в «Новом анализе» и при сохранении ставки. История ставок у него (' + x.bets + ') останется, вернуть его в список можно в любой момент.'),
+      actions: close => [button('Отмена', { kind: 'ghost', onClick: close }), button('Скрыть', { kind: 'primary', icon: 'eyeOff', onClick: () => { const L = myBooks(), i = L.indexOf(x.name); if (i >= 0) L.splice(i, 1); st.hiddenBooks.push(x.name); close(); drawPanel(); UI.toast(x.name + ' скрыт. История ставок осталась', 'eyeOff'); } })],
     });
   }
 
@@ -1377,7 +1404,7 @@
     }));
     return card({
       id: 'profile-key-mode', class: 'profile-anchor', title: 'Чей ключ Claude использовать',
-      subtitle: 'Ключ нужен для анализов, разборов ставок и обновления ваших данных',
+      subtitle: 'Ключ нужен для анализов: разбор текста, новости перед анализом и оценка матчей',
       body: [group,
         h('p', { class: 'profile-note' }, icon('info'), h('span', null, adm
           ? 'Вы администратор: ваши анализы идут на ключе администратора, без личного лимита — только в рамках общего бюджета.'
@@ -1590,7 +1617,7 @@
       id: 'profile-key-return', class: 'profile-anchor', title: 'Вернуться на ключ администратора', subtitle: 'Только с разрешения администратора',
       actions: req ? [chip('Ждет решения', 'info', 'clock')] : null,
       body: req ? [
-        UI.callout('info', 'clock', h('b', null, 'Запрос отправлен ' + lower1(when(req)) + ', ждем решения администратора. '), 'Ответ придет уведомлением на сайте' + (st.push.on ? ' и push' : '') + '. ' + (k ? 'Пока анализы идут на вашем ключе.' : 'Пока ключа нет, анализы не запускаются.')),
+        UI.callout('info', 'clock', h('b', null, 'Запрос отправлен ' + lower1(when(req)) + ', ждем решения администратора. '), 'Ответ придет уведомлением на сайте. ' + (k ? 'Пока анализы идут на вашем ключе.' : 'Пока ключа нет, анализы не запускаются.')),
         h('p', { class: 'xsmall muted', style: 'margin:0' }, 'В макете: переключитесь на администратора — просьба появится у него в колокольчике и в «Администрировании».'),
       ] : [
         !k && UI.callout('bad', 'alert', h('b', { class: 'profile-why' }, D.ai.access(me()) + '.'), ' Анализы не запускаются, пока администратор не вернет ключ или вы не сохраните новый.'),
@@ -1630,9 +1657,9 @@
         ], 'profile-key-steps'),
         details('Как это работает дальше', 'info', false, [
           h('ul', { class: 'profile-bullets' },
-            h('li', null, icon('coins'), h('span', null, 'Ваши анализы, разборы ставок и обновления ваших данных оплачиваются с вашего баланса. Лимиты администратора на вас не действуют, кроме потолка на один анализ.')),
+            h('li', null, icon('coins'), h('span', null, 'Ваши анализы (с новостями перед ними) оплачиваются с вашего баланса. Лимиты администратора на вас не действуют, кроме потолка на один анализ.')),
             h('li', null, icon('chart'), h('span', null, 'Расход видно в «ИИ и расходы» и в консоли Anthropic. Цифры могут немного расходиться: консоль обновляется с задержкой.')),
-            h('li', null, icon('users'), h('span', null, 'Общие фоновые задачи — ночное обновление базы игроков и новостей для всех — оплачивает администратор.')),
+            h('li', null, icon('users'), h('span', null, 'Общие фоновые задачи без участника (сейчас — прогоны приемки) и проверки качества (eval) оплачивает администратор. Загрузка архивов матчей идет без ИИ и токенов.')),
             h('li', null, icon('alert'), h('span', null, 'Если на балансе закончились деньги или ключ отозван, анализ остановится с понятной ошибкой, а вы получите уведомление.')),
             h('li', null, icon('refresh'), h('span', null, 'Вернуться на ключ администратора можно в этом же разделе, если администратор разрешит.'))),
         ]),
@@ -1662,8 +1689,24 @@
   }
 
   // =====================================================================
-  // 5. УВЕДОМЛЕНИЯ (Р3: на сайте и push, почты нет)
+  // 5. УВЕДОМЛЕНИЯ (Р3: на сайте; push и тихие часы — этап 6)
   // =====================================================================
+  // Настройка — по видам уведомлений кода (notifications.kind). Вход с нового устройства, неудачные попытки входа
+  // и сообщение администратора приходят всегда. Центр уведомлений в шапке учитывает настройки (UI.notifPrefs).
+  const KIND_PREF = {
+    bet_settled: 'bet', limit_80: 'limit', limit_100: 'limit', budget_80: 'budget', budget_100: 'budget',
+    ai_key_failed: 'key', ai_mode_request: 'requests', ai_mode_decision: 'decision', data_stale: 'archive', ai_alert: 'alert',
+  };
+  UI.notifPrefs = {
+    // false — пользователь выключил этот вид на сайте; обязательные виды и виды без настройки приходят всегда
+    allowed(kind) {
+      const s = states[user().id], id = KIND_PREF[kind];
+      if (!s || !id) return true;
+      const pref = id === 'limit' && isAdmin() ? s.notif.users : s.notif[id];
+      return !pref || pref.site !== false;
+    },
+  };
+
   function panelNotifications() {
     return h('div', { class: 'grid' },
       h('div', { class: 'col-8 profile-col' }, notifCard()),
@@ -1675,102 +1718,87 @@
     const dec = D.ai.decisions(); // то же, что значок у «Администрирования» и «дела» на главной
     const near = dec.filter(d => d.kind === 'limit').map(d => d.user);
     const asks = dec.filter(d => d.kind === 'return').length;
-    let ai;
-    if (adm) ai = { id: 'ai', t: 'Бюджет ключа: 80% и 100%', d: 'Общий бюджет ключа администратора — ' + usd(B.monthly, 0) + ' в месяц. На 100% анализы участников на вашем ключе остановятся' };
-    else if (own) ai = { id: 'ai', t: 'Ключ Claude и расходы', d: 'Анализ дороже вашего потолка или ключ перестал работать: отозван, закончились деньги' };
-    else { const L = memberLimit(); ai = { id: 'ai', t: 'Лимит ИИ: 80% и 100%', d: 'На 80% (' + usd(L.monthly * B.alertAt / 100, 0) + ' из ' + usd(L.monthly, 0) + ') — предупреждение, на 100% анализы останавливаются до решения администратора' }; }
+    const arch = D.archive;
+    const archDays = arch ? daysBetween(arch.lastLoad, TODAY) : null;
     const list = [
-      { id: 'bet', t: 'Ставка рассчитана', d: 'Счет, исход экспресса и новый банк — сразу после матча' },
-      { id: 'stale', t: 'Данные игрока устарели', d: 'Профиль игрока из анализа старше 24 часов. Сейчас: ' + staleN + ' ' + pl(staleN, 'профиль устарел', 'профиля устарели', 'профилей устарели') + ', ' + missingN + ' ' + pl(missingN, 'игрока', 'игроков', 'игроков') + ' нет в базе' },
-      ai,
-      { id: 'login', t: 'Вход с нового устройства', d: 'Устройство, город и время входа', lockSite: true },
-      { id: 'msg', t: 'Сообщение администратора', d: adm ? 'От других администраторов: работы на сервере, изменения в программе' : 'Работы на сервере, изменения в программе', lockSite: true },
+      { id: 'bet', kinds: 'bet_settled', t: 'Ставка рассчитана', d: 'Придет, когда ставки начнут рассчитываться сами (этап 5). Результат, который вы вносите на «Ставках», уведомления не шлет' },
     ];
+    if (!adm && !own) { const L = memberLimit(); list.push({ id: 'limit', kinds: 'limit_80, limit_100', t: 'Лимит ИИ: 80% и остановка', d: 'На 80% (' + usd(L.monthly * B.alertAt / 100, 0) + ' из ' + usd(L.monthly, 0) + ') — предупреждение; когда остатка не хватит на вызов Claude, анализы остановятся до решения администратора' }); }
+    if (own) list.push({ id: 'key', kinds: 'ai_key_failed', t: 'Ключ Claude не работает', d: 'Anthropic не принял ваш ключ или на счете нет денег — анализы на вашем ключе остановлены' });
+    if (!adm) list.push({ id: 'decision', kinds: 'ai_mode_decision', t: 'Решение по ключу администратора', d: 'Администратор вернул вас на свой ключ, отклонил просьбу или перевел анализы на ваш ключ' });
+    list.push(
+      { id: 'login', kinds: 'new_device', t: 'Вход с нового устройства', d: 'Устройство, город и время входа', lockSite: true },
+      { id: 'fails', kinds: 'login_failures', t: 'Неудачные попытки входа', d: 'Неверные пароли или коды 2FA подряд: вход с этого адреса закрыт на время', lockSite: true },
+      { id: 'msg', kinds: 'admin_message', t: 'Сообщение администратора', d: adm ? 'От других администраторов: работы на сервере, изменения в программе' : 'Работы на сервере, изменения в программе', lockSite: true });
     if (adm) list.push(
-      { id: 'requests', t: 'Просьбы участников', d: 'Вернуть ключ администратора и другие вопросы, которые ждут вашего решения. Сейчас ждут: ' + asks, admin: true },
-      { id: 'users', t: 'Лимиты участников', d: 'Участник израсходовал 80% или 100% своего лимита' + (near.length ? '. Сейчас у порога: ' + near.map(u => u.name).join(', ') : ''), admin: true });
+      { id: 'requests', kinds: 'ai_mode_request', t: 'Просьбы вернуть ключ администратора', d: 'Участник на своем ключе просит вернуть его на ваш. Сейчас ждут: ' + asks, admin: true },
+      { id: 'users', kinds: 'limit_80, limit_100', t: 'Участники у лимита', d: 'Участник израсходовал 80% лимита или ему не хватает на вызов Claude' + (near.length ? '. Сейчас у порога: ' + near.map(u => u.name).join(', ') : ''), admin: true },
+      { id: 'budget', kinds: 'budget_80, budget_100', t: 'Бюджет ключа: 80% и остановка', d: 'Общий бюджет ключа администратора — ' + usd(B.monthly, 0) + ' в месяц. Когда остатка не хватит на вызов Claude, анализы на вашем ключе остановятся', admin: true },
+      { id: 'key', kinds: 'ai_key_failed', t: 'Ключ администратора не работает', d: 'Anthropic не принял ключ или на счете нет денег — анализы всех на вашем ключе остановлены', admin: true },
+      { id: 'archive', kinds: 'data_stale', t: 'Архив матчей давно не обновлялся', d: 'Больше ' + ((arch && arch.staleDays) || 3) + ' дней без загрузки — Эло, форма и кэфы для анализа устаревают' + (archDays != null ? '. Последняя загрузка — ' + dateDay(arch.lastLoad) + ' (' + archDays + ' ' + pl(archDays, 'день', 'дня', 'дней') + ' назад)' : ''), admin: true },
+      { id: 'alert', kinds: 'ai_alert', isNew: true, t: 'Сигналы расхода ИИ', d: 'Доля кэша ниже 50% по 10 анализам, анализ дороже двух медиан за 7 дней, больше 2% обрезанных ответов или отказов, больше 15 поисков в день, модель без цены, серия ответов 429. Одно уведомление на правило в сутки', admin: true });
     return list;
   }
 
   function notifCard() {
-    const pushOn = st.push.on;
     const row = n => {
-      const v = st.notif[n.id];
+      const v = st.notif[n.id] || (st.notif[n.id] = { site: true });
       const site = n.lockSite
         ? h('span', { class: 'profile-notif-lock', title: 'На сайте приходит всегда' }, icon('lock'), h('span', { class: 'sr-only' }, n.t + ': на сайте всегда включено'))
-        : switchInput('profile-n-' + n.id + '-site', v.site, 'На сайте: ' + n.t, val => { v.site = val; UI.toast((val ? 'Включено на сайте: ' : 'Выключено на сайте: ') + lower1(n.t), val ? 'bell' : 'x'); });
-      const push = switchInput('profile-n-' + n.id + '-push', pushOn && v.push, 'Push: ' + n.t, val => { v.push = val; UI.toast((val ? 'Push включен: ' : 'Push выключен: ') + lower1(n.t), val ? 'bell' : 'x'); }, !pushOn);
+        : switchInput('profile-n-' + n.id + '-site', v.site, 'На сайте: ' + n.t, val => {
+          v.site = val;
+          if (UI.notifications && UI.notifications.refresh) UI.notifications.refresh();
+          UI.toast((val ? 'Включено на сайте: ' : 'Выключено на сайте: ') + lower1(n.t), val ? 'bell' : 'x');
+        });
+      const push = switchInput('profile-n-' + n.id + '-push', false, 'Push: ' + n.t + ' — появится на этапе 6', () => {}, true);
       return h('div', { class: 'profile-notif-row' },
-        h('div', { style: 'min-width:0' }, h('div', { class: 'profile-notif-t' }, n.t), h('div', { class: 'field-hint' }, n.d)),
+        h('div', { style: 'min-width:0' }, h('div', { class: 'profile-notif-t' }, n.t, n.isNew ? [' ', chip('новое', 'info')] : null), h('div', { class: 'field-hint' }, n.d)),
         h('div', { class: 'profile-notif-cell' }, site),
         h('div', { class: 'profile-notif-cell' }, push));
     };
     const events = notifEvents();
     const common = events.filter(e => !e.admin), forAdmin = events.filter(e => e.admin);
     return card({
-      id: 'profile-notif', class: 'profile-anchor', title: 'О чем сообщать', subtitle: 'Изменения сохраняются сразу',
+      id: 'profile-notif', class: 'profile-anchor', title: 'О чем сообщать', subtitle: 'Изменения сохраняются сразу · колокольчик в шапке учитывает эти настройки',
       body: [
-        !pushOn && UI.callout('info', 'device', 'Push выключен — столбец «Push» заработает, когда вы его разрешите. ', h('a', { href: '#profile-notifications', on: { click: e => { e.preventDefault(); scrollToId('profile-channels', '.card-foot .btn.primary'); } } }, 'Как включить')),
         h('div', null,
-          h('div', { class: 'profile-notif-head', 'aria-hidden': 'true' }, h('span', null, 'Событие'), h('span', null, 'На сайте'), h('span', null, 'Push')),
+          h('div', { class: 'profile-notif-head', 'aria-hidden': 'true' }, h('span', null, 'Событие'), h('span', null, 'На сайте'), h('span', null, 'Push', h('small', null, 'этап 6'))),
           common.map(row),
           forAdmin.length ? [h('div', { class: 'profile-group-label' }, 'Для администратора'), forAdmin.map(row)] : null),
-        h('p', { class: 'profile-note' }, icon('lock'), h('span', null, 'Вход с нового устройства и сообщения администратора на сайте приходят всегда: это защита аккаунта и важные новости.')),
+        h('p', { class: 'profile-note' }, icon('lock'), h('span', null, 'Вход с нового устройства, неудачные попытки входа и сообщения администратора на сайте приходят всегда: это защита аккаунта и важные новости.')),
       ],
     });
   }
 
   function channelsCard() {
-    const p = st.push;
-    const testBtn = button('Отправить тест', { kind: 'secondary', size: 'sm', icon: 'send', onClick: () => busy(testBtn, 'Отправляем…', 600, () => UI.toast('Тестовое push-уведомление отправлено: ' + p.device, 'send')) });
-    const allowBtn = button('Разрешить push', { kind: 'primary', icon: 'bell', onClick: () => busy(allowBtn, 'Ждем ответа браузера…', 900, () => {
-      p.on = true; p.device = currentSession().name; drawPanel();
-      UI.toast('Push разрешен: ' + p.device + '. Пришлем короткое тестовое уведомление', 'bell');
-    }) });
     return card({
       id: 'profile-channels', class: 'profile-anchor', title: 'Каналы', subtitle: 'Куда приходят уведомления',
       body: [
         h('div', { class: 'profile-list' },
           item({ ic: 'bell', icKind: 'good', title: 'На сайте', titleExtra: chip('Всегда включено', 'good', 'check'), meta: 'Колокольчик в шапке и центр уведомлений', below: true }),
-          item({ ic: 'device', icKind: p.on ? 'good' : null, title: 'Push на телефон и в браузере', titleExtra: p.on ? chip('Включено', 'good', 'check') : chip('Выключено', 'outline'), meta: p.on ? p.device + ' · установлено как приложение' : 'Нужно разрешение браузера', below: true })),
-        !p.on && h('div', { class: 'profile-how' },
-          h('h4', null, 'Как включить push'),
-          h('ol', { class: 'profile-steps' },
-            h('li', null, h('div', null, h('span', null, 'Откройте сайт на телефоне и установите как приложение: в Safari — «Поделиться → На экран „Домой“», в Chrome — меню → «Установить приложение».'))),
-            h('li', null, h('div', null, h('span', null, 'Откройте AI Capper с экрана «Домой» и нажмите «Разрешить push».')))),
-          h('p', { class: 'xsmall muted', style: 'margin:0' }, 'На компьютере push работает в браузере и без установки.')),
+          item({ ic: 'device', title: 'Push на телефон и в браузере', titleExtra: chip('Этап 6', 'outline', 'clock'), meta: 'Появится вместе с установкой сайта на телефон как приложения (PWA). Тогда же заработает столбец «Push» слева', below: true })),
       ],
-      foot: p.on
-        ? [testBtn, button('Отключить push', { kind: 'ghost', size: 'sm', icon: 'x', onClick: () => { p.on = false; drawPanel(); UI.toast('Push выключен. Уведомления остаются на сайте', 'x'); } })]
-        : [allowBtn],
+      foot: [button('Разрешить push', { kind: 'secondary', icon: 'bell', disabled: true, title: 'Push появится на этапе 6' })],
     });
   }
 
   function quietCard() {
     const q = st.quiet;
     const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0') + ':00');
-    const fromF = UI.field({ label: 'С', id: 'profile-quiet-from', value: q.from, options: HOURS, attrs: { 'aria-label': 'Тихие часы — с' } });
-    const toF = UI.field({ label: 'До', id: 'profile-quiet-to', value: q.to, options: HOURS, attrs: { 'aria-label': 'Тихие часы — до' } });
-    const times = h('div', { class: 'profile-time', hidden: !q.on }, fromF, toF);
-    const save = button('Сохранить', { kind: 'secondary', type: 'submit', icon: 'check', disabled: true });
-    return formCard({
+    const fromF = UI.field({ label: 'С', id: 'profile-quiet-from', value: q.from, options: HOURS, attrs: { 'aria-label': 'Тихие часы — с', disabled: true } });
+    const toF = UI.field({ label: 'До', id: 'profile-quiet-to', value: q.to, options: HOURS, attrs: { 'aria-label': 'Тихие часы — до', disabled: true } });
+    return card({
       id: 'profile-quiet', title: 'Тихие часы', subtitle: 'Push без звука · ' + tzTime(),
+      actions: [chip('Этап 6', 'outline', 'clock')],
       body: [
-        UI.toggle({ id: 'profile-quiet-on', label: 'Не беспокоить ночью', hint: 'На сайте уведомления копятся как обычно. Вход с нового устройства — со звуком всегда', checked: q.on, onChange: v => { times.hidden = !v; } }),
-        times,
+        h('div', { class: 'profile-time' }, fromF, toF),
+        h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Тихие часы нужны только для push — включим их вместе с push на этапе 6. На сайте уведомления копятся как обычно.'),
       ],
-      foot: [save],
-      onInput: () => { save.disabled = false; },
-      onSubmit: () => {
-        q.on = document.getElementById('profile-quiet-on').checked; q.from = valOf(fromF) || q.from; q.to = valOf(toF) || q.to;
-        save.disabled = true;
-        UI.toast(q.on ? 'Тихие часы: ' + q.from + '–' + q.to : 'Тихие часы выключены', 'moon');
-      },
     });
   }
 
   // =====================================================================
-  // 6. ДАННЫЕ (GDPR: экспорт и удаление, Р15)
+  // 6. ДАННЫЕ (GDPR: экспорт и удаление, Р15, В10)
   // =====================================================================
   function panelData() {
     return h('div', { class: 'grid' },
@@ -1779,47 +1807,40 @@
       h('div', { class: 'col-12 profile-col' }, dangerCard()));
   }
 
+  // Экспорт сразу скачиванием (В10): архив собирается по запросу, ссылок «на 24 часа» нет
   function exportCard() {
     const openLegs = openBets().reduce((a, b) => a + b.legs.length, 0);
-    const file = 'capper-export-' + TODAY + (st.exportFmt === 'json' ? '.json' : '.zip');
-    const nBank = D.bankHistory.length, nBooks = myBooks().length;
-    const prepBtn = button('Подготовить архив', { kind: 'primary', icon: 'download', onClick: () => busy(prepBtn, 'Собираем данные…', 1100, () => { st.exportState = 'ready'; drawPanel(); UI.toast('Архив готов', 'check'); }) });
+    const nBooks = myBooks().length + st.hiddenBooks.length;
+    const download = fmtId => () => UI.toast('Скачивание началось: capper-export-' + TODAY + (fmtId === 'json' ? '.json' : '.zip') + '. В макете файлов нет', 'download');
     return card({
       id: 'profile-export', class: 'profile-anchor', title: 'Экспорт всех данных', subtitle: 'Ваши данные — ваши: заберите их в любой момент (GDPR)',
       body: [
         UI.kv([
-          ['Ставки и экспрессы', D.bets.length + ' · из них ' + openBets().length + ' в игре'],
+          ['Ставки и экспрессы', D.bets.length + ' · из них ' + openBets().length + ' в игре' + (botBets.length ? ', ' + botBets.length + ' из старого бота' : '')],
           ['События в экспрессах', String(D.allLegs.length + openLegs)],
-          ['Банк и мои букмекеры', nBank + ' ' + pl(nBank, 'запись', 'записи', 'записей') + ' · ' + nBooks + ' ' + pl(nBooks, 'букмекер', 'букмекера', 'букмекеров')],
-          ['Версии стратегии и уроки модели', D.strategyVersions.length + ' и ' + D.lessons.length],
-          ['Ваши запуски ИИ', myRunsN + ' · токены и стоимость'],
-          ['Журнал входов', 'за 90 дней'],
-          ['Настройки', 'без паролей и ключей'],
+          ['Банк', 'журнал: ставки, пополнения, выводы, корректировки'],
+          ['Мои букмекеры', nBooks + ' ' + pl(nBooks, 'букмекер', 'букмекера', 'букмекеров') + (st.hiddenBooks.length ? ', из них скрыто ' + st.hiddenBooks.length : '')],
+          ['Стратегия и ответственная игра', 'действующая версия, лимиты и паузы'],
+          ['Ваши вызовы ИИ', myRunsN + ' · токены и стоимость'],
+          ['Настройки уведомлений и журнал входов', 'вход — за 90 дней'],
+          ['Без чего', 'без паролей, кодов 2FA и ключей Claude'],
         ]),
-        h('div', { class: 'stack', style: 'gap:6px' },
-          h('span', { class: 'field-label', id: 'profile-exp-fmt' }, 'Формат'),
-          UI.segmented({ label: 'Формат экспорта', items: [{ id: 'json', label: 'JSON — один файл' }, { id: 'csv', label: 'CSV — архив таблиц' }], active: st.exportFmt, onChange: id => { st.exportFmt = id; st.exportState = 'idle'; drawPanel(); } })),
-        h('p', { class: 'xsmall muted' }, 'В JSON у каждого события есть вероятность модели, кэф, закрывающая линия и результат — готовый датасет для своих экспериментов, см. ', h('a', { href: '#learning' }, 'Обучение модели'), '. Общая база игроков и матчей и общие фоновые задачи ИИ (обновление профилей) в архив не входят: они общие для всех.'),
-        st.exportState === 'ready' && h('div', { class: 'profile-list' }, item({
-          ic: 'download', icKind: 'good', title: file, meta: (st.exportFmt === 'json' ? '≈ 420 КБ' : '≈ 310 КБ, 7 таблиц') + ' · ссылка действует 24 часа', wrap: true,
-          side: button('Скачать', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => UI.toast('В рабочей версии начнется скачивание. В макете файлов нет', 'info') }),
-        })),
+        h('p', { class: 'xsmall muted' }, 'Архив собирается сразу при нажатии и скачивается в браузер — ссылок, которые где-то хранятся, нет. В JSON у каждого события есть вероятность модели, кэф, закрывающий кэф и результат. Общая база игроков, матчей и новостей в архив не входит: она общая для всех.'),
       ],
-      foot: st.exportState === 'ready' ? [button('Собрать заново', { kind: 'ghost', icon: 'refresh', onClick: () => { st.exportState = 'idle'; drawPanel(); } })] : [prepBtn],
+      foot: [button('Скачать JSON', { kind: 'primary', icon: 'download', onClick: download('json') }), button('Скачать CSV (ZIP)', { kind: 'secondary', icon: 'download', onClick: download('csv') })],
     });
   }
 
-  // Откуда берутся данные о матчах (Р10) — бывший блок «Данные матчей и кэфы» из интеграций
+  // Откуда берутся данные о матчах (Р10, Р17, Р23)
   function sourcesCard() {
-    const lo = Math.min(...refreshSearches), hi = Math.max(...refreshSearches);
-    const searches = lo === hi ? String(lo) : lo + '–' + hi;
     return card({
       title: 'Откуда берутся данные о матчах', subtitle: 'База игроков, матчей и новостей общая для всех участников',
       body: h('ul', { class: 'profile-bullets' },
-        h('li', null, icon('database'), h('span', null, 'Архивы матчей Сакманна и tennis-data.co.uk — история и статистика игроков.')),
-        h('li', null, icon('globe'), h('span', null, 'Свежие результаты и новости — веб-поиском модели при обновлении профилей: сейчас ' + searches + ' поисков на запуск.')),
-        h('li', null, icon('edit'), h('span', null, 'Кэфы вводите вы при анализе; закрывающий кэф Pinnacle нужен для CLV.')),
-        h('li', null, icon('clock'), h('span', null, 'Платный источник матчей и кэфов подключим позже, когда CLV на 100–200 ставках покажет перевес.'))),
+        h('li', null, icon('database'), h('span', null, h('b', null, 'Архивы матчей. '), 'Сакманн — матчи и статистика подачи (копия архива, по май 2026; CC BY-NC-SA 4.0), tennis-data.co.uk — результаты с датами и кэфы. Загрузка каждую ночь, Эло считаем сами.')),
+        h('li', null, icon('globe'), h('span', null, h('b', null, 'Новости. '), 'Ищет Claude (Sonnet 5.5) перед анализом, если по игроку им больше 12 часов, — только на atptour.com, сайтах турниров Большого шлема, tennis.com, tennismajors.com и espn.com. Найденное общее для всех.')),
+        h('li', null, icon('edit'), h('span', null, h('b', null, 'Кэфы. '), 'При анализе вводите вы, по своему букмекеру. По ним, без маржи, модель сравнивается с рынком в «Аналитике».')),
+        h('li', null, icon('target'), h('span', null, h('b', null, 'Закрывающий кэф для CLV. '), 'Тоже вносите вы, на «Ставках»: эталона (' + MARKET_RULE + ') или своего букмекера. Закрывающие кэфы из tennis-data подставим на этапе 5.')),
+        h('li', null, icon('clock'), h('span', null, h('b', null, 'Платный источник '), 'матчей и кэфов подключим позже, когда CLV на 100–200 ставках покажет перевес.'))),
     });
   }
 
@@ -1840,73 +1861,62 @@
     });
   }
 
-  // Одноразовый импорт истории старого бота — только у администратора
+  // Импорт истории старого бота — одна команда на сервере; в кабинете только статус (у администратора)
   function importCard() {
-    const first = settledBets[0], last = settledBets[settledBets.length - 1];
+    const src = botBets.length ? botBets : settledBets;
+    const first = src[0], last = src[src.length - 1];
+    const noResult = D.allLegs.filter(l => l.noResult).length;
     return card({
-      id: 'profile-import', class: 'profile-anchor', title: 'Импорт истории из старого бота', subtitle: 'Один раз · файл История-ставок.json',
+      id: 'profile-import', class: 'profile-anchor', title: 'Импорт истории из старого бота', subtitle: 'Один раз, командой на сервере',
       actions: [chip('Выполнен', 'good', 'check')],
       body: [
-        h('p', { class: 'small soft', style: 'margin:0' }, 'Старый бот выключен. Его история ставок перенесена в ваш аккаунт: ставки, кэфы, закрывающие линии и результаты.'),
         UI.kv([
-          ['Перенесено', settledBets.length + ' ' + pl(settledBets.length, 'ставка', 'ставки', 'ставок')],
+          ['Перенесено', src.length + ' ' + pl(src.length, 'ставка', 'ставки', 'ставок') + ' в ваш аккаунт'],
           ['Период', dateDay(first.date) + ' — ' + dateDay(last.date)],
+          ['Без исхода ноги', noResult ? noResult + ' ' + pl(noResult, 'событие', 'события', 'событий') + ' в проигранных экспрессах' : 'нет'],
           ['Кто видит', 'только вы'],
         ]),
-        h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Повторы отбрасываем, поэтому повторная загрузка того же файла ничего не испортит.'),
+        h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Ставки бота идут в банк и ROI с пометкой «бот». В CLV, сравнение с рынком и калибровку модели не входят: у бота есть только оценка Claude и кэф. Исходы ног проигранных экспрессов бот не записывал.'),
+        h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Повторить: ', h('span', { class: 'mono' }, 'bash deploy/local.sh import EMAIL История-ставок.json'), ' — повторы отбрасываются.'),
       ],
-      foot: [button('Проверить файл еще раз', { kind: 'secondary', icon: 'upload', onClick: importModal })],
     });
   }
 
-  function importModal() {
-    const n = settledBets.length;
-    UI.modal({
-      title: 'Проверка файла',
-      body: [
-        UI.callout('info', 'info', 'Пример разбора. В рабочей версии здесь будет ваш файл — ничего не переносится, пока вы не нажмете «Перенести».'),
-        h('div', { class: 'profile-list' },
-          item({ ic: 'database', title: 'История-ставок.json', titleExtra: chip('Ставки', 'outline'), meta: n + ' ' + pl(n, 'ставка', 'ставки', 'ставок') + ' в файле — все уже в базе, новых нет' }),
-          item({ ic: 'wallet', title: 'Банк по ставкам', titleExtra: chip('Сходится', 'good', 'check'), meta: 'После последней ставки — ' + fmt.money(settledBets[n - 1].bankAfter) })),
-      ],
-      actions: close => [button('Закрыть', { kind: 'ghost', onClick: close }), button('Перенести', { kind: 'primary', icon: 'upload', disabled: true, title: 'Новых ставок нет' })],
-    });
-  }
-
+  // Удаление аккаунта самим участником (В10): пароль и код 2FA, 7 дней на отмену, вход в это время — только для отмены
   function dangerCard() {
     const adm = isAdmin();
     const adminsLeft = D.users.filter(u => u.role === 'admin' && u.status === 'active' && u.id !== me().id).length;
     const lists = h('div', { class: 'profile-del-grid' },
       h('div', null, h('h4', null, 'Удалится'),
         h('ul', { class: 'profile-bullets badlist' },
-          h('li', null, icon('trash'), h('span', null, 'Ставки и экспрессы (' + D.bets.length + ')')),
-          h('li', null, icon('trash'), h('span', null, 'Банк, его история и мои букмекеры')),
-          h('li', null, icon('trash'), h('span', null, 'Стратегия, ее версии и уроки модели')),
-          h('li', null, icon('trash'), h('span', null, 'Ключ Claude (если свой) и настройки')),
+          h('li', null, icon('trash'), h('span', null, 'Ставки и экспрессы (' + D.bets.length + '), банк и его журнал')),
+          h('li', null, icon('trash'), h('span', null, 'Стратегия, лимиты ответственной игры и мои букмекеры')),
+          h('li', null, icon('trash'), h('span', null, 'Ключ Claude (если свой) и настройки уведомлений')),
           h('li', null, icon('trash'), h('span', null, 'Сеансы, доверенные устройства и журнал входов')))),
       h('div', null, h('h4', null, 'Останется'),
         h('ul', { class: 'profile-bullets lock' },
           consent()
             ? h('li', null, icon('shield'), h('span', null, 'Обезличенные прогнозы — без имени и email, для обучения общей модели. Вы дали согласие (', h('a', { href: '#profile-consent', on: { click: e => { e.preventDefault(); scrollToId('profile-consent'); } } }, 'изменить'), ')'))
             : h('li', null, icon('x'), h('span', null, 'Прогнозы не останутся: согласия на обезличенное использование нет')),
+          h('li', null, icon('coins'), h('span', null, 'Расход на ИИ за месяц — в бюджете администратора: деньги уже потрачены')),
           h('li', null, icon('history'), h('span', null, 'Запись в журнале администратора, что аккаунт удален — без ваших данных')))));
     if (st.deletion) {
       return card({
         id: 'profile-delete', class: 'profile-anchor profile-danger', eyebrow: 'Опасная зона', title: 'Удаление аккаунта запланировано',
         body: [
-          UI.callout('bad', 'trash', h('b', null, 'Аккаунт и данные будут удалены ' + dateLong(st.deletion.until) + '. '), 'До этой даты можно передумать: вход и данные сохраняются, ИИ не запускается.'),
+          UI.callout('bad', 'trash', h('b', null, 'Аккаунт и данные будут удалены ' + dateLong(st.deletion.until) + '. '), 'До этой даты войти можно только для отмены: сеансы завершены, анализы и ставки недоступны.'),
+          h('p', { class: 'xsmall muted', style: 'margin:0' }, 'В приложении после запроса вас сразу выведет из аккаунта, а при входе будет один экран — «Отменить удаление». В макете кабинет остается открытым, чтобы показать отмену.'),
           lists,
         ],
         foot: [
           button('Отменить удаление', { kind: 'primary', icon: 'refresh', onClick: () => { st.deletion = null; drawHero(); drawPanel(); UI.toast('Удаление отменено. Аккаунт работает как раньше', 'check'); } }),
-          button('Скачать экспорт', { kind: 'ghost', icon: 'download', onClick: () => scrollToId('profile-export') }),
         ],
       });
     }
     if (adm && !adminsLeft) {
       return card({
         id: 'profile-delete', class: 'profile-anchor profile-danger', eyebrow: 'Опасная зона', title: 'Удалить аккаунт',
-        subtitle: 'Удалятся ставки, банк, стратегия, уроки, ключ и сеансы',
+        subtitle: 'Удалятся ставки, банк, стратегия, ключ и сеансы',
         body: [
           UI.callout('info', 'admin', h('b', null, 'Вы единственный администратор. '), 'Сначала назначьте другого администратора в «Администрирование → Участники» — без администратора программой некому управлять.'),
           lists,
@@ -1914,24 +1924,28 @@
         foot: [button('Удалить аккаунт', { kind: 'danger', icon: 'trash', disabled: true }), button('Участники', { kind: 'secondary', icon: 'users', href: '#admin-users' })],
       });
     }
-    const inp = h('input', { class: 'input', id: 'profile-del-email', type: 'email', autocomplete: 'off', spellcheck: 'false', placeholder: 'Ваш email', 'aria-describedby': 'profile-del-hint' });
-    const del = button('Удалить аккаунт', { kind: 'danger', icon: 'trash', disabled: true, onClick: () => {
-      st.deletion = { until: addDays(TODAY, 7) }; drawHero(); drawPanel();
-      UI.toast('Удаление запланировано на ' + dateDay(st.deletion.until), 'trash');
-    } });
-    inp.addEventListener('input', () => { del.disabled = inp.value.trim().toLowerCase() !== st.email.toLowerCase(); });
-    return card({
-      id: 'profile-delete', class: 'profile-anchor profile-danger', eyebrow: 'Опасная зона', title: 'Удалить аккаунт',
-      subtitle: 'Удалятся ставки, банк, стратегия, уроки, ключ и сеансы',
+    const pF = UI.field({ label: 'Пароль', id: 'profile-del-pass', type: 'password', autocomplete: 'current-password', hint: 'В макете подойдет любой, кроме «wrong»' });
+    const oF = UI.field({ label: 'Код 2FA', id: 'profile-del-otp', inputmode: 'numeric', autocomplete: 'one-time-code', placeholder: '123456', hint: '6 цифр из приложения-аутентификатора' });
+    return formCard({
+      id: 'profile-delete', class: 'profile-danger', eyebrow: 'Опасная зона', title: 'Удалить аккаунт',
+      subtitle: 'Удалятся ставки, банк, стратегия, ключ и сеансы',
       body: [
         lists,
-        h('p', { class: 'small soft', style: 'margin:0' }, 'После подтверждения у вас будет 7 дней, чтобы передумать. Потом данные удаляются безвозвратно, восстановить их не сможем. Сначала сделайте экспорт.'),
-        h('div', { class: 'field', style: 'max-width:420px' },
-          h('label', { class: 'field-label', for: 'profile-del-email' }, h('span', null, 'Введите ', h('b', { class: 'mono' }, st.email), ', чтобы подтвердить')),
-          inp,
-          h('div', { class: 'field-hint', id: 'profile-del-hint' }, 'Кнопка станет активной, когда адрес совпадет')),
+        h('p', { class: 'small soft', style: 'margin:0' }, 'После подтверждения у вас будет 7 дней, чтобы передумать: в это время войти можно только для отмены. Потом данные удаляются безвозвратно. Сначала скачайте экспорт.'),
+        h('div', { class: 'profile-fields collapse', style: 'max-width:560px' }, pF, oF),
       ],
-      foot: [del],
+      foot: [button('Удалить аккаунт', { kind: 'danger', type: 'submit', icon: 'trash' })],
+      onInput: e => { if (e && e.target) { if (e.target.id === 'profile-del-pass') setFieldError(pF, null); if (e.target.id === 'profile-del-otp') setFieldError(oF, null); } },
+      onSubmit: () => {
+        const p = valOf(pF), c = valOf(oF).replace(/\s/g, '');
+        let ok = true;
+        if (!p) ok = setFieldError(pF, 'Введите пароль');
+        else if (p === 'wrong') ok = setFieldError(pF, 'Пароль не подходит');
+        if (!/^\d{6}$/.test(c)) ok = setFieldError(oF, 'Нужно 6 цифр из приложения');
+        if (!ok) return;
+        st.deletion = { until: addDays(TODAY, 7) }; drawHero(); drawPanel();
+        UI.toast('Удаление запланировано на ' + dateDay(st.deletion.until) + '. До этого дня его можно отменить', 'trash');
+      },
     });
   }
 

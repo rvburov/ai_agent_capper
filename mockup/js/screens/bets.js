@@ -1,5 +1,6 @@
 /* Экран «Ставки»: итоги по фильтрам, открытые ставки с вводом результата и закрывающего кэфа,
-   история (таблица с раскрытием на компьютере, карточки и нижний лист на телефоне), разбор ставки ИИ.
+   история (таблица с раскрытием на компьютере, карточки и нижний лист на телефоне), вердикт кодом по CLV,
+   исправление результата (сторно и повторный расчет). Разбор ставки ИИ — этап 5.
    Все цифры — из window.DATA; расчет ставки меняет DATA в памяти (банк, статистика, история банка). */
 (function () {
   'use strict';
@@ -19,7 +20,8 @@
   const betKind = b => (b.legs.length > 1 ? 'Экспресс × ' + b.legs.length : 'Ординар');
   const betKindLong = b => (b.legs.length > 1 ? 'Экспресс из ' + b.legs.length + ' ' + plural(b.legs.length, 'события', 'событий', 'событий') : 'Ординар');
   const matchOf = l => D.matchesToday.find(m => m.p1 === l.p1 && m.p2 === l.p2);
-  const legRes = (b, l) => (b.status === 'void' ? 'void' : l.result);
+  // Т10: у проигранных экспрессов старого бота исходы ног не записаны
+  const legRes = (b, l) => (b.status === 'void' ? 'void' : l.noResult ? 'unknown' : l.result);
   const toneCls = v => (v == null ? 'muted' : v > 0 ? 'good-text' : v < 0 ? 'bad-text' : 'muted');
   const clvText = v => (v == null ? '—' : fmt.signedPct(v, 1));
   const pctOrDash = v => (v == null ? '—' : fmt.signedPct(v, 1));
@@ -34,50 +36,82 @@
   const payCur = (stake, k) => roundCur(inCur(stake) * k);                 // выплата в валюте программы
   const payRub = (stake, k) => fmt.fromMoney(payCur(stake, k));           // она же в рублях демо-данных
   const nbspCur = t => t.split(' ' + fmt.cur()).join('\u00a0' + fmt.cur()); // символ валюты не отрывается от числа
+  // В1: CLV ноги = кэф ÷ закрывающий − 1 по закрытию, которое внес участник; «без маржи» — кэф × q_close − 1,
+  // если внесены обе стороны закрытия (q_close — степенной метод, как ml/market.py)
   const legClv = l => (l.closing ? (l.odds / l.closing - 1) * 100 : null);
+  function devig(o1, o2) {
+    const a = 1 / o1, b = 1 / o2;
+    let lo = 0.2, hi = 5;
+    for (let i = 0; i < 60; i++) { const k = (lo + hi) / 2; if (a ** k + b ** k > 1) lo = k; else hi = k; }
+    return a ** ((lo + hi) / 2);
+  }
+  const fairClv = (odds, closing, opp) => (closing && opp ? (odds * devig(closing, opp) - 1) * 100 : null);
+  const isBot = b => b.source === 'bot';
+  // В5: старый бот закрывающих кэфов не записывал — CLV по его ставкам не считается, вместо числа прочерк с пояснением
+  const BOT_CLV = 'Старый бот закрывающих кэфов не записывал — CLV не считается';
+  const botDash = () => h('span', { class: 'muted', title: BOT_CLV }, '—');
+  const bestOfText = l => (l.bestOf === 5 ? 'до трех побед в сетах' : 'до двух побед в сетах');
   const surfLabel = k => (D.surfaces[k] ? D.surfaces[k].label : k);
 
   function plink(id) {
     const p = D.P[id];
+    // карточки в макете есть только у игроков из DATA.players; остальные соперники — просто имя
+    if (!p) return h('span', null, pname(id));
     return h('a', { class: 'bets-plink', href: '#player-' + id, title: p ? p.name + ' — карточка игрока' : id, on: { click: e => e.stopPropagation() } }, pname(id));
   }
 
-  const RES = { win: ['Зашло', 'check'], loss: ['Не зашло', 'x'], void: ['Возврат', 'refresh'], open: ['Еще не сыграно', 'clock'] };
+  const RES = { win: ['Зашло', 'check'], loss: ['Не зашло', 'x'], void: ['Возврат', 'refresh'], open: ['Еще не сыграно', 'clock'], unknown: ['Исход не записан старым ботом', 'info'] };
   function resIcon(r) {
     const [t, ic] = RES[r] || RES.open;
     return h('span', { class: 'bets-res ' + r, role: 'img', 'aria-label': t, title: t }, icon(ic));
   }
-  const RES_CHIP = { win: ['Зашло', 'good', 'check'], loss: ['Не зашло', 'bad', 'x'], void: ['Возврат', 'outline', 'refresh'], open: ['Ждем матч', 'info', 'clock'] };
+  const RES_CHIP = { win: ['Зашло', 'good', 'check'], loss: ['Не зашло', 'bad', 'x'], void: ['Возврат', 'outline', 'refresh'], open: ['Ждем матч', 'info', 'clock'], unknown: ['Не записан', 'outline', 'info'] };
   const resChip = r => { const [t, k, i] = RES_CHIP[r] || RES_CHIP.open; return chip(t, k, i); };
 
-  // Счет по сетам для истории (в демо-данных его нет): согласован с рынком и исходом
+  // Счет по сетам для истории (в демо-данных его нет): согласован с рынком, исходом и форматом матча.
+  // На турнирах Большого шлема матч до трех побед (best_of = 5): там Ф(−1.5) — это 3:0 и 3:1 (Т21)
   const SCORES = {
-    p1: { win: ['2:0', '2:1'], loss: ['1:2', '0:2'] },
-    p2: { win: ['0:2', '1:2'], loss: ['2:0', '2:1'] },
-    h1m: { win: ['2:0'], loss: ['2:1', '1:2', '0:2'] },
-    h2p: { win: ['2:1', '1:2', '0:2'], loss: ['2:0'] },
-    h1p: { win: ['2:1', '1:2', '2:0'], loss: ['0:2'] },
+    3: {
+      p1: { win: ['2:0', '2:1'], loss: ['1:2', '0:2'] },
+      p2: { win: ['0:2', '1:2'], loss: ['2:0', '2:1'] },
+      h1m: { win: ['2:0'], loss: ['2:1', '1:2', '0:2'] },
+      h2m: { win: ['0:2'], loss: ['2:0', '2:1', '1:2'] },
+      h1p: { win: ['2:1', '1:2', '2:0'], loss: ['0:2'] },
+      h2p: { win: ['2:1', '1:2', '0:2'], loss: ['2:0'] },
+    },
+    5: {
+      p1: { win: ['3:0', '3:1', '3:2'], loss: ['2:3', '1:3', '0:3'] },
+      p2: { win: ['0:3', '1:3', '2:3'], loss: ['3:0', '3:1', '3:2'] },
+      h1m: { win: ['3:0', '3:1'], loss: ['3:2', '2:3', '1:3', '0:3'] },
+      h2m: { win: ['0:3', '1:3'], loss: ['3:0', '3:1', '3:2', '2:3'] },
+      h1p: { win: ['3:0', '3:1', '3:2', '2:3'], loss: ['1:3', '0:3'] },
+      h2p: { win: ['0:3', '1:3', '2:3', '3:2'], loss: ['3:0', '3:1'] },
+    },
   };
   function legScore(b, l, i) {
     if (l.score) return l.score;
-    if (b.status === 'void' || l.result === 'open') return null;
-    const opts = (SCORES[l.market] || SCORES.p1)[l.result] || [];
+    if (b.status === 'void' || l.result === 'open' || l.noResult) return null;
+    const set = SCORES[l.bestOf === 5 ? 5 : 3];
+    const opts = (set[l.market] || set.p1)[l.result] || [];
     return opts.length ? opts[(b.id * 7 + i * 3) % opts.length] : null;
   }
-  // «2:0», «2-1», «21» → [2, 0]; матчи Masters — до двух выигранных сетов
-  function parseScore(s) {
+  // «2:0», «3-1», «21» → [2, 0]; матч до двух побед в сетах (best_of = 3) или до трех (best_of = 5)
+  function parseScore(s, bestOf) {
     const m = String(s).trim().match(/^(\d)\s*[:\-–.\s]?\s*(\d)$/);
     if (!m) return null;
-    const a = +m[1], b = +m[2];
-    return (a === 2 && b < 2) || (b === 2 && a < 2) ? [a, b] : null;
+    const a = +m[1], b = +m[2], need = bestOf === 5 ? 3 : 2;
+    return (a === need && b < need) || (b === need && a < need) ? [a, b] : null;
   }
+  const scoreExamples = bestOf => (bestOf === 5 ? '3:0, 3:1, 3:2, 2:3, 1:3 или 0:3' : '2:0, 2:1, 1:2 или 0:2');
+  // Исход ноги по счету — для ML и форы ±1.5 при любом формате матча (как ml/sets.py)
   function resultFromScore(market, a, b) {
     switch (market) {
       case 'p1': return a > b ? 'win' : 'loss';
       case 'p2': return b > a ? 'win' : 'loss';
       case 'h1m': return a - b >= 2 ? 'win' : 'loss';
-      case 'h2p': return a - b >= 2 ? 'loss' : 'win';
+      case 'h2m': return b - a >= 2 ? 'win' : 'loss';
       case 'h1p': return b - a >= 2 ? 'loss' : 'win';
+      case 'h2p': return a - b >= 2 ? 'loss' : 'win';
       default: return null;
     }
   }
@@ -86,12 +120,18 @@
     return isFinite(v) && v >= 1.01 && v <= 50 ? r2(v) : null;
   }
 
-  // Вердикт разбора: отделяем дисперсию от возможной ошибки модели по закрывающей линии
+  // Вердикт считает код по закрывающей линии (CLV), без вызова Claude: отделяем дисперсию от возможной ошибки модели.
+  // Подробный разбор ставки Claude — этап 5
   function verdict(b) {
-    if (b.status === 'void') return { label: 'Без разбора', kind: 'outline', icon: 'refresh' };
     if (b.status === 'open') return null;
-    if (b.status === 'win') return b.clv != null && b.clv < 0 ? { label: 'Выигрыш против рынка', kind: 'warn', icon: 'alert' } : { label: 'Перевес подтвержден', kind: 'good', icon: 'check' };
+    if (isBot(b)) return { label: 'Без вердикта · старый бот', kind: 'outline', icon: 'info' };
+    if (b.status === 'void') return { label: 'Возврат', kind: 'outline', icon: 'refresh' };
+    if (b.status === 'win') {
+      if (b.clv == null) return { label: 'Без закрытия', kind: 'outline', icon: 'info' };
+      return b.clv < 0 ? { label: 'Выигрыш против рынка', kind: 'warn', icon: 'alert' } : { label: 'Перевес подтвержден', kind: 'good', icon: 'check' };
+    }
     const lost = b.legs.filter(l => l.result === 'loss');
+    if (lost.every(l => legClv(l) == null)) return { label: 'Без закрытия', kind: 'outline', icon: 'info' };
     const against = lost.some(l => legClv(l) != null && legClv(l) < 0);
     return against ? { label: 'Возможна ошибка модели', kind: 'serious', icon: 'alert' } : { label: 'Дисперсия', kind: 'info', icon: 'info' };
   }
@@ -109,8 +149,10 @@
     { value: 'loss', label: 'Проигрыш' }, { value: 'void', label: 'Возврат' },
   ];
   const MARKET_OPTS = [{ value: 'all', label: 'Все рынки' }].concat(D.markets.map(m => ({ value: m.id, label: m.label })));
+  // В5: ставки старого Telegram-бота перенесены в историю; по умолчанию показываются вместе со ставками приложения
+  const SOURCE_OPTS = [{ value: 'all', label: 'Все источники' }, { value: 'app', label: 'Приложение' }, { value: 'bot', label: 'Старый бот' }];
   const SURF_KEYS = Object.keys(D.surfaces).filter(k => D.bets.some(b => b.surface === k));
-  const blank = () => ({ period: 'all', status: 'all', market: 'all', surfaces: new Set(), q: '' });
+  const blank = () => ({ period: 'all', status: 'all', market: 'all', source: 'all', surfaces: new Set(), q: '' });
   let F = blank();
   const PAGE = 20;
   let shown = PAGE;
@@ -120,12 +162,13 @@
   let justSaved = null; // номер ставки, только что сохраненной на экране «Анализ»
   let ui = null;
 
-  const norm = s => String(s).toLowerCase().replace(/е/g, 'е');
+  const norm = s => String(s).toLowerCase().replace(/\u0451/g, 'е');
   function matches(b, flt) {
     const p = PERIODS.find(x => x.id === flt.period);
     if (p && p.days && b.date <= addDays(TODAY, -p.days)) return false;
     if (flt.status !== 'all' && b.status !== flt.status) return false;
     if (flt.market !== 'all' && !b.legs.some(l => l.market === flt.market)) return false;
+    if (flt.source !== 'all' && b.source !== flt.source) return false;
     if (flt.surfaces.size && !flt.surfaces.has(b.surface)) return false;
     if (flt.q) {
       const q = norm(flt.q);
@@ -136,7 +179,7 @@
   }
   const newestFirst = (a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id);
   const filtered = (flt = F) => D.bets.filter(b => matches(b, flt)).sort(newestFirst);
-  const sheetActive = flt => (flt.status !== 'all' ? 1 : 0) + (flt.market !== 'all' ? 1 : 0) + flt.surfaces.size;
+  const sheetActive = flt => (flt.status !== 'all' ? 1 : 0) + (flt.market !== 'all' ? 1 : 0) + (flt.source !== 'all' ? 1 : 0) + flt.surfaces.size;
   const anyActive = flt => sheetActive(flt) + (flt.period !== 'all' ? 1 : 0) + (flt.q ? 1 : 0);
   function describe(flt) {
     const parts = [];
@@ -144,6 +187,7 @@
     parts.push(p.days ? 'за ' + p.label : 'за все время');
     if (flt.status !== 'all') parts.push(STATUS_OPTS.find(o => o.value === flt.status).label.toLowerCase());
     if (flt.market !== 'all') parts.push(MARKET_OPTS.find(o => o.value === flt.market).label);
+    if (flt.source !== 'all') parts.push(SOURCE_OPTS.find(o => o.value === flt.source).label.toLowerCase());
     if (flt.surfaces.size) parts.push([...flt.surfaces].map(k => surfLabel(k).toLowerCase()).join(', '));
     if (flt.q) parts.push('«' + flt.q + '»');
     return parts.join(' · ');
@@ -177,7 +221,8 @@
     .bets-mfilters { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
     .bets-mrow { display: flex; gap: 8px; min-width: 0; }
     .bets-mrow .bets-search { flex: 1 1 auto; }
-    .bets-mrow .btn { height: 38px; flex: none; }
+    .bets-mrow .btn { height: 40px; flex: none; }
+    .bets-mrow .bets-search .input { height: 40px; }
     .chip.bets-fcount { height: 20px; padding: 0 7px; margin-left: -2px; }
     .bets-mfilters .segmented { display: flex; width: 100%; }
     .bets-mfilters .segmented button { flex: 1; padding-inline: 6px; }
@@ -325,6 +370,7 @@
     .bets-dleg-grid > div { min-width: 0; }
     .bets-dleg-grid dt { font-size: 11px; color: var(--fg-3); white-space: nowrap; }
     .bets-dleg-grid dd { margin: 0; font-weight: 600; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .bets-dleg-grid dd small { display: block; margin-top: 1px; font-size: 11px; font-weight: 400; line-height: 1.3; color: var(--fg-3); white-space: normal; overflow-wrap: anywhere; }
 
     .bets-settle-intro { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: var(--fs-sm); color: var(--fg-2); }
     .bets-sleg { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -332,7 +378,7 @@
     .bets-sleg-head > div { min-width: 0; }
     .bets-sleg-match { font-weight: 600; }
     .bets-sleg-odds { font-size: var(--fs-lg); }
-    .bets-sleg-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, .75fr) minmax(0, .9fr); gap: 12px; align-items: start; }
+    .bets-sleg-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; align-items: start; }
     .bets-resseg { display: flex; padding: 3px; gap: 2px; background: var(--surface-2); border-radius: var(--r-md); min-width: 0; }
     .bets-resseg button { flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 36px; padding: 0 6px; border: 0; border-radius: 7px; background: transparent; color: var(--fg-2); font-size: var(--fs-sm); font-weight: 500; cursor: pointer; white-space: nowrap; }
     .bets-resseg button svg { width: 15px; height: 15px; flex: none; }
@@ -341,6 +387,14 @@
     .bets-resseg button.win[aria-pressed="true"] { background: var(--good-soft); color: var(--good-ink); box-shadow: inset 0 0 0 1px var(--good-ink); }
     .bets-resseg button.loss[aria-pressed="true"] { background: var(--bad-soft); color: var(--bad-ink); box-shadow: inset 0 0 0 1px var(--bad-ink); }
     .bets-sleg .input { height: 40px; }
+    .bets-close { border: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .bets-close > legend { padding: 0; margin-bottom: 6px; }
+    .bets-close-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: end; }
+    .bets-close-grid .field-label { flex-wrap: wrap; justify-content: flex-start; column-gap: 4px; }
+    .bets-opt { font-size: var(--fs-xs); color: var(--fg-3); font-weight: 400; }
+    .bets-close-hint { margin-top: -2px; }
+    .chip.bets-src { height: 20px; padding: 0 7px; margin-top: 4px; font-size: 11px; }
+    .bets-res.unknown { background: var(--surface-3); color: var(--fg-3); }
     .bets-auto { color: var(--accent-ink); }
     .bets-auto.warn { color: var(--warn-ink); }
     .bets-ssum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
@@ -348,9 +402,15 @@
     .bets-ssum dt { font-size: var(--fs-xs); color: var(--fg-3); }
     .bets-ssum dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; min-height: 24px; display: flex; align-items: center; }
     .bets-ssum small { font-size: 11px; color: var(--fg-3); font-weight: 400; }
+    @media (max-width: 960px) {
+      /* на телефоне цели касания не меньше 40px */
+      .bets-resseg button, .bets-chipbtn, .bets-active .bets-chipbtn, .bets-banner .row .btn { height: 40px; }
+    }
     @media (max-width: 720px) {
       .bets-sleg { padding: 12px; }
       .bets-sleg-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .bets-close-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .bets-close-grid > .field:first-child { grid-column: 1 / -1; }
       .bets-sleg-grid > .bets-sleg-res { grid-column: 1 / -1; }
       .bets-ssum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
@@ -367,7 +427,7 @@
     return h('div', { class: 'page-head bets-head' },
       h('div', { style: 'min-width:0' },
         h('h2', null, 'История ставок'),
-        h('p', { class: 'lead' }, 'Каждая ставка, сделанная по анализу ИИ. Внесите результат после матча: от него зависят банк, CLV и то, чему модель научится дальше.')),
+        h('p', { class: 'lead' }, 'Каждая ставка, сделанная по анализу ИИ, и история старого бота. Внесите результат после матча: от него зависят банк, CLV и точность модели в «Аналитике».')),
       button('Экспорт CSV', { kind: 'secondary', size: mobile ? 'sm' : null, icon: 'download', onClick: exportCsv }));
   }
   function exportCsv() {
@@ -407,6 +467,7 @@
       periodSeg(),
       nativeSelect('Статус ставки', STATUS_OPTS, F.status, v => { F.status = v; shown = PAGE; refresh(); }),
       nativeSelect('Рынок', MARKET_OPTS, F.market, v => { F.market = v; shown = PAGE; refresh(); }),
+      nativeSelect('Источник', SOURCE_OPTS, F.source, v => { F.source = v; shown = PAGE; refresh(); }),
       chips);
   }
 
@@ -417,6 +478,7 @@
     const active = [];
     if (F.status !== 'all') active.push([STATUS_OPTS.find(o => o.value === F.status).label, () => { F.status = 'all'; }]);
     if (F.market !== 'all') active.push([MARKET_OPTS.find(o => o.value === F.market).label, () => { F.market = 'all'; }]);
+    if (F.source !== 'all') active.push([SOURCE_OPTS.find(o => o.value === F.source).label, () => { F.source = 'all'; }]);
     F.surfaces.forEach(k => active.push([surfLabel(k), () => { F.surfaces.delete(k); }]));
     return h('div', { class: 'bets-mfilters', role: 'region', 'aria-label': 'Фильтры ставок' },
       h('div', { class: 'bets-mrow' }, searchBox(), fbtn),
@@ -427,7 +489,7 @@
   }
 
   function filterSheet() {
-    const d = { status: F.status, market: F.market, surfaces: new Set(F.surfaces) };
+    const d = { status: F.status, market: F.market, source: F.source, surfaces: new Set(F.surfaces) };
     let applyBtn = null;
     const upd = () => {
       if (!applyBtn) return;
@@ -441,6 +503,12 @@
       STATUS_OPTS.forEach(o => statusGroup.appendChild(h('button', { type: 'button', class: 'bets-chipbtn', 'aria-pressed': String(d.status === o.value), on: { click: () => { d.status = o.value; drawStatus(); upd(); } } }, o.value === 'all' ? 'Все' : o.label)));
     };
     drawStatus();
+    const sourceGroup = h('div', { class: 'bets-chipgroup', role: 'group', 'aria-label': 'Источник' });
+    const drawSource = () => {
+      UI.clear(sourceGroup);
+      SOURCE_OPTS.forEach(o => sourceGroup.appendChild(h('button', { type: 'button', class: 'bets-chipbtn', 'aria-pressed': String(d.source === o.value), on: { click: () => { d.source = o.value; drawSource(); upd(); } } }, o.value === 'all' ? 'Все' : o.label)));
+    };
+    drawSource();
     const surfGroup = h('div', { class: 'bets-chipgroup', role: 'group', 'aria-label': 'Покрытие' });
     const drawSurf = () => {
       UI.clear(surfGroup);
@@ -453,9 +521,10 @@
         h('div', { class: 'field' }, h('div', { class: 'field-label' }, 'Статус'), statusGroup),
         UI.field({ id: 'bets-sheet-market', label: 'Рынок', options: MARKET_OPTS, value: d.market, hint: 'Ставка попадет в выборку, если рынок есть хотя бы в одном событии экспресса', attrs: { on: { change: e => { d.market = e.target.value; upd(); } } } }),
         h('div', { class: 'field' }, h('div', { class: 'field-label' }, 'Покрытие'), surfGroup, h('div', { class: 'field-hint' }, 'Можно выбрать несколько')),
+        h('div', { class: 'field' }, h('div', { class: 'field-label' }, 'Источник'), sourceGroup, h('div', { class: 'field-hint' }, 'Старый бот — история, перенесенная из Telegram-бота: в банке и ROI есть, в CLV — нет')),
       ],
       actions: close => [
-        button('Сбросить', { kind: 'secondary', onClick: () => { close(); F = Object.assign(F, { status: 'all', market: 'all', surfaces: new Set() }); shown = PAGE; build(); } }),
+        button('Сбросить', { kind: 'secondary', onClick: () => { close(); F = Object.assign(F, { status: 'all', market: 'all', source: 'all', surfaces: new Set() }); shown = PAGE; build(); } }),
         applyBtn = button('Показать', { kind: 'primary', onClick: () => { close(); F = Object.assign(F, d); shown = PAGE; build(); } }),
       ],
     });
@@ -469,14 +538,14 @@
     const losses = st.filter(b => b.status === 'loss').length;
     const voids = st.filter(b => b.status === 'void').length;
     const turnover = sum(st, b => b.stake), profit = sum(st, b => b.profit);
-    const clvs = st.filter(b => b.clv != null);
+    const clvs = st.filter(b => b.clv != null && !isBot(b)); // В5: ставки старого бота в CLV не входят
     const open = list.filter(b => b.status === 'open');
     return {
       n: st.length, wins, losses, voids, turnover, profit,
       roi: turnover ? profit / turnover * 100 : null,
       winrate: wins + losses ? wins / (wins + losses) * 100 : null,
       clv: clvs.length ? sum(clvs, b => b.clv) / clvs.length : null,
-      clvPos: clvs.filter(b => b.clv > 0).length, clvN: clvs.length,
+      clvPos: clvs.filter(b => b.clv > 0).length, clvN: clvs.length, botN: st.filter(isBot).length,
       avgStake: st.length ? turnover / st.length : null,
       open, openStake: sum(open, b => b.stake),
     };
@@ -497,9 +566,9 @@
         cell('Оборот', fmt.money(s.turnover), s.avgStake ? ['в среднем ', h('span', { class: 'bets-nw' }, fmt.money(s.avgStake))] : '—'),
         cell('Прибыль', fmt.signedMoney(s.profit), anyActive(F) ? 'по выбранным ставкам' : ['банк сейчас ', h('span', { class: 'bets-nw' }, fmt.money(S.bank))], toneCls(s.profit)),
         cell('ROI', pctOrDash(s.roi), 'прибыль ÷ оборот', toneCls(s.roi)),
-        cell('Средний CLV', pctOrDash(s.clv), s.clvN ? ['лучше закрытия: ', h('span', { class: 'bets-nw' }, s.clvPos + ' из ' + s.clvN)] : 'нет закрывающих кэфов', toneCls(s.clv))),
+        cell('Средний CLV', pctOrDash(s.clv), s.clvN ? ['лучше закрытия: ', h('span', { class: 'bets-nw' }, s.clvPos + ' из ' + s.clvN)] : s.n && s.botN === s.n ? 'у старого бота не считается' : 'нет закрывающих кэфов', toneCls(s.clv))),
       h('div', { class: 'bets-sum-note' }, icon('info'),
-        h('span', null, 'CLV — на сколько ваш кэф выше закрывающего, то есть кэфа Pinnacle перед началом матча: Pinnacle — эталон рынка. Если CLV стабильно в плюсе, модель находит перевес, даже когда отдельные ставки проигрывают.')));
+        h('span', null, 'CLV = ваш кэф ÷ закрывающий − 1. Закрывающий кэф вы вносите сами: эталона (' + D.marketRefRule + ') или своего букмекера — в поле видно, чей. Внесете и вторую сторону — в «Аналитике» появится CLV без маржи. Ставки старого бота в CLV не входят. Если CLV стабильно в плюсе, модель находит перевес, даже когда отдельные ставки проигрывают.')));
   }
 
   // ---------- баннер после расчета ----------
@@ -508,15 +577,14 @@
     const b = D.bets.find(x => x.id === lastSettled.id);
     if (!b) return null;
     const res = b.status === 'win' ? 'выигрыш ' + fmt.signedMoney(b.profit) : b.status === 'loss' ? 'проигрыш ' + fmt.signedMoney(b.profit) : 'возврат, сумма вернулась на счет';
-    return h('div', { class: 'callout accent bets-banner', role: 'status' }, icon('brain'),
+    const v = verdict(b);
+    return h('div', { class: 'callout accent bets-banner', role: 'status' }, icon('check'),
       h('div', { class: 'bets-banner-body' },
-        h('div', null, h('b', null, 'Ставка №' + b.id + ' рассчитана: ' + res + '. '), 'Банк — ' + fmt.money(S.bank) + '.'),
-        h('div', null, b.status === 'void'
-          ? 'Возврат не участвует в обучении и калибровке, разбор не нужен.'
-          : 'ИИ сравнит прогноз с исходом и закрывающей линией. Если ошибка повторяется, предложит урок — в промпт он попадет только после проверки на 20+ похожих случаях.'),
+        h('div', null, h('b', null, 'Ставка №' + b.id + (lastSettled.corrected ? ' пересчитана: ' : ' рассчитана: ') + res + '. '), 'Банк — ' + fmt.money(S.bank) + '.' + (lastSettled.corrected ? ' ' + journalOnCorrect(b.correctedFrom) : '')),
+        h('div', { class: 'row', style: 'gap:6px' }, h('span', null, 'Вердикт по CLV:'), v && chip(v.label, v.kind, v.icon), h('span', null, reviewNext(b))),
+        h('div', { class: 'xsmall muted' }, 'При ручном расчете уведомление не приходит — только это сообщение. Разбор ставки ИИ появится на этапе 5.'),
         h('div', { class: 'row' },
-          b.status !== 'void' && button('Посмотреть разбор', { kind: 'secondary', size: 'sm', icon: 'spark', onClick: () => reviewModal(b) }),
-          button('Обучение модели', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', href: '#learning' }))),
+          button('Исправить результат', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: () => correctModal(b) }))),
       button('', { kind: 'ghost', size: 'sm', icon: 'x', title: 'Скрыть', onClick: () => { lastSettled = null; refresh(); } }));
   }
 
@@ -548,7 +616,7 @@
       h('ul', { class: 'bets-olegs' }, b.legs.map(l => {
         const m = matchOf(l);
         return h('li', { class: 'bets-oleg' },
-          h('span', { class: 'bets-oleg-time' }, m ? m.time : '—'),
+          h('span', { class: 'bets-oleg-time' }, m ? m.time : fmt.date(b.date)),
           h('div', { style: 'min-width:0' },
             h('div', { class: 'bets-oleg-match' }, plink(l.p1), ' — ', plink(l.p2)),
             h('div', { class: 'bets-oleg-meta', title: 'Вероятность исхода: оценка ИИ и вероятность по кэфу (1 / кэф)' }, h('b', null, l.marketLabel), ' · ', h('span', { class: 'bets-nw' }, 'ИИ ' + fmt.prob(l.p)), ' · ', h('span', { class: 'bets-nw' }, 'по кэфу ' + fmt.prob(1 / l.odds)))),
@@ -568,11 +636,12 @@
 
   // Короткая выжимка анализа, по которому сделана ставка: оценка модели против кэфа по каждой ноге и правило суммы
   function whyModal(b) {
-    const an = (D.ai && D.ai.runs || []).filter(r => r.type === 'analysis');
-    const run = an.filter(r => r.at.slice(0, 10) === b.date).pop();
-    const runId = run ? 'A-' + String(131 + an.indexOf(run)).padStart(4, '0') : null;
+    // анализ дня, после которого сделана ставка (анализ — запуск из нескольких вызовов Claude)
+    const run = ((D.ai && D.ai.analyses) || []).filter(a => a.at.slice(0, 10) === b.date).pop();
+    const runId = run ? run.id : null;
+    // 4 диапазона по коду (Т20): четвертый, 3.25–4.10, — только экспресс из 3 событий
     const T = D.strategy.stakeTable;
-    const band = b.total <= 1.70 ? T[0] : b.total <= 2.20 ? T[1] : T[2];
+    const band = b.total <= 1.70 ? T[0] : b.total <= 2.20 ? T[1] : b.total <= 3.24 ? T[2] : T[3];
     const bankAt = S.bank - (b.status === 'open' ? 0 : b.profit);
     UI.modal({
       title: 'Почему эта ставка · №' + b.id,
@@ -665,13 +734,14 @@
     const isExp = expanded.has(b.id);
     const tr = h('tr', { class: ['bets-row', isExp && 'is-expanded', lastSettled && lastSettled.id === b.id && 'is-new'], 'data-bet': String(b.id) },
       h('td', null, h('div', { class: 'bets-date' }, fmt.date(b.date)),
-        h('div', { class: 'bets-sub' }, h('i', { class: 'bets-dot', style: { background: D.surfaces[b.surface].color } }), b.tournament + ' · ' + surfLabel(b.surface).toLowerCase())),
+        h('div', { class: 'bets-sub' }, h('i', { class: 'bets-dot', style: { background: D.surfaces[b.surface].color } }), b.tournament + ' · ' + surfLabel(b.surface).toLowerCase()),
+        isBot(b) && h('span', { class: 'chip outline bets-src', title: 'Перенесена из старого Telegram-бота' }, 'старый бот')),
       h('td', null, b.legs.map(l => legLine(b, l))),
       h('td', { class: 'r' }, h('span', { class: 'odds' }, fmt.odds(b.total))),
       h('td', { class: 'r' }, fmt.money(b.stake)),
       h('td', null, UI.statusChip(b.status)),
       h('td', { class: 'r' }, h('span', { class: ['bets-profit', toneCls(b.profit)] }, fmt.signedMoney(b.profit))),
-      h('td', { class: 'r' }, h('span', { class: toneCls(b.clv) }, clvText(b.clv))),
+      h('td', { class: 'r' }, isBot(b) ? botDash() : h('span', { class: toneCls(b.clv) }, clvText(b.clv))),
       h('td', { class: 'r' }, h('button', { type: 'button', class: 'btn ghost sm icon-only bets-exp', 'aria-expanded': String(isExp), 'aria-label': 'Детали ставки №' + b.id }, icon('chevronDown'))));
     tr.addEventListener('click', () => toggleRow(tr, b));
     return tr;
@@ -689,15 +759,15 @@
   function legsTable(b) {
     const th = (t, cls, title) => h('th', { class: cls, title }, t);
     return h('div', { class: 'table-wrap' }, h('table', { class: 'table bets-legtable' },
-      h('thead', null, h('tr', null, th('Событие'), th('Счет', 'c'), th('Кэф', 'r'), th('Закрытие', 'r', 'Кэф перед началом матча'), th('CLV', 'r'), th('ИИ', 'r', 'Вероятность исхода по оценке ИИ'), th('По кэфу', 'r', 'Вероятность по кэфу: 1 / кэф'), th('Разница', 'r', 'ИИ − по кэфу, п.п.'), th('Итог'))),
+      h('thead', null, h('tr', null, th('Событие'), th('Счет', 'c'), th('Кэф', 'r'), th('Закрытие', 'r', 'Закрывающий кэф, который вы внесли, и чей он'), th('CLV', 'r'), th('ИИ', 'r', 'Вероятность исхода по оценке ИИ'), th('По кэфу', 'r', 'Вероятность по кэфу: 1 / кэф'), th('Разница', 'r', 'ИИ − по кэфу, п.п.'), th('Итог'))),
       h('tbody', null, b.legs.map((l, i) => {
         const implied = 1 / l.odds, edge = (l.p - implied) * 100, clv = legClv(l), sc = legScore(b, l, i);
         return h('tr', null,
-          h('td', null, h('div', { style: 'white-space:nowrap;font-weight:500' }, plink(l.p1), ' — ', plink(l.p2)), h('div', { class: 'xsmall muted' }, l.marketLabel + ' · ' + surfLabel(l.surface).toLowerCase())),
+          h('td', null, h('div', { style: 'white-space:nowrap;font-weight:500' }, plink(l.p1), ' — ', plink(l.p2)), h('div', { class: 'xsmall muted' }, l.marketLabel + ' · ' + surfLabel(l.surface).toLowerCase() + (l.bestOf === 5 ? ' · до 3 побед' : ''))),
           h('td', { class: 'c' }, h('span', { class: 'mono' }, sc || '—')),
           h('td', { class: 'r' }, h('span', { class: 'odds' }, fmt.odds(l.odds))),
-          h('td', { class: 'r' }, h('span', { class: 'odds' }, l.closing ? fmt.odds(l.closing) : '—')),
-          h('td', { class: 'r' }, h('span', { class: toneCls(clv) }, clvText(clv))),
+          h('td', { class: 'r' }, l.closing ? [h('span', { class: 'odds' }, fmt.odds(l.closing)), h('div', { class: 'xsmall muted', style: 'white-space:nowrap' }, closingWho(l))] : isBot(b) ? botDash() : h('span', { class: 'odds' }, '—')),
+          h('td', { class: 'r' }, isBot(b) ? botDash() : h('span', { class: toneCls(clv) }, clvText(clv))),
           h('td', { class: 'r' }, fmt.prob(l.p)),
           h('td', { class: 'r' }, fmt.prob(implied)),
           h('td', { class: 'r' }, h('span', { class: 'soft' }, signedPP(edge))),
@@ -714,7 +784,7 @@
       ['Выплата', fmt.money(payoutOf(b))],
       ['Прибыль', h('span', { class: toneCls(b.profit) }, fmt.signedMoney(b.profit))],
       ['Банк после', fmt.money(b.bankAfter)],
-      ['CLV ставки', h('span', { class: toneCls(b.clv) }, clvText(b.clv))],
+      ['CLV ставки', isBot(b) ? h('span', { class: 'muted' }, '— · старый бот') : h('span', { class: toneCls(b.clv) }, clvText(b.clv))],
       ['Шанс: ИИ / кэф', fmt.prob(pModel) + ' / ' + fmt.prob(1 / b.total)],
     ]);
   }
@@ -729,7 +799,7 @@
       c('Выплата', fmt.money(payoutOf(b))),
       c('Прибыль', fmt.signedMoney(b.profit), toneCls(b.profit)),
       c('Банк после', fmt.money(b.bankAfter)),
-      c('CLV ставки', clvText(b.clv), toneCls(b.clv)),
+      isBot(b) ? h('div', { title: BOT_CLV }, h('dt', null, 'CLV ставки'), h('dd', { class: 'muted' }, '— · старый бот')) : c('CLV ставки', clvText(b.clv), toneCls(b.clv)),
       c('Шанс: ИИ / кэф', fmt.prob(pModel) + ' / ' + fmt.prob(1 / b.total)));
   }
 
@@ -738,14 +808,22 @@
       h('div', { class: 'bets-detail-main' },
         h('div', { class: 'bets-detail-cap' }, h('h4', null, 'События ставки'), h('span', { class: 'xsmall muted' }, 'Разница = вероятность ИИ − вероятность по кэфу, п.п. CLV = кэф ÷ закрывающий − 1.')),
         legsTable(b),
-        b.status === 'void' && h('div', { class: 'bets-detail-note' }, UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счет. В калибровке и обучении не учитывается.'))),
+        b.status === 'void' && h('div', { class: 'bets-detail-note' }, UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счет. В калибровке и CLV не учитывается.')),
+        isBot(b) && h('div', { class: 'bets-detail-note' }, UI.callout('', 'info', botNote(b)))),
       h('div', { class: 'bets-detail-bottom' },
-        h('div', { class: 'bets-detail-box' }, h('span', { class: 'eyebrow' }, 'Расчет'), kvGrid(b)),
+        h('div', { class: 'bets-detail-box' }, h('span', { class: 'eyebrow' }, 'Расчет'), kvGrid(b), b.corrected && h('p', { class: 'xsmall muted' }, correctedNote(b))),
         h('div', { class: 'bets-detail-box' },
-          h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Разбор ИИ'), verdictChip(b)),
+          h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Вердикт по CLV'), verdictChip(b)),
           h('p', null, reviewNext(b)),
-          b.status !== 'void' && button('Открыть разбор', { kind: 'secondary', size: 'sm', icon: 'brain', onClick: () => reviewModal(b) }))));
+          h('p', { class: 'xsmall muted' }, 'Вердикт считает код по закрывающим кэфам, без запроса к ИИ. Разбор ставки ИИ — на этапе 5.'),
+          !isBot(b) && h('div', { class: 'row' },
+            button(b.legs.some(l => !l.closing && legRes(b, l) !== 'void') ? 'Внести закрытие' : 'Закрывающие кэфы', { kind: 'secondary', size: 'sm', icon: 'bolt', onClick: () => closingModal(b) }),
+            button('Исправить результат', { kind: 'ghost', size: 'sm', icon: 'edit', onClick: () => correctModal(b) })))));
   }
+  const closingWho = l => (l.closingBy === D.marketRef || l.closingBy === 'Betfair' || l.closingBy === 'средний' ? 'эталон · ' + l.closingBy : 'свой · ' + l.closingBy);
+  const botNote = b => 'Ставка перенесена из старого Telegram-бота: у нее есть сумма, кэф и итог, поэтому она входит в банк и ROI. Закрывающих кэфов, итоговой вероятности модели и рынка в момент прогноза бот не записывал, поэтому CLV, Brier против рынка и калибровка модели по ней не считаются.' + (b.legs.some(l => l.noResult) ? ' Исходы событий проигранного экспресса бот тоже не записывал.' : '');
+  const correctedNote = b => (b.status === 'open' ? 'Расчет отменен ' : 'Результат исправлен ') + fmt.date(b.corrected) + '. ' + journalOnCorrect(b.correctedFrom)
+    + (b.status === 'open' ? ' Внесите новый результат.' : b.status === 'loss' ? ' Новый проигрыш проводки не требует.' : ' Новая ' + (b.status === 'void' ? 'сумма возврата' : 'выплата') + ' записана отдельной проводкой.');
 
   function mobileList(rows, months) {
     const out = [];
@@ -768,7 +846,7 @@
       on: { click: open, keydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } } } },
       h('div', { class: 'bets-mcard-top' },
         h('div', null, h('div', { class: 'bets-mcard-date' }, fmt.date(b.date) + ' · ' + betKind(b)),
-          h('div', { class: 'bets-sub' }, h('i', { class: 'bets-dot', style: { background: D.surfaces[b.surface].color } }), b.tournament + ' · ' + surfLabel(b.surface).toLowerCase() + ' · №' + b.id)),
+          h('div', { class: 'bets-sub' }, h('i', { class: 'bets-dot', style: { background: D.surfaces[b.surface].color } }), b.tournament + ' · ' + surfLabel(b.surface).toLowerCase() + ' · №' + b.id + (isBot(b) ? ' · старый бот' : ''))),
         UI.statusChip(b.status)),
       h('ul', { class: 'bets-mlegs' }, b.legs.map(l => h('li', null, resIcon(legRes(b, l)), h('span', { class: 'm' }, D.match(l)), h('span', { class: 'k' }, l.marketLabel, h('span', { class: 'odds' }, fmt.odds(l.odds)))))),
       h('dl', { class: 'bets-mcard-sum' },
@@ -790,22 +868,25 @@
               h('div', { class: 'xsmall muted' }, fmt.dateFull(b.date) + ' · ' + betKind(b) + ' · ' + b.bookmaker),
               h('div', { class: ['bets-dm-profit', toneCls(b.profit)] }, b.status === 'open' ? fmt.money(b.stake) : fmt.signedMoney(b.profit))),
             UI.statusChip(b.status)),
-          v && h('div', { class: 'row' }, h('span', { class: 'small muted' }, 'Разбор ИИ:'), v),
+          v && h('div', { class: 'row' }, h('span', { class: 'small muted' }, 'Вердикт по CLV:'), v),
+          b.status !== 'open' && h('p', { class: 'small soft', style: 'margin:0' }, reviewNext(b)),
           b.legs.map((l, i) => {
             const clv = legClv(l), sc = legScore(b, l, i);
             return h('div', { class: 'bets-dleg' },
               h('div', { class: 'bets-dleg-head' }, resIcon(legRes(b, l)),
                 h('div', { style: 'min-width:0;flex:1' },
                   h('div', { class: 'bets-dleg-match' }, plink(l.p1), ' — ', plink(l.p2)),
-                  h('div', { class: 'xsmall muted' }, l.marketLabel + ' · ' + l.tournament + (sc ? ' · счет ' + sc : ''))),
+                  h('div', { class: 'xsmall muted' }, l.marketLabel + ' · ' + l.tournament + (sc ? ' · счет ' + sc : '') + (l.bestOf === 5 ? ' · до 3 побед' : ''))),
                 h('span', { class: 'odds' }, fmt.odds(l.odds))),
               h('dl', { class: 'bets-dleg-grid' },
-                h('div', null, h('dt', null, 'Закрытие'), h('dd', { class: 'odds' }, l.closing ? fmt.odds(l.closing) : '—')),
-                h('div', null, h('dt', null, 'CLV'), h('dd', { class: toneCls(clv) }, clvText(clv))),
+                h('div', { title: isBot(b) ? BOT_CLV : null }, h('dt', null, 'Закрытие'), h('dd', null, h('span', { class: 'odds' }, l.closing ? fmt.odds(l.closing) : '—'), l.closing && h('small', null, closingWho(l)))),
+                h('div', { title: isBot(b) ? BOT_CLV : null }, h('dt', null, 'CLV'), h('dd', { class: isBot(b) ? 'muted' : toneCls(clv) }, clvText(clv))),
                 h('div', null, h('dt', null, 'ИИ'), h('dd', null, fmt.prob(l.p))),
                 h('div', null, h('dt', null, 'По кэфу'), h('dd', null, fmt.prob(1 / l.odds)))));
           }),
           b.status === 'void' && UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счет.'),
+          isBot(b) && UI.callout('', 'info', botNote(b)),
+          b.corrected && h('p', { class: 'xsmall muted', style: 'margin:0' }, correctedNote(b)),
           b.status === 'open'
             ? UI.kv([['Букмекер', b.bookmaker], ['Итоговый кэф', h('span', { class: 'odds' }, fmt.odds(b.total))], ['Выплата при выигрыше', fmt.money(payRub(b.stake, b.total))]])
             : betKv(b),
@@ -813,63 +894,66 @@
       },
       actions: close => b.status === 'open'
         ? [button('Закрыть', { kind: 'secondary', onClick: close }), button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => { close(); settleModal(b); } })]
-        : [b.status !== 'void' && button('Разбор ИИ', { kind: 'secondary', icon: 'brain', onClick: () => { close(); reviewModal(b); } }), button('Закрыть', { kind: 'primary', onClick: close })].filter(Boolean),
+        : [!isBot(b) && button('Исправить', { kind: 'secondary', icon: 'edit', onClick: () => { close(); correctModal(b); } }), !isBot(b) && button('Закрытие', { kind: 'secondary', icon: 'bolt', onClick: () => { close(); closingModal(b); } }), button('Закрыть', { kind: 'primary', onClick: close })].filter(Boolean),
     });
   }
 
+  // Пояснение к вердикту кодом (без ИИ)
   function reviewNext(b) {
     const v = verdict(b);
-    if (b.status === 'void') return 'Возврат не участвует в калибровке и обучении.';
-    if (b.status === 'open') return 'Разбор появится после внесения результата.';
-    if (b.status === 'win') return v.kind === 'good' ? 'Урок не нужен: перевес модели подтвердили и результат, и закрывающая линия.' : 'Выигрыш не засчитан как подтверждение: на дистанции ставки с отрицательным CLV теряют деньги. Рынок отмечен для наблюдения.';
-    return v.kind === 'info' ? 'Урок не нужен: ошибки в оценке не найдено, проигрыш в пределах дисперсии. Ставка учтена в калибровке модели.' : 'Рынок не согласился с моделью. Предложена гипотеза для раздела «Обучение модели» — в промпт она попадет, только если подтвердится на 20 и более похожих случаях.';
-  }
-
-  // ---------- разбор ставки ИИ (пример) ----------
-  function reviewModal(b) {
-    const v = verdict(b);
-    const items = b.legs.map((l, i) => {
-      const clv = legClv(l), sc = legScore(b, l, i), r = legRes(b, l);
-      const head = h('b', null, D.match(l) + ' · ' + l.marketLabel + ' @' + fmt.odds(l.odds));
-      let text;
-      if (r === 'win') {
-        text = [' — зашло' + (sc ? ' (' + sc + ')' : '') + '. ИИ ' + fmt.prob(l.p) + ', по кэфу ' + fmt.prob(1 / l.odds) + '. ',
-          clv == null ? 'Закрывающий кэф не внесен — CLV не посчитать.' : clv >= 0 ? 'Кэф к старту упал до ' + fmt.odds(l.closing) + ' (CLV ' + fmt.signedPct(clv) + ') — рынок согласился с оценкой.' : 'Кэф к старту вырос до ' + fmt.odds(l.closing) + ' (CLV ' + fmt.signedPct(clv) + '): рынок был против, выигрыш скорее удачный.'];
-      } else if (r === 'loss') {
-        text = [' — не зашло' + (sc ? ' (' + sc + ')' : '') + '. ИИ давал ' + fmt.prob(l.p) + ', по кэфу ' + fmt.prob(1 / l.odds) + '. ',
-          clv == null ? 'Закрывающий кэф не внесен, поэтому отличить невезение от ошибки сложнее.'
-            : clv >= 0 ? 'К старту кэф упал до ' + fmt.odds(l.closing) + ' — рынок согласился с нами. Такой исход ожидаем примерно в ' + fmt.prob(1 - l.p) + ' случаев: это дисперсия.'
-              : 'К старту кэф вырос до ' + fmt.odds(l.closing) + ' — рынок оценил шансы ниже модели. Проверяю, что могло быть упущено: усталость после прошлого матча, новости, статистика на покрытии.',
-          l.market === 'h1m' ? ' Похоже на урок L-014 (фора −1.5 срезается тай-брейками) — случай добавлен в его доказательную базу.' : ''];
-      } else {
-        text = [' — возврат, в обучении не участвует.'];
-      }
-      return h('li', null, resIcon(r), h('div', { style: 'min-width:0' }, head, text));
-    });
-    const next = reviewNext(b);
-    UI.modal({
-      title: 'Разбор ставки №' + b.id,
-      wide: true,
-      body: [
-        UI.callout('info', 'info', 'Пример разбора. В рабочей версии его пишет Claude Sonnet 5.5 сразу после внесения результата, около $0,02 за ставку. Одна ставка не доказывает ошибку: невезение от систематического промаха отделяют только на дистанции.'),
-        h('div', { class: 'row' }, h('span', { class: 'small muted' }, fmt.dateFull(b.date) + ' · ' + betKind(b) + ' @' + fmt.odds(b.total) + ' · CLV ' + clvText(b.clv)), v && chip(v.label, v.kind, v.icon)),
-        h('h4', null, 'По событиям'),
-        h('ul', { class: 'bets-review-legs' }, items),
-        h('h4', null, 'Что дальше'),
-        h('p', { class: 'small soft' }, next),
-      ],
-      actions: close => [button('Обучение модели', { kind: 'secondary', icon: 'brain', href: '#learning' }), button('Понятно', { kind: 'primary', onClick: close })],
-    });
+    if (b.status === 'open') return 'Вердикт появится после внесения результата.';
+    if (isBot(b)) return 'Ставка старого бота: CLV и вердикт по ней не считаются.';
+    if (b.status === 'void') return 'Возврат не участвует в CLV и калибровке.';
+    if (v.label === 'Без закрытия') return 'Закрывающий кэф не внесен — по CLV не отличить невезение от ошибки модели. Его можно внести и сейчас.';
+    if (b.status === 'win') return v.kind === 'good' ? 'Ставка выиграла, и к старту линия ушла в вашу сторону: рынок согласился с оценкой.' : 'Ставка выиграла, но к старту линия ушла против вас (CLV ниже нуля). На дистанции такие ставки теряют деньги.';
+    return v.kind === 'info' ? 'По закрывающим кэфам рынок был согласен с вашей ценой: проигрыш в пределах дисперсии.' : 'У проигравшего события линия к старту ушла против вас: рынок оценил шансы ниже модели. Если такое повторяется на одном рынке или покрытии, это будет видно в «Аналитике».';
   }
 
   // ---------- внесение результата ----------
-  const CLOSE_HINT = 'кэф Pinnacle перед началом матча'; // эталон рынка для всех (Р17)
+  // В1: чей закрывающий кэф вносит участник — эталона по Р17 (по порядку Pinnacle → Betfair → средний по рынку)
+  // или своего букмекера. Своя сторона нужна для CLV, вторая — по желанию: с ней есть рынок закрытия без маржи
+  const CLOSE_WHO = b => [
+    { value: 'Pinnacle', label: 'Pinnacle — эталон' },
+    { value: 'Betfair', label: 'Betfair — эталон' },
+    { value: 'средний', label: 'Средний по рынку — эталон' },
+  ].concat(b.bookmaker && b.bookmaker !== 'Pinnacle' ? [{ value: b.bookmaker, label: b.bookmaker + ' — ваш букмекер' }] : []);
   const RES_OPTS = [{ id: 'win', label: 'Выиграл', icon: 'check' }, { id: 'loss', label: 'Проиграл', icon: 'x' }, { id: 'void', label: 'Возврат', icon: 'refresh' }];
   const RES_WORD = { win: 'выиграла', loss: 'проиграла', void: 'возврат' };
 
-  function settleModal(b) {
+  // Поля закрывающего кэфа одной ноги: чей кэф, ваш исход, противоположный исход (по желанию) и подсказка с CLV
+  function closingFields(b, l, id, s, onChange) {
+    const whoF = UI.field({ id: id + '-who', label: 'Чей кэф', options: CLOSE_WHO(b), value: s.closingBy || 'Pinnacle' });
+    const ownF = UI.field({ id: id + '-own', label: 'На ваш исход', placeholder: fmt.odds(l.odds), inputmode: 'decimal', value: s.closing ? fmt.odds(s.closing) : null, attrs: { autocomplete: 'off', maxlength: '5' } });
+    const oppF = UI.field({ id: id + '-opp', label: 'На обратный исход', labelAside: h('span', { class: 'bets-opt' }, 'по желанию'), placeholder: fmt.odds(l.oddsOpp || 2), inputmode: 'decimal', value: s.closingOpp ? fmt.odds(s.closingOpp) : null, attrs: { autocomplete: 'off', maxlength: '5' } });
+    const hint = h('div', { class: 'field-hint bets-close-hint', 'aria-live': 'polite' });
+    const ownIn = ownF.querySelector('input'), oppIn = oppF.querySelector('input'), whoSel = whoF.querySelector('select');
+    ownIn.classList.add('mono'); oppIn.classList.add('mono');
+    const draw = () => {
+      const rawO = ownIn.value.trim(), rawP = oppIn.value.trim();
+      const o = parseOdds(rawO), q = parseOdds(rawP);
+      const badO = !!rawO && !o && rawO.length >= 3, badP = !!rawP && !q && rawP.length >= 3;
+      ownIn.classList.toggle('invalid', badO); oppIn.classList.toggle('invalid', badP);
+      s.closing = o; s.closingOpp = o && q ? q : null; s.closingBy = whoSel.value;
+      UI.clear(hint); hint.className = 'field-hint bets-close-hint';
+      if (badO || badP) { hint.className = 'field-error bets-close-hint'; hint.textContent = 'Кэф от 1.01, например ' + fmt.odds(l.odds); }
+      else if (o) {
+        const clv = (l.odds / o - 1) * 100, fair = fairClv(l.odds, o, s.closingOpp);
+        hint.append('Перед стартом · ', h('b', { class: [toneCls(clv), 'bets-nw'] }, 'CLV ' + fmt.signedPct(clv)),
+          ...(fair != null ? [' · ', h('b', { class: [toneCls(fair), 'bets-nw'] }, 'без маржи ' + fmt.signedPct(fair))] : [' · вторая сторона даст CLV без маржи']));
+      } else hint.textContent = 'Можно внести позже. Без закрывающего кэфа CLV не посчитать.';
+      onChange && onChange();
+    };
+    ownIn.addEventListener('input', draw); oppIn.addEventListener('input', draw); whoSel.addEventListener('change', draw);
+    draw();
+    return h('fieldset', { class: 'bets-close', style: 'margin:0' },
+      h('legend', { class: 'field-label' }, 'Закрывающий кэф'),
+      h('div', { class: 'bets-close-grid' }, whoF, ownF, oppF), hint);
+  }
+
+  // prefill — прошлый расчет при исправлении результата
+  function settleModal(b, prefill) {
     if (b.status !== 'open') { detailModal(b); return; }
-    const st = b.legs.map(() => ({ result: null, score: null, closing: null, auto: false }));
+    const st = b.legs.map((l, i) => Object.assign({ result: null, score: null, closing: null, closingOpp: null, closingBy: null, auto: false }, prefill ? prefill[i] : null));
     const sumHost = h('div', { class: 'stack', style: 'gap:8px', 'aria-live': 'polite' });
     const formId = 'bets-settle-' + b.id;
     let saveBtn = null;
@@ -894,7 +978,7 @@
         cell('Выплата', o ? fmt.money(o.payout) : '—', o && o.eff && o.eff !== b.total ? 'кэф пересчитан: ' + fmt.odds(o.eff) : 'кэф ' + fmt.odds(b.total)),
         cell('Прибыль', o ? h('span', { class: toneCls(o.profit) }, fmt.signedMoney(o.profit)) : '—'),
         cell('Банк после', o ? fmt.money(S.bank + o.profit) : '—', 'сейчас ' + fmt.money(S.bank))));
-      if (!complete) sumHost.appendChild(h('div', { class: 'field-hint' }, o ? 'Ставка уже проиграна, но отметьте исход и по остальным событиям — они нужны модели для калибровки.' : 'Отметьте исход по каждому событию, чтобы рассчитать ставку.'));
+      if (!complete) sumHost.appendChild(h('div', { class: 'field-hint' }, o ? 'Ставка уже проиграна, но отметьте исход и по остальным событиям — они нужны для калибровки.' : 'Отметьте исход по каждому событию, чтобы рассчитать ставку.'));
       else if (o.status === 'win' && st.some(s => s.result === 'void')) sumHost.appendChild(h('div', { class: 'field-hint' }, 'Событие с возвратом считается с кэфом 1,00 — так рассчитывают экспрессы букмекеры.'));
       if (saveBtn) saveBtn.disabled = !complete;
     };
@@ -911,103 +995,172 @@
         drawSum();
       };
       const checkConflict = () => {
-        const sc = s.score && parseScore(s.score);
+        const sc = s.score && parseScore(s.score, l.bestOf);
         const fromScore = sc ? resultFromScore(l.market, sc[0], sc[1]) : null;
         if (s.auto) { autoNote.hidden = false; autoNote.className = 'field-hint bets-auto'; autoNote.textContent = 'Отметили по счету — можно поправить'; }
         else if (fromScore && s.result && fromScore !== s.result) { autoNote.hidden = false; autoNote.className = 'field-hint bets-auto warn'; autoNote.textContent = 'По счету ставка ' + RES_WORD[fromScore] + ' — проверьте, что выбрано верно'; }
         else autoNote.hidden = true;
       };
       const seg = h('div', { class: 'bets-resseg', role: 'group', 'aria-label': 'Исход ставки на матч ' + D.match(l) },
-        RES_OPTS.map(o => (btns[o.id] = h('button', { type: 'button', class: o.id, 'aria-pressed': 'false', on: { click: () => setRes(o.id, false) } }, icon(o.icon), o.label))));
+        RES_OPTS.map(o => (btns[o.id] = h('button', { type: 'button', class: o.id, 'aria-pressed': String(s.result === o.id), on: { click: () => setRes(o.id, false) } }, icon(o.icon), o.label))));
 
-      const scoreF = UI.field({ id: formId + '-score-' + i, label: 'Счет по сетам', placeholder: '2:0', hint: 'первым — ' + pname(l.p1), attrs: { autocomplete: 'off', maxlength: '5' } });
+      const scoreHintText = 'первым — ' + pname(l.p1) + ' · ' + (l.bestOf === 5 ? 'до 3 побед' : 'до 2 побед');
+      const scoreF = UI.field({ id: formId + '-score-' + i, label: 'Счет по сетам', placeholder: l.bestOf === 5 ? '3:1' : '2:0', value: s.score, hint: scoreHintText, attrs: { autocomplete: 'off', maxlength: '5' } });
       const scoreIn = scoreF.querySelector('input'), scoreHint = scoreF.querySelector('.field-hint');
       scoreIn.classList.add('mono');
       scoreIn.addEventListener('input', () => {
         const v = scoreIn.value.trim();
         s.score = v || null;
-        const sc = parseScore(v);
+        const sc = parseScore(v, l.bestOf);
         if (!v) {
-          scoreIn.classList.remove('invalid'); scoreHint.className = 'field-hint'; scoreHint.textContent = 'первым — ' + pname(l.p1);
+          scoreIn.classList.remove('invalid'); scoreHint.className = 'field-hint'; scoreHint.textContent = scoreHintText;
           if (s.auto) setRes(null); else checkConflict();
           return;
         }
         if (!sc) {
-          if (v.replace(/\D/g, '').length >= 2) { scoreIn.classList.add('invalid'); scoreHint.className = 'field-error'; scoreHint.textContent = 'Матч до двух сетов: 2:0, 2:1, 1:2 или 0:2'; }
+          if (v.replace(/\D/g, '').length >= 2) { scoreIn.classList.add('invalid'); scoreHint.className = 'field-error'; scoreHint.textContent = 'Матч ' + bestOfText(l) + ': ' + scoreExamples(l.bestOf); }
           return;
         }
-        scoreIn.classList.remove('invalid'); scoreHint.className = 'field-hint'; scoreHint.textContent = 'первым — ' + pname(l.p1);
+        scoreIn.classList.remove('invalid'); scoreHint.className = 'field-hint'; scoreHint.textContent = scoreHintText;
         const r = resultFromScore(l.market, sc[0], sc[1]);
         if (!s.result || s.auto) setRes(r, true); else checkConflict();
-      });
-
-      const closeF = UI.field({ id: formId + '-close-' + i, label: 'Закрывающий кэф', placeholder: fmt.odds(l.odds), inputmode: 'decimal', hint: CLOSE_HINT, attrs: { autocomplete: 'off', maxlength: '5' } });
-      const closeIn = closeF.querySelector('input'), closeHint = closeF.querySelector('.field-hint');
-      closeIn.classList.add('mono');
-      closeIn.addEventListener('input', () => {
-        const raw = closeIn.value.trim();
-        const v = parseOdds(raw);
-        s.closing = v;
-        UI.clear(closeHint);
-        closeIn.classList.toggle('invalid', !!raw && !v && raw.length >= 3);
-        if (raw && !v && raw.length >= 3) { closeHint.className = 'field-error'; closeHint.textContent = 'Кэф от 1.01, например ' + fmt.odds(l.odds); return; }
-        closeHint.className = 'field-hint';
-        if (v) { const clv = (l.odds / v - 1) * 100; closeHint.append('Pinnacle перед стартом · ', h('b', { class: [toneCls(clv), 'bets-nw'] }, 'CLV ' + fmt.signedPct(clv))); }
-        else closeHint.textContent = CLOSE_HINT;
       });
 
       return h('fieldset', { class: 'bets-sleg', style: 'margin:0' },
         h('legend', { class: 'sr-only' }, 'Событие ' + (i + 1) + ': ' + D.match(l)),
         h('div', { class: 'bets-sleg-head' },
           h('div', null, h('div', { class: 'bets-sleg-match' }, D.match(l)),
-            h('div', { class: 'xsmall muted' }, (m ? m.time + ' · ' + m.round + ' · ' : '') + l.marketLabel + ' · ИИ ' + fmt.prob(l.p))),
+            h('div', { class: 'xsmall muted' }, (m ? m.time + ' · ' + m.round + ' · ' : fmt.date(b.date) + ' · ' + l.tournament + ' · ') + l.marketLabel + ' · ИИ ' + fmt.prob(l.p) + ' · матч ' + bestOfText(l))),
           h('span', { class: 'odds bets-sleg-odds', 'aria-label': 'Кэф ' + fmt.odds(l.odds) }, fmt.odds(l.odds))),
         h('div', { class: 'bets-sleg-grid' },
           h('div', { class: 'field bets-sleg-res' }, h('div', { class: 'field-label' }, 'Исход ставки'), seg, autoNote),
-          scoreF, closeF));
+          scoreF),
+        closingFields(b, l, formId + '-close-' + i, s));
     }
 
     const save = close => {
       const o = outcome();
       if (!o || !st.every(s => s.result)) { UI.toast('Отметьте исход по каждому событию', 'alert'); return; }
-      applySettle(b, st, o);
+      applySettle(b, st, o, !!prefill);
       close();
       UI.rerender();
-      UI.toast(nbspCur('Ставка №' + b.id + ' рассчитана: ' + (o.status === 'void' ? 'возврат' : fmt.signedMoney(o.profit)) + ', банк ' + fmt.money(S.bank)), o.status === 'loss' ? 'x' : 'check');
+      UI.toast(nbspCur('Ставка №' + b.id + (prefill ? ' пересчитана: ' : ' рассчитана: ') + (o.status === 'void' ? 'возврат' : fmt.signedMoney(o.profit)) + ', банк ' + fmt.money(S.bank)), o.status === 'loss' ? 'x' : 'check');
     };
 
     UI.modal({
-      title: 'Результат ставки №' + b.id,
+      title: (prefill ? 'Исправить результат №' : 'Результат ставки №') + b.id,
       wide: true,
       body: close => {
         const form = h('form', { id: formId, class: 'stack', novalidate: true, on: { submit: e => { e.preventDefault(); save(close); } } },
           h('div', { class: 'bets-settle-intro' }, UI.statusChip('open'), h('span', null, betKindLong(b) + ' · ' + b.bookmaker + ' · сумма ' + fmt.money(b.stake) + ' · кэф ', h('span', { class: 'odds' }, fmt.odds(b.total)))),
+          prefill && UI.callout('warn', 'edit', h('b', null, b.correctedFrom === 'loss' ? 'Прошлый расчет уже отменен. ' : 'Прошлый расчет уже отменен сторно. '), 'Поля заполнены прежними значениями — исправьте неверное и сохраните. Если закрыть окно, ставка останется открытой.'),
           b.legs.map(legBlock),
           sumHost,
-          UI.callout('accent', 'brain', h('b', null, 'После расчета модель разберет ошибки и предложит урок. '), 'Она сравнит свою вероятность с исходом и закрывающей линией. Закрывающий кэф можно не вносить, но без него CLV не посчитать и отличить невезение от ошибки сложнее.'));
+          UI.callout('', 'info', h('b', null, 'Снятие и отказ. '), 'Если игрок снялся или не вышел на матч, выберите исход по правилам вашего букмекера: у одних ставка проигрывает, у других — возврат. Счет можно не вносить.'));
         drawSum();
         return form;
       },
       actions: close => [
         button('Отмена', { kind: 'secondary', onClick: close }),
-        saveBtn = button('Сохранить результат', { kind: 'primary', icon: 'check', type: 'submit', attrs: { form: formId } }),
+        saveBtn = button(prefill ? 'Сохранить исправление' : 'Сохранить результат', { kind: 'primary', icon: 'check', type: 'submit', attrs: { form: formId } }),
       ],
     });
     drawSum();
   }
 
-  function applySettle(b, st, o) {
+  // Исправить результат (Р22): ставка снова открыта, затем вносится новый результат. У выигрыша и возврата выплата
+  // отменяется сторно (reversal к payout или refund); у проигрыша выплаты не было — в журнале новой проводки нет,
+  // сумма ставки просто снова в игре. Задним числом меняются банк, пик и просадка, а значит и суммы следующих ставок
+  const journalOnCorrect = from => (from === 'loss'
+    ? 'Прошлый расчет отменен: при проигрыше выплаты не было, поэтому сторно в журнале банка нет.'
+    : 'Прошлая выплата отменена сторно, оба движения — в журнале банка.');
+  function correctModal(b) {
+    if (b.status === 'open') { settleModal(b); return; }
+    const loss = b.status === 'loss';
+    const what = loss
+      ? 'Ставка снова станет открытой: ' + fmt.money(b.stake) + ' опять в игре, банк с учетом ставок в игре станет ' + fmt.money(S.bank - b.profit) + '. В журнале банка проводки не будет — при проигрыше выплаты не было, сумма ставки списана еще при ее создании.'
+      : 'Расчет отменится сторно: ' + (b.status === 'win' ? 'выплата ' + fmt.money(b.stake + b.profit) : 'возврат ' + fmt.money(b.stake)) + ' спишется обратной проводкой, и ставка снова станет открытой.';
+    UI.modal({
+      title: 'Исправить результат №' + b.id,
+      body: [
+        h('p', { class: 'small soft' }, nbspCur(what) + ' Сразу откроется окно результата с прежними значениями.'),
+        UI.kv([['Сейчас', UI.statusChip(b.status)], ['Прибыль', h('span', { class: toneCls(b.profit) }, fmt.signedMoney(b.profit))], ['Банк сейчас', fmt.money(S.bank)], [loss ? 'Банк после отмены' : 'Банк после сторно', fmt.money(S.bank - b.profit)]]),
+        UI.callout('warn', 'alert', 'Исправление меняет банк задним числом: пик и просадку, а значит и правила адаптации для следующих ставок.' + (loss ? '' : ' В журнале банка останутся обе проводки — исходная и сторно.')),
+      ],
+      actions: close => [
+        button('Отмена', { kind: 'secondary', onClick: close }),
+        button('Отменить расчет и исправить', { kind: 'primary', icon: 'edit', onClick: () => { close(); const prev = reverseSettle(b); UI.rerender(); setTimeout(() => settleModal(b, prev), 60); } }),
+      ],
+    });
+  }
+
+  function reverseSettle(b) {
+    const prev = b.legs.map((l, i) => ({ result: l.noResult ? null : l.result, score: legScore(b, l, i), closing: l.closing || null, closingOpp: l.closingOpp || null, closingBy: l.closingBy || null }));
+    S.bank -= b.profit;
+    S.profit -= b.profit; S.turnover -= b.stake; S.settled--; S.open++;
+    if (b.status === 'win') S.wins--; else if (b.status === 'loss') S.losses--; else S.voids--;
+    S.roi = r1(S.profit / S.turnover * 100);
+    S.winrate = r1(S.wins / (S.wins + S.losses) * 100);
+    D.bankHistory.push({ date: TODAY, bank: S.bank });
+    D.allLegs = D.allLegs.filter(x => x.betId !== b.id);
+    b.correctedFrom = b.status;
+    b.status = 'open'; b.profit = 0; b.bankAfter = null; b.clv = null; b.effTotal = null;
+    b.legs.forEach(l => { l.result = 'open'; l.score = null; delete l.noResult; });
+    b.corrected = TODAY;
+    expanded.delete(b.id);
+    lastSettled = null;
+    return prev;
+  }
+
+  // Закрывающие кэфы рассчитанной ставки можно внести позже (PUT …/legs/{id}/closing): CLV пересчитывается
+  function closingModal(b) {
+    const st = b.legs.map(l => ({ closing: l.closing || null, closingOpp: l.closingOpp || null, closingBy: l.closingBy || null }));
+    UI.modal({
+      title: 'Закрывающие кэфы · №' + b.id,
+      wide: true,
+      body: [
+        h('p', { class: 'small soft' }, 'Кэф перед началом матча — эталона (' + D.marketRefRule + ') или своего букмекера. CLV ставки считается, когда внесены кэфы всех событий, кроме возвратов.'),
+        b.legs.map((l, i) => h('div', { class: 'bets-sleg' },
+          h('div', { class: 'bets-sleg-head' }, h('div', null, h('div', { class: 'bets-sleg-match' }, D.match(l)), h('div', { class: 'xsmall muted' }, l.marketLabel + ' · ' + fmt.date(b.date))), h('span', { class: 'odds bets-sleg-odds' }, fmt.odds(l.odds))),
+          legRes(b, l) === 'void' ? h('p', { class: 'xsmall muted' }, 'Возврат — для CLV не нужен') : closingFields(b, l, 'bets-cl-' + b.id + '-' + i, st[i]))),
+      ],
+      actions: close => [
+        button('Отмена', { kind: 'secondary', onClick: close }),
+        button('Сохранить', { kind: 'primary', icon: 'check', onClick: () => {
+          b.legs.forEach((l, i) => { if (legRes(b, l) === 'void') return; applyClosing(l, st[i]); });
+          b.clv = betClv(b);
+          D.allLegs.filter(x => x.betId === b.id).forEach((x, i) => { const l = b.legs[i]; Object.assign(x, { closing: l.closing, closingOpp: l.closingOpp, closingBy: l.closingBy, qClose: l.qClose }); });
+          close(); UI.rerender();
+          UI.toast('Закрывающие кэфы сохранены' + (b.clv != null ? ': CLV ставки ' + fmt.signedPct(b.clv) : ''), 'bolt');
+        } }),
+      ],
+    });
+  }
+  function applyClosing(l, s) {
+    l.closing = s.closing || null;
+    l.closingOpp = s.closing && s.closingOpp ? s.closingOpp : null;
+    l.closingBy = s.closing ? (s.closingBy || 'Pinnacle') : null;
+    l.qClose = l.closing && l.closingOpp ? Math.round(devig(l.closing, l.closingOpp) * 1000) / 1000 : null;
+    if (!l.closingOpp) delete l.qClose;
+  }
+  // CLV экспресса: Π кэфов ÷ Π закрытий − 1 по не-возвратным событиям, только если внесены все (В1)
+  function betClv(b) {
+    const live = b.legs.filter(l => l.result !== 'void');
+    return live.length && live.every(l => l.closing) ? r1((live.reduce((a, l) => a * l.odds, 1) / live.reduce((a, l) => a * l.closing, 1) - 1) * 100) : null;
+  }
+
+  function applySettle(b, st, o, corrected) {
     b.legs.forEach((l, i) => {
       l.result = st[i].result;
-      const sc = st[i].score && parseScore(st[i].score);
+      const sc = st[i].score && parseScore(st[i].score, l.bestOf);
       l.score = sc ? sc[0] + ':' + sc[1] : null;
-      l.closing = st[i].closing || null;
+      applyClosing(l, st[i]);
     });
     b.status = o.status;
     b.profit = o.profit;
     b.effTotal = o.eff && o.eff !== b.total ? o.eff : null;
-    const live = b.legs.filter(l => l.result !== 'void');
-    b.clv = live.length && live.every(l => l.closing) ? r1((live.reduce((a, l) => a * l.odds, 1) / live.reduce((a, l) => a * l.closing, 1) - 1) * 100) : null;
+    b.clv = betClv(b);
+    b.settledBy = 'manual';
     S.bank += o.profit;
     b.bankAfter = S.bank;
     S.profit += o.profit; S.turnover += b.stake; S.settled++; S.open = Math.max(0, S.open - 1);
@@ -1019,8 +1172,9 @@
     if (clvs.length) S.clvAvg = r1(sum(clvs, x => x.clv) / clvs.length);
     S.streak = S.streak.type === o.status ? { type: o.status, n: S.streak.n + 1 } : { type: o.status, n: 1 };
     D.bankHistory.push({ date: TODAY, bank: S.bank });
-    b.legs.forEach(l => { if ((l.result === 'win' || l.result === 'loss') && l.closing) D.allLegs.push(Object.assign({ date: TODAY, betId: b.id }, l)); });
-    lastSettled = { id: b.id };
+    // события с исходом идут в калибровку и Brier (рынок — при прогнозе, В2), с закрытием — еще и в CLV
+    b.legs.forEach(l => { if (l.result === 'win' || l.result === 'loss') D.allLegs.push(Object.assign({ date: b.date, betId: b.id, source: b.source }, l)); });
+    lastSettled = { id: b.id, corrected: !!corrected };
     expanded.add(b.id);
   }
 

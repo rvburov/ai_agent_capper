@@ -38,6 +38,7 @@
   const P = Object.fromEntries(players.map(p => [p.id, p]));
 
   // Календарь туров (июль–октябрь 2026)
+  // На турнирах Большого шлема матч до трех побед в сетах (best_of = 5), на остальных — до двух
   const calendar = [
     { from: '2026-07-01', to: '2026-07-12', name: 'Уимблдон', cat: 'Grand Slam', surface: 'grass' },
     { from: '2026-07-13', to: '2026-07-26', name: 'Гамбург / Умаг', cat: 'ATP 500', surface: 'clay' },
@@ -52,10 +53,22 @@
   const tourAt = d => calendar.find(t => d >= t.from && d <= t.to) || calendar[calendar.length - 1];
 
   // Генерация истории ставок
+  // Шесть исходов, как в коде (ml/sets.py): победа и фора ±1.5 по сетам на каждого игрока
   const markets = [
-    { id: 'p1', label: 'П1' }, { id: 'p2', label: 'П2' }, { id: 'h1m', label: 'Ф1(−1.5)' }, { id: 'h2p', label: 'Ф2(+1.5)' }, { id: 'h1p', label: 'Ф1(+1.5)' },
+    { id: 'p1', label: 'П1' }, { id: 'p2', label: 'П2' }, { id: 'h1m', label: 'Ф1(−1.5)' }, { id: 'h2m', label: 'Ф2(−1.5)' }, { id: 'h1p', label: 'Ф1(+1.5)' }, { id: 'h2p', label: 'Ф2(+1.5)' },
   ];
-  const stakePct = k => k <= 1.27 ? 3 : k <= 1.70 ? 2.75 : k <= 2.20 ? 2.25 : 1.75;
+  // Доля банка по таблице стратегии (Т20): диапазоны итогового кэфа 1.28–1.70, 1.71–2.20, 2.21–3.24
+  const stakePct = k => k <= 1.70 ? 2.75 : k <= 2.20 ? 2.25 : 1.75;
+  const TOTAL_MIN = 1.28; // ниже первого диапазона таблицы ставку стратегия не предлагает
+  // Второе событие для ординара с низким кэфом: фаворит по Эло на покрытии, кэф 1.30–1.42, событие сыграло
+  function extraLeg(t, used, id) {
+    const free = players.filter(p => !used.has(p.id));
+    const a = free[id % free.length], b = free[(id * 3 + 1) % free.length] === a ? free[(id + 1) % free.length] : free[(id * 3 + 1) % free.length];
+    used.add(a.id); used.add(b.id);
+    const fav = a.elo[t.surface] >= b.elo[t.surface] ? a : b, dog = fav === a ? b : a;
+    const odds = round(1.30 + (id * 7 % 13) / 100, 2);
+    return { p1: fav.id, p2: dog.id, market: 'p1', marketLabel: 'П1', odds, closing: round(odds * (1 - (id % 3) / 100), 2), p: round(Math.min(0.94, 1 / odds * 1.05 + 0.03), 3), result: 'win', surface: t.surface, tournament: t.name, bestOf: t.cat === 'Grand Slam' ? 5 : 3 };
+  }
   const bets = [];
   let bank = 40000;
   const bankHistory = [{ date: '2026-07-01', bank }];
@@ -81,13 +94,17 @@
         const won = rnd() < trueP;
         const closing = round(odds * (1 - (rnd() * 0.05 - 0.012)), 2);
         const p1 = mk === 'h2p' || mk === 'p2' ? dog : fav, p2 = p1 === fav ? dog : fav;
-        const leg = { p1: p1.id, p2: p2.id, market: mk, marketLabel: markets.find(m => m.id === mk).label, odds, closing, p: round(p, 3), result: won ? 'win' : 'loss', surface: t.surface, tournament: t.name };
+        const leg = { p1: p1.id, p2: p2.id, market: mk, marketLabel: markets.find(m => m.id === mk).label, odds, closing, p: round(p, 3), result: won ? 'win' : 'loss', surface: t.surface, tournament: t.name, bestOf: t.cat === 'Grand Slam' ? 5 : 3 };
         legs.push(leg);
       }
       while (legs.length > 1 && legs.reduce((a, l) => a * l.odds, 1) > 3.24) legs.pop();
+      // Ординар с кэфом ниже 1.28 стратегия не ставит (такого диапазона в таблице нет): добавляем второе событие.
+      // Без случайных чисел — так остальные ставки и исходы не меняются
+      if (legs.length === 1 && legs[0].odds < TOTAL_MIN) legs.push(extraLeg(t, used, id));
       legs.forEach(leg => allLegs.push(Object.assign({ date, betId: id }, leg)));
       let total = round(legs.reduce((a, l) => a * l.odds, 1), 2);
       const voided = rnd() < 0.03;
+      const bookmaker = pick(['bet365', 'Unibet', 'Pinnacle', 'bet365']);
       const won = legs.every(l => l.result === 'win');
       const stake = Math.round(bank * stakePct(total) / 100 / 10) * 10;
       const status = voided ? 'void' : won ? 'win' : 'loss';
@@ -95,7 +112,7 @@
       bank += profit;
       // CLV экспресса — из неокругленных произведений кэфов, как при вводе результата на экране «Ставки»
       const clv = round((legs.reduce((a, l) => a * l.odds, 1) / legs.reduce((a, l) => a * l.closing, 1) - 1) * 100, 1);
-      bets.push({ id, date, tournament: t.name, surface: t.surface, legs, total, stake, status, profit, bankAfter: bank, clv, bookmaker: pick(['bet365', 'Unibet', 'Pinnacle', 'bet365']) });
+      bets.push({ id, date, tournament: t.name, surface: t.surface, legs, total, stake, status, profit, bankAfter: bank, clv, bookmaker });
       bankHistory.push({ date, bank });
       id++;
     }
@@ -127,13 +144,64 @@
 
   // Открытая ставка на сегодня: экспресс по матчам вне демо-анализа #A-0142 (его экспресс создается на экране «Анализ»)
   const openLegs = [
-    [{ p1: 'zverev', p2: 'musetti', market: 'p1', marketLabel: 'П1', odds: 1.48, p: 0.71, surface: 'hard', tournament: 'Шанхай' }, { p1: 'alcaraz', p2: 'shelton', market: 'p1', marketLabel: 'П1', odds: 1.30, p: 0.82, surface: 'hard', tournament: 'Шанхай' }],
+    [{ p1: 'zverev', p2: 'musetti', market: 'p1', marketLabel: 'П1', odds: 1.48, p: 0.71, surface: 'hard', tournament: 'Шанхай', bestOf: 3 }, { p1: 'alcaraz', p2: 'shelton', market: 'p1', marketLabel: 'П1', odds: 1.30, p: 0.82, surface: 'hard', tournament: 'Шанхай', bestOf: 3 }],
   ];
   openLegs.forEach((legs, k) => {
     const total = round(legs.reduce((a, l) => a * l.odds, 1), 2);
     const stake = Math.round(bank * stakePct(total) / 100 / 10) * 10;
     bets.push({ id, date: TODAY, tournament: 'Шанхай', surface: 'hard', legs: legs.map(l => Object.assign({ closing: null, result: 'open' }, l)), total, stake, status: 'open', profit: 0, bankAfter: null, clv: null, bookmaker: 'bet365' });
     id++;
+  });
+
+  // ---------- Поля этапа 4 (решения В1, В2, В5, Т3, Т9, Т10, Т13): считаются из истории без генератора, ----------
+  // поэтому ставки, банк и исходы не меняются.
+  // Вероятность рынка без маржи — степенной метод, как ml/market.py: ищем k, при котором (1/o1)^k + (1/o2)^k = 1
+  const devig = (o1, o2) => {
+    const a = 1 / o1, b = 1 / o2;
+    let lo = 0.2, hi = 5;
+    for (let i = 0; i < 60; i++) { const k = (lo + hi) / 2; if (a ** k + b ** k > 1) lo = k; else hi = k; }
+    return a ** ((lo + hi) / 2);
+  };
+  const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+  // В5: история до 1 августа перенесена из старого Telegram-бота. Такие ставки идут в банк и ROI, но не в CLV,
+  // Brier против рынка и калибровку p_final: у бота есть только оценка Claude и кэф (Т10)
+  const BOT_UNTIL = '2026-08-01';
+  const betById = Object.fromEntries(bets.map(b => [b.id, b]));
+  function enrichLeg(l, b, i) {
+    const bot = b.date < BOT_UNTIL;
+    // кэф противоположного исхода у вашего букмекера в момент прогноза (маржа ≈ 5,5%) → рынок при прогнозе без маржи (В2)
+    l.oddsOpp = round(1 / (1.055 - 1 / l.odds), 2);
+    l.q = bot ? null : round(devig(l.odds, l.oddsOpp), 3);
+    // p — итоговая вероятность (p_final); в таблице калибровки рядом — базовая модель (p_base) и после поправки Claude (p_claude)
+    const s = b.id * 7 + i * 5;
+    l.pb = bot ? null : round(clamp(l.p - 0.025 + (s % 9 - 4) / 100, 0.45, 0.95), 3);
+    l.pc = bot ? l.p : round(clamp(l.p + ((b.id * 3 + i * 7) % 7 - 3) / 200, 0.45, 0.96), 3);
+    l.pKind = bot ? 'claude' : 'final';
+    // старый бот закрывающих кэфов не записывал — у его ставок CLV нет (В5, LLM_LEARNING 2.4)
+    if (bot) l.closing = null;
+    // у части ставок приложения закрывающий кэф последнего события не внесен — CLV ставки не считается (В1)
+    if (!bot && b.status !== 'open' && b.id % 11 === 0 && i === b.legs.length - 1) l.closing = null;
+    if (l.closing) {
+      // В1: чей закрывающий кэф внес участник — эталон по Р17 (Pinnacle → Betfair → средний) или свой букмекер
+      l.closingBy = (b.id + i) % 5 === 0 ? b.bookmaker : (b.id + i) % 7 === 0 ? 'Betfair' : 'Pinnacle';
+      // вторую сторону закрытия вносят по желанию — тогда есть рынок закрытия без маржи и «CLV без маржи» (Т13)
+      if (!bot && (b.id + i) % 3 === 0) { l.closingOpp = round(1 / (1.03 - 1 / l.closing), 2); l.qClose = round(devig(l.closing, l.closingOpp), 3); }
+    }
+    // Т10: у проигранных экспрессов бота исходы ног не записаны
+    if (bot && b.status === 'loss' && b.legs.length > 1) l.noResult = true;
+  }
+  bets.forEach(b => {
+    b.source = b.date < BOT_UNTIL ? 'bot' : 'app';
+    b.legs.forEach((l, i) => enrichLeg(l, b, i));
+    const live = b.legs.filter(l => l.result !== 'open');
+    if (live.length && live.some(l => !l.closing)) b.clv = null;
+  });
+  // allLegs — копии ног с датой и номером ставки: те же поля по тому же номеру ноги
+  const legIndex = {};
+  allLegs.forEach(l => {
+    const b = betById[l.betId], i = legIndex[l.betId] = (legIndex[l.betId] == null ? 0 : legIndex[l.betId] + 1);
+    l.source = b.source;
+    enrichLeg(l, b, i);
   });
 
   const settled = bets.filter(b => b.status !== 'open');
@@ -144,23 +212,26 @@
   const profit = settled.reduce((a, b) => a + b.profit, 0);
   let streak = 0, streakType = settled[settled.length - 1].status;
   for (let i = settled.length - 1; i >= 0 && settled[i].status === streakType; i--) streak++;
-  const brier = allLegs.reduce((a, l) => a + (l.p - (l.result === 'win' ? 1 : 0)) ** 2, 0) / allLegs.length;
-  const brierMarket = allLegs.reduce((a, l) => { const q = Math.min(0.97, 1 / l.closing * 0.955); return a + (q - (l.result === 'win' ? 1 : 0)) ** 2; }, 0) / allLegs.length;
-  const clvAvg = settled.reduce((a, b) => a + b.clv, 0) / settled.length;
+  // Brier модели и рынка — по рынку при прогнозе без маржи (В2, степенной метод), только ставки приложения (В5)
+  const appLegs = allLegs.filter(l => l.q != null);
+  const brier = appLegs.reduce((a, l) => a + (l.p - (l.result === 'win' ? 1 : 0)) ** 2, 0) / appLegs.length;
+  const brierMarket = appLegs.reduce((a, l) => a + (l.q - (l.result === 'win' ? 1 : 0)) ** 2, 0) / appLegs.length;
+  const clvBets = settled.filter(b => b.clv != null && b.source !== 'bot');
+  const clvAvg = clvBets.reduce((a, b) => a + b.clv, 0) / clvBets.length;
 
-  // Калибровка по событиям (ногам экспрессов)
+  // Калибровка по событиям (ногам экспрессов) — только ставки приложения с итоговой вероятностью (В5), как в «Аналитике»
   const calibration = [];
   for (let lo = 0.5; lo < 0.95; lo += 0.05) {
     const hi = lo + 0.05;
-    const inBin = allLegs.filter(l => l.p >= lo && l.p < hi);
+    const inBin = appLegs.filter(l => l.p >= lo && l.p < hi);
     if (!inBin.length) continue;
     calibration.push({ lo: round(lo, 2), hi: round(hi, 2), p: round(inBin.reduce((a, l) => a + l.p, 0) / inBin.length, 3), actual: round(inBin.filter(l => l.result === 'win').length / inBin.length, 3), n: inBin.length });
   }
   // Скользящий Brier (окно 30 событий) — модель против рынка
   const brierRolling = [];
-  for (let i = 29; i < allLegs.length; i += 3) {
-    const w = allLegs.slice(i - 29, i + 1);
-    brierRolling.push({ date: w[w.length - 1].date, model: round(w.reduce((a, l) => a + (l.p - (l.result === 'win' ? 1 : 0)) ** 2, 0) / 30, 3), market: round(w.reduce((a, l) => { const q = Math.min(0.97, 1 / l.closing * 0.955); return a + (q - (l.result === 'win' ? 1 : 0)) ** 2; }, 0) / 30, 3) });
+  for (let i = 29; i < appLegs.length; i += 3) {
+    const w = appLegs.slice(i - 29, i + 1);
+    brierRolling.push({ date: w[w.length - 1].date, model: round(w.reduce((a, l) => a + (l.p - (l.result === 'win' ? 1 : 0)) ** 2, 0) / 30, 3), market: round(w.reduce((a, l) => a + (l.q - (l.result === 'win' ? 1 : 0)) ** 2, 0) / 30, 3) });
   }
   // ROI по срезам (события как одиночные ставки с равной суммой)
   const roiBy = (key, labelOf) => {
@@ -173,10 +244,12 @@
   const oddsBucket = o => o < 1.3 ? '1.13–1.29' : o < 1.5 ? '1.30–1.49' : o < 1.65 ? '1.50–1.64' : '1.65–1.80';
   const roiByOdds = roiBy(l => oddsBucket(l.odds)).sort((a, b) => a.key.localeCompare(b.key));
   // ROI по итоговому кэфу экспресса (реальные ставки)
-  const totalBucket = k => k < 1.71 ? '1.28–1.70' : k < 2.21 ? '1.71–2.20' : '2.21–3.24';
+  // четвертый диапазон 3.25–4.10 — только экспресс из 3 событий (Т20)
+  const totalBucket = k => k < 1.71 ? '1.28–1.70' : k < 2.21 ? '1.71–2.20' : k < 3.25 ? '2.21–3.24' : '3.25–4.10';
   const roiByTotal = Object.entries(settled.reduce((g, b) => { const k = totalBucket(b.total); (g[k] = g[k] || []).push(b); return g; }, {})).map(([k, bs]) => ({ key: k, label: k, n: bs.length, roi: round(bs.reduce((a, b) => a + b.profit, 0) / bs.reduce((a, b) => a + b.stake, 0) * 100, 1) })).sort((a, b) => a.key.localeCompare(b.key));
 
-  // Матчи сегодня (Шанхай, 1/8 финала)
+  // Матчи сегодня (Шанхай, 1/8 финала): матчи, которые участники ввели в анализы (matches.scheduled_at), с примером кэфов.
+  // Расписания и линии в программе нет (Р10): на главной — только «Мои матчи сегодня» из своих ставок и анализов (В6).
   const matchesToday = [
     { id: 'm1', p1: 'sinner', p2: 'rune', time: '10:30', round: '1/8 финала', court: 'Stadium Court', odds: { p1: 1.17, p2: 5.10, h1m: 1.62, h2p: 2.30 } },
     { id: 'm2', p1: 'djokovic', p2: 'rublev', time: '12:00', round: '1/8 финала', court: 'Grand Stand', odds: { p1: 1.34, p2: 3.35, h1m: 2.05, h2p: 1.72 } },
@@ -189,42 +262,83 @@
   // В приложении — GET /analyses (свои, последние 20); статусы: done, failed, cancelled, идет
   // demo: true — анализ с теми же матчами, что демо-пример экрана «Анализ»; остальные в макете открываются на нем же
   const recentAnalyses = [
-    { id: 'A-0141', at: '2026-10-07T09:12', matches: [{ p1: 'sinner', p2: 'rune' }, { p1: 'djokovic', p2: 'rublev' }], status: 'done', decision: 'bet', cost: 0.17, demo: true },
+    // newsCached — новости, которые анализ взял из кэша (моложе 12 ч): когда их нашли в анализах других участников
+    { id: 'A-0141', at: '2026-10-07T09:12', matches: [{ p1: 'sinner', p2: 'rune' }, { p1: 'djokovic', p2: 'rublev' }], status: 'done', decision: 'bet', cost: 0.17, demo: true,
+      newsCached: { sinner: '2026-10-07T04:10', djokovic: '2026-10-07T02:30', rublev: '2026-10-06T21:50' } },
     { id: 'A-0140', at: '2026-10-06T18:40', matches: [{ p1: 'fritz', p2: 'deminaur' }, { p1: 'draper', p2: 'medvedev' }], status: 'failed', note: 'шаг 8 из 9: Claude перегружен', cost: 0.13 },
     { id: 'A-0139', at: '2026-10-06T10:15', matches: [{ p1: 'sinner', p2: 'medvedev' }, { p1: 'djokovic', p2: 'shelton' }, { p1: 'alcaraz', p2: 'rune' }], status: 'done', decision: 'skip', cost: 0.24 },
     { id: 'A-0138', at: '2026-10-05T19:30', matches: [{ p1: 'zverev', p2: 'rublev' }, { p1: 'fritz', p2: 'musetti' }], status: 'cancelled', cost: 0.05 },
     { id: 'A-0137', at: '2026-10-05T09:50', matches: [{ p1: 'sinner', p2: 'draper' }, { p1: 'alcaraz', p2: 'deminaur' }], status: 'done', decision: 'bet', cost: 0.16 },
   ];
 
-  // Расходы ИИ (октябрь)
+  // Расходы ИИ (октябрь). Строка — вызов Claude (agent_runs), как в коде этапа 3 (Т17, Т19):
+  // разбор текста — Haiku 5.5; новости перед анализом — Sonnet 5.5 с веб-поиском (2 поиска на матч, кэш 12 часов);
+  // оценка матча — Opus 5.5, один вызов на матч: первый пишет общий префикс в кэш, следующие его читают.
+  // Разбора ставки и ночного обновления профилей нет (этап 5). Генератор детерминированный, без сида:
+  // расход сходится с «Последними анализами» и бюджетом ключа.
   const runTypes = [
-    { id: 'analysis', label: 'Анализ матчей', model: 'Opus 5.5' },
-    { id: 'refresh', label: 'Обновление профилей (Batch)', model: 'Sonnet 5.5' },
-    { id: 'postmortem', label: 'Разбор ставки', model: 'Sonnet 5.5' },
-    { id: 'parse', label: 'Разбор текста событий', model: 'Haiku 5.5' },
+    { id: 'analysis', label: 'Оценка матча', model: 'Opus 5.5', effort: 'medium', what: 'Оценка матча: один вызов на матч' },
+    { id: 'news', label: 'Новости перед анализом', model: 'Sonnet 5.5', effort: 'low', what: 'Веб-поиск: 2 поиска на матч, кэш 12 часов' },
+    { id: 'parse', label: 'Разбор текста событий', model: 'Haiku 5.5', effort: 'low', what: 'Вставленный текст → список событий' },
   ];
-  const aiRuns = [];
-  for (let d = 0; d < 7; d++) {
-    const day = addDays('2026-10-01', d);
-    const n = d === 6 ? 3 : 2 + Math.floor(rnd() * 3);
-    for (let k = 0; k < n; k++) {
-      const t = k === 0 ? runTypes[3] : k === 1 ? runTypes[0] : pick(runTypes);
-      const input = t.id === 'analysis' ? 38000 + Math.floor(rnd() * 22000) : t.id === 'refresh' ? 90000 + Math.floor(rnd() * 60000) : t.id === 'postmortem' ? 9000 + Math.floor(rnd() * 5000) : 1800 + Math.floor(rnd() * 900);
-      const cacheShare = t.id === 'parse' ? 0 : 0.62 + rnd() * 0.25;
-      const output = t.id === 'analysis' ? 3500 + Math.floor(rnd() * 2500) : t.id === 'refresh' ? 7000 + Math.floor(rnd() * 4000) : t.id === 'postmortem' ? 1200 + Math.floor(rnd() * 800) : 400 + Math.floor(rnd() * 200);
-      // $ за 1 млн токенов: вход, выход, чтение кэша (docs/TOKEN_ECONOMY.md)
-      const price = { 'Opus 5.5': [4, 20, 0.2], 'Sonnet 5.5': [2, 10, 0.1], 'Haiku 5.5': [0.1, 0.5, 0.01] }[t.model];
-      const batch = t.id === 'refresh' ? 0.5 : 1;
-      const searches = t.id === 'analysis' ? Math.floor(rnd() * 4) : t.id === 'refresh' ? 6 + Math.floor(rnd() * 6) : 0;
-      // разбор текста на Haiku 5.5 стоит доли цента: храним точнее, чтобы на экране не было $0,000
-      const cost = round(((input * (1 - cacheShare) * price[0] + input * cacheShare * price[2] + output * price[1]) / 1e6) * batch + searches * 0.01, t.id === 'parse' ? 5 : 3);
-      const hh = String(8 + k * 3 + Math.floor(rnd() * 2)).padStart(2, '0'), mm = String(Math.floor(rnd() * 60)).padStart(2, '0');
-      aiRuns.push({ id: 'run-' + day.slice(5) + '-' + k, at: day + 'T' + hh + ':' + mm, type: t.id, typeLabel: t.label, model: t.model, input, cached: Math.round(input * cacheShare), output, searches, cost, duration: t.id === 'analysis' ? 70 + Math.floor(rnd() * 80) : t.id === 'refresh' ? 600 + Math.floor(rnd() * 900) : 8 + Math.floor(rnd() * 20), batch: batch < 1 });
-    }
+  // $ за 1 млн токенов: вход, выход, чтение кэша; запись в кэш — вход × 1,25 (docs/TOKEN_ECONOMY.md)
+  const PRICE_M = { 'Opus 5.5': [4, 20, 0.2], 'Sonnet 5.5': [2, 10, 0.1], 'Haiku 5.5': [0.1, 0.5, 0.01] };
+  const SEARCH_USD = 0.01;
+  // n — матчей, news — матчей с поиском новостей (у остальных новости свежее 12 часов), parse — ввод текстом;
+  // cancelled — отменен после шага новостей; failedAt — номер вызова Opus, который не прошел (Claude перегружен)
+  const analysesSpec = [
+    { id: 'A-0131', at: '2026-10-01T09:20', n: 2, news: 0, parse: true },
+    { id: 'A-0132', at: '2026-10-01T15:03', n: 2, news: 0, parse: false },
+    { id: 'A-0133', at: '2026-10-02T12:31', n: 2, news: 1, parse: true },
+    { id: 'A-0134', at: '2026-10-02T14:55', n: 3, news: 0, parse: false },
+    { id: 'A-0135', at: '2026-10-03T12:06', n: 3, news: 1, parse: true },
+    { id: 'A-0136', at: '2026-10-04T11:38', n: 2, news: 0, parse: true },
+    { id: 'A-0137', at: '2026-10-05T09:50', n: 2, news: 1, parse: true },
+    { id: 'A-0138', at: '2026-10-05T19:30', n: 2, news: 1, parse: true, cancelled: true },
+    { id: 'A-0139', at: '2026-10-06T10:15', n: 3, news: 0, parse: false },
+    { id: 'A-0140', at: '2026-10-06T18:40', n: 2, news: 1, parse: true, failedAt: 1 },
+    { id: 'A-0141', at: '2026-10-07T09:12', n: 2, news: 1, parse: true },
+  ];
+  const addMin = (iso, m) => { const d = new Date(iso + ':00Z'); d.setUTCMinutes(d.getUTCMinutes() + m); return d.toISOString().slice(0, 16); };
+  function makeRun(o) {
+    const t = runTypes.find(x => x.id === o.type), p = PRICE_M[t.model];
+    const cost = (o.fresh * p[0] + o.written * p[0] * 1.25 + o.read * p[2] + o.output * p[1]) / 1e6 + o.searches * SEARCH_USD;
+    return Object.assign({ typeLabel: t.label, model: t.model, effort: t.effort, batch: false, status: 'ok' }, o, {
+      input: o.fresh + o.written + o.read, cached: o.read, cost: round(cost, o.type === 'parse' ? 5 : 3),
+    });
   }
-  // Сегодняшние запуски — утром, до первого матча дня (10:30)
-  const T7 = { 'run-10-07-0': '08:50', 'run-10-07-1': '09:05', 'run-10-07-2': '09:52' };
-  aiRuns.forEach(r => { if (T7[r.id]) r.at = '2026-10-07T' + T7[r.id]; });
+  const aiRuns = [];
+  analysesSpec.forEach((a, ai) => {
+    let at = a.at, step = 0, k = 0;
+    const push = o => { aiRuns.push(makeRun(Object.assign({ id: 'run-' + a.id.slice(2) + '-' + (k++), at, analysis: a.id, step: step }, o))); };
+    if (a.parse) { step = 1; push({ type: 'parse', fresh: 1900 + (ai * 137) % 700, written: 0, read: 0, output: 420 + (ai * 53) % 160, searches: 0, duration: 9 + ai % 6 }); at = addMin(at, 1); }
+    step = 3;
+    for (let m = 0; m < a.news; m++) {
+      push({ type: 'news', match: m, fresh: 262 + (ai * 31) % 120, written: 30200 + (ai * 977 + m * 431) % 3600, read: 4100 + (ai * 211) % 900, output: 980 + (ai * 67 + m * 41) % 260, searches: 2, duration: 34 + (ai * 7 + m * 5) % 22 });
+      at = addMin(at, 1);
+    }
+    if (a.cancelled) return;
+    step = 6;
+    for (let m = 0; m < a.n; m++) {
+      const first = m === 0;
+      if (a.failedAt === m) { push({ type: 'analysis', match: m, fresh: 0, written: 0, read: 0, output: 0, searches: 0, duration: 31, status: 'error', error: 'Claude перегружен (529), повтор не помог' }); return; }
+      push({ type: 'analysis', match: m, fresh: 3800 + (ai * 173 + m * 97) % 700, written: first ? 6100 : 0, read: first ? 0 : 6100, output: 1500 + (ai * 89 + m * 61) % 320, searches: 0, duration: 48 + (ai * 11 + m * 7) % 40 });
+      at = addMin(at, 1);
+    }
+  });
+  // Общие фоновые задачи: вызовы на ключе администратора без участника — сейчас это приемка этапа (agent-smoke).
+  // В лимит участника они не входят, в общий бюджет ключа — входят.
+  [
+    { type: 'news', fresh: 262, written: 32444, read: 4498, output: 1076, searches: 2, duration: 41 },
+    { type: 'analysis', fresh: 4100, written: 6100, read: 0, output: 1620, searches: 0, duration: 63 },
+  ].forEach((o, k) => aiRuns.push(makeRun(Object.assign({ id: 'run-smoke-' + k, at: addMin('2026-10-02T21:10', k), shared: true, tag: 'Приемка (agent-smoke)', step: 0 }, o))));
+  aiRuns.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  // Проверки (eval) — свой бюджет на ключе администратора, $25 в месяц: ни в лимит участника, ни в общий бюджет не входят
+  const evalRuns = [
+    { at: '2026-10-04T10:02', what: 'smoke-eval: 40 сыгранных матчей, Opus 5.5 через Batch', cost: 0.58 },
+    { at: '2026-10-04T10:41', what: 'parse-eval: 30 текстов, Haiku 5.5', cost: 0.02 },
+  ];
+  const evalBudget = { monthly: 25, spent: round(evalRuns.reduce((a, r) => a + r.cost, 0), 2), runs: evalRuns };
   const aiSpent = round(aiRuns.reduce((a, r) => a + r.cost, 0), 2);
 
   const lessons = [
@@ -247,10 +361,13 @@
   // Демо-вход под двумя ролями: администратор (владелец) и участник. Ставки, банк и запуски ИИ
   // у обоих демо-пользователей одни и те же: в макете показываем вид интерфейса, а не разные истории.
   const sumCost = rs => round(rs.reduce((a, r) => a + r.cost, 0), 2);
-  const personalSpent = sumCost(aiRuns.filter(r => r.type !== 'refresh')); // анализы, разборы, разбор текста
-  const sharedSpent = sumCost(aiRuns.filter(r => r.type === 'refresh'));  // общие фоновые задачи, платит администратор
-  const analysesN = aiRuns.filter(r => r.type === 'analysis').length;
-  const analysesToday = aiRuns.filter(r => r.type === 'analysis' && r.at.startsWith(TODAY)).length;
+  const personalSpent = sumCost(aiRuns.filter(r => !r.shared)); // анализы: разбор текста, новости, оценка матчей
+  const sharedSpent = sumCost(aiRuns.filter(r => r.shared));  // общие фоновые задачи без участника, платит администратор
+  // Анализ — запуск из нескольких вызовов: считаем анализы, а не вызовы
+  const analysesN = analysesSpec.length;
+  const analysesToday = analysesSpec.filter(a => a.at.startsWith(TODAY)).length;
+  // Цена анализа в «Последних анализах» — сумма его вызовов
+  recentAnalyses.forEach(x => { x.cost = sumCost(aiRuns.filter(r => r.analysis === x.id)); });
   const personas = {
     admin: { id: 'u1', name: 'Роман Буров', first: 'Роман', email: 'roman@example.com', initials: 'РБ', tz: 'Europe/Helsinki', role: 'admin', roleLabel: 'Администратор', since: '2026-06-28', aiMode: 'admin', bookmakers: ['bet365', 'Unibet', 'Pinnacle'] },
     member: { id: 'u2', name: 'Ольга Лехтинен', first: 'Ольга', email: 'olga@example.com', initials: 'ОЛ', tz: 'Europe/Helsinki', role: 'member', roleLabel: 'Участник', since: '2026-06-30', aiMode: 'admin', bookmakers: ['bet365', 'Unibet', 'Pinnacle'] },
@@ -293,19 +410,26 @@
     ],
   };
   // Центр уведомлений: у каждой роли свой список. Суммы в тексте подставляются при показе (валюта программы).
+  // data_stale — архив матчей не обновлялся больше 3 дней, только администраторам (PLAN, раздел 6);
+  // ai_alert — оповещение о расходе ИИ по правилам TOKEN_ECONOMY, раздел 6 (одно на правило в сутки, администраторам);
+  // bet_settled — для авторасчета этапа 5 (при ручном расчете уведомления нет, только баннер), ссылка ведет на ставку.
   const lastSettled = settled[settled.length - 1];
+  // Последняя успешная загрузка архива матчей (ночное обновление в 05:25 UTC); больше 3 дней — data_stale
+  const archive = { lastLoad: '2026-10-03T05:31', source: 'tennis-data.co.uk', staleDays: 3, nightly: '05:25 UTC' };
+  const recent10 = analysesSpec.slice(-10).map(a => a.id);
+  const cache10 = (() => { const rs = aiRuns.filter(r => recent10.includes(r.analysis)); return Math.round(rs.reduce((a, r) => a + r.cached, 0) / rs.reduce((a, r) => a + r.input, 0) * 100); })();
   const notifications = {
     admin: [
       { id: 'n1', kind: 'limit_80', icon: 'coins', tone: 'warn', title: 'Алексей Ковалев израсходовал 91% лимита', body: '$7,28 из $8 за октябрь. На 100% его анализы на вашем ключе остановятся.', at: '2026-10-07T09:31', link: '#admin-limits', read: false },
       { id: 'n2', kind: 'ai_mode_request', icon: 'key', tone: 'info', title: 'Дмитрий Шульц просит вернуть ключ администратора', body: 'Сейчас работает на своем ключе. Вернуть можно только с вашего разрешения.', at: '2026-10-06T21:15', link: '#admin', read: false },
-      { id: 'n3', kind: 'data_stale', icon: 'clock', tone: 'warn', title: 'Данные Фрица устарели', body: 'Обновлены 4 октября. Матч сегодня в 16:30 — обновите перед анализом.', at: '2026-10-07T07:00', link: '#player-fritz', read: false },
-      { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: lastSettled.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + lastSettled.id + ' рассчитана', bet: lastSettled.id, at: lastSettled.date + 'T21:40', link: '#bets', read: true },
+      { id: 'n6', kind: 'ai_alert', icon: 'alert', tone: 'warn', title: 'Расход ИИ: доля кэша ' + cache10 + '%', body: 'По последним 10 анализам из кэша читается ' + cache10 + '% входа, правило — не меньше 50%. Больше всего входа пишут в кэш новости. Проверьте журнал запусков.', at: '2026-10-07T08:00', link: '#costs', read: false },
+      { id: 'n3', kind: 'data_stale', icon: 'database', tone: 'warn', title: 'Архив матчей не обновлялся 4 дня', body: 'Последняя загрузка ' + archive.source + ' — 3 октября. Эло и форма игроков — без матчей после этой даты. Ночное обновление идет в ' + archive.nightly + '.', at: '2026-10-07T05:40', read: false },
+      { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: lastSettled.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + lastSettled.id + ' рассчитана', bet: lastSettled.id, at: lastSettled.date + 'T21:40', link: '#bets-' + lastSettled.id, read: true },
       { id: 'n5', kind: 'new_device', icon: 'device', tone: 'info', title: 'Вход с нового устройства', body: 'Safari, iPhone · Хельсинки. Если это не вы — завершите сеанс в личном кабинете.', at: '2026-10-05T19:12', link: '#profile-security', read: true },
     ],
     member: [
       { id: 'n1', kind: 'admin_message', icon: 'megaphone', tone: 'info', title: 'Сообщение администратора', body: 'В субботу с 10:00 до 10:30 (Хельсинки) сервер обновляется, анализы будут недоступны.', at: '2026-10-07T08:00', read: false },
-      { id: 'n3', kind: 'data_stale', icon: 'clock', tone: 'warn', title: 'Данные Фрица устарели', body: 'Обновлены 4 октября. Матч сегодня в 16:30 — обновите перед анализом.', at: '2026-10-07T07:00', link: '#player-fritz', read: false },
-      { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: lastSettled.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + lastSettled.id + ' рассчитана', bet: lastSettled.id, at: lastSettled.date + 'T21:40', link: '#bets', read: true },
+      { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: lastSettled.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + lastSettled.id + ' рассчитана', bet: lastSettled.id, at: lastSettled.date + 'T21:40', link: '#bets-' + lastSettled.id, read: true },
       { id: 'n5', kind: 'new_device', icon: 'device', tone: 'info', title: 'Вход с нового устройства', body: 'Chrome, Windows · Хельсинки. Если это не вы — завершите сеанс в личном кабинете.', at: '2026-10-03T18:02', link: '#profile-security', read: true },
     ],
   };
@@ -393,7 +517,9 @@
   window.DATA = {
     today: TODAY,
     demo: true,
-    personas, users, admin, notifications, LIMIT_DEFAULT, timezones, marketRef: 'Pinnacle',
+    personas, users, admin, notifications, LIMIT_DEFAULT, timezones, marketRef: 'Pinnacle', archive,
+    // Эталон рынка по Р17: первый, у кого есть кэфы обеих сторон. marketRef — первый в порядке (для старых подписей)
+    marketRefRule: 'Pinnacle → Betfair → средний по рынку',
     // tzCity: «время по Хельсинки» — город в дательном падеже
     tzCity: tz => (timezones.find(t => t.value === tz) || timezones[0]).city,
     surfaces, players, P, calendar, markets,
@@ -406,9 +532,24 @@
     },
     allLegs, calibration, brierRolling, roiBySurface, roiByMarket, roiByOdds, roiByTotal,
     matchesToday, recentAnalyses,
-    ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, keySpent, ownSpent, keyUsers, limitOf, budget, forecastOf, access, recordRun, recordSpend, decisions, budgetHint: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes },
+    ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, keySpent, ownSpent, keyUsers, limitOf, budget, forecastOf, access, recordRun, recordSpend, decisions, budgetHint: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes,
+      // общие фоновые задачи — вызовы без участника (r.shared); проверки (eval) — отдельный бюджет; анализы — запуски из вызовов
+      isShared: r => !!r.shared, eval: evalBudget, analyses: analysesSpec, searchUsd: SEARCH_USD },
     lessons, strategyVersions,
-    strategy: { minProb: 65, oddsMin: 1.13, oddsMax: 1.80, maxLegs: 3, totalMax: 3.24, stakeTable: [{ range: '1.28–1.70', pct: '2,5–3%' }, { range: '1.71–2.20', pct: '2–2,5%' }, { range: '2.21–3.24', pct: '1,5–2%' }] },
+    // Стратегия по коду этапа 3 (ml/strategy.py, Т20): 4 диапазона с одним процентом, четвертый — экспресс из 3 событий.
+    // adapt — правила адаптации суммы (Р22) и включены ли они по умолчанию: рост и прибыльная неделя выключены (В7)
+    strategy: {
+      minProb: 65, oddsMin: 1.13, oddsMax: 1.80, maxLegs: 3, totalMax: 3.24,
+      stakeTable: [{ range: '1.28–1.70', pct: '2,75%', pctNum: 2.75 }, { range: '1.71–2.20', pct: '2,25%', pctNum: 2.25 }, { range: '2.21–3.24', pct: '1,75%', pctNum: 1.75 }, { range: '3.25–4.10', pct: '1,75%', pctNum: 1.75, triple: true }],
+      triple: { minProb: 70, legOddsMax: 1.60, totalMin: 1.44, totalMax: 4.10 }, coverMinProb: 55, formMinWins: 3,
+      adapt: [
+        { key: 'dd10', label: 'Просадка от пика −10%', effect: 'ставка не больше 2,5% банка', on: true },
+        { key: 'dd20', label: 'Просадка от пика −20%', effect: 'защитный режим: 1,5% банка, только 2 события с кэфами до 1.50', on: true },
+        { key: 'week_loss', label: 'Итог 7 дней −5% и хуже', effect: 'ставка не больше 2% банка', on: true },
+        { key: 'up15', label: 'Банк +15% к вложенному и винрейт от 60%', effect: 'потолок ставки 4% вместо 3%', on: false },
+        { key: 'week_win', label: 'Итог 7 дней +10% и лучше', effect: 'ставка +0,5 п.п.', on: false },
+      ],
+    },
     playerName: id => (P[id] ? P[id].short : id),
     match: (l) => (P[l.p1] ? P[l.p1].short : l.p1) + ' — ' + (P[l.p2] ? P[l.p2].short : l.p2),
   };

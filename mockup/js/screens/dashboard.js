@@ -1,5 +1,5 @@
-/* Главная: банк и показатели за выбранный период, открытые ставки, матчи дня,
-   «требует внимания», как учится модель, расходы ИИ. Все цифры — из window.DATA. */
+/* Главная: банк и показатели за выбранный период, открытые ставки, мои матчи сегодня (из своих ставок и анализов),
+   «требует внимания», расходы ИИ; «Модель учится» — пустое состояние до этапа 5. Все цифры — из window.DATA. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
@@ -29,16 +29,20 @@
     const losses = bets.filter(b => b.status === 'loss').length;
     const voids = bets.filter(b => b.status === 'void').length;
     const turnover = sum(bets, b => b.stake), profit = sum(bets, b => b.profit);
+    // CLV — только ставки с внесенным закрывающим кэфом; ставки старого бота в CLV не входят (В5)
+    const clvBets = bets.filter(b => b.clv != null && b.source !== 'bot');
     return {
       n: bets.length, wins, losses, voids, turnover, profit,
       roi: turnover ? profit / turnover * 100 : null,
       winrate: wins + losses ? wins / (wins + losses) * 100 : null,
-      clv: bets.length ? sum(bets, b => b.clv) / bets.length : null,
-      clvPos: bets.filter(b => b.clv > 0).length,
+      clv: clvBets.length ? sum(clvBets, b => b.clv) / clvBets.length : null,
+      clvPos: clvBets.filter(b => b.clv > 0).length, clvN: clvBets.length,
     };
   }
-  const marketQ = l => Math.min(0.97, 1 / l.closing * 0.955); // как в data.js: вероятность рынка по закрытию без маржи
+  // Рынок при прогнозе без маржи (В2, степенной метод — Т3); у ног старого бота его нет — они в Brier не входят (В5)
+  const marketQ = l => l.q;
   function brier(legs) {
+    legs = legs.filter(l => l.q != null);
     if (!legs.length) return { model: null, market: null, n: 0 };
     const y = l => (l.result === 'win' ? 1 : 0);
     return { model: sum(legs, l => (l.p - y(l)) ** 2) / legs.length, market: sum(legs, l => (marketQ(l) - y(l)) ** 2) / legs.length, n: legs.length };
@@ -64,9 +68,28 @@
 
   const openBets = () => D.bets.filter(b => b.status === 'open');
   const matchOf = leg => D.matchesToday.find(m => (m.p1 === leg.p1 && m.p2 === leg.p2) || (m.p1 === leg.p2 && m.p2 === leg.p1));
-  function betOfMatch(m) {
-    for (const b of openBets()) for (const l of b.legs) if (matchOf(l) === m) return { bet: b, leg: l };
-    return null;
+  const pairKey = (a, b) => [a, b].sort().join('|');
+  // Мои матчи сегодня (В6): расписания в программе нет (Р10), поэтому только матчи с сегодняшней датой
+  // из ног открытых ставок и из сегодняшних анализов. Время — из матча, который ввел участник (matches.scheduled_at).
+  function myMatches() {
+    const out = new Map();
+    const add = (p1, p2) => {
+      const k = pairKey(p1, p2);
+      if (!out.has(k)) { const m = matchOf({ p1, p2 }); out.set(k, { p1, p2, time: m ? m.time : null, round: m ? m.round : null, tournament: m ? m.tournament : null, bets: [], analyses: [] }); }
+      return out.get(k);
+    };
+    openBets().forEach(b => b.legs.forEach(l => { const m = matchOf(l); if (m && m.date === TODAY) add(l.p1, l.p2).bets.push({ bet: b, leg: l }); }));
+    (D.recentAnalyses || []).filter(a => a.at.slice(0, 10) === TODAY).forEach(a => a.matches.forEach(x => {
+      const m = matchOf(x); if (m && m.date === TODAY) add(x.p1, x.p2).analyses.push(a);
+    }));
+    return [...out.values()].sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
+  }
+  // «Сейчас» в макете — утро 7 октября по времени пользователя (как часы «Администрирования»).
+  // Приветствие — по времени суток в поясе пользователя: 5–12 утро, 12–17 день, 17–23 вечер, иначе ночь
+  const NOW = TODAY + 'T09:41';
+  function greeting(iso) {
+    const hh = +iso.slice(11, 13);
+    return hh >= 5 && hh < 12 ? 'Доброе утро' : hh >= 12 && hh < 17 ? 'Добрый день' : hh >= 17 && hh < 23 ? 'Добрый вечер' : 'Доброй ночи';
   }
   function playerLink(id) {
     const pl = D.P[id];
@@ -90,14 +113,6 @@
   const tzLabel = () => 'время по ' + D.tzCity(D.user.tz);
   // Лимиты и потолки: $10, $8, но $1,50 — как на остальных экранах
   const usdL = n => fmt.usd(n, Number.isInteger(n) ? 0 : 2);
-  // «3–5 окт» или «28 сен – 2 окт»
-  function dateRange(isos) {
-    const ds = isos.map(x => x.slice(0, 10)).sort();
-    const a = ds[0], b = ds[ds.length - 1];
-    if (a === b) return fmt.date(a);
-    return a.slice(0, 7) === b.slice(0, 7) ? +a.slice(8, 10) + '–' + fmt.date(b) : fmt.date(a) + ' – ' + fmt.date(b);
-  }
-
   // ---------- стили экрана ----------
   UI.css('dashboard', `
     .dashboard-head h2 { font-size: var(--fs-2xl); }
@@ -140,6 +155,8 @@
 
     .dashboard-player { color: var(--fg); font-weight: 600; text-decoration: none; }
     .dashboard-player:hover { color: var(--accent-ink); text-decoration: underline; }
+    /* на телефоне зона нажатия имени — 40px в высоту, строка при этом не растет */
+    @media (max-width: 960px) { .dashboard-player { display: inline-block; padding: 9px 0; margin: -9px 0; } }
 
     .dashboard-betlist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
     .dashboard-betlist li + li { border-top: 1px solid var(--line); }
@@ -166,23 +183,19 @@
 
     /* матчи дня — раскладка зависит от ширины карточки */
     .dashboard-matches-card { container-type: inline-size; }
-    .dashboard-match { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto auto; grid-template-areas: "time players odds action"; gap: 8px 18px; align-items: center; padding: 14px 18px; border-top: 1px solid var(--line); }
+    .dashboard-match { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; grid-template-areas: "time players action"; gap: 8px 18px; align-items: center; padding: 14px 18px; border-top: 1px solid var(--line); }
     .dashboard-match:first-child { border-top: 0; }
     .dashboard-match-time { grid-area: time; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .dashboard-match-time .mono { font-weight: 600; font-size: var(--fs-md); color: var(--fg); }
     .dashboard-match-time .xsmall { color: var(--fg-3); line-height: 1.25; }
-    .dashboard-match-players { grid-area: players; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; min-width: 0; }
+    .dashboard-match-players { grid-area: players; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .dashboard-match-pair { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
     .dashboard-match-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .dashboard-match-name .rank { font-size: var(--fs-xs); color: var(--fg-3); font-variant-numeric: tabular-nums; }
-    .dashboard-match-players > .chip { justify-self: start; }
-    .dashboard-match-extra { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
-    .dashboard-match-odds { grid-area: odds; display: flex; gap: 6px; }
+    .dashboard-match-extra { display: flex; flex-wrap: wrap; gap: 6px; }
     .dashboard-match-action { grid-area: action; display: flex; justify-content: flex-end; }
-    .dashboard-match-sep { display: none; }
     @container (max-width: 600px) {
-      .dashboard-match { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "time time" "players players" "odds action"; padding: 14px; gap: 10px 12px; }
-      .dashboard-match-time { flex-direction: row; align-items: baseline; gap: 6px; flex-wrap: wrap; }
-      .dashboard-match-sep { display: inline; color: var(--fg-3); }
+      .dashboard-match { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "time action" "players players"; padding: 14px; gap: 10px 12px; }
     }
 
     /* требует внимания */
@@ -201,18 +214,26 @@
     .dashboard-alert-text { font-size: var(--fs-sm); color: var(--fg-2); }
     .dashboard-alert-body > :last-child { margin-top: auto; }
     .dashboard-attn-card { container-type: inline-size; }
+    .dashboard-alert-text > span { display: block; }
+    /* правила адаптации: название с действием и статус */
+    .dashboard-rules { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    .dashboard-rules li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--surface-2); min-width: 0; }
+    .dashboard-rule-name { min-width: 0; color: var(--fg); font-weight: 500; }
+    .dashboard-rule-name small { display: block; color: var(--fg-3); font-weight: 400; font-size: var(--fs-xs); }
+    .dashboard-rules .chip { flex: none; }
+    .dashboard-rule-note { display: flex !important; gap: 6px; align-items: flex-start; margin-top: 8px; font-size: var(--fs-xs); color: var(--fg-2); }
+    .dashboard-rule-note svg { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--fg-3); }
     @container (min-width: 560px) {
       .dashboard-alerts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
       .dashboard-alert, .dashboard-alert:first-child, .dashboard-alert:last-child { border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; }
+      .dashboard-alert.is-wide { grid-column: 1 / -1; }
     }
 
-    /* обучение */
-    .dashboard-lesson { margin: 0; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); border-left: 3px solid var(--accent); display: flex; flex-direction: column; gap: 8px; }
-    .dashboard-lesson p { font-size: var(--fs-md); line-height: 1.5; }
-    .dashboard-mini-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
-    .dashboard-mini-stats > div { min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); }
-    .dashboard-mini-stats dt { font-size: var(--fs-xs); color: var(--fg-3); }
-    .dashboard-mini-stats dd { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+    /* «Модель учится» до этапа 5 */
+    .dashboard-soon { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; align-items: start; }
+    .dashboard-soon-ic { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-3); }
+    .dashboard-soon-ic svg { width: 20px; height: 20px; }
+    .dashboard-soon p { font-size: var(--fs-sm); color: var(--fg-2); }
 
     /* расходы */
     .dashboard-cost-value { font-family: var(--font-display); font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
@@ -223,11 +244,11 @@
     const d = new Date(TODAY + 'T12:00:00Z');
     const weekday = d.toLocaleDateString('ru-RU', { weekday: 'long', timeZone: 'UTC' });
     const dateStr = d.getUTCDate() + ' ' + MONTHS_GEN[d.getUTCMonth()] + ', ' + weekday;
-    const nM = D.matchesToday.length, nO = openBets().length;
+    const nM = myMatches().length, nO = openBets().length;
     return h('div', { class: 'page-head dashboard-head' },
       h('div', { style: 'min-width:0' },
-        h('h2', null, 'Добрый день, ' + D.user.first),
-        h('p', { class: 'lead' }, dateStr + ' · в Шанхае ' + nM + ' ' + fmt.plural(nM, 'матч', 'матча', 'матчей') + ' 1/8 финала, ' + nO + ' ' + fmt.plural(nO, 'ставка', 'ставки', 'ставок') + ' в игре')),
+        h('h2', { title: 'Приветствие зависит от времени суток в вашем поясе' }, greeting(NOW) + ', ' + D.user.first),
+        h('p', { class: 'lead' }, dateStr + ' · ' + nO + ' ' + fmt.plural(nO, 'ставка', 'ставки', 'ставок') + ' в игре' + (nM ? ', ' + nM + ' ' + fmt.plural(nM, 'мой матч', 'моих матча', 'моих матчей') + ' сегодня' : ''))),
       UI.segmented({ label: 'Период для показателей', items: PERIODS.map(p => ({ id: p.id, label: p.label })), active: periodId, onChange: onPeriod }));
   }
 
@@ -239,7 +260,7 @@
     const fromPeak = (S.bank - S.peak) / S.peak * 100;
     return h('section', { class: 'card stat dashboard-hero', 'aria-label': 'Банк' },
       h('div', { class: 'dashboard-hero-top' },
-        h('div', { class: 'stat-label' }, icon('wallet', { width: 16, height: 16 }), 'Банк'),
+        h('div', { class: 'stat-label' }, icon('wallet', { width: 16, height: 16 }), 'Банк', h('span', { class: 'xsmall muted', style: 'font-weight:400' }, '· с учетом ставок в игре')),
         h('div', { class: 'stat-value hero' }, fmt.money(S.bank)),
         h('div', { class: 'row', style: 'gap:8px' }, deltaEl(fmt.signedMoney(delta) + ' · ' + fmt.signedPct(pct), trendOf(delta)), h('span', { class: 'stat-hint' }, st.p.ctx))),
       h('div', { class: 'dashboard-hero-spark', title: 'Банк по дням ' + st.p.ctx }, UI.sparkline(st.values, { color: 'var(--s1)', width: 320, height: 52 })),
@@ -258,16 +279,20 @@
     const wrTile = { label: 'Винрейт', icon: 'trophy', value: c.winrate == null ? '—' : fmt.pct(c.winrate),
       hint: c.wins + ' В · ' + c.losses + ' П' + (c.voids ? ' · ' + c.voids + ' возвр.' : '') };
 
+    // CLV = ваш кэф ÷ закрывающий − 1 по закрытию, которое вы внесли (В1)
     const clvTile = { label: 'Средний CLV', icon: 'bolt', value: c.clv == null ? '—' : fmt.signedPct(Math.round(c.clv * 10) / 10),
-      hint: c.n ? 'лучше закрытия в ' + c.clvPos + ' из ' + c.n : 'нет ставок' };
+      hint: c.clvN ? 'лучше закрытия в ' + c.clvPos + ' из ' + c.clvN : 'нет закрывающих кэфов' };
 
+    // Brier рынка — рынок при прогнозе без маржи (В2)
     const b = st.brier;
     const brTile = { label: 'Brier модели', icon: 'target', value: b.model == null ? '—' : fmt.dec(b.model, 3) };
     if (b.model != null) {
       const diff = b.model - b.market;
-      Object.assign(brTile, { delta: signedDec(diff, 3) + ' к рынку', trend: trendOf(Math.round(diff * 1000)), good: false, hint: 'рынок ' + fmt.dec(b.market, 3) + ' · ниже — лучше' });
+      Object.assign(brTile, { delta: (Math.round(diff * 1000) === 0 ? '0,000' : signedDec(diff, 3)) + ' к рынку', trend: trendOf(Math.round(diff * 1000)), good: false, hint: 'рынок при прогнозе ' + fmt.dec(b.market, 3) + ' · ниже — лучше' });
     }
-    return [roiTile, wrTile, clvTile, brTile].map(t => h('div', { class: 'col-6 half-mobile' }, UI.stat(t)));
+    return [roiTile, wrTile, clvTile, brTile].map(t => h('div', { class: 'col-6 half-mobile' }, UI.stat(t)))
+      .concat(h('div', { class: 'col-12' }, h('div', { class: 'dashboard-howto' }, icon('info'),
+        h('span', null, 'CLV — ваш кэф ÷ закрывающий − 1; закрывающий кэф вы вносите сами: эталона (' + D.marketRefRule + ') или своего букмекера. Brier рынка — по рынку в момент прогноза без маржи. Ставки старого бота входят в банк и ROI, но не в CLV и Brier.'))));
   }
 
   function smallSampleNote(st) {
@@ -372,32 +397,34 @@
     });
   }
 
-  function matchesCard() {
-    const rows = D.matchesToday.map(m => {
-      const inBet = betOfMatch(m);
-      const pl = id => [
-        h('div', { class: 'dashboard-match-name' }, playerLink(id), D.P[id] && h('span', { class: 'rank', title: 'Место по Эло среди игроков с матчами за 52 недели' }, '№' + D.P[id].eloPlace)),
-        UI.freshnessChip(D.P[id] ? D.P[id].fresh : 'missing'),
+  // Мои матчи сегодня (В6): ноги открытых ставок и матчи сегодняшних анализов. Кэфов-примеров и «Все матчи дня
+  // в анализ» нет — линии и расписания в программе нет (Р10)
+  function myMatchesCard() {
+    const list = myMatches();
+    const rows = list.map(x => {
+      const pl = id => h('div', { class: 'dashboard-match-name' }, playerLink(id), D.P[id] && h('span', { class: 'rank', title: 'Место по Эло среди игроков с матчами за 52 недели' }, '№' + D.P[id].eloPlace));
+      const tags = [
+        ...x.bets.map(({ bet, leg }) => chip('В ставке №' + bet.id + ' · ' + leg.marketLabel + ' ' + fmt.odds(leg.odds), 'accent', 'ticket')),
+        ...x.analyses.map(a => chip('Анализ #' + a.id, 'outline', 'spark')),
       ];
-      return h('article', { class: 'dashboard-match', 'aria-label': DATA.match(m) + ', ' + m.time },
-        h('div', { class: 'dashboard-match-time' }, h('span', { class: 'mono' }, m.time), h('span', { class: 'dashboard-match-sep', 'aria-hidden': 'true' }, '·'), h('span', { class: 'xsmall' }, m.court)),
-        h('div', { class: 'dashboard-match-players' }, pl(m.p1), pl(m.p2),
-          inBet && h('div', { class: 'dashboard-match-extra' }, chip('В ставке №' + inBet.bet.id + ' · ' + inBet.leg.marketLabel + ' ' + fmt.odds(inBet.leg.odds), 'accent', 'ticket'))),
-        h('div', { class: 'dashboard-match-odds' },
-          UI.oddsBox('П1', m.odds.p1, inBet && inBet.leg.market === 'p1'),
-          UI.oddsBox('П2', m.odds.p2, inBet && inBet.leg.market === 'p2')),
-        h('div', { class: 'dashboard-match-action' }, button('Анализировать', { kind: 'secondary', size: 'sm', icon: 'spark', href: '#new-' + m.id, ariaLabel: 'Анализировать матч ' + DATA.match(m) })));
+      const action = x.bets.length
+        ? button('Ставка №' + x.bets[0].bet.id, { kind: 'secondary', size: 'sm', icon: 'ticket', href: '#bets-' + x.bets[0].bet.id, ariaLabel: 'Открыть ставку №' + x.bets[0].bet.id })
+        : button('Анализ', { kind: 'secondary', size: 'sm', icon: 'spark', href: '#analysis-' + x.analyses[0].id, ariaLabel: 'Открыть анализ #' + x.analyses[0].id });
+      return h('article', { class: 'dashboard-match', 'aria-label': DATA.match(x) + (x.time ? ', ' + x.time : '') },
+        h('div', { class: 'dashboard-match-time' }, h('span', { class: 'mono' }, x.time || '—'), h('span', { class: 'xsmall' }, [x.tournament, x.round].filter(Boolean).join(', '))),
+        h('div', { class: 'dashboard-match-players' }, h('div', { class: 'dashboard-match-pair' }, pl(x.p1), h('span', { class: 'muted', 'aria-hidden': 'true' }, '—'), pl(x.p2)), h('div', { class: 'dashboard-match-extra' }, tags)),
+        h('div', { class: 'dashboard-match-action' }, action));
     });
+    const nb = list.filter(x => x.bets.length).length, na = list.length - nb;
     return card({
       class: 'dashboard-matches-card dashboard-card',
-      title: 'Матчи сегодня · Шанхай, Masters 1000',
-      subtitle: '1/8 финала · ' + tzLabel() + ' · кэфы — пример',
-      actions: [UI.surfaceChip('hard')],
+      title: 'Мои матчи сегодня',
+      subtitle: list.length ? (nb ? nb + ' в ставках' : '') + (nb && na ? ' · ' : '') + (na ? na + ' в анализах' : '') + ' · ' + tzLabel() : 'Из ваших ставок и анализов',
       flush: true,
-      body: h('div', null, rows),
+      body: list.length ? h('div', null, rows) : h('div', { style: 'padding:14px 18px' }, UI.empty('Сегодня в ваших ставках и анализах матчей нет.')),
       foot: [
-        button('Все матчи дня в анализ', { kind: 'primary', size: 'sm', icon: 'spark', href: '#new-today' }),
-        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 220px' }, 'Кэфы своей линии впишете в «Новом анализе». Новости игроков перед анализом входят в его цену, ночное обновление базы оплачивает администратор.'),
+        button('Новый анализ', { kind: 'primary', size: 'sm', icon: 'spark', href: '#new' }),
+        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 220px' }, 'Здесь только матчи из ваших ставок и анализов: расписания и линии кэфов в программе нет. Матчи и кэфы своей линии вписываете в «Новом анализе».'),
       ],
     });
   }
@@ -410,135 +437,107 @@
       : d.user.name + ' — уже ' + fmt.pct(d.ratio * 100, 0) + ' месячного лимита (' + fmt.usd(D.ai.keySpent(d.user)) + ' из ' + usdL(D.ai.limitOf(d.user).monthly) + ').');
   }
 
-  // Состояние кнопок в «Требует внимания» — сохраняется между перерисовками периода
-  const queued = { rune: false, stale: false };
-  function attentionCard() {
-    const list = h('div', { class: 'dashboard-alerts' });
-    const missing = D.players.filter(p => p.fresh === 'missing');
-    const stale = D.players.filter(p => p.fresh === 'stale');
-    const playsToday = id => D.matchesToday.find(m => m.p1 === id || m.p2 === id);
-    const staleToday = stale.filter(p => playsToday(p.id));
-    const cand = D.strategyVersions.find(v => v.status === 'candidate');
-    const act = D.strategyVersions.find(v => v.status === 'active');
-    const isAdmin = UI.auth.isAdmin;
-
-    function draw() {
-      UI.clear(list);
-      const items = [];
-      missing.forEach(p => {
-        const m = playsToday(p.id);
-        const opp = m ? D.P[m.p1 === p.id ? m.p2 : m.p1] : null;
-        items.push({
-          tone: 'warn', ic: 'database', sr: 'Предупреждение',
-          title: h('span', null, 'Профиль не собран: ', playerLink(p.id)),
-          text: (m ? 'Играет сегодня в ' + m.time + (opp ? ', соперник — ' + opp.short + '. ' : '. ') : '') + 'Анализ пройдет и без профиля: досье — по архиву матчей и Эло, свежие новости Claude поищет перед анализом. Профиль (стиль, физика, психология) можно собрать заранее.',
-          action: queued.rune
-            ? chip('Сбор профиля в очереди', 'info', 'clock')
-            : button('Собрать сейчас', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => { queued.rune = true; draw(); UI.toast('Сбор профиля ' + p.short + ' запущен — около 1–2 минут', 'refresh'); } }),
-        });
-      });
-      if (stale.length) {
-        items.push({
-          tone: 'warn', ic: 'clock', sr: 'Предупреждение',
-          title: h('span', null, 'Данные устарели: ', stale.map((p, i) => [i ? ', ' : '', playerLink(p.id)])),
-          text: 'Обновлены ' + dateRange(stale.map(p => p.updated)) + '. ' + (staleToday.length ? staleToday.map(p => p.short).join(' и ') + (staleToday.length > 1 ? ' играют' : ' играет') + ' сегодня. ' : '') + 'Пакетное обновление в фоне — вдвое дешевле.',
-          action: queued.stale
-            ? chip('Обновление в очереди · пакетом', 'info', 'clock')
-            : button('Обновить ' + stale.length + ' ' + fmt.plural(stale.length, 'профиль', 'профиля', 'профилей'), { kind: 'secondary', size: 'sm', icon: 'refresh', onClick: () => { queued.stale = true; draw(); UI.toast('Обновление ' + stale.length + ' профилей поставлено в пакетную очередь (−50% к цене)', 'refresh'); } }),
-        });
-      }
-      if (isAdmin) {
-        const todo = adminTodo();
-        if (todo.length) items.push({
-          tone: 'info', ic: 'admin', sr: 'Нужно решение',
-          title: 'Администрирование: ' + todo.length + ' ' + fmt.plural(todo.length, 'дело', 'дела', 'дел'),
-          text: todo.join(' '),
-          action: button('Открыть Администрирование', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#admin' }),
-        });
-      }
-      if (cand && act) {
-        items.push({
-          tone: 'accent', ic: 'flask', sr: 'Нужно решение',
-          title: 'Нужно решение: кандидат стратегии ' + cand.id,
-          text: 'Промпт на английском и сжатое досье — примерно на 30% меньше токенов на анализ. На тех же ' + cand.n + ' событиях Brier ' + fmt.dec(cand.brier, 3) + ' против ' + fmt.dec(act.brier, 3) + ' у ' + act.id + ' — разница в пределах шума, то есть качество не хуже. Включать ли ради экономии — решаете вы.',
-          action: button('Сравнить ' + act.id + ' и ' + cand.id, { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#learning' }),
-        });
-      }
-      // Адаптации размера ставки — те же правила, что в «Профиль → Банк и стратегия» (Р22: правил серий нет);
-      // статус считается из DATA.stats
-      const fromPeak = (S.bank - S.peak) / S.peak * 100, growth = (S.bank - S.start) / S.start * 100;
-      const weekBase = D.bankHistory.filter(x => x.date <= addDays(D.today, -7)).pop() || D.bankHistory[0];
-      const week = (S.bank - weekBase.bank) / weekBase.bank * 100;
-      const activeRules = [
-        fromPeak <= -20 && 'при просадке ' + fmt.signedPct(fromPeak) + ' — защитный режим: 1,5% банка, только 2 события с кэфами до 1.50',
-        fromPeak <= -10 && fromPeak > -20 && 'при просадке ' + fmt.signedPct(fromPeak) + ' ставка не больше 2,5% банка',
-        growth >= 15 && S.winrate >= 60 && 'банк ' + fmt.signedPct(growth) + ' к старту и винрейт ' + fmt.pct(S.winrate) + ' — потолок ставки 4% вместо 3%',
-        week <= -5 && 'за 7 дней ' + fmt.signedPct(week) + ' — ставка не больше 2%',
-        week >= 10 && 'за 7 дней ' + fmt.signedPct(week) + ' — ставка +0,5 п.п.',
-      ].filter(Boolean);
-      items.push({
-        tone: activeRules.length ? 'warn' : 'info', ic: 'shield', sr: activeRules.length ? 'Предупреждение' : 'Информация',
-        title: activeRules.length ? 'Размер ставки изменен правилом адаптации' : 'Размер ставки: адаптации не действуют',
-        text: (fromPeak < 0 ? 'Банк ' + fmt.signedPct(fromPeak) + ' от пика' : 'Банк на пике') + ', за 7 дней ' + fmt.signedPct(week) + '. ' + (activeRules.length
-          ? 'Сейчас ' + activeRules.join('; ') + '. Новые анализы предложат суммы с учетом этого.'
-          : 'Ставка не превысит 2,5% банка при просадке от −10% и 1,5% при −20%; после убыточной недели — не больше 2%. Сегодня суммы — по таблице.'),
-        action: button('Правила ставок', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#profile-bank' }),
-      });
-      items.forEach(it => list.appendChild(h('div', { class: 'dashboard-alert' },
-        h('div', { class: ['dashboard-alert-ic', it.tone] }, icon(it.ic)),
-        h('div', { class: 'dashboard-alert-body' },
-          h('div', { class: 'dashboard-alert-title' }, h('span', { class: 'sr-only' }, it.sr + '. '), it.title),
-          h('div', { class: 'dashboard-alert-text' }, it.text),
-          it.action))));
-    }
-    draw();
-    const n = list.children.length;
-    return card({ class: 'dashboard-card dashboard-attn-card', title: 'Требует внимания', subtitle: n + ' ' + fmt.plural(n, 'пункт', 'пункта', 'пунктов') + ' · ' + (isAdmin ? 'данные, стратегия и администрирование' : 'данные и стратегия'), body: list });
+  // Архив матчей не обновлялся больше 3 дней (уведомление data_stale) — только администратору
+  const daysSince = iso => Math.floor((Date.parse(NOW + ':00Z') - Date.parse(iso + ':00Z')) / 86400000);
+  function archiveModal() {
+    const A = D.archive;
+    UI.modal({
+      title: 'Архив матчей не обновляется',
+      body: [
+        h('p', { class: 'small soft' }, 'Ночное обновление в ' + A.nightly + ' скачивает новые матчи ' + A.source + ' и пересчитывает Эло. Последняя успешная загрузка — ' + fmt.dateFull(A.lastLoad) + ', ' + A.lastLoad.slice(11, 16) + ' UTC.'),
+        UI.kv([['Что устарело', 'Эло, форма и подача игроков — без матчей после этой даты'], ['Что работает', 'анализы, новости перед анализом, ставки и банк'], ['Как обновить вручную', h('code', null, 'bash deploy/local.sh data')]]),
+        h('p', { class: 'xsmall muted' }, 'Уведомление приходит администраторам, если загрузки не было больше ' + A.staleDays + ' дней, не чаще раза в сутки.'),
+      ],
+      actions: close => [button('Понятно', { kind: 'primary', onClick: close })],
+    });
   }
 
-  // Уроки о сборе данных (не о вероятностях) принимаются по правилу «не хуже на ≥ 10 случаях»
-  const isProcessLesson = l => /сбор/i.test(l.scope || '');
+  function attentionCard() {
+    const list = h('div', { class: 'dashboard-alerts' });
+    const isAdmin = UI.auth.isAdmin;
+    const items = [];
+    if (isAdmin && D.archive) {
+      const days = daysSince(D.archive.lastLoad);
+      if (days > D.archive.staleDays) items.push({
+        tone: 'warn', ic: 'database', sr: 'Предупреждение',
+        title: 'Архив матчей не обновлялся ' + days + ' ' + fmt.plural(days, 'день', 'дня', 'дней'),
+        text: 'Последняя загрузка ' + D.archive.source + ' — ' + fmt.date(D.archive.lastLoad) + '. Эло и форма игроков — без матчей после этой даты, анализы идут.',
+        action: button('Что делать', { kind: 'secondary', size: 'sm', icon: 'info', onClick: archiveModal }),
+      });
+    }
+    if (isAdmin) {
+      const todo = adminTodo();
+      if (todo.length) items.push({
+        tone: 'info', ic: 'admin', sr: 'Нужно решение',
+        title: 'Администрирование: ' + todo.length + ' ' + fmt.plural(todo.length, 'дело', 'дела', 'дел'),
+        text: todo.join(' '),
+        action: button('Открыть Администрирование', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#admin' }),
+      });
+    }
+    // Адаптации размера ставки (Р22) — те же правила, что в «Профиль → Банк и стратегия».
+    // В7: «рост банка» и «прибыльная неделя» по умолчанию выключены, статус остальных считается из DATA.stats
+    const fromPeak = (S.bank - S.peak) / S.peak * 100, growth = (S.bank - S.start) / S.start * 100;
+    const weekBase = D.bankHistory.filter(x => x.date <= addDays(D.today, -7)).pop() || D.bankHistory[0];
+    const week = (S.bank - weekBase.bank) / weekBase.bank * 100;
+    const cond = {
+      dd10: fromPeak <= -10 && fromPeak > -20, dd20: fromPeak <= -20, week_loss: week <= -5,
+      up15: growth >= 15 && S.winrate >= 60, week_win: week >= 10,
+    };
+    const rules = D.strategy.adapt.map(r => Object.assign({}, r, { met: cond[r.key], active: r.on && cond[r.key] }));
+    const active = rules.filter(r => r.active);
+    const off = rules.filter(r => !r.on);
+    const STATUS = r => (!r.on ? chip('Выключено', 'outline', 'pause') : r.active ? chip('Действует', 'warn', 'alert') : chip('Ждет условия', 'info', 'clock'));
+    items.push({
+      tone: active.length ? 'warn' : 'info', ic: 'shield', sr: active.length ? 'Предупреждение' : 'Информация',
+      title: active.length ? 'Размер ставки изменен правилом адаптации' : 'Размер ставки: адаптации не действуют',
+      text: [
+        h('span', null, (fromPeak < 0 ? 'Банк ' + fmt.signedPct(fromPeak) + ' от пика' : 'Банк на пике') + ', за 7 дней ' + fmt.signedPct(week) + ', к вложенному ' + fmt.signedPct(growth) + ', винрейт ' + fmt.pct(S.winrate) + '. '
+          + (active.length ? 'Сейчас ' + active.map(r => r.effect).join('; ') + '.' : 'Сегодня суммы — по таблице стратегии.')),
+        h('ul', { class: 'dashboard-rules', 'aria-label': 'Правила адаптации' }, rules.map(r => h('li', null,
+          h('span', { class: 'dashboard-rule-name' }, r.label, h('small', null, r.effect)), STATUS(r)))),
+        off.length ? h('span', { class: 'dashboard-rule-note' }, icon('info'), h('span', null, h('b', null, 'По умолчанию выключены: '), off.map(r => '«' + r.label.toLowerCase() + '»').join(' и ') + '. В утвержденных правилах суммы их нет, они опираются на короткие серии, то есть на шум. Включенные, они увеличили бы следующие ставки' + (off.some(r => r.met) ? ' — и сейчас бы сработали' : '; сейчас не сработали бы и включенными') + '. Включить — только по вашему решению.')) : null,
+        // Для согласования (В7): в коде этапа 3 эти правила включены, «Выключено» — предложение, оно меняет суммы ставок
+        off.length ? h('span', { class: 'dashboard-rule-note' }, h('span', null, h('span', { class: 'demo-pill' }, 'Только в макете'), ' ', h('b', null, 'На согласование. '), 'Сейчас в коде этапа 3 эти правила включены. «Выключено» — предложение: оно меняет суммы следующих ставок, поэтому выключаем только с вашего согласия. Подробнее — в «Правилах ставок».')) : null,
+      ],
+      action: button('Правила ставок', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#profile-bank' }),
+      wide: true,
+    });
+    items.forEach(it => list.appendChild(h('div', { class: ['dashboard-alert', it.wide && 'is-wide'] },
+      h('div', { class: ['dashboard-alert-ic', it.tone] }, icon(it.ic)),
+      h('div', { class: 'dashboard-alert-body' },
+        h('div', { class: 'dashboard-alert-title' }, h('span', { class: 'sr-only' }, it.sr + '. '), it.title),
+        h('div', { class: 'dashboard-alert-text' }, it.text),
+        it.action))));
+    const n = items.length;
+    return card({ class: 'dashboard-card dashboard-attn-card', title: 'Требует внимания', subtitle: n + ' ' + fmt.plural(n, 'пункт', 'пункта', 'пунктов') + ' · ' + (isAdmin ? 'стратегия, архив и администрирование' : 'стратегия'), body: list });
+  }
+
+  // «Модель учится» — этап 5 (уроки, гипотезы, версии стратегии): пока пустое состояние
   function learningCard() {
-    const confirmed = D.lessons.filter(l => l.status === 'confirmed').sort((a, b) => b.created.localeCompare(a.created));
-    const latest = confirmed[0];
-    const hyp = D.lessons.find(l => l.status === 'hypothesis');
-    const need = hyp ? +((hyp.effect.match(/\d+/) || [20])[0]) : 20;
-    const count = st => D.lessons.filter(l => l.status === st).length;
-    const act = D.strategyVersions.find(v => v.status === 'active');
     return card({
       class: 'dashboard-card',
       title: 'Модель учится',
-      subtitle: 'Последний принятый урок',
-      actions: [button('Все уроки', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', href: '#learning' })],
+      subtitle: 'Появится на этапе 5',
       body: [
-        latest && h('figure', { class: 'dashboard-lesson' },
-          h('div', { class: 'row', style: 'gap:6px' }, chip(latest.id, 'outline'), chip('Подтвержден', 'good', 'check'), latest.inPrompt && chip('В инструкциях анализа', 'accent', 'book')),
-          h('p', null, latest.text),
-          h('figcaption', { class: 'xsmall muted' }, latest.evidence + ' ' + fmt.plural(latest.evidence, 'случай', 'случая', 'случаев') + ' · ' + latest.effect + ' · ' + latest.scope + ' · с ' + fmt.date(latest.created)),
-          isProcessLesson(latest) && h('div', { class: 'dashboard-howto' }, icon('info'), 'Урок про сбор данных: вероятности не меняет, убирает лишние поиски. Такие принимаются, если качество не хуже на 10+ случаях; уроки о вероятностях — от 20 своих случаев.')),
-        hyp && h('div', { class: 'stack', style: 'gap:6px' },
-          h('div', { class: 'row-between small' }, h('span', { class: 'soft', style: 'min-width:0' }, 'Проверяется гипотеза ', h('b', null, hyp.id), ': ', hyp.scope), h('span', { class: 'num', style: 'font-weight:600' }, hyp.evidence + ' из ' + need + ' случаев')),
-          UI.meter(hyp.evidence, need)),
-        h('dl', { class: 'dashboard-mini-stats' },
-          h('div', null, h('dt', null, 'Принято'), h('dd', null, String(count('confirmed')))),
-          h('div', null, h('dt', null, 'Гипотез'), h('dd', null, String(count('hypothesis')))),
-          h('div', null, h('dt', null, 'Стратегия'), h('dd', null, act ? act.id : '—'))),
-        h('div', { class: 'dashboard-howto' }, icon('info'), 'Веса нейросети не меняются: ИИ разбирает каждую рассчитанную ставку, а вывод попадает в инструкции анализа только после проверки на истории ставок.'),
+        h('div', { class: 'dashboard-soon' },
+          h('span', { class: 'dashboard-soon-ic', 'aria-hidden': 'true' }, icon('brain')),
+          h('p', null, 'Разбор рассчитанных ставок, уроки и версии стратегии появятся на этапе 5. Пока модель не меняется: точность прогнозов и калибровка — в «Аналитике».')),
       ],
+      foot: [button('Аналитика', { kind: 'ghost', size: 'sm', icon: 'chart', iconRight: 'chevronRight', href: '#analytics' })],
     });
   }
 
   // Расходы ИИ (Р7, Р9, Р13). Участник на ключе администратора видит свой лимит, администратор — бюджет ключа.
   // Бюджет ключа, расход по людям и лимиты — только общий расчет DATA.ai (budget, keySpent, ownSpent, keyUsers,
-  // limitOf): те же цифры, что в «ИИ и расходах» и «Администрировании». Ночное обновление базы оплачивает
-  // администратор, в лимит участника оно не входит.
-  const SHARED_TYPES = ['refresh'];
+  // limitOf): те же цифры, что в «ИИ и расходах» и «Администрировании». Задачи — по коду этапа 3 (Т19): разбор текста,
+  // новости перед анализом, оценка матча. Общие фоновые задачи (вызовы без участника — приемка) оплачивает
+  // администратор, в лимит участника они не входят; проверки (eval) — отдельный бюджет и в общий не входят.
   const PAUSED = 'Анализы на паузе — решение администратора';
   function costsCard() {
     const A = D.ai, me = D.me || {}, isAdmin = UI.auth.isAdmin;
     const day = +TODAY.slice(8, 10);
     const pace = v => v / day * 31; // темп 1–7 окт на месяц — для личного прогноза, как в DATA.ai.budget()
-    const runs = isAdmin ? A.runs : A.runs.filter(r => !SHARED_TYPES.includes(r.type));
+    const runs = isAdmin ? A.runs : A.runs.filter(r => !A.isShared(r));
     const spentRuns = sum(runs, r => r.cost);
     const byType = {};
     runs.forEach(r => { byType[r.type] = (byType[r.type] || 0) + r.cost; });
@@ -569,8 +568,9 @@
             ['Участники на вашем ключе', fmt.usd(sum(others, A.keySpent))],
             ['Общие фоновые задачи', fmt.usd(B.shared)],
             ['Прогноз на месяц', '≈ ' + fmt.usd(B.forecast)],
+            ['Проверки (eval), отдельно', fmt.usd(A.eval.spent) + ' из ' + usdL(A.eval.monthly)],
           ]),
-          howto('Прогноз учитывает личные лимиты участников. Ставки и банк участников вам не видны — только расход на ИИ.'),
+          howto('Общие фоновые задачи — вызовы без участника, сейчас это приемка этапа. Проверки идут из своего бюджета и в общий не входят. Прогноз учитывает личные лимиты участников. Ставки и банк участников вам не видны — только расход на ИИ.'),
         ],
         foot: [button('Администрирование', { kind: 'ghost', size: 'sm', icon: 'admin', iconRight: 'chevronRight', href: '#admin-usage', title: 'Расход ИИ по людям — в Администрировании' })],
       });
@@ -611,7 +611,7 @@
           ['Из кэша', fmt.pct(cacheShare, 0) + ' входных токенов'],
           ['Дороже всего', topLabel + ' · ' + fmt.pct(top ? top[1] / spentRuns * 100 : 0, 0)],
         ]),
-        howto('Лимит меняет администратор. Ночное обновление базы он оплачивает сам — в ваш лимит оно не входит.'),
+        howto('Лимит меняет администратор. В цену анализа входят разбор текста, новости перед анализом (Sonnet 5.5 с веб-поиском) и оценка матчей (Opus 5.5).'),
       ],
     });
   }
@@ -647,11 +647,11 @@
       drawPeriod();
 
       if (mobile) {
-        // Телефон: одна колонка, самое важное сверху — банк, открытые ставки, матчи дня
+        // Телефон: одна колонка, самое важное сверху — банк, открытые ставки, мои матчи сегодня
         UI.append(root, [
           head, noteSlot, heroSlot,
           openBetsCard(),
-          matchesCard(),
+          myMatchesCard(),
           h('section', { class: 'stack', style: 'gap:10px', 'aria-label': 'Показатели за период' }, h('div', { class: 'dashboard-section-label' }, tilesLabel), tilesGrid),
           attentionCard(),
           chartSlot,
@@ -663,10 +663,10 @@
       UI.append(root, [
         head, noteSlot,
         h('div', { class: 'dashboard-top' }, heroSlot, tilesGrid),
-        // Слева — что требует действий и матчи дня, затем история; справа — открытые ставки и состояние модели.
+        // Слева — что требует действий и мои матчи сегодня, затем история; справа — открытые ставки, «Модель учится» и расходы.
         // На ширине ≤1180 колонки «растворяются» и блоки встают по порядку важности (классы dashboard-o-N).
         h('div', { class: 'dashboard-main' },
-          h('div', { class: 'dashboard-col' }, ord(attentionCard(), 2), ord(matchesCard(), 3), ord(chartSlot, 4)),
+          h('div', { class: 'dashboard-col' }, ord(attentionCard(), 2), ord(myMatchesCard(), 3), ord(chartSlot, 4)),
           h('div', { class: 'dashboard-col dashboard-side' }, ord(openBetsCard(), 1), ord(learningCard(), 5), ord(costsCard(), 6))),
       ]);
     },

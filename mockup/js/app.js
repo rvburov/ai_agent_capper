@@ -69,18 +69,26 @@
     if (d === y.toISOString().slice(0, 10)) return 'Вчера, ' + t;
     return +d.slice(8, 10) + ' ' + MONTHS[+d.slice(5, 7) - 1] + ', ' + t;
   }
+  // Что присылать на сайт (Личный кабинет → Уведомления): выключенные виды в центр не попадают.
+  // Обязательные виды (вход с нового устройства, сообщение администратора) приходят всегда — это решает UI.notifPrefs.
+  const allowed = n => !UI.notifPrefs || UI.notifPrefs.allowed(n.kind);
   UI.notifications = {
     list() {
-      return (DATA.notifications[state.role] || []).map(n => {
-        let body = n.body;
+      return (DATA.notifications[state.role] || []).filter(allowed).map(n => {
+        let body = n.body, link = n.link;
+        // ставка рассчитана — ссылка на саму ставку (#bets-<id>), а не на список
+        if (n.kind === 'bet_settled' && n.bet && (!link || link === '#bets')) link = '#bets-' + n.bet;
         if (n.kind === 'bet_settled') {
           const b = DATA.bets.find(x => x.id === n.bet);
           body = (b.status === 'win' ? 'Выигрыш ' : b.status === 'loss' ? 'Проигрыш ' : 'Возврат ') + fmt.signedMoney(b.profit) + '. Банк ' + fmt.money(b.bankAfter) + '.';
         }
-        return Object.assign({}, n, { body, read: n.read || readState[state.role].has(n.id) });
+        return Object.assign({}, n, { body, link, read: n.read || readState[state.role].has(n.id) });
       });
     },
+    // сколько уведомлений скрыто настройками «Что присылать»
+    hidden() { return (DATA.notifications[state.role] || []).filter(n => !allowed(n)).length; },
     unread() { return this.list().filter(n => !n.read).length; },
+    refresh() { updateBell(); },
     markRead(id) { readState[state.role].add(id); updateBell(); },
     markAll() { this.list().forEach(n => readState[state.role].add(n.id)); updateBell(); },
   };
@@ -123,7 +131,8 @@
           h('span', { class: 'notif-text' },
             h('span', { class: 'notif-title' }, n.title),
             n.body ? h('span', { class: 'notif-body' }, n.body) : null,
-            h('span', { class: 'notif-time' }, whenShort(n.at))),
+            // на этапе 4 ставки рассчитывает сам участник и уведомления нет — это пример авторасчета этапа 5
+            h('span', { class: 'notif-time' }, whenShort(n.at) + (n.kind === 'bet_settled' ? ' · пример этапа 5: авторасчет' : ''))),
           n.read ? null : h('span', { class: 'notif-dot', 'aria-label': 'Не прочитано' })));
       });
     }
@@ -135,7 +144,7 @@
       listEl,
       h('div', { class: 'notif-foot' },
         h('a', { href: '#profile-notifications', on: { click: () => closeNotif(false) } }, icon('sliders'), 'Что присылать'),
-        h('span', { class: 'xsmall muted' }, 'На сайте и push на телефон')));
+        h('span', { class: 'xsmall muted' }, UI.notifications.hidden() ? 'Часть видов выключена в настройках' : 'На сайте · push — на этапе 6')));
     if (sheet) document.body.appendChild(h('div', { class: 'notif-back', on: { click: () => closeNotif(true) } }));
     document.body.appendChild(pop);
     if (!sheet) {

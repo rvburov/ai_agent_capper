@@ -1,6 +1,8 @@
-/* Аналитика: прибыльность по срезам (покрытия, рынки, кэфы), калибровка, Brier против рынка, CLV, выводы модели.
+/* Аналитика: прибыльность по срезам (покрытия, рынки, кэфы) с доверительными интервалами, экспрессы против тех же
+   событий ординарами (Р21), калибровка, Brier против рынка при прогнозе, CLV с ДИ, выводы кодом.
    Фильтры сверху пересчитывают все блоки из DATA.allLegs / DATA.bets теми же формулами, что и data.js,
-   поэтому без фильтров цифры совпадают с DATA.stats и с главной. */
+   поэтому без фильтров цифры совпадают с DATA.stats и с главной. В приложении все числа и ДИ считает сервер
+   (Т4, один GET /api/analytics), фронтенд только рисует; здесь — демо-расчет в браузере. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
@@ -21,19 +23,30 @@
   const settled = () => D.bets.filter(b => b.status !== 'open');
   const openN = () => D.bets.filter(b => b.status === 'open').length;
   const SMALL = 20; // меньше — помечаем «мало данных»
+  // Калибровка: диапазон с 8+ событиями, где прогноз расходится с фактом на 4 п.п. и больше (в любую сторону), — плохой
+  const CALIB_N = 8, CALIB_GAP = 0.04;
+  // Т10: старый бот записывал исходы событий только у выигранных экспрессов (у проигранных — нет). Если брать события
+  // его экспрессов, останутся почти одни выигрыши. Поэтому у бота по событиям считаются только ординары
+  const betLegsN = id => { const b = D.bets.find(x => x.id === id); return b ? b.legs.length : 1; };
+  const botParlayLeg = l => l.source === 'bot' && betLegsN(l.betId) > 1;
+  const botParlay = b => b.source === 'bot' && b.legs.length > 1;
 
   const PERIODS = [
     { id: '30', label: '30 дней', days: 30, ctx: 'за 30 дней', prev: 'к пред. 30 дням' },
     { id: '90', label: '3 месяца', days: 90, ctx: 'за 3 месяца', prev: 'к пред. 3 месяцам' },
     { id: 'all', label: 'Все время', days: null, ctx: 'за все время', prev: null },
   ];
-  const MARKET_SHORT = { p1: 'победа игрока 1', p2: 'победа игрока 2', h1m: 'игрок 1 — 2:0 по сетам', h2p: 'игрок 2 — хотя бы сет', h1p: 'игрок 1 — хотя бы сет' };
+  // Описания рынков для матча до 2 побед; в скобках — для матча до 3 побед (Большой шлем, Т21)
+  const MARKET_SHORT = { p1: 'победа игрока 1', p2: 'победа игрока 2', h1m: 'игрок 1 — 2:0 (3:0, 3:1)', h2m: 'игрок 2 — 2:0 (3:0, 3:1)', h1p: 'игрок 1 — хотя бы сет (два)', h2p: 'игрок 2 — хотя бы сет (два)' };
   const MARKETS = D.markets.filter(m => D.allLegs.some(l => l.market === m.id));
   const mLabel = id => (D.markets.find(m => m.id === id) || { label: id }).label;
   const SURF_KEYS = Object.keys(D.surfaces);
 
   // ---------- состояние фильтров (живет между перерисовками) ----------
-  const DEFAULTS = { period: 'all', market: 'all', surface: 'all' };
+  // source — источник ставок (В5): приложение, старый бот или все; ставки бота входят в банк и ROI,
+  // но не в CLV, Brier против рынка и калибровку p_final (под фильтром «бот» калибровка — по p_claude бота)
+  const SOURCES = [{ value: 'all', label: 'Все источники' }, { value: 'app', label: 'Приложение' }, { value: 'bot', label: 'Старый бот' }];
+  const DEFAULTS = { period: 'all', market: 'all', surface: 'all', source: 'all' };
   const state = Object.assign({}, DEFAULTS);
   try {
     const saved = JSON.parse(sessionStorage.getItem('capper.analytics') || 'null');
@@ -41,70 +54,107 @@
       if (PERIODS.some(p => p.id === saved.period)) state.period = saved.period;
       if (saved.market === 'all' || MARKETS.some(m => m.id === saved.market)) state.market = saved.market;
       if (saved.surface === 'all' || SURF_KEYS.includes(saved.surface)) state.surface = saved.surface;
+      if (SOURCES.some(x => x.value === saved.source)) state.source = saved.source;
     }
   } catch (e) { /* хранилище недоступно — работаем в памяти */ }
   const save = () => { try { sessionStorage.setItem('capper.analytics', JSON.stringify(state)); } catch (e) { /* ок */ } };
-  const isDefault = () => state.period === DEFAULTS.period && state.market === 'all' && state.surface === 'all';
-  const ui = { hypotheses: {}, deep: false };
+  const isDefault = () => state.period === DEFAULTS.period && state.market === 'all' && state.surface === 'all' && state.source === 'all';
 
   // ---------- расчеты (формулы как в data.js) ----------
   const won = l => (l.result === 'win' ? 1 : 0);
-  const marketQ = l => Math.min(0.97, 1 / l.closing * 0.955); // вероятность рынка по закрытию без маржи
-  const legClv = l => (l.odds / l.closing - 1) * 100;
+  // Рынок при прогнозе без маржи (В2): кэфы обеих сторон у вашего букмекера, степенной метод (Т3, ml/market.py)
+  const marketQ = l => l.q;
+  const legClv = l => (l.closing ? (l.odds / l.closing - 1) * 100 : null);
+  // «CLV без маржи» = кэф × q_close − 1 — только у событий с двумя сторонами закрытия (В1)
+  const fairClv = l => (l.qClose != null ? (l.odds * l.qClose - 1) * 100 : null);
+  // События для Brier против рынка — ноги ставок приложения с итоговой вероятностью p_final и рынком при прогнозе
+  const withMarket = legs => legs.filter(l => l.q != null && l.pKind === 'final');
+
+  // 95% доверительный интервал бутстрэпом с фиксированным сидом (как в коде: B = 10 000, здесь 1 000 — макету хватает)
+  function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function boot(n, stat, B = 1000) {
+    if (n < 2) return null;
+    const rnd = rng(20261007), vals = [], idx = new Array(n);
+    for (let b = 0; b < B; b++) { for (let i = 0; i < n; i++) idx[i] = Math.floor(rnd() * n); vals.push(stat(idx)); }
+    vals.sort((a, b) => a - b);
+    return [vals[Math.floor(B * 0.025)], vals[Math.ceil(B * 0.975) - 1]];
+  }
+  const meanCi = xs => boot(xs.length, idx => idx.reduce((a, i) => a + xs[i], 0) / idx.length);
+  const roiCiBets = bs => boot(bs.length, idx => { let p = 0, st = 0; idx.forEach(i => { p += bs[i].profit; st += bs[i].stake; }); return st ? p / st * 100 : 0; });
+  const roiCiLegs = ls => meanCi(ls.map(l => (won(l) ? l.odds - 1 : -1) * 100));
 
   function brier(legs) {
-    if (!legs.length) return { model: null, market: null, n: 0 };
-    return { model: sum(legs, l => (l.p - won(l)) ** 2) / legs.length, market: sum(legs, l => (marketQ(l) - won(l)) ** 2) / legs.length, n: legs.length };
+    legs = withMarket(legs);
+    if (!legs.length) return { model: null, market: null, n: 0, ci: null };
+    const d = legs.map(l => (l.p - won(l)) ** 2 - (marketQ(l) - won(l)) ** 2);
+    return { model: sum(legs, l => (l.p - won(l)) ** 2) / legs.length, market: sum(legs, l => (marketQ(l) - won(l)) ** 2) / legs.length, n: legs.length, ci: meanCi(d) };
   }
   function summarize(bets) {
     const wins = bets.filter(b => b.status === 'win').length;
     const losses = bets.filter(b => b.status === 'loss').length;
     const voids = bets.filter(b => b.status === 'void').length;
     const turnover = sum(bets, b => b.stake), profit = sum(bets, b => b.profit);
-    const withClv = bets.filter(b => b.clv != null); // без закрывающего кэфа CLV не посчитать — такие ставки не входят в среднее
+    // без закрывающего кэфа CLV не посчитать; ставки старого бота в CLV не входят (В5)
+    const withClv = bets.filter(b => b.clv != null && b.source !== 'bot');
     return {
       n: bets.length, wins, losses, voids, turnover, profit,
       singles: bets.filter(b => b.legs.length === 1).length,
+      bot: bets.filter(b => b.source === 'bot').length,
       roi: turnover ? profit / turnover * 100 : null,
       winrate: wins + losses ? wins / (wins + losses) * 100 : null,
       clv: withClv.length ? sum(withClv, b => b.clv) / withClv.length : null,
       clvPos: withClv.filter(b => b.clv > 0).length,
       clvN: withClv.length,
+      clvs: withClv.map(b => b.clv),
     };
   }
-  // ROI по срезу: каждое событие — как ординар на равную сумму
+  // ДИ считаются отдельно (бутстрэп дорогой) и только для текущей выборки
+  function withCi(sm, bets) { return Object.assign(sm, { roiCi: roiCiBets(bets.filter(b => b.status !== 'void')), clvCi: meanCi(sm.clvs) }); }
+  // ROI по срезу (Р21): каждое событие — как виртуальный ординар на равную сумму; у срезов — 95% ДИ
   function groupLegs(legs, keyFn, labelFn) {
     const g = {};
     legs.forEach(l => { const k = keyFn(l); (g[k] = g[k] || []).push(l); });
-    return Object.entries(g).map(([k, ls]) => ({
-      key: k, label: labelFn ? labelFn(k) : k, n: ls.length,
-      roi: Math.round(sum(ls, l => (won(l) ? l.odds - 1 : -1)) / ls.length * 1000) / 10,
-      winrate: Math.round(ls.filter(won).length / ls.length * 1000) / 10,
-      avgOdds: sum(ls, l => l.odds) / ls.length,
-      clv: sum(ls, legClv) / ls.length,
-    }));
+    return Object.entries(g).map(([k, ls]) => {
+      const cl = ls.filter(l => l.closing);
+      return {
+        key: k, label: labelFn ? labelFn(k) : k, n: ls.length,
+        roi: Math.round(sum(ls, l => (won(l) ? l.odds - 1 : -1)) / ls.length * 1000) / 10,
+        ci: roiCiLegs(ls),
+        winrate: Math.round(ls.filter(won).length / ls.length * 1000) / 10,
+        avgOdds: sum(ls, l => l.odds) / ls.length,
+        clv: cl.length ? sum(cl, legClv) / cl.length : null,
+      };
+    });
   }
   const oddsBucket = o => (o < 1.3 ? '1.13–1.29' : o < 1.5 ? '1.30–1.49' : o < 1.65 ? '1.50–1.64' : '1.65–1.80');
-  const totalBucket = k => (k < 1.71 ? '1.28–1.70' : k < 2.21 ? '1.71–2.20' : '2.21–3.24');
+  // Диапазоны итогового кэфа — как в таблице ставок стратегии (Т20): четвертый, 3.25–4.10, — экспресс из 3 событий
+  const TOTAL_BUCKETS = D.strategy.stakeTable.map(r => r.range);
+  const totalBucket = k => (k < 1.71 ? TOTAL_BUCKETS[0] : k < 2.21 ? TOTAL_BUCKETS[1] : k < 3.25 ? TOTAL_BUCKETS[2] : TOTAL_BUCKETS[3]);
   function groupTotals(bets) {
     const g = {};
-    bets.forEach(b => { const k = totalBucket(b.total); (g[k] = g[k] || []).push(b); });
+    TOTAL_BUCKETS.forEach(k => { g[k] = []; });
+    bets.forEach(b => { const k = totalBucket(b.total); g[k].push(b); });
     return Object.entries(g).map(([k, bs]) => {
       const st = sum(bs, b => b.stake), pr = sum(bs, b => b.profit);
-      return { key: k, label: k, n: bs.length, stake: st, profit: pr, roi: st ? Math.round(pr / st * 1000) / 10 : 0 };
-    }).sort((a, b) => a.key.localeCompare(b.key));
+      return { key: k, label: k, n: bs.length, stake: st, profit: pr, roi: st ? Math.round(pr / st * 1000) / 10 : 0, ci: roiCiBets(bs.filter(b => b.status !== 'void')) };
+    });
   }
+  // Калибровка: p — итоговая вероятность (p_final), в таблице рядом p_base и p_claude (Т9). Под фильтром «бот» — p_claude бота
   function calibration(legs) {
     const out = [];
     for (let lo = 0.5; lo < 0.95; lo += 0.05) {
       const hi = lo + 0.05;
       const bin = legs.filter(l => l.p >= lo && l.p < hi);
       if (!bin.length) continue;
-      out.push({ lo: Math.round(lo * 100) / 100, hi: Math.round(hi * 100) / 100, p: sum(bin, l => l.p) / bin.length, actual: bin.filter(won).length / bin.length, n: bin.length });
+      const avg = f => { const xs = bin.filter(l => f(l) != null); return xs.length ? sum(xs, f) / xs.length : null; };
+      out.push({ lo: Math.round(lo * 100) / 100, hi: Math.round(hi * 100) / 100, p: sum(bin, l => l.p) / bin.length, pb: avg(l => l.pb), pc: avg(l => l.pc), actual: bin.filter(won).length / bin.length, n: bin.length });
     }
     return out;
   }
+  // Диапазон, где прогноз дальше всего от факта в любую сторону
+  const calibWorst = bins => bins.reduce((w, b) => (!w || Math.abs(b.p - b.actual) > Math.abs(w.p - w.actual) ? b : w), null);
   function rolling(legs) {
+    legs = withMarket(legs);
     const out = [];
     for (let i = 29; i < legs.length; i += 3) {
       const w = legs.slice(i - 29, i + 1);
@@ -112,15 +162,37 @@
     }
     return out;
   }
+  // Р21: реальные экспрессы против тех же событий ординарами на равную сумму. Парный бутстрэп по ставкам:
+  // разница ROI считается на одной и той же выборке. Экспрессы старого бота не входят целиком — ни в экспрессы,
+  // ни в ординары: исходы событий у него известны только у выигранных (Т10), и любая их часть завысила бы результат
+  function parlayVsSingles(bets) {
+    const all = bets.filter(b => b.legs.length > 1 && b.status !== 'void');
+    const ex = all.filter(b => !botParlay(b));
+    const botN = all.length - ex.length;
+    const legsOf = b => b.legs.filter(l => l.result === 'win' || l.result === 'loss');
+    if (!ex.length) return botN ? { n: 0, botN } : null;
+    const exRoi = idx => { let p = 0, st = 0; idx.forEach(i => { p += ex[i].profit; st += ex[i].stake; }); return st ? p / st * 100 : 0; };
+    const sgRoi = idx => { let r = 0, n = 0; idx.forEach(i => legsOf(ex[i]).forEach(l => { r += won(l) ? l.odds - 1 : -1; n++; })); return n ? r / n * 100 : 0; };
+    const idxAll = ex.map((_, i) => i);
+    const legsN = sum(ex, b => legsOf(b).length);
+    return {
+      n: ex.length, legsN, botN,
+      exRoi: exRoi(idxAll), exCi: boot(ex.length, exRoi), exProfit: sum(ex, b => b.profit),
+      sgRoi: sgRoi(idxAll), sgCi: boot(ex.length, sgRoi),
+      diff: exRoi(idxAll) - sgRoi(idxAll), diffCi: boot(ex.length, idx => exRoi(idx) - sgRoi(idx)),
+    };
+  }
   function bankAt(d) { let v = D.bankHistory[0].bank; for (const p of D.bankHistory) { if (p.date <= d) v = p.bank; else break; } return v; }
 
   function compute() {
     const p = PERIODS.find(x => x.id === state.period) || PERIODS[2];
     const anchor = p.days ? addDays(TODAY, -p.days) : firstDate; // начало периода (не включительно)
-    const legOk = (l, from, to, ignore) => l.date > from && l.date <= to
+    const srcOk = x => state.source === 'all' || x.source === state.source;
+    // события экспрессов старого бота в разрезы не входят — ни без исхода, ни выигранные (Т10, см. botParlayLeg)
+    const legOk = (l, from, to, ignore) => l.date > from && l.date <= to && srcOk(l) && !botParlayLeg(l)
       && (ignore === 'market' || state.market === 'all' || l.market === state.market)
       && (ignore === 'surface' || state.surface === 'all' || l.surface === state.surface);
-    const betOk = (b, from, to) => b.date > from && b.date <= to
+    const betOk = (b, from, to) => b.date > from && b.date <= to && srcOk(b)
       && (state.surface === 'all' || b.surface === state.surface)
       && (state.market === 'all' || b.legs.some(l => l.market === state.market));
     const legs = D.allLegs.filter(l => legOk(l, anchor, TODAY));
@@ -131,13 +203,17 @@
       const pa = addDays(anchor, -p.days);
       if (pa >= firstDate) prev = summarize(SETTLED.filter(b => betOk(b, pa, anchor)));
     }
+    // Калибровка (В3): ноги рассчитанных ставок; p_final — только у ставок приложения, у бота — p_claude его ординаров
+    const calibLegs = state.source === 'bot' ? legs : legs.filter(l => l.pKind === 'final');
     return {
-      p, anchor, legs, bets, prev,
+      p, anchor, legs, bets, prev, calibLegs,
+      // события экспрессов бота за период, которые не считаются по отдельности (с исходом и без)
+      botParlayLegs: D.allLegs.filter(l => botParlayLeg(l) && l.date > anchor && srcOk(l)).length,
       // Разрез по измерению не сужается фильтром этого же измерения — выбранное значение подсвечивается
       legsAllMarkets: D.allLegs.filter(l => legOk(l, anchor, TODAY, 'market')),
       legsAllSurfaces: D.allLegs.filter(l => legOk(l, anchor, TODAY, 'surface')),
-      sum: summarize(bets), brier: brier(legs),
-      filtered: state.market !== 'all' || state.surface !== 'all',
+      sum: withCi(summarize(bets), bets), brier: brier(legs), r21: parlayVsSingles(bets),
+      filtered: state.market !== 'all' || state.surface !== 'all' || state.source !== 'all',
     };
   }
 
@@ -158,6 +234,7 @@
     .analytics-scope b { color: var(--fg); font-weight: 600; }
     .analytics-chip-btn { cursor: pointer; font: inherit; font-size: var(--fs-xs); font-weight: 600; }
     .analytics-chip-btn:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+    @media (max-width: 960px) { .analytics-chip-btn { height: 40px; padding: 0 12px; } }
     @media (max-width: 720px) {
       .analytics-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; gap: 12px; }
       .analytics-filter-period { grid-column: 1 / -1; }
@@ -167,6 +244,8 @@
       .analytics-filter-reset { grid-column: 1 / -1; justify-self: start; }
       .analytics-scope { grid-column: 1 / -1; padding-top: 10px; }
     }
+    /* узкий телефон: фильтры в одну колонку, чтобы значения («Все рынки», «Старый бот») не обрезались */
+    @media (max-width: 420px) { .analytics-filters { grid-template-columns: minmax(0, 1fr); } }
 
     .analytics-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; }
     .analytics-kpis > .card { height: 100%; }
@@ -236,7 +315,7 @@
     .analytics-mtable tr.is-active td { background: var(--accent-soft); }
     .analytics-mtable tr.is-total td { font-weight: 600; background: var(--surface-2); }
     .analytics-mname { font-weight: 600; white-space: nowrap; }
-    .analytics-mdesc { font-size: var(--fs-xs); color: var(--fg-3); white-space: nowrap; }
+    .analytics-mdesc { font-size: var(--fs-xs); color: var(--fg-3); }
     .analytics-mlist { list-style: none; margin: 0; padding: 0; display: none; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
     .analytics-mlist > li + li { border-top: 1px solid var(--line); }
     .analytics-mrow { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 10px 12px; background: var(--surface); border: 0; text-align: left; cursor: pointer; color: var(--fg); }
@@ -268,7 +347,24 @@
     .analytics-nowrap { white-space: nowrap; }
     .analytics-empty-ic svg { width: 24px; height: 24px; }
     .analytics-empty p { max-width: 52ch; color: var(--fg-2); font-size: var(--fs-sm); }
-    .analytics-check { display: flex; flex-direction: column; gap: 10px; }
+    .analytics-check { display: flex; flex-direction: column; gap: 4px; }
+    .analytics-check .check { min-height: 40px; align-items: center; }
+    .analytics-strip.analytics-strip-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .analytics-strip-2 dd { white-space: normal; }
+    .analytics-sample { align-self: flex-start; max-width: 100%; }
+    @media (max-width: 720px) {
+      .analytics-sample { align-self: stretch; display: flex; }
+      .analytics-sample button { flex: 1 1 auto; padding-inline: 8px; }
+    }
+    .analytics-sample button:disabled { opacity: .55; cursor: not-allowed; }
+    /* Р21: экспрессы против тех же событий ординарами */
+    .analytics-r21-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+    .analytics-r21-side { background: var(--surface); padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+    .analytics-r21-l { font-size: var(--fs-xs); color: var(--fg-2); }
+    .analytics-r21-v { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.02em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .analytics-r21-s { font-size: var(--fs-xs); color: var(--fg-3); }
+    .analytics-r21-side .chip { margin-top: 4px; }
+    @media (max-width: 720px) { .analytics-r21-grid { grid-template-columns: minmax(0, 1fr); } }
   `);
 
   // ---------- мелкие блоки ----------
@@ -284,6 +380,13 @@
   const tableBox = node => h('div', { class: 'analytics-tablebox' }, node);
   const roiCls = v => (v > 0 ? 'good-text' : v < 0 ? 'bad-text' : null);
   const roiText = v => h('span', { class: roiCls(v), style: 'font-weight:600;white-space:nowrap' }, fmt.signedPct(v));
+  // 95% ДИ: «−8…+16%»; интервал задевает ноль — разница в пределах шума
+  const sgn0 = v => { const r = Math.round(v); return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r); };
+  const ciPct = ci => (ci ? sgn0(ci[0]) + '…' + sgn0(ci[1]) + '%' : '—');
+  const ciPct1 = ci => (ci ? fmt.signedPct(ci[0]) + '…' + fmt.signedPct(ci[1]) : '—');
+  const ciDec3 = ci => (ci ? signedDec(ci[0], 3) + '…' + signedDec(ci[1], 3) : '—');
+  const noisy = ci => !ci || (ci[0] <= 0 && ci[1] >= 0);
+  const ciCell = ci => h('span', { class: 'analytics-nowrap muted', title: '95% доверительный интервал' }, ciPct(ci));
 
   // Подписи оси X у UI.lineChart: первая прижата к левому краю, а шаг рассчитан на центрированные подписи,
   // поэтому в узкой колонке первые две слипаются. После каждой отрисовки убираем подписи, которые налезают
@@ -321,7 +424,7 @@
         const dim = o.selected && o.selected !== 'all' && o.selected !== g.key;
         const color = dim ? 'color-mix(in srgb, ' + base + ' 30%, var(--surface))' : base;
         return {
-          label: g.label, value: g.roi, color, note: nEv(g.n),
+          label: g.label, value: g.roi, color, note: nEv(g.n), ci: g.ci,
           labelNode: [h('i', { style: { width: '8px', height: '8px', borderRadius: '2px', background: color, flex: 'none' } }),
             h('span', { style: dim ? 'color:var(--fg-3)' : (o.selected === g.key ? 'color:var(--fg);font-weight:600' : null) }, g.label),
             g.n < SMALL && smallMark()],
@@ -351,14 +454,19 @@
       options: [{ value: 'all', label: 'Все покрытия' }].concat(SURF_KEYS.map(k => ({ value: k, label: D.surfaces[k].label }))),
       attrs: { on: { change: e => { state.surface = e.target.value; onChange(); } } },
     });
+    const sourceField = UI.field({
+      id: 'analytics-source', label: 'Источник', value: state.source, options: SOURCES,
+      attrs: { on: { change: e => { state.source = e.target.value; onChange(); } } },
+    });
     const reset = button('Сбросить фильтры', { kind: 'ghost', size: 'sm', icon: 'refresh', onClick: () => { Object.assign(state, DEFAULTS); onChange(true); }, attrs: { class: 'btn ghost sm analytics-filter-reset' } });
     const scope = h('div', { class: 'analytics-scope', 'aria-live': 'polite' });
     const el = h('section', { class: 'analytics-filters', 'aria-label': 'Фильтры: применяются ко всем блокам ниже' },
-      periodBox, h('div', { class: 'analytics-filter' }, marketField), h('div', { class: 'analytics-filter' }, surfaceField), reset, scope);
+      periodBox, h('div', { class: 'analytics-filter' }, marketField), h('div', { class: 'analytics-filter' }, surfaceField), h('div', { class: 'analytics-filter' }, sourceField), reset, scope);
 
     function sync(s, periodChanged) {
       marketField.querySelector('select').value = state.market;
       surfaceField.querySelector('select').value = state.surface;
+      sourceField.querySelector('select').value = state.source;
       if (periodChanged) drawPeriod();
       reset.hidden = isDefault();
       UI.clear(scope);
@@ -367,9 +475,12 @@
       const chips = [];
       if (state.market !== 'all') chips.push(h('button', { type: 'button', class: 'chip accent analytics-chip-btn', title: 'Убрать фильтр по рынку', on: { click: () => { state.market = 'all'; onChange(); } } }, 'Рынок: ' + mLabel(state.market), icon('x')));
       if (state.surface !== 'all') chips.push(h('button', { type: 'button', class: 'chip accent analytics-chip-btn', title: 'Убрать фильтр по покрытию', on: { click: () => { state.surface = 'all'; onChange(); } } }, 'Покрытие: ' + D.surfaces[state.surface].label, icon('x')));
+      if (state.source !== 'all') chips.push(h('button', { type: 'button', class: 'chip accent analytics-chip-btn', title: 'Убрать фильтр по источнику', on: { click: () => { state.source = 'all'; onChange(); } } }, 'Источник: ' + SOURCES.find(x => x.value === state.source).label, icon('x')));
       UI.append(scope, [
         h('span', null, 'В выборке ', h('b', null, nBets(s.sum.n)), ' и ', h('b', null, nEv(s.legs.length)), range),
         chips,
+        s.sum.bot > 0 && state.source === 'all' && h('span', { class: 'muted xsmall' }, 'из них ' + nBets(s.sum.bot) + ' старого бота — в банке и ROI, но не в CLV, Brier и калибровке'),
+        s.botParlayLegs > 0 && h('span', { class: 'muted xsmall' }, nEv(s.botParlayLegs) + ' из экспрессов старого бота не считаются по отдельности: бот записывал их исходы только у выигранных экспрессов'),
         openN() > 0 && h('span', { class: 'muted xsmall' }, openN() + ' ' + fmt.plural(openN(), 'ставка в игре не учитывается', 'ставки в игре не учитываются', 'ставок в игре не учитываются')),
       ]);
     }
@@ -381,16 +492,17 @@
     const c = s.sum, pv = s.prev && s.prev.n ? s.prev : null;
     const profit = { label: 'Прибыль', icon: 'wallet', value: fmt.signedMoney(c.profit), hint: 'оборот ' + fmt.money(c.turnover) };
     if (pv) Object.assign(profit, { delta: fmt.signedMoney(c.profit - pv.profit), trend: trendOf(c.profit - pv.profit), hint: s.p.prev });
-    const roi = { label: 'ROI', icon: 'coins', value: c.roi == null ? '—' : fmt.signedPct(c.roi), hint: 'к сумме ставок' };
-    if (pv && pv.roi != null && c.roi != null) Object.assign(roi, { delta: deltaPP(c.roi - pv.roi), trend: trendOf(Math.round((c.roi - pv.roi) * 10)), hint: s.p.prev });
+    // 95% ДИ у ROI и CLV (бутстрэп по ставкам): на сотне ставок ROI гуляет на ±20 п.п.
+    const roi = { label: 'ROI', icon: 'coins', value: c.roi == null ? '—' : fmt.signedPct(c.roi), hint: 'ДИ ' + ciPct(c.roiCi) };
+    if (pv && pv.roi != null && c.roi != null) Object.assign(roi, { delta: deltaPP(c.roi - pv.roi), trend: trendOf(Math.round((c.roi - pv.roi) * 10)), hint: 'ДИ ' + ciPct(c.roiCi) + ' · ' + s.p.prev });
     const wr = { label: 'Винрейт', icon: 'trophy', value: c.winrate == null ? '—' : fmt.pct(c.winrate), hint: c.wins + ' В · ' + c.losses + ' П' + (c.voids ? ' · ' + c.voids + ' возвр.' : '') };
-    const clv = { label: 'Средний CLV', icon: 'bolt', value: c.clv == null ? '—' : fmt.signedPct(Math.round(c.clv * 10) / 10), hint: 'лучше закрытия в ' + c.clvPos + ' из ' + c.clvN };
+    const clv = { label: 'Средний CLV', icon: 'bolt', value: c.clv == null ? '—' : fmt.signedPct(Math.round(c.clv * 10) / 10), hint: c.clvN ? 'ДИ ' + ciPct1(c.clvCi) + ' · лучше закрытия в ' + c.clvPos + ' из ' + c.clvN : c.n && c.bot === c.n ? 'у старого бота не считается' : 'нет закрывающих кэфов' };
     if (pv && pv.clv != null && c.clv != null) Object.assign(clv, { delta: deltaPP(c.clv - pv.clv), trend: trendOf(Math.round((c.clv - pv.clv) * 10)) });
     const b = s.brier;
-    const br = { label: 'Brier модели', icon: 'target', value: b.model == null ? '—' : fmt.dec(b.model, 3) };
+    const br = { label: 'Brier модели', icon: 'target', value: b.model == null ? '—' : fmt.dec(b.model, 3), hint: b.model == null ? 'нет событий с рынком при прогнозе' : null };
     if (b.model != null) {
       const diff = b.model - b.market;
-      Object.assign(br, { delta: signedDec(diff, 3) + ' к рынку', trend: trendOf(Math.round(diff * 1000)), good: false, hint: 'рынок ' + fmt.dec(b.market, 3) + ' · ниже — лучше' });
+      Object.assign(br, { delta: (Math.round(diff * 1000) === 0 ? '0,000' : signedDec(diff, 3)) + ' к рынку', trend: trendOf(Math.round(diff * 1000)), good: false, hint: 'рынок при прогнозе ' + fmt.dec(b.market, 3) + (noisy(b.ci) ? ' · в пределах шума' : '') });
     }
     const exp = c.n - c.singles;
     const cnt = { label: 'Выборка', icon: 'ticket', value: h('span', { title: c.singles + ' ' + fmt.plural(c.singles, 'ординар', 'ординара', 'ординаров') + ', ' + exp + ' ' + fmt.plural(exp, 'экспресс', 'экспресса', 'экспрессов') }, String(c.n), h('small', null, ' / ' + s.legs.length)),
@@ -473,21 +585,21 @@
     });
   }
 
-  // ---------- выводы модели ----------
+  // ---------- выводы (считает код, до трех) ----------
   function insightList(s) {
     const out = [];
-    // 1. Калибровка: самый переоцененный диапазон с достаточной выборкой
-    const bins = calibration(s.legs).filter(b => b.n >= 8);
-    const worst = bins.reduce((w, b) => (!w || b.p - b.actual > w.p - w.actual ? b : w), null);
-    if (worst && worst.p - worst.actual >= 0.04) {
-      const gap = Math.round((worst.p - worst.actual) * 100);
+    // 1. Калибровка: диапазон с достаточной выборкой, где прогноз дальше всего от факта (переоценка или недооценка)
+    const bins = calibration(s.calibLegs).filter(b => b.n >= CALIB_N);
+    const worst = calibWorst(bins);
+    if (worst && Math.abs(worst.p - worst.actual) >= CALIB_GAP) {
+      const over = worst.p > worst.actual, gap = Math.round(Math.abs(worst.p - worst.actual) * 100);
       const range = pctRange(worst.lo, worst.hi);
-      out.push({ id: 'calib-' + range, tone: 'warn', ic: 'target', title: ['Переоценка фаворитов в диапазоне ', nowrap(range)],
-        text: 'Модель давала в среднем ' + fmt.prob(worst.p) + ', а сыграло ' + fmt.prob(worst.actual) + ' — на ' + gap + ' п.п. меньше. Валуй в этом диапазоне, вероятно, завышен.',
-        basis: nEv(worst.n), action: 'hypothesis', range, gap, n: worst.n });
+      out.push({ id: 'calib-' + range, tone: 'warn', ic: 'target', title: [over ? 'Переоценка фаворитов в диапазоне ' : 'Недооценка в диапазоне ', nowrap(range)],
+        text: 'Модель давала в среднем ' + fmt.prob(worst.p) + ', а сыграло ' + fmt.prob(worst.actual) + ' — на ' + gap + ' п.п. ' + (over ? 'меньше. Валуй в этом диапазоне, вероятно, завышен.' : 'больше. Модель здесь занижает шансы — часть выгодных ставок, вероятно, отсеивается.'),
+        basis: nEv(worst.n), action: 'calib' });
     } else if (bins.length) {
       out.push({ id: 'calib-ok', tone: 'good', ic: 'check', title: 'Калибровка в норме',
-        text: 'Ни в одном диапазоне с 8+ событиями прогноз не расходится с фактом больше чем на 4 п.п.', basis: nEv(sum(bins, b => b.n)) });
+        text: 'Ни в одном диапазоне с ' + CALIB_N + '+ событиями прогноз не расходится с фактом на ' + Math.round(CALIB_GAP * 100) + ' п.п. и больше — ни вверх, ни вниз.', basis: nEv(sum(bins, b => b.n)) });
     }
     // 2. Убыточный диапазон итогового кэфа
     const tot = groupTotals(s.bets).filter(t => t.n >= 8).sort((a, b) => a.roi - b.roi)[0];
@@ -509,11 +621,11 @@
         text: 'Выборка мала: ' + nEv(best.n) + '. Один следующий проигрыш опустит ROI до ' + fmt.signedPct(after) + '. Чтобы отличить преимущество от везения, нужно хотя бы 30 событий.',
         basis: nEv(best.n), action: 'filter', dim: best.dim, key: best.key, label: best.label });
     }
-    // 4. Модель против рынка
+    // 4. Модель против рынка при прогнозе (В2): с ДИ разницы; задевает ноль — «в пределах шума»
     if (s.brier.n >= 20) {
-      const diff = s.brier.model - s.brier.market;
-      out.push({ id: 'brier', tone: 'accent', ic: 'bolt', title: Math.abs(diff) < 0.01 ? 'Модель на уровне закрывающей линии' : diff < 0 ? 'Модель точнее закрывающей линии' : 'Рынок пока точнее модели',
-        text: 'Brier ' + fmt.dec(s.brier.model, 3) + ' против ' + fmt.dec(s.brier.market, 3) + ' у рынка' + (Math.abs(diff) < 0.01 ? ' — разница в пределах шума на ' + onEv(s.brier.n) + '.' : '.') + ' Надежнее смотреть на CLV: ' + fmt.signedPct(Math.round(s.sum.clv * 10) / 10) + ' в среднем, лучше закрытия в ' + s.sum.clvPos + ' из ' + s.sum.clvN + '.',
+      const diff = s.brier.model - s.brier.market, noise = noisy(s.brier.ci);
+      out.push({ id: 'brier', tone: 'accent', ic: 'bolt', title: noise ? 'Модель на уровне рынка' : diff < 0 ? 'Модель точнее рынка' : 'Рынок пока точнее модели',
+        text: 'Brier ' + fmt.dec(s.brier.model, 3) + ' против ' + fmt.dec(s.brier.market, 3) + ' у рынка при прогнозе, 95% ДИ разницы ' + ciDec3(s.brier.ci) + (noise ? ' — в пределах шума.' : '.') + (s.sum.clvN ? ' Надежнее смотреть на CLV: ' + fmt.signedPct(Math.round(s.sum.clv * 10) / 10) + ' в среднем, лучше закрытия в ' + s.sum.clvPos + ' из ' + s.sum.clvN + '.' : ''),
         basis: nEv(s.brier.n), action: 'explain' });
     }
     // 0. Общая оговорка, если данных мало — ставим первой
@@ -525,82 +637,20 @@
     return out.slice(0, 3);
   }
 
-  function hypothesisModal(ins) {
-    const num = 'L-0' + (22 + Object.keys(ui.hypotheses).length);
-    UI.modal({
-      title: 'Гипотеза для обучения модели',
-      body: [
-        h('p', { class: 'soft small' }, 'ИИ подготовил черновик урока по этому наблюдению. Урок не попадет в промпт анализа, пока не подтвердится на новых событиях и вы его не одобрите в разделе «Обучение модели».'),
-        UI.field({ id: 'analytics-hyp-text', label: 'Формулировка', rows: 4, value: 'При прогнозе ' + ins.range + ' на фаворита модель завышает вероятность примерно на ' + ins.gap + ' п.п. Снижать оценку на ' + Math.max(2, Math.round(ins.gap / 2)) + ' п.п. перед расчетом валуя.' }),
-        UI.field({ id: 'analytics-hyp-scope', label: 'Где проверять', value: 'all', options: [{ value: 'all', label: 'Все покрытия и рынки' }, { value: 'fav', label: 'Только П1 и Ф1(−1.5) — ставки на фаворита' }, { value: 'hard', label: 'Только хард' }] }),
-        UI.kv([['Основание сейчас', nEv(ins.n)], ['Порог подтверждения', '≥ 20 новых событий'], ['Номер', num]]),
-      ],
-      actions: close => [
-        button('Отмена', { kind: 'ghost', onClick: close }),
-        button('Добавить в гипотезы', { kind: 'primary', icon: 'flask', onClick: () => { ui.hypotheses[ins.id] = num; close(); update(); UI.toast('Гипотеза ' + num + ' добавлена — проверим на следующих 20 событиях', 'flask'); } }),
-      ],
-    });
-  }
-
   function explainModal() {
     UI.modal({
       title: 'Brier и CLV простыми словами',
       body: [
         h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'Brier — точность вероятностей'),
           h('p', { class: 'small soft' }, 'Для каждого события берется (прогноз − исход)², где исход — 1 или 0, и усредняется. Прогноз 80% на сыгравшее событие дает 0,04, на не сыгравшее — 0,64. 0 — идеально, 0,25 — как всегда ставить 50%. Ниже — лучше.')),
-        h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'Почему сравниваем с рынком'),
-          h('p', { class: 'small soft' }, 'Закрывающий кэф — самая точная публичная оценка. Эталон рынка у нас — кэф ' + D.marketRef + ': у него самая низкая маржа. Если Brier модели ниже рыночного, модель видит что-то, чего не учла линия. Разница в тысячные доли на сотне событий — пока шум.')),
+        h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'С каким рынком сравниваем'),
+          h('p', { class: 'small soft' }, 'С рынком в момент прогноза: кэфы обеих сторон у вашего букмекера, маржа снята степенным методом. Это честное сравнение — модель и рынок знали одно и то же. Где внесены обе стороны закрывающего кэфа, ниже показан и рынок закрытия. Разница в тысячные доли на сотне событий — шум: смотрите на доверительный интервал разницы.')),
         h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'CLV — качество цены'),
-          h('p', { class: 'small soft' }, 'CLV = ваш кэф / закрывающий кэф ' + D.marketRef + ' − 1. Взяли 1.62, к началу матча у ' + D.marketRef + ' стало 1.55 — CLV +4,5%. Результат одной ставки — случайность, а стабильно положительный CLV — устойчивый признак преимущества. Его видно уже через 50–100 ставок, ROI — через сотни.')),
-        UI.callout('info', 'flask', 'Эти же метрики используются при обучении. Новую версию стратегии включают, только если ее лог-лосс на отложенной выборке лучше текущего: 95% интервал разницы целиком ниже нуля. Версия ради экономии токенов проходит правило «не хуже с допуском». Brier и CLV — дополнительные проверки, а ROI на паре сотен событий — шум, по нему версии не выбирают.'),
+          h('p', { class: 'small soft' }, 'CLV = ваш кэф ÷ закрывающий − 1. Закрывающий кэф вносите вы: эталона (' + D.marketRefRule + ') или своего букмекера. Взяли 1.62, к началу матча стало 1.55 — CLV +4,5%. Так CLV немного завышен: в закрывающем кэфе есть маржа, честный кэф выше. Точнее — CLV без маржи: ваш кэф × вероятность рынка закрытия − 1, если внесена и вторая сторона закрытия. Результат одной ставки — случайность, а стабильно положительный CLV — устойчивый признак преимущества. Его видно уже через 50–100 ставок, ROI — через сотни.')),
+        h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'Доверительный интервал'),
+          h('p', { class: 'small soft' }, '95% ДИ — где с высокой вероятностью лежит настоящее значение. Если интервал ROI или разницы с рынком задевает ноль, преимущество пока не доказано: это может быть везение.')),
       ],
-      actions: close => [button('Открыть «Обучение модели»', { kind: 'secondary', iconRight: 'chevronRight', href: '#learning', attrs: { class: 'btn secondary', on: { click: close } } }), button('Понятно', { kind: 'primary', onClick: close })],
-    });
-  }
-
-  // Лимит ИИ по решениям Р7, Р9, Р13: участник на ключе администратора видит свой лимит, администратор — бюджет
-  // своего ключа; на своем ключе действует только потолок на один анализ (DATA.me.ownCap). Расходы на Claude — в долларах.
-  // Цифры — из общего расчета DATA.ai; можно ли запускать — решает DATA.ai.access.
-  const usdL = n => fmt.usd(n, Number.isInteger(n) ? 0 : 2); // $10 и $1, но $1,50
-  function aiLimitText() {
-    const me = D.me, m = D.ai.month;
-    if (me.aiMode === 'own') {
-      if (!me.ownKey) return 'Вы работаете на своем ключе Claude, но ключ еще не добавлен — добавьте его в личном кабинете.';
-      const cap = me.ownCap != null ? me.ownCap : D.admin.defaults.perAnalysis;
-      return 'Разбор оплачивается с вашего ключа Claude (sk-ant-…' + me.ownKey.last4 + '). На своем ключе действует только ваш потолок — ' + usdL(cap) + ' на один запуск.';
-    }
-    const L = D.ai.limitOf(me);
-    if (L) {
-      const spent = D.ai.keySpent(me);
-      return 'Ваш лимит ИИ на ' + m + ': израсходовано ' + fmt.usd(spent) + ' из ' + usdL(L.monthly) + ', осталось ' + fmt.usd(Math.max(0, L.monthly - spent)) + '. Ключ администратора.';
-    }
-    const B = D.ai.budget();
-    return 'Ключ администратора на ' + m + ': израсходовано ' + fmt.usd(B.spent) + ' из ' + usdL(B.monthly) + ' — общий бюджет на всех, кто работает на этом ключе.';
-  }
-
-  function deepModal(s) {
-    const fresh = 3000 + s.legs.length * 45, cached = 6200, out = 1600;
-    const cost = (fresh * 2 + cached * 0.2 + out * 10) / 1e6; // цены Sonnet 5.5 из data.js, $ за 1M токенов
-    const reason = D.ai.access(D.me, cost, { kind: 'review' }); // пауза, нет ключа, лимиты и бюджет — общий расчет
-    UI.modal({
-      title: 'Подробный разбор периода',
-      body: [
-        h('p', { class: 'soft small' }, 'ИИ получит сжатую таблицу событий и ставок под текущими фильтрами, правила стратегии и подтвержденные уроки. Вернет 5–7 наблюдений с указанием выборки и черновики гипотез. Сам по себе разбор ничего не меняет в стратегии.'),
-        UI.kv([
-          ['Модель', 'Sonnet 5.5'],
-          ['Данные', nBets(s.sum.n) + ', ' + nEv(s.legs.length)],
-          ['Токены на входе', '≈ ' + fmt.tokens(fresh + cached) + ' (' + fmt.tokens(cached) + ' из кэша)'],
-          ['Ответ', '≈ ' + fmt.tokens(out) + ' токенов'],
-          ['Стоимость', '≈ ' + fmt.usd(cost)],
-          ['Время', '≈ 30 с'],
-        ]),
-        UI.callout('accent', 'coins', aiLimitText()),
-        reason && UI.callout('warn', 'alert', h('b', null, 'Запустить нельзя. '), reason + '.'),
-      ],
-      actions: close => [
-        button('Отмена', { kind: 'ghost', onClick: close }),
-        button('Запустить разбор', { kind: 'primary', icon: 'spark', disabled: !!reason, onClick: () => { if (D.ai.access(D.me, cost, { kind: 'review' })) return; D.ai.recordSpend(D.me, cost); ui.deep = true; close(); update(); UI.toast('Разбор запущен — результат появится в «Обучении модели» через ~30 с', 'spark'); } }),
-      ],
+      actions: close => [button('Понятно', { kind: 'primary', onClick: close })],
     });
   }
 
@@ -608,25 +658,21 @@
     const list = insightList(s);
     const TONE_LABEL = { warn: 'Внимание', bad: 'Риск', info: 'Мало данных', accent: 'Наблюдение', good: 'В норме' };
     const actionOf = ins => {
-      if (ins.action === 'hypothesis') {
-        return ui.hypotheses[ins.id]
-          ? h('a', { href: '#learning', class: 'chip info', style: 'text-decoration:none' }, icon('flask'), 'В гипотезах · ' + ui.hypotheses[ins.id])
-          : button('Создать гипотезу', { kind: 'secondary', size: 'sm', icon: 'flask', onClick: () => hypothesisModal(ins) });
-      }
+      if (ins.action === 'calib') return button('К калибровке', { kind: 'secondary', size: 'sm', icon: 'target', onClick: () => { const el = document.getElementById('analytics-calib'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } });
       if (ins.action === 'bets') return button('Открыть ставки', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#bets' });
       if (ins.action === 'filter') return button('Показать только ' + ins.label, { kind: 'secondary', size: 'sm', icon: 'filter', onClick: () => { state[ins.dim] = ins.key; update(); scrollToFilters(); UI.toast('Фильтр: ' + ins.label, 'filter'); } });
       if (ins.action === 'widen') return button('Показать за все время', { kind: 'secondary', size: 'sm', icon: 'calendar', onClick: () => { state.period = 'all'; update(true); } });
-      if (ins.action === 'clear') return button('Снять фильтры', { kind: 'secondary', size: 'sm', icon: 'refresh', onClick: () => { state.market = 'all'; state.surface = 'all'; update(); } });
+      if (ins.action === 'clear') return button('Снять фильтры', { kind: 'secondary', size: 'sm', icon: 'refresh', onClick: () => { state.market = 'all'; state.surface = 'all'; state.source = 'all'; update(); } });
       if (ins.action === 'explain') return button('Что это значит', { kind: 'secondary', size: 'sm', icon: 'book', onClick: explainModal });
       return null;
     };
     return card({
       class: 'analytics-card analytics-ins-card',
-      title: 'Выводы модели',
-      subtitle: 'Автоматически по рассчитанным ставкам ' + s.p.ctx,
+      title: 'Выводы',
+      subtitle: 'Считает код по рассчитанным ставкам ' + s.p.ctx + ', без запроса к ИИ',
       actions: [chip('Обновлено ' + fmt.date(settled().map(b => b.date).sort().pop()), 'outline', 'clock')],
       body: list.length
-        ? h('ol', { class: 'analytics-ins', 'aria-label': 'Выводы модели', style: { '--ins-n': String(list.length) } }, list.map(ins => h('li', null,
+        ? h('ol', { class: 'analytics-ins', 'aria-label': 'Выводы', style: { '--ins-n': String(list.length) } }, list.map(ins => h('li', null,
           h('span', { class: ['analytics-ins-ic', ins.tone], 'aria-hidden': 'true' }, icon(ins.ic)),
           h('div', { class: 'analytics-ins-body' },
             h('span', { class: 'sr-only' }, TONE_LABEL[ins.tone] + ': '),
@@ -635,10 +681,7 @@
             h('div', { class: 'analytics-ins-foot' }, chip('Основание: ' + ins.basis, 'outline'), actionOf(ins))))))
         : UI.empty('Слишком мало событий для выводов — нужно хотя бы 20.'),
       foot: [
-        ui.deep
-          ? chip('Разбор запущен · смотрите «Обучение модели»', 'info', 'clock')
-          : button('Разобрать подробнее с ИИ', { kind: 'ghost', size: 'sm', icon: 'spark', onClick: () => deepModal(s) }),
-        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 200px' }, 'Это наблюдения по истории, а не гарантии. В промпт попадают только уроки, которые вы подтвердили.'),
+        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 200px' }, 'Это наблюдения по истории, а не гарантии. Гипотезы и подробный разбор периода с ИИ появятся на этапе 5.'),
       ],
     });
   }
@@ -648,7 +691,7 @@
     const groups = groupLegs(s.legsAllSurfaces, l => l.surface, k => D.surfaces[k].label).sort((a, b) => SURF_KEYS.indexOf(a.key) - SURF_KEYS.indexOf(b.key));
     const missing = SURF_KEYS.filter(k => !groups.some(g => g.key === k));
     return card({
-      class: 'analytics-card', title: 'ROI по покрытиям', subtitle: 'События экспрессов как ординары на равную сумму',
+      class: 'analytics-card', title: 'ROI по покрытиям', subtitle: 'События как ординары на равную сумму · линия — 95% ДИ',
       actions: [chip(nEv(sum(groups, g => g.n)), 'outline')],
       body: [
         groups.length ? UI.withTable(roiBars(groups, { colorOf: k => D.surfaces[k].color, selected: state.surface }), () => tableBox(mtable({
@@ -658,12 +701,13 @@
             { key: 'winrate', label: 'Винрейт', align: 'r', render: g => fmt.pct(g.winrate) },
             { key: 'avgOdds', label: nowrap('Ср. кэф'), align: 'r', hideMobile: true, render: g => h('span', { class: 'odds' }, fmt.odds(g.avgOdds)) },
             { key: 'roi', label: 'ROI', align: 'r', render: g => roiText(g.roi) },
+            { key: 'ci', label: '95% ДИ', align: 'r', render: g => ciCell(g.ci) },
           ], rows: groups,
         }))) : UI.empty('Нет событий за период'),
         (groups.some(g => g.n < SMALL) || missing.length) && h('div', { class: 'stack', style: 'gap:4px' },
           groups.some(g => g.n < SMALL) && smallNote(),
-          missing.length && h('div', { class: 'analytics-foot-note', style: 'padding-left:19px' }, h('span', null, missing.map(k => D.surfaces[k].label).join(', ') + ': событий ' + (missing.includes('indoor') && missing.length === 1 ? 'пока нет — сезон в залах начнется после Шанхая' : 'за период нет')))),
-        howto(h('b', null, 'Как читать: '), 'каждое событие считается отдельной ставкой одного размера — так видно, где прогнозы точнее, без влияния размера ставки. Полоса вправо — плюс, влево — минус.'),
+          missing.length && h('div', { class: 'analytics-foot-note', style: 'padding-left:19px' }, h('span', null, missing.map(k => D.surfaces[k].label).join(', ') + ': событий за период нет'))),
+        howto(h('b', null, 'Как читать: '), 'каждое событие считается отдельной ставкой одного размера — так видно, где прогнозы точнее, без влияния размера ставки. Полоса вправо — плюс, влево — минус. Линия с засечками — 95% доверительный интервал: если он задевает ноль, плюс может быть везением.'),
       ],
     });
   }
@@ -676,7 +720,7 @@
       body: [
         groups.length ? roiBars(groups, { selected: state.market }) : UI.empty('Нет событий за период'),
         groups.some(g => g.n < SMALL) && smallNote(),
-        howto(h('b', null, 'Как читать: '), 'Ф1(−1.5) — игрок 1 выигрывает 2:0 по сетам, Ф2(+1.5) — игрок 2 берет хотя бы сет. Подробности и фильтр — в таблице «Сводка по рынкам» ниже.'),
+        howto(h('b', null, 'Как читать: '), 'Ф1(−1.5) — игрок 1 выигрывает 2:0 по сетам (в матче до трех побед — 3:0 или 3:1), Ф2(+1.5) — игрок 2 берет хотя бы сет (до трех побед — два). Линия — 95% ДИ. Подробности и фильтр — в таблице «Сводка по рынкам» ниже.'),
       ],
     });
   }
@@ -694,6 +738,7 @@
             { key: 'winrate', label: 'Винрейт', align: 'r', render: g => fmt.pct(g.winrate) },
             { key: 'need', label: 'Для нуля', align: 'r', render: g => h('span', { class: 'muted' }, fmt.pct(100 / g.avgOdds)) },
             { key: 'roi', label: 'ROI', align: 'r', render: g => roiText(g.roi) },
+            { key: 'ci', label: '95% ДИ', align: 'r', hideMobile: true, render: g => ciCell(g.ci) },
           ], rows: groups,
         }))) : UI.empty('Нет событий за период'),
         groups.some(g => g.n < SMALL) && smallNote(),
@@ -704,93 +749,149 @@
 
   function totalCard(s) {
     const groups = groupTotals(s.bets);
-    const stakeOf = k => (D.strategy.stakeTable.find(x => x.range === k) || {}).pct || '—';
+    const row = k => D.strategy.stakeTable.find(x => x.range === k) || {};
+    const stakeOf = k => row(k).pct || '—';
     return card({
-      class: 'analytics-card', title: 'ROI по итоговому кэфу экспресса', subtitle: 'Реальные ставки: прибыль к сумме ставок',
+      class: 'analytics-card', title: 'ROI по итоговому кэфу', subtitle: 'Реальные ставки: прибыль к сумме ставок · диапазоны стратегии',
       actions: [chip(nBets(s.sum.n), 'outline')],
       body: [
-        groups.length ? UI.withTable(UI.hbars({
+        s.bets.length ? UI.withTable(UI.hbars({
           valueFormat: v => fmt.signedPct(v),
-          items: groups.map(g => ({ label: g.label, value: g.roi, color: 'var(--s1)', note: nBets(g.n),
-            labelNode: [h('i', { style: { width: '8px', height: '8px', borderRadius: '2px', background: 'var(--s1)', flex: 'none' } }), h('span', null, g.label), g.n < SMALL && smallMark()] })),
+          items: groups.map(g => ({ label: g.label, value: g.roi, valueText: g.n ? null : '—', color: 'var(--s1)', note: g.n ? nBets(g.n) : 'ставок нет', ci: g.ci,
+            labelNode: [h('i', { style: { width: '8px', height: '8px', borderRadius: '2px', background: 'var(--s1)', flex: 'none' } }), h('span', { style: g.n ? null : 'color:var(--fg-3)' }, g.label), g.n > 0 && g.n < SMALL && smallMark()] })),
         }), () => tableBox(mtable({
           columns: [
-            { key: 'label', label: 'Кэф', render: g => h('span', { class: 'odds analytics-nowrap' }, g.label) },
+            { key: 'label', label: 'Кэф', render: g => h('span', { class: 'odds analytics-nowrap', title: row(g.key).triple ? 'Только экспресс из 3 событий' : null }, g.label) },
             { key: 'n', label: 'Ставок', align: 'r' },
             { key: 'pct', label: 'Ставка', align: 'r', hideMobile: true, render: g => h('span', { class: 'analytics-nowrap', title: 'Размер ставки по таблице стратегии, % банка' }, stakeOf(g.key)) },
             { key: 'profit', label: 'Прибыль', align: 'r', render: g => h('span', { class: roiCls(g.profit), style: 'white-space:nowrap;font-weight:600' }, fmt.signedMoney(g.profit)) },
-            { key: 'roi', label: 'ROI', align: 'r', render: g => roiText(g.roi) },
+            { key: 'roi', label: 'ROI', align: 'r', render: g => (g.n ? roiText(g.roi) : '—') },
+            { key: 'ci', label: '95% ДИ', align: 'r', hideMobile: true, render: g => ciCell(g.ci) },
           ], rows: groups,
         }))) : UI.empty('Нет ставок за период'),
-        groups.some(g => g.n < SMALL) && footNote('меньше ' + SMALL + ' ставок — ROI может быть случайным'),
-        howto(h('b', null, 'Как читать: '), 'здесь считаются деньги, а не отдельные события. На экспрессы до 1.70 по таблице стратегии идет самая крупная ставка (', stakeOf('1.28–1.70'), ' банка), поэтому их ROI сильнее всего влияет на банк.'),
+        groups.some(g => g.n > 0 && g.n < SMALL) && footNote('меньше ' + SMALL + ' ставок — ROI может быть случайным'),
+        howto(h('b', null, 'Как читать: '), 'здесь считаются деньги, а не отдельные события. Диапазон 3.25–4.10 — только экспресс из 3 событий. На экспрессы до 1.70 по таблице стратегии идет самая крупная ставка (', stakeOf(TOTAL_BUCKETS[0]), ' банка), поэтому их ROI сильнее всего влияет на банк.'),
       ],
     });
   }
 
+  // Р21: экспрессы против тех же событий ординарами — показывает, помогает ли объединение событий в экспресс
+  function parlayCard(s) {
+    const r = s.r21;
+    const head = { class: 'analytics-card analytics-r21', title: 'Экспрессы и те же события ординарами', subtitle: 'Реальные экспрессы против ординаров на равную сумму по их же событиям' };
+    if (!r) return card(Object.assign(head, { body: UI.empty('Экспрессов за период нет.') }));
+    const botText = n => n + ' ' + fmt.plural(n, 'экспресс', 'экспресса', 'экспрессов') + ' старого бота ' + fmt.plural(n, 'не входит', 'не входят', 'не входят') + ' в сравнение';
+    if (!r.n) return card(Object.assign(head, { body: UI.empty(botText(r.botN) + ': исходы событий бот записывал только у выигранных экспрессов, поэтому честно разложить их на ординары нельзя.') }));
+    const side = (label, sub, roi, ci, extra) => h('div', { class: 'analytics-r21-side' },
+      h('div', { class: 'analytics-r21-l' }, label), h('div', { class: ['analytics-r21-v', roiCls(roi)] }, fmt.signedPct(roi)),
+      h('div', { class: 'analytics-r21-s' }, '95% ДИ ' + ciPct(ci)), h('div', { class: 'analytics-r21-s' }, sub), extra);
+    const noise = noisy(r.diffCi);
+    return card(Object.assign(head, {
+      actions: [chip(r.n + ' ' + fmt.plural(r.n, 'экспресс', 'экспресса', 'экспрессов') + ' · ' + nEv(r.legsN), 'outline')],
+      body: [
+        h('div', { class: 'analytics-r21-grid' },
+          side('Экспрессы', 'реальные деньги: ' + fmt.signedMoney(r.exProfit), r.exRoi, r.exCi),
+          side('Те же события ординарами', 'виртуально, каждое на равную сумму', r.sgRoi, r.sgCi),
+          h('div', { class: 'analytics-r21-side' },
+            h('div', { class: 'analytics-r21-l' }, 'Разница'), h('div', { class: ['analytics-r21-v', noise ? null : roiCls(r.diff)] }, deltaPP(r.diff)),
+            h('div', { class: 'analytics-r21-s' }, '95% ДИ ' + ciPct(r.diffCi).replace('%', ' п.п.')),
+            chip(noise ? 'В пределах шума' : r.diff > 0 ? 'Экспрессы лучше' : 'Ординары лучше', noise ? 'outline' : r.diff > 0 ? 'good' : 'warn', noise ? 'info' : 'check'))),
+        r.botN > 0 && footNote(botText(r.botN) + ' — ни в экспрессы, ни в ординары: исходы событий бот записывал только у выигранных экспрессов, а без проигранных результат был бы завышен.'),
+        howto(h('b', null, 'Как читать: '), 'ставим только экспрессы, а ординары по тем же прогнозам считаются виртуально, для сравнения — так видно, сколько съедает маржа в экспрессе. Экспресс выигрывает, только если сыграли все события, ординары приносят деньги по отдельности. Если интервал разницы задевает ноль, данных пока мало, чтобы сказать, что лучше.'),
+      ],
+    }));
+  }
+
   // ---------- точность ----------
+  // Калибровка (В3): выборка — ноги рассчитанных ставок; «все мои прогнозы» — когда у матчей появится исход из архива (этап 5).
+  // На графике — итоговая вероятность p_final, в таблице рядом базовая модель p_base и после поправки Claude p_claude (Т9)
   function calibrationCard(s, mobile) {
-    const bins = calibration(s.legs);
-    if (!bins.length) return card({ class: 'analytics-card', title: 'Калибровка прогнозов', body: UI.empty('Нет событий за период') });
+    const bot = state.source === 'bot';
+    const legs = s.calibLegs;
+    const bins = calibration(legs);
+    const sample = h('div', { class: 'segmented analytics-sample', role: 'group', 'aria-label': 'Выборка калибровки' },
+      h('button', { type: 'button', 'aria-pressed': 'true' }, 'Ноги ставок'),
+      h('button', { type: 'button', 'aria-pressed': 'false', disabled: true, title: 'Все мои прогнозы, а не только ноги ставок, — когда у матчей появится исход из архива, этап 5' }, 'Все прогнозы · этап 5'));
+    const head = { class: 'analytics-card', id: 'analytics-calib', title: 'Калибровка прогнозов', subtitle: bot ? 'Старый бот: оценка Claude против доли сыгравших событий' : 'Итоговая вероятность модели против доли сыгравших событий' };
+    // у бота по событиям считаются только ординары; на паре событий график калибровки ничего не говорит
+    if (bot && legs.length < SMALL) return card(Object.assign(head, { actions: [chip(nEv(legs.length), 'outline')], body: [sample, UI.empty('У старого бота по событиям считаются только ординары — за период их ' + legs.length + '. Для калибровки нужно хотя бы ' + SMALL + ' событий. События его экспрессов не считаются: исходы бот записывал только у выигранных экспрессов, и остались бы почти одни выигрыши.')] }));
+    if (!bins.length) return card(Object.assign(head, { body: [sample, UI.empty('Нет событий за период')] }));
     const vals = bins.flatMap(b => [b.p, b.actual]);
     const d0 = Math.max(0.2, Math.min(0.6, Math.floor(Math.min(...vals) * 10) / 10));
     const chart = UI.calibrationChart({ bins, domain: [d0, 1], height: mobile ? 250 : 280 });
-    const big = bins.filter(b => b.n >= 8);
-    const worst = big.reduce((w, b) => (!w || b.p - b.actual > w.p - w.actual ? b : w), null);
-    const under = big.reduce((w, b) => (!w || b.actual - b.p > w.actual - w.p ? b : w), null);
+    const big = bins.filter(b => b.n >= CALIB_N);
+    const worst = calibWorst(big);
+    const gapPP = b => Math.round(Math.abs(b.p - b.actual) * 100);
+    // самый заметный диапазон с обратным знаком — чтобы сказать и о нем
+    const other = worst && big.filter(b => (b.p > b.actual) !== (worst.p > worst.actual) && Math.abs(b.p - b.actual) >= CALIB_GAP)
+      .reduce((w, b) => (!w || Math.abs(b.p - b.actual) > Math.abs(w.p - w.actual) ? b : w), null);
+    const dirText = b => (b.p > b.actual ? 'переоценивает фаворитов' : 'недооценивает');
     let insight;
     if (!big.length) {
-      insight = UI.callout('', 'info', 'Ни в одном диапазоне нет 8+ событий — по калибровке пока рано делать выводы.');
-    } else if (worst && worst.p - worst.actual >= 0.03) {
-      insight = UI.callout('warn', 'alert', h('b', null, 'Диапазон ' + pctRange(worst.lo, worst.hi) + ': '), 'прогноз ' + fmt.prob(worst.p) + ', сбылось ' + fmt.prob(worst.actual) + ' (' + nEv(worst.n) + '). Модель переоценивает фаворитов на ' + Math.round((worst.p - worst.actual) * 100) + ' п.п.' + (under && under.actual - under.p >= 0.02 ? ' А в диапазоне ' + pctRange(under.lo, under.hi) + ' — наоборот, недооценивает: ' + fmt.prob(under.p) + ' против ' + fmt.prob(under.actual) + '.' : ''));
+      insight = UI.callout('', 'info', 'Ни в одном диапазоне нет ' + CALIB_N + '+ событий — по калибровке пока рано делать выводы.');
+    } else if (Math.abs(worst.p - worst.actual) >= CALIB_GAP) {
+      insight = UI.callout('warn', 'alert', h('b', null, 'Диапазон ' + pctRange(worst.lo, worst.hi) + ': '), 'прогноз ' + fmt.prob(worst.p) + ', сбылось ' + fmt.prob(worst.actual) + ' (' + nEv(worst.n) + '). Модель ' + dirText(worst) + ' на ' + gapPP(worst) + ' п.п.'
+        + (other ? ' А в диапазоне ' + pctRange(other.lo, other.hi) + ' — наоборот, ' + dirText(other) + ': ' + fmt.prob(other.p) + ' против ' + fmt.prob(other.actual) + '.' : ''));
     } else {
-      insight = UI.callout('good', 'check', 'Во всех диапазонах с 8+ событиями прогноз расходится с фактом меньше чем на 3 п.п.');
+      insight = UI.callout('good', 'check', 'Во всех диапазонах с ' + CALIB_N + '+ событиями прогноз расходится с фактом меньше чем на ' + Math.round(CALIB_GAP * 100) + ' п.п. — и вверх, и вниз.');
     }
-    return card({
-      class: 'analytics-card', title: 'Калибровка прогнозов', subtitle: 'Прогноз модели против доли сыгравших событий',
-      actions: [chip(nEv(s.legs.length), 'outline')],
+    const probCell = v => (v == null ? '—' : fmt.prob(v));
+    return card(Object.assign(head, {
+      actions: [chip(nEv(legs.length), 'outline')],
       body: [
-        UI.legend([{ name: 'Модель · размер точки — число событий', color: 'var(--s1)' }, { name: 'Идеальная калибровка', type: 'dash' }]),
+        sample,
+        UI.legend([{ name: (bot ? 'Оценка Claude' : 'Модель') + ' · размер точки — число событий', color: 'var(--s1)' }, { name: 'Идеальная калибровка', type: 'dash' }]),
         UI.withTable(chart, () => tableBox(mtable({
           columns: [
             { key: 'r', label: 'Диапазон', render: b => nowrap(pctRange(b.lo, b.hi)) },
             { key: 'n', label: 'Событий', align: 'r', hideMobile: true },
-            { key: 'p', label: 'Модель', align: 'r', render: b => fmt.prob(b.p) },
+            { key: 'p', label: bot ? 'Claude' : 'Итог', align: 'r', render: b => fmt.prob(b.p) },
+            { key: 'pb', label: 'База', align: 'r', hideMobile: true, render: b => (bot ? '—' : probCell(b.pb)) },
+            { key: 'pc', label: 'Claude', align: 'r', hideMobile: true, render: b => (bot ? '—' : probCell(b.pc)) },
             { key: 'a', label: 'Факт', align: 'r', render: b => fmt.prob(b.actual) },
-            { key: 'd', label: 'Разница, п.п.', align: 'r', render: b => { const d = Math.round((b.actual - b.p) * 100); return h('span', { class: d <= -4 ? 'bad-text' : null, style: 'white-space:nowrap', title: d <= -4 ? 'Модель переоценивает этот диапазон' : null }, (d > 0 ? '+' : d < 0 ? '−' : '') + Math.abs(d)); } },
+            { key: 'd', label: 'Разница, п.п.', align: 'r', render: b => { const d = Math.round((b.actual - b.p) * 100), far = Math.abs(d) >= CALIB_GAP * 100; return h('span', { class: far ? (d < 0 ? 'bad-text' : 'warn-text') : null, style: 'white-space:nowrap', title: far ? (d < 0 ? 'Модель переоценивает этот диапазон' : 'Модель недооценивает этот диапазон') : null }, (d > 0 ? '+' : d < 0 ? '−' : '') + Math.abs(d)); } },
           ], rows: bins,
         }))),
         insight,
-        s.legs.length < 60 && footNote('Меньше 60 событий: точки калибровки сильно скачут, выводы преждевременны.'),
-        howto(h('b', null, 'Как читать: '), 'если модель говорит 70%, такие события должны сыграть примерно в 7 из 10 случаев. Точки ниже диагонали — модель переоценивает фаворитов, выше — недооценивает.'),
+        legs.length < 60 && footNote('Меньше 60 событий: точки калибровки сильно скачут, выводы преждевременны.'),
+        howto(h('b', null, 'Как читать: '), 'если модель говорит 70%, такие события должны сыграть примерно в 7 из 10 случаев. Точки ниже диагонали — модель переоценивает фаворитов, выше — недооценивает. ',
+          bot ? 'У старого бота есть только оценка Claude — ее и показываем, и только по его ординарам: исходы событий в экспрессах бот записывал лишь у выигранных.' : 'В таблице рядом с итоговой вероятностью — базовая модель (Эло и признаки) и оценка после поправки Claude. Ставки старого бота сюда не входят.'),
       ],
-    });
+    }));
   }
 
+  // Brier модели против рынка (В2): главный ряд — рынок при прогнозе без маржи; закрытие — отдельной строкой там,
+  // где внесены обе стороны закрывающего кэфа. Разница — с 95% ДИ; задевает ноль — «в пределах шума»
   function brierCard(s, mobile) {
     const pts = rolling(s.legs);
-    const head = { class: 'analytics-card', title: 'Brier: модель против рынка', subtitle: 'Скользящие 30 событий · ниже — лучше' };
+    const head = { class: 'analytics-card', title: 'Brier: модель против рынка', subtitle: 'Рынок при прогнозе, без маржи · скользящие 30 событий · ниже — лучше' };
+    const n = withMarket(s.legs).length;
+    if (state.source === 'bot') return card(Object.assign(head, { body: [UI.empty('У ставок старого бота нет итоговой вероятности модели и рынка в момент прогноза — Brier против рынка по ним не считается.')] }));
     if (pts.length < 2) {
-      return card(Object.assign(head, { body: [UI.empty('Для скользящего окна нужно хотя бы 33 события — сейчас ' + s.legs.length + '. Расширьте период или снимите фильтры.'), howto(h('b', null, 'Как читать: '), 'Brier — средняя квадратичная ошибка прогноза: 0 — идеально, 0,25 — как всегда ставить 50%.')] }));
+      return card(Object.assign(head, { body: [UI.empty('Для скользящего окна нужно хотя бы 33 события с рынком при прогнозе — сейчас ' + n + '. Расширьте период или снимите фильтры.'), howto(h('b', null, 'Как читать: '), 'Brier — средняя квадратичная ошибка прогноза: 0 — идеально, 0,25 — как всегда ставить 50%.')] }));
     }
     const last = pts[pts.length - 1];
     const better = pts.filter(p => p.model < p.market).length;
-    const b = s.brier, diff = b.model - b.market;
-    const verdict = Math.abs(diff) < 0.01
-      ? UI.callout('', 'info', h('b', null, 'За период: '), 'модель ' + fmt.dec(b.model, 3) + ', рынок ' + fmt.dec(b.market, 3) + ' — разница ' + signedDec(diff, 3) + ', в пределах шума на ' + onEv(b.n) + '. Чтобы говорить о преимуществе над линией, нужен доверительный интервал на тысячах событий.')
+    const b = s.brier, diff = b.model - b.market, noise = noisy(b.ci);
+    const verdict = noise
+      ? UI.callout('', 'info', h('b', null, 'За период: '), 'модель ' + fmt.dec(b.model, 3) + ', рынок ' + fmt.dec(b.market, 3) + ' — разница ' + signedDec(diff, 3) + ', 95% ДИ ' + ciDec3(b.ci) + ': в пределах шума на ' + onEv(b.n) + '.')
       : diff < 0
-        ? UI.callout('good', 'check', h('b', null, 'За период: '), 'модель ' + fmt.dec(b.model, 3) + ' против ' + fmt.dec(b.market, 3) + ' у рынка (' + nEv(b.n) + '). Разница заметная, но проверьте, держится ли она на новых событиях.')
-        : UI.callout('warn', 'alert', h('b', null, 'За период: '), 'рынок точнее: ' + fmt.dec(b.market, 3) + ' против ' + fmt.dec(b.model, 3) + ' у модели (' + nEv(b.n) + '). Ставки, где модель расходится с линией, стоит пересмотреть.');
+        ? UI.callout('good', 'check', h('b', null, 'За период: '), 'модель ' + fmt.dec(b.model, 3) + ' против ' + fmt.dec(b.market, 3) + ' у рынка (' + nEv(b.n) + '), 95% ДИ разницы ' + ciDec3(b.ci) + ' — целиком ниже нуля. Проверьте, держится ли это на новых событиях.')
+        : UI.callout('warn', 'alert', h('b', null, 'За период: '), 'рынок точнее: ' + fmt.dec(b.market, 3) + ' против ' + fmt.dec(b.model, 3) + ' у модели (' + nEv(b.n) + '), 95% ДИ разницы ' + ciDec3(b.ci) + '.');
+    // Закрытие: только события, где внесены обе стороны закрывающего кэфа (Т13)
+    const cl = withMarket(s.legs).filter(l => l.qClose != null);
+    const clModel = cl.length ? sum(cl, l => (l.p - won(l)) ** 2) / cl.length : null;
+    const clMarket = cl.length ? sum(cl, l => (l.qClose - won(l)) ** 2) / cl.length : null;
     const chart = declutterX(UI.lineChart({
       labels: pts.map(p => p.date),
-      series: [{ name: 'Модель', color: 'var(--s1)', values: pts.map(p => p.model) }, { name: 'Рынок (закрытие)', color: 'var(--s2)', values: pts.map(p => p.market) }],
+      series: [{ name: 'Модель', color: 'var(--s1)', values: pts.map(p => p.model) }, { name: 'Рынок при прогнозе', color: 'var(--s2)', values: pts.map(p => p.market) }],
       height: mobile ? 210 : 280, yFormat: v => fmt.dec(v, 3), xFormat: d => fmt.date(d), tipTitle: d => '30 событий по ' + fmt.date(d),
-      ariaLabel: 'Скользящий Brier: модель ' + fmt.dec(last.model, 3) + ', рынок ' + fmt.dec(last.market, 3),
+      ariaLabel: 'Скользящий Brier: модель ' + fmt.dec(last.model, 3) + ', рынок при прогнозе ' + fmt.dec(last.market, 3),
     }));
     return card(Object.assign(head, {
       actions: [h('span', { class: ['chip', better * 2 >= pts.length ? 'good' : 'warn'], title: 'В скольких окнах по 30 событий Brier модели ниже рыночного' }, icon(better * 2 >= pts.length ? 'check' : 'alert'), 'Точнее рынка: ' + better + ' из ' + pts.length)],
       body: [
-        UI.legend([{ name: 'Модель · сейчас ' + fmt.dec(last.model, 3), color: 'var(--s1)' }, { name: 'Рынок (закрытие) · ' + fmt.dec(last.market, 3), color: 'var(--s2)' }]),
+        UI.legend([{ name: 'Модель · сейчас ' + fmt.dec(last.model, 3), color: 'var(--s1)' }, { name: 'Рынок при прогнозе · ' + fmt.dec(last.market, 3), color: 'var(--s2)' }]),
         UI.withTable(chart, () => h('div', { class: 'analytics-scroll' }, mtable({
           columns: [
             { key: 'date', label: 'Окно по', render: p => h('span', { style: 'white-space:nowrap' }, fmt.date(p.date)) },
@@ -800,15 +901,21 @@
           ], rows: pts.slice().reverse(),
         }))),
         verdict,
-        howto(h('b', null, 'Как читать: '), 'Brier — средняя квадратичная ошибка прогноза: 0 — идеально, 0,25 — как всегда ставить 50%. Когда линия модели ниже линии рынка, модель точнее закрывающего кэфа. Каждая точка — последние 30 событий.'),
+        h('dl', { class: 'analytics-strip analytics-strip-2' },
+          h('div', null, h('dt', null, 'Рынок при прогнозе'), h('dd', null, fmt.dec(b.market, 3), h('small', null, nEv(b.n) + ' · ваш букмекер'))),
+          h('div', null, h('dt', null, 'Рынок закрытия'), h('dd', null, clMarket == null ? '—' : fmt.dec(clMarket, 3), h('small', null, cl.length ? 'модель ' + fmt.dec(clModel, 3) + ' · ' + nEv(cl.length) + ' с двумя сторонами' : 'нет событий с двумя сторонами закрытия')))),
+        howto(h('b', null, 'Как читать: '), 'Brier — средняя квадратичная ошибка прогноза: 0 — идеально, 0,25 — как всегда ставить 50%. Рынок — вероятность по кэфам обеих сторон у вашего букмекера в момент прогноза, маржа снята степенным методом. Каждая точка — последние 30 событий. Ставки старого бота не входят.'),
+        button('Brier и CLV простыми словами', { kind: 'ghost', size: 'sm', icon: 'book', onClick: explainModal, attrs: { class: 'btn ghost sm', style: 'align-self:flex-start' } }),
       ],
     }));
   }
 
   // ---------- CLV ----------
+  // CLV (В1): кэф ÷ закрывающий − 1 по закрытию, которое внес участник; среднее — с 95% ДИ. Где внесены обе стороны
+  // закрытия — еще «CLV без маржи» по событиям. Ставки старого бота не входят (В5)
   function clvCard(s, mobile) {
-    const clvs = s.bets.filter(b => b.clv != null).map(b => b.clv); // ставки без закрывающего кэфа в распределение не попадают
-    if (!clvs.length) return card({ class: 'analytics-card', title: 'Распределение CLV', body: UI.empty('Нет ставок за период') });
+    const clvs = s.sum.clvs; // ставки без закрывающего кэфа и ставки бота в распределение не попадают
+    if (!clvs.length) return card({ class: 'analytics-card', title: 'Распределение CLV', body: UI.empty(state.source === 'bot' ? 'У ставок старого бота CLV не считается.' : 'Нет ставок с закрывающими кэфами за период') });
     const lo = Math.max(-3, Math.floor(Math.min(...clvs))), top = Math.min(7, Math.max(lo + 3, Math.floor(Math.max(...clvs))));
     const bins = [];
     for (let k = lo; k <= top; k++) bins.push({ k, n: 0 });
@@ -822,10 +929,12 @@
     }));
     const avg = sum(clvs, v => v) / clvs.length;
     const neg = clvs.filter(v => v < 0).length;
+    const fair = s.legs.filter(l => l.qClose != null && l.pKind === 'final').map(fairClv);
+    const fairAvg = fair.length ? sum(fair, v => v) / fair.length : null;
     const chart = UI.columnChart({ items, height: mobile ? 190 : 220, valueFormat: v => fmt.int(v), seriesName: 'Ставок', ariaLabel: 'Распределение CLV по ставкам: средний ' + fmt.signedPct(avg) });
     return card({
       class: 'analytics-card', title: 'Распределение CLV', subtitle: 'Ваш кэф против закрывающего, по ставкам',
-      actions: [chip('Средний ' + fmt.signedPct(Math.round(avg * 10) / 10), avg > 0 ? 'good' : 'bad', avg > 0 ? 'arrowUp' : 'arrowDown')],
+      actions: [chip('Средний ' + fmt.signedPct(Math.round(avg * 10) / 10), noisy(s.sum.clvCi) ? 'outline' : avg > 0 ? 'good' : 'bad', avg > 0 ? 'arrowUp' : 'arrowDown')],
       body: [
         UI.legend([{ name: 'Кэф не хуже закрытия · ' + (clvs.length - neg), color: 'var(--s1)', type: 'box' }, { name: 'Линия ушла против вас · ' + neg, color: 'var(--fg-3)', type: 'box' }]),
         UI.withTable(chart, () => tableBox(mtable({
@@ -835,7 +944,10 @@
             { key: 'share', label: 'Доля', align: 'r', render: it => fmt.pct(it.value / clvs.length * 100, 0) },
           ], rows: items,
         }))),
-        howto(h('b', null, 'Как читать: '), 'CLV — на сколько ваш кэф выше закрывающего кэфа ' + D.marketRef + ' (последнего перед матчем). Столбцы правее нуля — вы взяли цену лучше рыночного итога. Стабильно положительный CLV — главный признак, что преимущество не случайно; исход одной ставки — нет.'),
+        h('dl', { class: 'analytics-strip analytics-strip-2' },
+          h('div', null, h('dt', null, 'Средний CLV · 95% ДИ'), h('dd', { class: roiCls(avg) }, fmt.signedPct(Math.round(avg * 10) / 10), h('small', null, ciPct1(s.sum.clvCi) + (noisy(s.sum.clvCi) ? ' · в пределах шума' : '') + ' · ' + nBets(clvs.length)))),
+          h('div', null, h('dt', null, 'CLV без маржи'), h('dd', { class: fairAvg == null ? null : roiCls(fairAvg) }, fairAvg == null ? '—' : fmt.signedPct(Math.round(fairAvg * 10) / 10), h('small', null, fair.length ? nEv(fair.length) + ' с двумя сторонами закрытия' : 'внесите обе стороны закрытия')))),
+        howto(h('b', null, 'Как читать: '), 'CLV = ваш кэф ÷ закрывающий − 1; закрывающий кэф вы вносите сами — эталона (' + D.marketRefRule + ') или своего букмекера. Так CLV немного завышен: в закрывающем кэфе есть маржа, честный кэф выше. Точнее — CLV без маржи: ваш кэф × вероятность рынка закрытия − 1, если внесены обе стороны. Столбцы правее нуля — вы взяли цену лучше рыночного итога. Стабильно положительный CLV — главный признак, что преимущество не случайно. Ставки старого бота не входят.'),
       ],
     });
   }
@@ -886,13 +998,12 @@
   }
 
   // ---------- экспорт ----------
+  // В13: в этапе 4 — только CSV (ставки, события, калибровка и Brier); Excel и PDF — не сейчас
   function exportModal(s) {
-    let format = 'csv';
     UI.modal({
-      title: 'Выгрузить аналитику',
+      title: 'Выгрузить аналитику в CSV',
       body: [
-        h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Формат'),
-          UI.segmented({ label: 'Формат файла', items: [{ id: 'csv', label: 'CSV' }, { id: 'xlsx', label: 'Excel' }, { id: 'pdf', label: 'PDF-отчет' }], active: format, onChange: id => { format = id; } })),
+        h('p', { class: 'small soft', style: 'margin:0' }, 'CSV открывается в Excel, Numbers и Google Таблицах. Каждый выбранный набор — отдельный файл в одном архиве.'),
         h('fieldset', { class: 'analytics-check', style: 'border:0;padding:0;margin:0' },
           h('legend', { class: 'field-label', style: 'margin-bottom:8px' }, 'Что включить'),
           [['analytics-ex-bets', 'Ставки с суммами и результатом', true], ['analytics-ex-legs', 'События экспрессов (кэф, закрытие, прогноз модели)', true], ['analytics-ex-calib', 'Калибровку и Brier по окнам', false]].map(([id, text, on]) =>
@@ -901,7 +1012,7 @@
       ],
       actions: close => [
         button('Отмена', { kind: 'ghost', onClick: close }),
-        button('Сформировать файл', { kind: 'primary', icon: 'download', onClick: () => { close(); UI.toast((format === 'pdf' ? 'PDF-отчет' : format === 'xlsx' ? 'Файл Excel' : 'CSV-файл') + ' сформирован. В макете он не скачивается', 'download'); } }),
+        button('Скачать CSV', { kind: 'primary', icon: 'download', onClick: () => { close(); UI.toast('В рабочей версии скачается analytics_' + TODAY + '.zip с CSV-файлами. В макете файл не скачивается', 'download'); } }),
       ],
     });
   }
@@ -915,19 +1026,16 @@
   }
 
   function emptyState(s) {
-    const indoor = state.surface === 'indoor';
     // Есть ли такие ставки за все время — тогда предлагаем расширить период, а не сбрасывать фильтры
-    const ever = settled().filter(b => (state.surface === 'all' || b.surface === state.surface) && (state.market === 'all' || b.legs.some(l => l.market === state.market)));
+    const ever = settled().filter(b => (state.surface === 'all' || b.surface === state.surface) && (state.market === 'all' || b.legs.some(l => l.market === state.market)) && (state.source === 'all' || b.source === state.source));
     const canWiden = state.period !== 'all' && ever.length > 0;
     const reset = () => { Object.assign(state, DEFAULTS); update(true); };
     return h('section', { class: 'card analytics-empty' },
       h('span', { class: 'analytics-empty-ic' }, icon('filter')),
       h('h3', null, 'Под фильтр не попало ни одной ставки'),
-      h('p', null, indoor
-        ? 'На крытом харде ставок пока не было: сезон в залах начнется после Шанхая. Первые события появятся здесь в конце октября.'
-        : canWiden
+      h('p', null, canWiden
           ? s.p.ctx[0].toUpperCase() + s.p.ctx.slice(1) + ' таких ставок нет. Последняя была ' + fmt.date(ever[ever.length - 1].date) + ', всего за сезон — ' + nBets(ever.length) + '.'
-          : 'Нет рассчитанных ставок с таким рынком и покрытием. Снимите один из фильтров.'),
+          : 'Нет рассчитанных ставок с таким рынком, покрытием и источником. Снимите один из фильтров.'),
       h('div', { class: 'row', style: 'justify-content:center' },
         canWiden && button('Показать за все время', { kind: 'primary', icon: 'calendar', onClick: () => { state.period = 'all'; update(true); } }),
         button('Сбросить фильтры', { kind: canWiden ? 'secondary' : 'primary', icon: 'refresh', onClick: reset })));
@@ -944,9 +1052,10 @@
       kpis(s),
       insightsCard(s),
       bankCard(s, mobile),
-      section('Где стратегия зарабатывает', 'ROI по срезам. В разрезах по покрытию и рынку все значения видны всегда, выбранное в фильтре подсвечено.'),
+      section('Где стратегия зарабатывает', 'ROI по срезам с 95% доверительными интервалами. В разрезах по покрытию и рынку все значения видны всегда, выбранное в фильтре подсвечено.'),
+      parlayCard(s),
       h('div', { class: 'analytics-grid' }, surfaceCard(s), marketCard(s), oddsCard(s), totalCard(s)),
-      section('Точность прогнозов', 'Насколько вероятности модели совпадают с реальностью и с закрывающей линией.'),
+      section('Точность прогнозов', 'Насколько вероятности модели совпадают с реальностью и с рынком в момент прогноза.'),
       h('div', { class: 'analytics-grid' }, calibrationCard(s, mobile), brierCard(s, mobile)),
       section('Цена и рынки', 'Качество взятых кэфов и итог по типам ставок.'),
       h('div', { class: 'analytics-grid' }, clvCard(s, mobile), marketTableCard(s)),
@@ -968,7 +1077,7 @@
           h('h2', null, 'Прибыльность и точность'),
           h('p', { class: 'lead' }, 'Где стратегия приносит деньги и насколько точны вероятности модели. Фильтры ниже пересчитывают все блоки.')),
         h('div', { class: 'analytics-head-actions' },
-          button('Выгрузить', { kind: 'secondary', size: UI.isMobile() ? 'sm' : null, icon: 'download', onClick: () => exportModal(compute()) })));
+          button('Выгрузить CSV', { kind: 'secondary', size: UI.isMobile() ? 'sm' : null, icon: 'download', onClick: () => exportModal(compute()) })));
       filters = filterBar(reset => update(reset));
       contentEl = h('div', { class: 'stack', style: 'gap:inherit' });
       UI.append(root, [head, filters.el, contentEl]);

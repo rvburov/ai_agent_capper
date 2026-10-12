@@ -481,21 +481,27 @@
     }, height);
   }
 
-  // hbars({items:[{label, value, color, note, labelNode}], valueFormat, domain:[min,max]}) — горизонтальные полосы, поддерживают отрицательные значения
+  // hbars({items:[{label, value, valueText, color, note, labelNode, ci:[lo,hi]}], valueFormat, domain:[min,max]}) — горизонтальные полосы,
+  // поддерживают отрицательные значения; ci — 95% доверительный интервал, рисуется тонкой линией с засечками поверх полосы
   function hbars(o) {
     const vf = o.valueFormat || (v => fmt.int(v));
-    const vals = o.items.map(i => i.value);
+    const vals = o.items.flatMap(i => (i.ci ? [i.value, i.ci[0], i.ci[1]] : [i.value]));
     const lo = o.domain ? o.domain[0] : Math.min(0, ...vals), hi = o.domain ? o.domain[1] : Math.max(0, ...vals);
     const span = (hi - lo) || 1;
-    const zero = ((0 - lo) / span) * 100;
+    const pos = v => ((Math.max(lo, Math.min(hi, v)) - lo) / span) * 100;
+    const zero = pos(0);
+    if (o.items.some(i => i.ci)) css('ui-hbar-ci', '.hbar-ci { position: absolute; top: 50%; height: 0; border-top: 1.5px solid var(--fg-2); }'
+      + ' .hbar-ci::before, .hbar-ci::after { content: ""; position: absolute; top: -5px; height: 8px; border-left: 1.5px solid var(--fg-2); }'
+      + ' .hbar-ci::before { left: -1px; } .hbar-ci::after { right: -1px; }');
     return h('div', { class: 'hbars', role: 'list' }, o.items.map(it => {
       const v = it.value, w = Math.abs(v) / span * 100;
       const color = it.color || o.color || 'var(--s1)';
       const fill = h('i', { class: ['hbar-fill', v >= 0 ? 'pos' : 'neg'], style: { left: (v >= 0 ? zero : zero - w) + '%', width: Math.max(w, 0.6) + '%', background: color } });
-      return h('div', { class: 'hbar', role: 'listitem', title: it.label + ': ' + vf(v) },
+      const ci = it.ci && h('i', { class: 'hbar-ci', style: { left: pos(it.ci[0]) + '%', width: Math.max(0.6, pos(it.ci[1]) - pos(it.ci[0])) + '%' } });
+      return h('div', { class: 'hbar', role: 'listitem', title: it.label + ': ' + vf(v) + (it.ci ? ', 95% ДИ ' + vf(it.ci[0]) + '…' + vf(it.ci[1]) : '') },
         h('span', { class: 'hbar-label' }, it.labelNode || [it.dot !== false && h('i', { style: { width: '8px', height: '8px', borderRadius: '2px', background: color, flex: 'none' } }), it.label]),
-        h('span', { class: 'hbar-track' }, lo < 0 && h('i', { class: 'hbar-zero', style: { left: zero + '%' } }), fill),
-        h('span', { class: 'hbar-value' }, vf(v), it.note && h('small', null, it.note)));
+        h('span', { class: 'hbar-track' }, lo < 0 && h('i', { class: 'hbar-zero', style: { left: zero + '%' } }), fill, ci),
+        h('span', { class: 'hbar-value' }, it.valueText != null ? it.valueText : vf(v), it.note && h('small', null, it.note)));
     }));
   }
 
