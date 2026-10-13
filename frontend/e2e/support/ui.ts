@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { expectNoHorizontalScroll } from './layout';
 import type { Account } from './test';
 import { Totp } from './totp';
 
@@ -124,10 +125,5 @@ export async function navigationLinks(page: Page, isMobile: boolean): Promise<st
   return (await sidebar.getByRole('link').allInnerTexts()).map((s) => s.trim());
 }
 
-/** Нет горизонтальной прокрутки страницы. */
-export async function expectNoHorizontalScroll(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
-  expect(overflow).toBeLessThanOrEqual(0);
-}
+// Нет горизонтальной прокрутки страницы; проверки раскладки телефона — в ./layout
+export { expectNoHorizontalScroll };

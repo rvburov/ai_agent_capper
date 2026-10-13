@@ -1,12 +1,7 @@
-import { QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { meQueryKey } from '../../api/keys';
-import { createQueryClient } from '../../api/queryClient';
-import { ToastProvider } from '../../components';
 import { aiBudget } from '../../features/ai/testData';
 import {
   analysisDone,
@@ -20,7 +15,8 @@ import {
 import type { Analysis } from '../../features/analysis/types';
 import { setEventSourceFactory } from '../../features/analysis/useAnalysisEvents';
 import { CLIENT_REF, type BetIn } from '../../features/bets/api';
-import { apiError, json, ME_MEMBER, mockFetch, type Handler } from '../../test/fetchMock';
+import { apiError, json, mockFetch, type Handler } from '../../test/fetchMock';
+import { renderPage } from '../../test/renderPage';
 import { setViewportWidth } from '../../test/setup';
 import { AnalysisPage } from './AnalysisPage';
 
@@ -78,23 +74,11 @@ function routes(analysis: Analysis | (() => Analysis), extra: Record<string, Han
 }
 
 function renderAnalysis(id: number) {
-  const router = createMemoryRouter(
-    [
-      { path: '/analysis/:id', element: <AnalysisPage /> },
-      { path: '/new', element: <p>Новый анализ</p> },
-    ],
-    { initialEntries: [`/analysis/${id}`] },
-  );
-  const client = createQueryClient();
-  client.setDefaultOptions({ queries: { retry: false } });
-  client.setQueryData(meQueryKey, ME_MEMBER);
-  render(
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <RouterProvider router={router} />
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
+  const { router } = renderPage(<AnalysisPage />, {
+    path: '/analysis/:id',
+    url: `/analysis/${id}`,
+    stubs: { '/new': 'Новый анализ' },
+  });
   return router;
 }
 

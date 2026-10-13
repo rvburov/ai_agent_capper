@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, ScrollRestoration } from 'react-router';
 
@@ -6,10 +6,12 @@ import { useMe } from '../../api/hooks/useMe';
 import { useLogout } from '../../features/auth/useLogout';
 import { useRouteMeta } from '../routeMeta';
 import { useDocumentTitle } from '../useDocumentTitle';
+import { PageLoading } from './FullPageState';
 import { MoreSheet } from './MoreSheet';
 import { Sidebar } from './Sidebar';
 import { TabBar } from './TabBar';
 import { TopBar } from './TopBar';
+import { usePendingNavigation } from './usePendingNavigation';
 
 /**
  * Оболочка приложения (mockup/js/app.js, shell): боковая панель на компьютере,
@@ -19,7 +21,11 @@ import { TopBar } from './TopBar';
 export function AppShell() {
   const { t } = useTranslation();
   const { data: me } = useMe();
-  const meta = useRouteMeta();
+  // Переход на экран, который грузится дольше 300 мс: шапка и меню — уже нового экрана, на
+  // месте прежнего — индикатор (как при первой загрузке), а не застывший прежний экран
+  const pending = usePendingNavigation();
+  const shownMeta = useRouteMeta();
+  const meta = pending ? (pending.meta ?? shownMeta) : shownMeta;
   // Выход: запрос, переход на /login, очистка кэша и тост — в одном хуке
   const { logout: onLogout } = useLogout();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -48,8 +54,15 @@ export function AppShell() {
       </div>
       <div className="main">
         <TopBar title={title} crumbs={crumbs} me={me} onLogout={onLogout} />
-        <main className="view" id="view" tabIndex={-1}>
-          <Outlet />
+        <main className="view" id="view" tabIndex={-1} aria-busy={pending ? true : undefined}>
+          {/* экран грузится отдельным файлом (src/app/lazyPage.ts): шапка и меню уже на месте */}
+          {pending && <PageLoading immediate />}
+          {/* прежний экран при долгом переходе скрыт, но не размонтирован: переход могут отменить */}
+          <div className="view-screen" hidden={pending !== null}>
+            <Suspense fallback={<PageLoading />}>
+              <Outlet />
+            </Suspense>
+          </div>
         </main>
       </div>
       <TabBar navId={meta?.nav} moreOpen={moreOpen} onMore={() => setMoreOpen(true)} />

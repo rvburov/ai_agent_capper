@@ -1,17 +1,13 @@
-import { onlineManager, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { onlineManager } from '@tanstack/react-query';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createMemoryRouter, RouterProvider } from 'react-router';
 import { describe, expect, it } from 'vitest';
 
-import { meQueryKey } from '../../api/keys';
-import { createQueryClient } from '../../api/queryClient';
-import { ThemeProvider } from '../../app/theme/ThemeProvider';
-import { ToastProvider } from '../../components';
 import { adminBudget, adminKey } from '../../features/admin/testData';
 import { aiBudget } from '../../features/ai/testData';
 import type { AiBudget, OwnKey } from '../../features/ai/types';
 import { apiError, json, ME_ADMIN, ME_MEMBER, mockFetch, type Handler } from '../../test/fetchMock';
+import { renderPage } from '../../test/renderPage';
 import { setViewportWidth } from '../../test/setup';
 import { ProfilePage } from './ProfilePage';
 
@@ -39,26 +35,12 @@ function routes(me: Me, budget: AiBudget | (() => AiBudget), extra: Record<strin
 }
 
 function renderKey(me: Me = ME_MEMBER) {
-  const router = createMemoryRouter(
-    [
-      { path: '/profile/:tab?', element: <ProfilePage /> },
-      { path: '/admin/:tab?', element: <p>Администрирование</p> },
-      { path: '/costs', element: <p>ИИ и расходы</p> },
-    ],
-    { initialEntries: ['/profile/key'] },
-  );
-  const client = createQueryClient();
-  client.setDefaultOptions({ queries: { retry: false } });
-  client.setQueryData(meQueryKey, me);
-  render(
-    <QueryClientProvider client={client}>
-      <ThemeProvider>
-        <ToastProvider>
-          <RouterProvider router={router} />
-        </ToastProvider>
-      </ThemeProvider>
-    </QueryClientProvider>,
-  );
+  const { router } = renderPage(<ProfilePage />, {
+    path: '/profile/:tab?',
+    url: '/profile/key',
+    me,
+    stubs: { '/admin/:tab?': 'Администрирование', '/costs': 'ИИ и расходы' },
+  });
   return { router };
 }
 

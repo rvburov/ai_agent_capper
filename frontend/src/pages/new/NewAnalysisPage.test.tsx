@@ -1,12 +1,7 @@
-import { QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { meQueryKey } from '../../api/keys';
-import { createQueryClient } from '../../api/queryClient';
-import { ToastProvider } from '../../components';
 import { aiBudget } from '../../features/ai/testData';
 import { clearDraft, loadDraft } from '../../features/analysis/draftStore';
 import {
@@ -20,6 +15,7 @@ import {
 } from '../../features/analysis/testData';
 import type { Analysis, ConfirmIn } from '../../features/analysis/types';
 import { apiError, json, ME_ADMIN, ME_MEMBER, mockFetch, type Handler } from '../../test/fetchMock';
+import { renderPage } from '../../test/renderPage';
 import { setViewportWidth } from '../../test/setup';
 import { NewAnalysisPage } from './NewAnalysisPage';
 
@@ -41,23 +37,12 @@ function routes(extra: Record<string, Handler> = {}): Record<string, Handler> {
 }
 
 function renderNew(path = '/new', me: typeof ME_MEMBER | typeof ME_ADMIN = ME_MEMBER) {
-  const router = createMemoryRouter(
-    [
-      { path: '/new', element: <NewAnalysisPage /> },
-      { path: '/analysis/:id', element: <p>Экран анализа</p> },
-    ],
-    { initialEntries: [path] },
-  );
-  const client = createQueryClient();
-  client.setDefaultOptions({ queries: { retry: false } });
-  client.setQueryData(meQueryKey, me);
-  render(
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <RouterProvider router={router} />
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
+  const { router } = renderPage(<NewAnalysisPage />, {
+    path: '/new',
+    url: path,
+    me,
+    stubs: { '/analysis/:id': 'Экран анализа' },
+  });
   return router;
 }
 

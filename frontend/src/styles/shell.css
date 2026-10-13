@@ -128,3 +128,12 @@ button.nav-link { width: 100%; border: 0; background: none; cursor: pointer; tex
 .full-state .card { width: min(440px, 100%); }
 
 /* экраны без оболочки (вход, регистрация, сброс пароля) — src/pages/auth/auth.css */
+
+/* экран грузится (ленивая загрузка): индикатор появляется не сразу, чтобы не мигать */
+.page-loading { animation: fade .2s ease .3s both; }
+.page-loading.now { animation-delay: 0s; }
+.page-loading:not(.full-state) { display: grid; place-items: center; min-height: 40vh; }
+/* обертка экрана в .view: без своей раскладки (дети — прямо в колонке .view); при долгом
+   переходе на другой экран прежний скрыт, на его месте индикатор */
+.view-screen { display: contents; }
+.view-screen[hidden] { display: none; }

@@ -30,6 +30,10 @@ const CURRENCIES: ReadonlySet<string> = new Set(['RUB', 'USD', 'EUR']);
 const MONEY_PARAMS: Readonly<Record<string, readonly string[]>> = {
   'analysis.warnings.bank_differs': ['input', 'ledger'],
   'errors.bet.stake_range': ['bank'],
+  'errors.bet.payout_range': ['payout', 'max'],
+  'errors.bet.payout_overflow': ['payout', 'max'],
+  'errors.bank.withdrawal_range': ['balance'],
+  'errors.bank.correction_range': ['balance'],
 };
 
 function moneyCurrency(params: Record<string, unknown>, options: TextOptions): Currency | null {

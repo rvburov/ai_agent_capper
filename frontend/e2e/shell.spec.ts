@@ -2,9 +2,11 @@ import { readFileSync } from 'node:fs';
 
 import { expect, test } from '@playwright/test';
 
-import { collectErrors, horizontalOverflow, ME_ADMIN, ME_MEMBER, mockApi } from './fixtures';
+import { collectErrors, expectTapTargets, horizontalOverflow, ME_ADMIN, ME_MEMBER, mockApi } from './fixtures';
 
+// 360 px — самый узкий телефон из PLAN.md, 375 px — из CLAUDE.md
 const VIEWPORTS = [
+  { name: 'телефон', width: 360, height: 780, mobile: true },
   { name: 'телефон', width: 375, height: 812, mobile: true },
   { name: 'компьютер', width: 1366, height: 900, mobile: false },
 ] as const;
@@ -40,13 +42,9 @@ for (const vp of VIEWPORTS) {
         await expect(sheet).toBeHidden();
         await expect(page.getByRole('heading', { level: 1, name: 'Игроки' })).toBeVisible();
         await expect(page).toHaveURL(/\/players$/);
-        // зоны нажатия нижних вкладок не меньше 40 px
-        for (const box of await tabbar.locator('.tab').evaluateAll((els) =>
-          els.map((el) => el.getBoundingClientRect()).map((r) => ({ w: r.width, h: r.height })),
-        )) {
-          expect(box.w).toBeGreaterThanOrEqual(40);
-          expect(box.h).toBeGreaterThanOrEqual(40);
-        }
+        // зоны нажатия шапки и нижних вкладок не меньше 40 px
+        await expectTapTargets(page, { root: tabbar });
+        await expectTapTargets(page, { root: page.locator('.topbar') });
       } else {
         const sidebar = page.getByRole('complementary', { name: 'Основная навигация' });
         await expect(sidebar).toBeVisible();
@@ -148,6 +146,57 @@ test('вкладки-адреса и неизвестная страница', a
   await expect(page).toHaveURL(/\/profile$/);
   await page.goto('/no-such-page');
   await expect(page.getByText('Такой страницы нет')).toBeVisible();
+});
+
+test('экран не загрузился после выкладки: одна автоперезагрузка, потом текст и «Обновить страницу»', async ({ page }) => {
+  // сколько раз документ загружался: счетчик в sessionStorage до скриптов приложения
+  await page.addInitScript(() => {
+    sessionStorage.setItem('e2e.loads', String(Number(sessionStorage.getItem('e2e.loads') ?? 0) + 1));
+  });
+  const loads = () => page.evaluate(() => Number(sessionStorage.getItem('e2e.loads')));
+  await mockApi(page, ME_ADMIN);
+  await page.goto('/');
+  await expect(page.getByRole('heading', { level: 1, name: 'Главная' })).toBeVisible();
+  expect(await loads()).toBe(1);
+  // файла экрана «Новый анализ» на сервере нет — как после выкладки новой версии
+  await page.route(/\/assets\/NewAnalysisPage-[^/]+\.js$/, (route) => route.abort());
+  await page.getByRole('complementary', { name: 'Основная навигация' }).getByRole('link', { name: 'Новый анализ' }).click();
+  // первая ошибка — страница перезагружается сама; вторая подряд (новая версия уже загружена) —
+  // текст сбоя без цикла, а не «Вышла новая версия»
+  await expect(page.getByText('Экран не загрузился')).toBeVisible();
+  await expect(page.getByText('Вышла новая версия программы')).toHaveCount(0);
+  await expect(page).toHaveURL(/\/new$/);
+  expect(await loads()).toBe(2);
+  await page.waitForTimeout(500);
+  expect(await loads()).toBe(2);
+  // файл снова на месте: «Обновить страницу» открывает экран
+  await page.unroute(/\/assets\/NewAnalysisPage-[^/]+\.js$/);
+  await page.getByRole('button', { name: 'Обновить страницу' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Новый анализ' })).toBeVisible();
+  await expect(page.getByText('Экран не загрузился')).toHaveCount(0);
+});
+
+test('долгий переход на экран: шапка и меню — нового экрана, на месте прежнего — индикатор', async ({ page }) => {
+  await mockApi(page, ME_ADMIN);
+  await page.goto('/');
+  await expect(page.getByRole('heading', { level: 1, name: 'Главная' })).toBeVisible();
+  // файл экрана «Новый анализ» отдается через 2 с — медленная мобильная сеть
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/\/assets\/NewAnalysisPage-[^/]+\.js$/, async (route) => {
+    await released;
+    await route.continue();
+  });
+  const nav = page.getByRole('complementary', { name: 'Основная навигация' });
+  await nav.getByRole('link', { name: 'Новый анализ' }).click();
+  await expect(page.getByRole('status', { name: 'Загружаем экран' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Новый анализ' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Новый анализ' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('main')).toHaveAttribute('aria-busy', 'true');
+  release();
+  await expect(page.getByRole('status', { name: 'Загружаем экран' })).toHaveCount(0);
+  await expect(page.getByRole('main')).not.toHaveAttribute('aria-busy', 'true');
+  await expect(page).toHaveURL(/\/new$/);
 });
 
 test('CSP: preview отдает ту же политику, что Caddy, и страница ее не нарушает', async ({ page }) => {

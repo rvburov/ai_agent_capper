@@ -1,12 +1,7 @@
-import { QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createMemoryRouter, RouterProvider } from 'react-router';
 import { describe, expect, it } from 'vitest';
 
-import { meQueryKey } from '../../api/keys';
-import { createQueryClient } from '../../api/queryClient';
-import { ToastProvider } from '../../components';
 import {
   adminBudget,
   adminKey,
@@ -17,6 +12,7 @@ import {
 } from '../../features/admin/testData';
 import type { AuditEntry, Invite } from '../../features/admin/types';
 import { apiError, json, ME_ADMIN, mockFetch, type Handler } from '../../test/fetchMock';
+import { renderPage } from '../../test/renderPage';
 import { setViewportWidth } from '../../test/setup';
 import { AdminPage } from './AdminPage';
 
@@ -104,23 +100,12 @@ async function bodyOf(request: Request): Promise<unknown> {
 }
 
 function renderAdmin(path: string) {
-  const router = createMemoryRouter(
-    [
-      { path: '/admin/:tab?', element: <AdminPage /> },
-      { path: '/profile/:tab?', element: <p>Личный кабинет</p> },
-    ],
-    { initialEntries: [path] },
-  );
-  const client = createQueryClient();
-  client.setDefaultOptions({ queries: { retry: false } });
-  client.setQueryData(meQueryKey, ME_ADMIN);
-  render(
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <RouterProvider router={router} />
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
+  const { router } = renderPage(<AdminPage />, {
+    path: '/admin/:tab?',
+    url: path,
+    me: ME_ADMIN,
+    stubs: { '/profile/:tab?': 'Личный кабинет' },
+  });
   return { router };
 }
 

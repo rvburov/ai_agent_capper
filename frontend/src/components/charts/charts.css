@@ -1,0 +1,72 @@
+/* Графики (mockup/index.html, «charts»). Цвета — токены: светлая и темная темы без перерисовки. */
+.chart { position: relative; width: 100%; min-width: 0; contain: inline-size; }
+.chart svg { display: block; overflow: visible; touch-action: pan-y; }
+.chart svg:focus { outline: none; }
+.chart svg:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: var(--r-sm); }
+.chart text { font-family: var(--font-body); font-size: 11px; fill: var(--chart-muted); font-variant-numeric: tabular-nums; }
+.chart .grid-line { stroke: var(--chart-grid); stroke-width: 1; }
+.chart .axis-line { stroke: var(--chart-axis); stroke-width: 1; }
+.chart .crosshair { stroke: var(--fg-3); stroke-width: 1; }
+/* опорная линия (банк на начало периода, ноль, идеальная калибровка) — пунктир, не сетка */
+.chart .ref-line line, .chart line.ref-line { stroke: var(--fg-3); stroke-width: 1; stroke-dasharray: 4 4; }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .area { opacity: .1; stroke: none; }
+.chart .dot { stroke: var(--surface); stroke-width: 2; }
+.chart .dot.on { stroke: var(--fg); }
+.chart .end-label { fill: var(--fg); font-weight: 600; }
+.chart .column.dim { opacity: .55; }
+.chart .column.on { opacity: .8; }
+.chart .ci line { stroke: var(--fg-2); stroke-width: 1.5; }
+/* конец ДИ за шкалой — стрелка наружу; точка за шкалой — полая (прижата к краю) */
+.chart .ci-arrow { fill: none; stroke: var(--fg-2); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.chart .dot.off { stroke-width: 2; }
+.chart .hit { fill: transparent; }
+
+.chart-block { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* перезапрос данных: прежний график на месте, приглушен */
+.chart-block.pending .chart, .chart-block.pending .hbars { opacity: .55; transition: opacity .2s; }
+.chart-table-toggle { align-self: flex-start; }
+.chart-table { min-width: 0; }
+
+.chart-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); color: var(--fg-2); }
+.chart-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; flex: none; }
+.chart-legend i.box { width: 10px; height: 10px; border-radius: 2px; }
+.chart-legend i.dash { height: 0; border-top: 2px dashed var(--fg-3); background: none; }
+
+.chart-tip {
+  position: fixed; z-index: 90; pointer-events: none; min-width: 140px; max-width: 260px;
+  background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: var(--shadow); padding: 8px 10px; font-size: var(--fs-sm);
+}
+.chart-tip .tip-title { color: var(--fg-3); font-size: var(--fs-xs); margin-bottom: 4px; }
+.chart-tip .tip-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.chart-tip .tip-row b { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.chart-tip .tip-key { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); min-width: 0; }
+.chart-tip .tip-key i { width: 12px; height: 2px; border-radius: 1px; display: inline-block; flex: none; }
+
+/* Строки — одна сетка (subgrid): столбец значений общий и по ширине самого длинного значения,
+   поэтому дорожки всех строк одной ширины (одна шкала), а сумма с центами не вылезает за край */
+.hbars { display: grid; grid-template-columns: minmax(0, 8.5rem) minmax(0, 1fr) minmax(4.5rem, max-content); column-gap: 10px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.hbar { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 8.5rem) minmax(0, 1fr) 4.5rem; grid-template-columns: subgrid; align-items: center; font-size: var(--fs-sm); padding: 5px 0; min-width: 0; }
+.hbar.dim .hbar-fill { opacity: .3; }
+.hbar.dim .hbar-label { color: var(--fg-3); }
+.hbar-label { color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.hbar-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hbar-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.hbar-track { position: relative; height: 14px; }
+.hbar-zero { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--chart-axis); }
+.hbar-fill { position: absolute; top: 0; bottom: 0; }
+.hbar-fill.pos { border-radius: 0 4px 4px 0; }
+.hbar-fill.neg { border-radius: 4px 0 0 4px; }
+.hbar-ci { position: absolute; top: 50%; height: 0; border-top: 1.5px solid var(--fg-2); }
+.hbar-ci::before, .hbar-ci::after { content: ""; position: absolute; top: -5px; height: 8px; border-left: 1.5px solid var(--fg-2); }
+.hbar-ci::before { left: -1px; }
+.hbar-ci::after { right: -1px; }
+.hbar-value { position: relative; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--fg); white-space: nowrap; }
+.hbar-value small { display: block; font-weight: 400; color: var(--fg-3); font-size: 11px; }
+@media (max-width: 480px) { .hbars { grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr) minmax(4rem, max-content); column-gap: 8px; } }
+
+.sparkline { display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; height: auto; }
+.sparkline .area { opacity: .1; stroke: none; }
+.sparkline .line { fill: none; stroke-width: 1.5; stroke-linejoin: round; }

@@ -1,5 +1,5 @@
 import i18n from '../../i18n';
-import { formatPercent, formatUsd } from '../../lib/format';
+import { formatPercent, formatPp, formatUsd } from '../../lib/format';
 import type { Market, MarketRow } from './types';
 
 // Исходы матча на экране: подписи (П1, Ф1(−1.5)), описание, порядок, уровни валуя.
@@ -46,18 +46,16 @@ export function valueTier(tier: string): ValueTier | null {
   return tier === 'strong' || tier === 'good' || tier === 'small' ? tier : null;
 }
 
-/** Вероятность целыми процентами: «66%». */
-export function formatProb(p: number | null | undefined): string {
-  return formatPercent(p, { digits: 0 });
-}
+// Вероятность целыми процентами («66%») — общая для всех экранов, живет в lib/format
+export { formatProb } from '../../lib/format';
 
-/** Поправка Claude в процентных пунктах: «+4 п.п.», «−2 п.п.», «±0 п.п.». */
+/**
+ * Поправка Claude в процентных пунктах: «+4 п.п.», «−2 п.п.», «±0 п.п.». Общий формат п.п. —
+ * formatPp в lib/format; здесь только вид экрана анализа: целые и ноль со знаком «±».
+ * unit: false — только число (в узкой ячейке единица уже в заголовке).
+ */
 export function ppDelta(delta: number, { unit = true }: { unit?: boolean } = {}): string {
-  const v = Math.round(delta * 100);
-  const sign = v > 0 ? '+' : v < 0 ? '−' : '±';
-  const value = `${sign}${Math.abs(v)}`;
-  // unit: false — только число (в узкой ячейке единица уже в заголовке)
-  return unit ? i18n.t('analysis.pp', { value }) : value;
+  return formatPp(delta, { digits: 0, zero: '±', unit });
 }
 
 /** Модель Claude по имени: claude-opus-5-5 → «Opus 5.5». */

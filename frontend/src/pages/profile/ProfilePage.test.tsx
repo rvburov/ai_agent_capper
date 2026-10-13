@@ -1,15 +1,11 @@
-import { QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createMemoryRouter, RouterProvider } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
 import { meQueryKey } from '../../api/keys';
-import { createQueryClient } from '../../api/queryClient';
-import { ThemeProvider } from '../../app/theme/ThemeProvider';
-import { ToastProvider } from '../../components';
 import { aiBudget } from '../../features/ai/testData';
 import { apiError, json, ME_ADMIN, ME_MEMBER, mockFetch, type Handler } from '../../test/fetchMock';
+import { renderPage } from '../../test/renderPage';
 import { setViewportWidth } from '../../test/setup';
 import { ProfilePage } from './ProfilePage';
 
@@ -58,26 +54,12 @@ function routes(me: Me, extra: Record<string, Handler> = {}): Record<string, Han
 }
 
 function renderProfile(path: string, me: Me = ME_MEMBER) {
-  const router = createMemoryRouter(
-    [
-      { path: '/profile/:tab?', element: <ProfilePage /> },
-      { path: '/login', element: <p>Страница входа</p> },
-      { path: '/admin/:tab?', element: <p>Администрирование</p> },
-    ],
-    { initialEntries: [path] },
-  );
-  const client = createQueryClient();
-  client.setDefaultOptions({ queries: { retry: false } });
-  client.setQueryData(meQueryKey, me);
-  render(
-    <QueryClientProvider client={client}>
-      <ThemeProvider>
-        <ToastProvider>
-          <RouterProvider router={router} />
-        </ToastProvider>
-      </ThemeProvider>
-    </QueryClientProvider>,
-  );
+  const { router, client } = renderPage(<ProfilePage />, {
+    path: '/profile/:tab?',
+    url: path,
+    me,
+    stubs: { '/login': 'Страница входа', '/admin/:tab?': 'Администрирование' },
+  });
   return { router, client };
 }
 

@@ -1,6 +1,7 @@
 // Форматирование денег, чисел и дат. Суммы, проценты, кэфы и даты в интерфейсе выводятся
 // только через эти функции (CLAUDE.md). Вид — как в макете (mockup/js/ui.js, fmt):
-// «48 133 ₽», «$0,30», «1.85», «12,5%», «8 окт», «Сегодня, 14:05», «5 мин назад».
+// «48 133 ₽», «48,1 тыс. ₽», «$0,30», «1.85», «12,5%», «66%», «+2,1 п.п.», «8 окт», «3–5 окт»,
+// «Сегодня, 14:05», «5 мин назад».
 // Локаль и слова («Сегодня», месяцы) берутся из файла перевода (format.*).
 
 import i18n from '../i18n';
@@ -79,14 +80,89 @@ export function formatUsd(amount: Amount | null | undefined, digits = 2): string
   return (rounded < 0 ? MINUS : '') + '$' + body;
 }
 
-/** Число с разделителем разрядов: «12 480», «0,25». */
-export function formatNumber(value: Amount | null | undefined, digits = 0): string {
+/**
+ * Число с разделителем разрядов: «12 480», «0,25». signed — со знаком, как разница Brier
+ * с рынком: «+0,012», «−0,012», ноль без знака.
+ */
+export function formatNumber(
+  value: Amount | null | undefined,
+  digits = 0,
+  { signed = false }: { signed?: boolean } = {},
+): string {
   const n = toNumber(value);
   if (!Number.isFinite(n)) return DASH;
   return withMinus(
-    numberFormat({ minimumFractionDigits: digits, maximumFractionDigits: digits }).format(
-      dropNegativeZero(n, digits),
-    ),
+    numberFormat({
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+      signDisplay: signed ? 'exceptZero' : 'auto',
+    }).format(dropNegativeZero(n, digits)),
+  );
+}
+
+/**
+ * Сколько знаков после запятой нужно, чтобы соседние деления оси с шагом step не слились
+ * в одну подпись: шаг 1 и крупнее — 0, 0,5 и 0,1 — 1, 0,05 — 2.
+ */
+export function stepDigits(step: number): number {
+  if (!(step > 0) || !Number.isFinite(step)) return 0;
+  return Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+}
+
+// Единица сокращения, в которой Intl покажет значение: 1, тысяча, миллион, миллиард, триллион
+function compactUnit(value: number): number {
+  const abs = Math.abs(value);
+  if (abs < 1000) return 1;
+  return 10 ** Math.min(12, 3 * Math.floor(Math.log10(abs) / 3));
+}
+
+/**
+ * Сокращенное число для осей графиков и плиток: «950», «4,8 тыс.», «48 тыс.», «1,2 млн».
+ * digits — сколько знаков после запятой у тысяч и миллионов (лишние нули не пишутся).
+ * step — шаг делений оси: знаков столько, чтобы соседние деления различались
+ * («990 тыс.», «1 млн», «1,01 млн»).
+ */
+export function formatCompact(
+  value: Amount | null | undefined,
+  { digits = 1, signed = false, step }: { digits?: number; signed?: boolean; step?: number } = {},
+): string {
+  const n = toNumber(value);
+  if (!Number.isFinite(n)) return DASH;
+  const max = step === undefined ? digits : stepDigits(step / compactUnit(n));
+  return withMinus(
+    numberFormat({
+      notation: 'compact',
+      maximumFractionDigits: max,
+      signDisplay: signed ? 'exceptZero' : 'auto',
+    }).format(dropNegativeZero(n, max)),
+  );
+}
+
+/**
+ * Сокращенная сумма в валюте программы: «48,1 тыс. ₽», «1,2 млн ₽», «950 ₽». Меньше тысячи —
+ * как в formatMoney, но без лишних нулей: рубли целыми, доллары и евро — до центов («12,5 $»).
+ * step — шаг делений оси, как в formatCompact.
+ */
+export function formatMoneyCompact(
+  amount: Amount | null | undefined,
+  currency: Currency,
+  { digits = 1, signed = false, step }: { digits?: number; signed?: boolean; step?: number } = {},
+): string {
+  const value = toNumber(amount);
+  if (!Number.isFinite(value)) return DASH;
+  // Ниже тысячи — знаки суммы: 999,5 ₽ округлится до «1 тыс. ₽», а не покажет копейки
+  // (Intl переходит к «тыс.» по значению, округленному до maximumFractionDigits)
+  let max = Math.abs(value) >= 1000 ? digits : currency === 'RUB' ? 0 : 2;
+  if (step !== undefined) max = stepDigits(step / compactUnit(value));
+  return withMinus(
+    numberFormat({
+      style: 'currency',
+      currency,
+      notation: 'compact',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: max,
+      signDisplay: signed ? 'exceptZero' : 'auto',
+    }).format(dropNegativeZero(value, max)),
   );
 }
 
@@ -112,6 +188,58 @@ export function formatPercent(
       }).format(dropNegativeZero(n * 100, digits)),
     ) + '%'
   );
+}
+
+/** Вероятность целыми процентами: «66%» (прогноз модели, 1/кэф, калибровка). */
+export function formatProb(p: number | null | undefined): string {
+  return formatPercent(p, { digits: 0 });
+}
+
+/** Диапазон вероятностей: «70–75%» (корзина калибровки). */
+export function formatProbRange(lo: number | null | undefined, hi: number | null | undefined): string {
+  const a = toNumber(lo);
+  const b = toNumber(hi);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return DASH;
+  return i18n.t('format.probRange', {
+    from: formatNumber(a * 100),
+    to: formatNumber(b * 100),
+  });
+}
+
+/**
+ * Разница долей в процентных пунктах: 0.021 → «+2,1 п.п.», −0.01 → «−1,0 п.п.», ноль — «0,0 п.п.»
+ * (ROI к прошлому периоду, прогноз против факта). signed: false — без плюса. zero: '±' —
+ * ноль как «±0 п.п.» (поправка Claude к вероятности, экран анализа). unit: false — только
+ * число, когда единица уже в заголовке столбца.
+ */
+export function formatPp(
+  delta: number | null | undefined,
+  {
+    digits = 1,
+    signed = true,
+    zero = '',
+    unit = true,
+  }: { digits?: number; signed?: boolean; zero?: '' | '±'; unit?: boolean } = {},
+): string {
+  const n = toNumber(delta);
+  if (!Number.isFinite(n)) return DASH;
+  let value = formatNumber(n * 100, digits, { signed });
+  // ноль после округления (formatNumber уже без знака) — со знаком «±», если просили
+  if (zero && dropNegativeZero(n * 100, digits) === 0) value = zero + value;
+  return unit ? i18n.t('format.pp', { value }) : value;
+}
+
+/**
+ * Интервал из двух значений одним форматом: 95% ДИ ROI «−3,2%…+8,4%», Brier «−0,012…+0,004».
+ * Нет любого конца — прочерк.
+ */
+export function formatInterval<T>(
+  lo: T | null | undefined,
+  hi: T | null | undefined,
+  format: (value: T) => string,
+): string {
+  if (lo === null || lo === undefined || hi === null || hi === undefined) return DASH;
+  return i18n.t('format.interval', { from: format(lo), to: format(hi) });
 }
 
 // ---------- даты ----------
@@ -176,6 +304,14 @@ function partsIn(date: Date, timeZone: string | undefined): Parts {
   return parts;
 }
 
+// «2026-10-03» — календарный день (ряд банка по дням, последний матч), а не момент времени:
+// показываем его как есть, в любом поясе пользователя
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+function zoneOf(value: DateInput, timeZone: string | undefined): string | undefined {
+  return typeof value === 'string' && DATE_ONLY.test(value) ? 'UTC' : (timeZone ?? displayTimeZone);
+}
+
 function toDate(value: DateInput | null | undefined): Date | null {
   if (value === null || value === undefined || value === '') return null;
   const date = value instanceof Date ? value : new Date(value);
@@ -205,10 +341,12 @@ export function formatDate(
   options: DateFormatOptions & { year?: 'auto' | 'always' } = {},
 ): string {
   const date = toDate(value);
-  if (!date) return DASH;
-  const timeZone = options.timeZone ?? displayTimeZone;
+  if (!date || value === null || value === undefined) return DASH;
+  const timeZone = zoneOf(value, options.timeZone);
   const p = partsIn(date, timeZone);
-  const showYear = options.year === 'always' || p.year !== partsIn(nowDate(options), timeZone).year;
+  const showYear =
+    options.year === 'always' ||
+    p.year !== partsIn(nowDate(options), options.timeZone ?? displayTimeZone).year;
   return showYear
     ? i18n.t('format.dateYear', { day: p.day, month: monthShort(p.month), year: p.year })
     : i18n.t('format.date', { day: p.day, month: monthShort(p.month) });
@@ -220,8 +358,8 @@ export function formatDateLong(
   options: Pick<DateFormatOptions, 'timeZone'> = {},
 ): string {
   const date = toDate(value);
-  if (!date) return DASH;
-  const p = partsIn(date, options.timeZone ?? displayTimeZone);
+  if (!date || value === null || value === undefined) return DASH;
+  const p = partsIn(date, zoneOf(value, options.timeZone));
   const months: readonly string[] = i18n.t('format.monthsGenitive', { returnObjects: true });
   return i18n.t('format.dateYear', { day: p.day, month: months[p.month - 1] ?? p.month, year: p.year });
 }
@@ -232,10 +370,47 @@ export function formatDayMonth(
   options: Pick<DateFormatOptions, 'timeZone'> = {},
 ): string {
   const date = toDate(value);
-  if (!date) return DASH;
-  const p = partsIn(date, options.timeZone ?? displayTimeZone);
+  if (!date || value === null || value === undefined) return DASH;
+  const p = partsIn(date, zoneOf(value, options.timeZone));
   const months: readonly string[] = i18n.t('format.monthsGenitive', { returnObjects: true });
   return i18n.t('format.date', { day: p.day, month: months[p.month - 1] ?? p.month });
+}
+
+/**
+ * Диапазон дат: «3–5 окт», «28 сен – 5 окт», «28 дек 2025 – 5 янв 2026» (год — если концы
+ * в разных годах или не в текущем), один день — «8 окт». month: 'long' — месяц полностью:
+ * «1–13 октября» (период расходов). Конец раньше начала — концы меняются местами.
+ */
+export function formatDateRange(
+  from: DateInput | null | undefined,
+  to: DateInput | null | undefined,
+  options: DateFormatOptions & { month?: 'short' | 'long' } = {},
+): string {
+  const a = toDate(from);
+  const b = toDate(to);
+  if (!a || !b || from === null || from === undefined || to === null || to === undefined) return DASH;
+  let p = partsIn(a, zoneOf(from, options.timeZone));
+  let q = partsIn(b, zoneOf(to, options.timeZone));
+  if (dayNumber(q) < dayNumber(p)) [p, q] = [q, p];
+  const nowYear = partsIn(nowDate(options), options.timeZone ?? displayTimeZone).year;
+  const months: readonly string[] =
+    options.month === 'long'
+      ? i18n.t('format.monthsGenitive', { returnObjects: true })
+      : i18n.t('format.monthsShort', { returnObjects: true });
+  const month = (n: number) => months[n - 1] ?? String(n);
+  const withYear = p.year !== q.year || p.year !== nowYear;
+  const one = (x: Parts) =>
+    withYear
+      ? i18n.t('format.dateYear', { day: x.day, month: month(x.month), year: x.year })
+      : i18n.t('format.date', { day: x.day, month: month(x.month) });
+
+  if (dayNumber(p) === dayNumber(q)) return one(p);
+  if (p.year === q.year && p.month === q.month) {
+    return withYear
+      ? i18n.t('format.dayRangeYear', { from: p.day, to: q.day, month: month(p.month), year: p.year })
+      : i18n.t('format.dayRange', { from: p.day, to: q.day, month: month(p.month) });
+  }
+  return i18n.t('format.dateRange', { from: one(p), to: one(q) });
 }
 
 /**

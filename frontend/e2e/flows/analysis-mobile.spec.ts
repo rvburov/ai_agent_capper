@@ -3,12 +3,13 @@ import { withFakeClaude } from '../support/fakeClaude';
 import { expect, test } from '../support/test';
 import { expectNoHorizontalScroll } from '../support/ui';
 
-// Телефон (375 px): липкая панель запуска над нижними вкладками, итог анализа — переключатель
-// «Вероятности / Сравнение / Факторы» в карточке матча и список вместо таблицы.
+// Телефон (375 px, а с меткой @360 — и 360 px в проекте mobile-360): липкая панель запуска над
+// нижними вкладками, итог анализа — переключатель «Вероятности / Сравнение / Факторы» в карточке
+// матча и список вместо таблицы.
 
 test.skip(({ isMobile }) => !isMobile, 'сценарий для телефона');
 
-test('телефон: панель запуска и вкладки карточки матча', async ({ device, apiClient }) => {
+test('телефон: панель запуска и вкладки карточки матча', { tag: '@360' }, async ({ device, apiClient }) => {
   const m = await memberDevice(device, apiClient, 'Мила Мобайлова');
   const page = m.page;
   await parseEvents(page, eventsText(SINNER_RUNE, DJOKOVIC_RUBLEV), 2);

@@ -237,6 +237,19 @@ describe('тексты по ключам и кодам сервера', () => {
     expect(codeText(null, {}, 'нет')).toBe('нет');
   });
 
+  it('суммы в ошибках банка — деньгами в валюте из параметров', () => {
+    expect(codeText('bank.withdrawal_range', { balance: '20000.00', currency: 'RUB' })).toBe(
+      'Вывести можно не больше баланса (20\u00a0000\u00a0₽): ставки в игре вывести нельзя',
+    );
+    expect(codeText('errors.bet.closing_range', { odds: '0.9' })).toBe('Закрывающий кэф 0.9 — допустимо от 1.01 до 50');
+    expect(
+      codeText('bet.payout_range', { payout: '15000000000.00', max: '9999999999.99', currency: 'USD' }),
+    ).toBe(
+      'Возможная выплата 15 000 000 000,00 $ больше предела учета '
+        + '(9 999 999 999,99 $): уменьшите сумму ставки',
+    );
+  });
+
   it('429 — через сколько минут повторить; неизвестный код — текст сервера', () => {
     const limited = new ApiError(429, 'common.rate_limited', 'Too many', { retry_after: 125 });
     expect(apiErrorText(limited)).toBe('Слишком много разборов за час. Повторите через 3 мин');
