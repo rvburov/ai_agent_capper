@@ -39,11 +39,11 @@ from app.db.models import (
 from app.db.session import create_sessionmaker
 from app.ingest import update
 from app.services import analysis_run
+from app.services.data_status import DATA_UPDATE_MINUTE, STALE_AFTER
 from app.services.sessions import create_session, get_active_session
 from app.workers import jobs
 from app.workers.jobs import (
     LOGIN_EVENTS_RETENTION,
-    STALE_AFTER,
     cleanup_auth_data,
     cleanup_auth_records,
     notify_stale_data,
@@ -55,7 +55,6 @@ from app.workers.main import (
     ANALYSIS_TIMEOUT_SECONDS,
     CLEANUP_HOUR_UTC,
     CLEANUP_MINUTE,
-    DATA_UPDATE_MINUTE,
     REAP_MINUTES,
     WorkerSettings,
     apply_redis_prefix,
@@ -221,12 +220,17 @@ async def test_cleanup_job_uses_sessionmaker_from_context(
 
 def test_worker_settings(settings: Settings) -> None:
     assert WorkerSettings.queue_name == f"{settings.redis_prefix}arq:queue"
-    cleanup_job, update_job, analysis_job, reaper_job = WorkerSettings.functions
+    cleanup_job, update_job, analysis_job, reaper_job, warm_job = WorkerSettings.functions
     assert (cleanup_job, update_job, reaper_job) == (
         cleanup_auth_records,
         update_data,
         reap_stuck_analyses,
     )
+    # Прогрев кэша аналитики: без повтора и без хранения результата — иначе задача с тем
+    # же id участника не ставилась бы, пока результат не истечет
+    assert isinstance(warm_job, arq.worker.Function)
+    assert warm_job.coroutine is jobs.warm_analytics and warm_job.name == "warm_analytics"
+    assert warm_job.max_tries == 1 and warm_job.keep_result_s == 0
     # Анализ: свой предел 15 минут и без повтора arq (перезапуск — с чекпойнта)
     assert isinstance(analysis_job, arq.worker.Function)
     assert analysis_job.coroutine is run_analysis and analysis_job.name == "run_analysis"

@@ -40,6 +40,9 @@ BIN_WIDTH = 0.05
 Z95 = 1.959963984540054
 # Сколько чисел держать в памяти за один шаг бутстрэпа
 _BOOTSTRAP_CHUNK = 2_000_000
+# Пересэмплирование счетчиками значений — если различных значений в 20 раз меньше, чем
+# строк (иначе быстрее индексы строк)
+_GROUPED_SHARE = 20
 
 
 def clip_probabilities(p: npt.ArrayLike) -> FloatArray:
@@ -209,16 +212,41 @@ def _percentiles(values: FloatArray, level: float) -> tuple[float, float]:
     return float(low), float(high)
 
 
+def _grouped_sums(values: FloatArray, samples: int, seed: int) -> FloatArray | None:
+    """Суммы пересэмплирований через счетчики различных значений: число выпадений каждого
+    значения в выборке с возвращением — полиномиальное распределение, поэтому вместо
+    индексов строк берутся счетчики значений. Распределение то же, работы в n / K раз
+    меньше. Различных значений больше n / _GROUPED_SHARE — None (выгоднее индексы)."""
+    unique, counts = np.unique(values, return_counts=True)
+    if unique.size * _GROUPED_SHARE > values.size:
+        return None
+    rng = np.random.default_rng(seed)
+    sums = np.empty(samples)
+    shares = counts / values.size
+    step = max(1, min(samples, _BOOTSTRAP_CHUNK // unique.size))
+    for start in range(0, samples, step):
+        count = min(step, samples - start)
+        drawn = rng.multinomial(values.size, shares, size=count)
+        sums[start : start + count] = drawn @ unique
+    return sums
+
+
 def bootstrap_mean_ci(
     values: npt.ArrayLike,
     *,
     n: int = BOOTSTRAP_SAMPLES,
     seed: int = 0,
     level: float = CI_LEVEL,
+    grouped: bool = False,
 ) -> Estimate:
-    """Среднее значений и его бутстрэп-интервал (перцентили)."""
+    """Среднее значений и его бутстрэп-интервал (перцентили). grouped — пересэмплировать
+    счетчиками различных значений, если их мало (результат события как ординара: кэф − 1
+    или −1): тот же бутстрэп, в разы быстрее на тысячах событий, но другая
+    последовательность случайных чисел, чем без grouped."""
     array = _as_values(values)
-    (sums,) = _resample_sums([array], n, seed)
+    sums = _grouped_sums(array, n, seed) if grouped else None
+    if sums is None:
+        (sums,) = _resample_sums([array], n, seed)
     low, high = _percentiles(sums / array.size, level)
     return Estimate(value=float(array.mean()), low=low, high=high, n=int(array.size))
 
@@ -287,6 +315,96 @@ def roi_with_ci(
         low=low,
         high=high,
     )
+
+
+def _positive_denominators(values: npt.ArrayLike) -> FloatArray:
+    array = _as_values(values)
+    if (array <= 0).any():
+        raise ValueError(t("ml.metrics.bad_stakes"))
+    return array
+
+
+def bootstrap_ratio_ci(
+    numerators: npt.ArrayLike,
+    denominators: npt.ArrayLike,
+    *,
+    n: int = BOOTSTRAP_SAMPLES,
+    seed: int = 0,
+    level: float = CI_LEVEL,
+) -> Estimate:
+    """Отношение сумм Σ числителей / Σ знаменателей и его бутстрэп-интервал по строкам
+    (пара «числитель — знаменатель» сохраняется): ROI ставок — прибыль к сумме ставок,
+    ROI ординаров экспресса — их результат к числу ног. Знаменатели — больше нуля."""
+    top, bottom = _as_values(numerators), _positive_denominators(denominators)
+    if top.size != bottom.size:
+        raise ValueError(t("ml.metrics.shape", n_p=top.size, n_y=bottom.size))
+    top_sums, bottom_sums = _resample_sums([top, bottom], n, seed)
+    low, high = _percentiles(top_sums / bottom_sums, level)
+    return Estimate(value=float(top.sum() / bottom.sum()), low=low, high=high, n=int(top.size))
+
+
+@dataclass(frozen=True)
+class PairedRatios:
+    """Два отношения сумм на одних и тех же строках и их разница first − second."""
+
+    first: Estimate
+    second: Estimate
+    diff: Estimate
+
+
+def paired_ratio_ci(
+    first: tuple[npt.ArrayLike, npt.ArrayLike],
+    second: tuple[npt.ArrayLike, npt.ArrayLike],
+    *,
+    n: int = BOOTSTRAP_SAMPLES,
+    seed: int = 0,
+    level: float = CI_LEVEL,
+) -> PairedRatios:
+    """Два отношения (числитель, знаменатель) по одним и тем же строкам с общими
+    пересэмплированиями: решение Р21 — ROI экспрессов (прибыль / сумма) против ROI тех же
+    событий ординарами (результат ног / число ног), строка — экспресс. Интервал разницы —
+    парный: пересэмплируются экспрессы, а не ноги и ставки по отдельности."""
+    columns = [
+        _as_values(first[0]),
+        _positive_denominators(first[1]),
+        _as_values(second[0]),
+        _positive_denominators(second[1]),
+    ]
+    if len({column.size for column in columns}) != 1:
+        raise ValueError(t("ml.metrics.shape", n_p=columns[0].size, n_y=columns[2].size))
+    a_top, a_bottom, b_top, b_bottom = _resample_sums(columns, n, seed)
+    a_ratio, b_ratio = a_top / a_bottom, b_top / b_bottom
+    size = int(columns[0].size)
+
+    def estimate(value: float, samples: FloatArray) -> Estimate:
+        low, high = _percentiles(samples, level)
+        return Estimate(value=value, low=low, high=high, n=size)
+
+    a_value = float(columns[0].sum() / columns[1].sum())
+    b_value = float(columns[2].sum() / columns[3].sum())
+    return PairedRatios(
+        first=estimate(a_value, a_ratio),
+        second=estimate(b_value, b_ratio),
+        diff=estimate(a_value - b_value, a_ratio - b_ratio),
+    )
+
+
+def rolling_means(
+    a: npt.ArrayLike, b: npt.ArrayLike, *, window: int, step: int
+) -> list[tuple[int, float, float]]:
+    """Скользящие средние двух рядов по окну window с шагом step: (индекс последнего
+    элемента окна, среднее a, среднее b). Первое окно кончается на window − 1; ряд
+    короче окна — пусто. Так считается скользящий Brier модели и рынка."""
+    first, second = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
+    if first.size != second.size:
+        raise ValueError(t("ml.metrics.shape", n_p=first.size, n_y=second.size))
+    out: list[tuple[int, float, float]] = []
+    for end in range(window - 1, first.size, step):
+        start = end - window + 1
+        out.append(
+            (end, float(first[start : end + 1].mean()), float(second[start : end + 1].mean()))
+        )
+    return out
 
 
 # --- CLV ---

@@ -13,6 +13,7 @@ from app.ml.metrics import (
     EPS,
     bootstrap_diff_ci,
     bootstrap_mean_ci,
+    bootstrap_ratio_ci,
     brier,
     brier_losses,
     brier_skill_score,
@@ -25,7 +26,9 @@ from app.ml.metrics import (
     ece,
     log_loss,
     log_losses,
+    paired_ratio_ci,
     roi_with_ci,
+    rolling_means,
     wilson_interval,
 )
 
@@ -177,3 +180,45 @@ def test_clv_parlay() -> None:
         1.5 * 0.7 * 1.3 * 0.8 - 1
     )
     assert clv_fair_parlay([(Decimal("1.5"), 0.7), (Decimal("1.3"), None)]) is None
+
+
+def test_ratio_ci_matches_roi() -> None:
+    """Отношение сумм — то же, что ROI ставок: прибыль к сумме, интервал по ставкам."""
+    stakes = [100.0, 250.0, 300.0, 50.0]
+    profits = [80.0, -250.0, 150.0, -50.0]
+    estimate = bootstrap_ratio_ci(profits, stakes, n=2000, seed=7)
+    roi = roi_with_ci(stakes, [s + p for s, p in zip(stakes, profits, strict=True)], n=2000, seed=7)
+    assert estimate.value == pytest.approx(-70 / 700)
+    assert (estimate.low, estimate.high) == pytest.approx((roi.low, roi.high))
+    assert estimate.low <= estimate.value <= estimate.high and estimate.n == 4
+    # Тот же seed — тот же интервал
+    assert bootstrap_ratio_ci(profits, stakes, n=2000, seed=7) == estimate
+    with pytest.raises(ValueError):
+        bootstrap_ratio_ci([1.0], [0.0])
+    with pytest.raises(ValueError):
+        bootstrap_ratio_ci([1.0, 2.0], [1.0])
+
+
+def test_paired_ratio_ci() -> None:
+    """Р21: две доли на одних и тех же строках и парный интервал разницы."""
+    first = ([10.0, -100.0, 40.0], [100.0, 100.0, 100.0])
+    second = ([0.9, -1.2, 0.3], [2.0, 2.0, 3.0])
+    paired = paired_ratio_ci(first, second, n=3000, seed=1)
+    assert paired.first.value == pytest.approx(-50 / 300)
+    assert paired.second.value == pytest.approx(0.0 / 7)
+    assert paired.diff.value == pytest.approx(paired.first.value - paired.second.value)
+    for estimate in (paired.first, paired.second, paired.diff):
+        assert estimate.low <= estimate.high and estimate.n == 3
+    alone = bootstrap_ratio_ci(*first, n=3000, seed=1)
+    assert (paired.first.low, paired.first.high) == pytest.approx((alone.low, alone.high))
+    with pytest.raises(ValueError):
+        paired_ratio_ci(first, ([1.0], [1.0]))
+
+
+def test_rolling_means() -> None:
+    a = [float(n) for n in range(10)]
+    b = [1.0] * 10
+    assert rolling_means(a, b, window=4, step=3) == [(3, 1.5, 1.0), (6, 4.5, 1.0), (9, 7.5, 1.0)]
+    assert rolling_means(a[:3], b[:3], window=4, step=1) == []
+    with pytest.raises(ValueError):
+        rolling_means(a, b[:2], window=2, step=1)

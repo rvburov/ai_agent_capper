@@ -783,6 +783,12 @@ async def _already_sent(
     return found is not None
 
 
+def threshold_level(spent: Decimal, total: Decimal, pct: int, need: Decimal) -> str | None:
+    """Пройденный порог расхода (80 или 100) по правилу уведомлений — для главной
+    администратора (app/services/dashboard.py)."""
+    return _threshold(spent, total, pct, need)
+
+
 def _threshold(spent: Decimal, total: Decimal, pct: int, need: Decimal) -> str | None:
     """Пройденный порог: 100 — остатка не хватает даже на самый маленький вызов оценки
     матча (need, call_need_usd): анализы уже не запускаются, хотя до 100% расхода может

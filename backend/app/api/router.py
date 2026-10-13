@@ -14,9 +14,11 @@ from app.api.routes import (
     admin_ai,
     ai,
     analyses,
+    analytics,
     auth,
     bank,
     bets,
+    dashboard,
     health,
     me,
     players,
@@ -40,5 +42,7 @@ api_router.include_router(admin_ai.router)
 api_router.include_router(analyses.router)
 api_router.include_router(bets.router)
 api_router.include_router(bank.router)
+api_router.include_router(analytics.router)
+api_router.include_router(dashboard.router)
 api_router.include_router(players.router)
 api_router.include_router(strategy.router)

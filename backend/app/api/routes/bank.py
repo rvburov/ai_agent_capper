@@ -3,7 +3,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Query, Response, status
 
 from app.core.deps import CurrentUser, DbSession
 from app.schemas.bets import (
@@ -14,6 +14,7 @@ from app.schemas.bets import (
     BankOut,
     Period,
 )
+from app.services import analytics_cache
 from app.services import bank as bank_service
 from app.services import bets as bets_service
 
@@ -49,11 +50,17 @@ async def bank_entries(
 
 @router.post("/entries", status_code=status.HTTP_201_CREATED)
 async def add_bank_entry(
-    body: BankEntryIn, user: CurrentUser, db: DbSession, response: Response
+    body: BankEntryIn,
+    user: CurrentUser,
+    db: DbSession,
+    response: Response,
+    background: BackgroundTasks,
 ) -> BankEntryOut:
     """Пополнение, вывод (не больше баланса) или корректировка. Повтор той же записи
     (двойная отправка) возвращает ее же с кодом 200."""
     added = await bank_service.add_entry(db, user, body)
     if not added.created:
         response.status_code = status.HTTP_200_OK
+    else:
+        background.add_task(analytics_cache.request_warm, user.id)
     return added.entry

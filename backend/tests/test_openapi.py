@@ -30,6 +30,13 @@ def test_openapi_export_prints_schema() -> None:
     assert health["4XX"]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorOut")
 
 
+def test_schema_names_are_unique() -> None:
+    """Две схемы Pydantic с одним именем FastAPI переименовал бы в app__schemas__…: тип
+    фронтенда с прежним именем пропал бы молча (так было с ReturnRequestOut)."""
+    names = create_app().openapi()["components"]["schemas"]
+    assert [name for name in names if "__" in name] == []
+
+
 async def test_docs_only_outside_prod(
     override_settings: SettingsOverride, monkeypatch: pytest.MonkeyPatch
 ) -> None:

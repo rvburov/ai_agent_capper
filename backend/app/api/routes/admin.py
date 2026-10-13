@@ -39,7 +39,7 @@ from app.schemas.admin import (
     TotpConfirmIn,
     UserDeleteIn,
 )
-from app.services import access_codes, admin_users
+from app.services import access_codes, admin_users, analytics_cache
 from app.services.admin_confirm import TotpConfirm
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -147,6 +147,7 @@ async def reset_two_factor(
 @router.delete("/users/{user_id}", status_code=204)
 async def delete_user(
     db: DbSession,
+    redis: RedisClient,
     admin: AdminUser,
     ip: ClientIp,
     confirm: Confirm,
@@ -161,6 +162,8 @@ async def delete_user(
         ip=ip,
         confirm=confirm.with_code(body.totp_code),
     )
+    # Кэш аналитики — личные данные: удаляется вместе с участником
+    await analytics_cache.clear_user(redis, user_id)
 
 
 # --- приглашения ---

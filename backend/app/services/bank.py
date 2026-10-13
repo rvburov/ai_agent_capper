@@ -251,12 +251,13 @@ WITH reversed AS (
     WHERE l.user_id = :user_id AND l.reversed_by IS NULL
       AND l.id NOT IN (SELECT id FROM reversed)
 ), events AS (
-    SELECT at AS moment, id AS ord, amount, true AS flow FROM live WHERE bet_id IS NULL
+    SELECT at AS moment, id AS ord, amount, true AS flow, bet_id FROM live
+    WHERE bet_id IS NULL
     UNION ALL
-    SELECT at, id, amount, false FROM live
+    SELECT at, id, amount, false, bet_id FROM live
     WHERE bet_id IS NOT NULL AND bet_status = 'open' AND kind <> 'stake'
     UNION ALL
-    SELECT greatest(max(at), max(settled_at)), max(id), sum(amount), false FROM live
+    SELECT greatest(max(at), max(settled_at)), max(id), sum(amount), false, bet_id FROM live
     WHERE bet_id IS NOT NULL AND bet_status <> 'open' GROUP BY bet_id
 )
 """
@@ -404,10 +405,50 @@ def period_start(period: str, today: date) -> date | None:
 _HISTORY_SQL = (
     _EVENTS_SQL
     + """
-SELECT (moment AT TIME ZONE :tz)::date AS day, sum(amount) AS delta
+SELECT (moment AT TIME ZONE :tz)::date AS day, sum(amount) AS delta,
+       coalesce(sum(amount) FILTER (WHERE flow), 0) AS flows
 FROM events GROUP BY 1 ORDER BY 1
 """
 )
+
+
+@dataclass(frozen=True)
+class DayCapital:
+    """Капитал на конец дня и сумма пополнений, выводов и корректировок за этот день."""
+
+    day: date
+    equity: Decimal
+    flows: Decimal
+
+
+async def daily_capital(
+    db: AsyncSession, user: User, first: date | None, last: date
+) -> list[DayCapital]:
+    """Капитал на конец каждого дня с first по last включительно (по поясу участника, те
+    же события, что у bank_state) и движение банка за день. first = None — с дня первого
+    события (журнал пуст — только last). Ряд «Динамика банка» главной и «Банк по дням»
+    аналитики."""
+    zone = user_zone(user.tz)
+    rows = (await db.execute(text(_HISTORY_SQL), {"user_id": user.id, "tz": zone.key})).all()
+    deltas = {row.day: Decimal(row.delta) for row in rows}
+    flows = {row.day: Decimal(row.flows) for row in rows}
+    start = first if first is not None else min(min(deltas, default=last), last)
+    equity = sum((delta for day, delta in deltas.items() if day < start), _ZERO)
+    points: list[DayCapital] = []
+    day = start
+    while day <= last:
+        equity += deltas.get(day, _ZERO)
+        points.append(DayCapital(day=day, equity=equity, flows=flows.get(day, _ZERO)))
+        day += timedelta(days=1)
+    return points
+
+
+async def daily_equity(
+    db: AsyncSession, user: User, first: date | None, last: date
+) -> list[BankPointOut]:
+    """Капитал на конец каждого дня с first по last (см. daily_capital)."""
+    points = await daily_capital(db, user, first, last)
+    return [BankPointOut(day=point.day, equity=point.equity) for point in points]
 
 
 async def bank_history(
@@ -418,19 +459,34 @@ async def bank_history(
     settings = await get_app_settings(db)
     zone = user_zone(user.tz)
     today = local_today(zone, now)
-    rows = (await db.execute(text(_HISTORY_SQL), {"user_id": user.id, "tz": zone.key})).all()
-    deltas = {row.day: Decimal(row.delta) for row in rows}
-    start = period_start(period, today)
-    if start is None:
-        start = min(min(deltas, default=today), today)
-    equity = sum((delta for day, delta in deltas.items() if day < start), _ZERO)
-    points: list[BankPointOut] = []
-    day = start
-    while day <= today:
-        equity += deltas.get(day, _ZERO)
-        points.append(BankPointOut(day=day, equity=equity))
-        day += timedelta(days=1)
+    points = await daily_equity(db, user, period_start(period, today), today)
     return BankHistoryOut(currency=settings.currency, tz=zone.key, period=period, points=points)
+
+
+# Капитал сразу после события каждой рассчитанной ставки: сумма событий нарастающим
+# итогом (те же события, что у bank_state; у рассчитанной ставки событие одно)
+_EQUITY_AFTER_SQL = (
+    _EVENTS_SQL
+    + """
+SELECT seq.bet_id, seq.capital FROM (
+    SELECT bet_id, flow, sum(amount) OVER (ORDER BY moment, ord ROWS UNBOUNDED PRECEDING)
+           AS capital
+    FROM events
+) AS seq JOIN bets b ON b.id = seq.bet_id
+WHERE NOT seq.flow AND b.status <> 'open' AND seq.bet_id = ANY(:bet_ids)
+"""
+)
+
+
+async def equity_after_bets(
+    db: AsyncSession, user_id: int, bet_ids: Sequence[int]
+) -> dict[int, Decimal]:
+    """Капитал сразу после расчета каждой из рассчитанных ставок bet_ids («Банк после» в
+    последних ставках главной). Открытые и чужие ставки в ответ не попадают."""
+    if not bet_ids:
+        return {}
+    rows = await db.execute(text(_EQUITY_AFTER_SQL), {"user_id": user_id, "bet_ids": list(bet_ids)})
+    return {int(bet_id): Decimal(capital) for bet_id, capital in rows}
 
 
 # --- журнал и движение банка ---

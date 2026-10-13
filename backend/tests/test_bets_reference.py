@@ -7,137 +7,17 @@ UTC). Деньги — точное равенство, доли — до 1e-9."
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import BankrollLedger, Bet
 from tests import reference_sql
 from tests.helpers_admin import Signed, signed_in
-from tests.helpers_bets import BetMaker, LegSpec, get_bet, reverse, settle, settle_body
+from tests.helpers_bets import BetMaker, LegSpec, get_bet, settle_body
+from tests.stage4_world import TZ, ZONE, base_world
 from tests.support import ClientFactory, LoginFn, UserFactory
 
 D = Decimal
-TZ = "America/New_York"
-ZONE = ZoneInfo(TZ)
-
-
-async def _move_settlement(db: AsyncSession, bet_id: int, moment: datetime) -> None:
-    """Расчет ставки и его записи журнала — в момент moment (для дней по поясу)."""
-    await db.execute(update(Bet).where(Bet.id == bet_id).values(settled_at=moment))
-    await db.execute(
-        update(BankrollLedger)
-        .where(BankrollLedger.bet_id == bet_id, BankrollLedger.kind != "stake")
-        .values(at=moment)
-    )
-    await db.commit()
-
-
-def _days_ago(days: int, hour: int = 12) -> datetime:
-    """Момент hour:00 по поясу участника days дней назад."""
-    today = datetime.now(UTC).astimezone(ZONE).date()
-    return datetime.combine(today - timedelta(days=days), time(hour), tzinfo=ZONE).astimezone(UTC)
-
-
-async def _fixture(db: AsyncSession, member: Signed, other: Signed) -> dict[str, int]:
-    maker = BetMaker(db)
-    client = member.client
-    ids: dict[str, int] = {}
-
-    single = await maker.bet(
-        member.user, [LegSpec(odds="2.00")], stake="100", placed_at=_days_ago(12)
-    )
-    await settle(client, single.id, "win", closing={"odds": "1.90", "by": "pinnacle"})
-    # Расчет в 23:30 по Нью-Йорку — по UTC это уже следующий день
-    late = datetime.combine(
-        datetime.now(UTC).astimezone(ZONE).date() - timedelta(days=11), time(23, 30), tzinfo=ZONE
-    )
-    await _move_settlement(db, single.id, late.astimezone(UTC))
-    ids["single"] = single.id
-
-    parlay = await maker.bet(
-        member.user,
-        [LegSpec(odds="1.45"), LegSpec(odds="1.333"), LegSpec(odds="1.60")],
-        stake="250",
-        placed_at=_days_ago(9),
-    )
-    card = await get_bet(client, parlay.id)
-    body = settle_body(card, "win", "void", "win")
-    body["legs"][0]["closing"] = {"odds": "1.40", "opp_odds": "2.90", "by": "pinnacle"}
-    body["legs"][2]["closing"] = {"odds": "1.70", "by": "bookmaker"}
-    assert (await client.put(f"/api/bets/{parlay.id}/result", json=body)).status_code == 200
-    await _move_settlement(db, parlay.id, _days_ago(8))
-    ids["parlay"] = parlay.id
-
-    lost = await maker.bet(
-        member.user,
-        [LegSpec(odds="1.50"), LegSpec(odds="1.70")],
-        stake="300",
-        placed_at=_days_ago(6),
-    )
-    card = await get_bet(client, lost.id)
-    body = settle_body(card, "loss", "win")
-    body["legs"][0]["closing"] = {"odds": "1.55", "by": "avg"}
-    assert (await client.put(f"/api/bets/{lost.id}/result", json=body)).status_code == 200
-    await _move_settlement(db, lost.id, _days_ago(5))
-
-    void = await maker.bet(member.user, [LegSpec(), LegSpec()], stake="120", placed_at=_days_ago(4))
-    await settle(client, void.id, "void", "void")
-    await _move_settlement(db, void.id, _days_ago(3))
-
-    corrected = await maker.bet(
-        member.user, [LegSpec(odds="1.80")], stake="500", placed_at=_days_ago(3)
-    )
-    await settle(client, corrected.id, "win", closing={"odds": "1.85", "by": "betfair_ex"})
-    await _move_settlement(db, corrected.id, _days_ago(2))
-    await reverse(client, corrected.id)
-    await settle(client, corrected.id, "loss")
-    await _move_settlement(db, corrected.id, _days_ago(1))
-    ids["corrected"] = corrected.id
-
-    await maker.bet(member.user, [LegSpec(odds="1.70")], stake="200", placed_at=_days_ago(1))
-
-    # Ставка старого бота: рассчитана при импорте, в CLV не идет
-    legacy = await maker.bet(member.user, [LegSpec(odds="1.90")], stake="150", source="legacy",
-                             placed_at=_days_ago(20))  # fmt: skip
-    await db.execute(
-        update(Bet)
-        .where(Bet.id == legacy.id)
-        .values(status="won", profit=D("135.00"), settled_at=_days_ago(20, 18), settled_by="legacy")
-    )
-    db.add(
-        BankrollLedger(
-            user_id=member.id,
-            at=_days_ago(20, 18),
-            kind="payout",
-            amount=D("285.00"),
-            currency="RUB",
-            bet_id=legacy.id,
-        )
-    )
-    await db.commit()
-
-    journal = (await client.get("/api/me/bank/entries")).json()
-    response = await client.post(
-        "/api/me/bank/entries",
-        json={"kind": "withdrawal", "amount": "700", "expected_last_id": journal["last_id"]},
-    )
-    assert response.status_code == 201, response.text
-    response = await client.post(
-        "/api/me/bank/entries",
-        json={"kind": "correction", "amount": "-12.50", "note": "сверка",
-              "expected_last_id": response.json()["id"]},
-    )  # fmt: skip
-    assert response.status_code == 201, response.text
-
-    # Чужие ставки и банк
-    foreign = await maker.bet(
-        other.user, [LegSpec(odds="3.00")], stake="999", placed_at=_days_ago(2)
-    )
-    await settle(other.client, foreign.id, "win")
-    return ids
 
 
 @pytest.fixture
@@ -146,7 +26,7 @@ async def world(
 ) -> tuple[Signed, dict[str, int]]:
     member = await signed_in(make_client, make_user, login, tz=TZ)
     other = await signed_in(make_client, make_user, login, ip="10.0.0.3")
-    return member, await _fixture(db, member, other)
+    return member, await base_world(db, member, other)
 
 
 def _check_summary(data: dict[str, Any], ref: reference_sql.Summary) -> None:

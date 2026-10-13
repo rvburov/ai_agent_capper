@@ -17,10 +17,12 @@ deploy/backup/crontab) и до утра в Европе. Обновление д
 CAPPER_DATA_UPDATE_HOUR_UTC (по умолчанию 5) и 25 минут: после очистки и до утра в
 Европе. Минуты не нулевые: в начале часа запускается больше всего чужих задач.
 Анализ (run_analysis) ставит API, у задачи свой предел 15 минут и нет повтора arq;
-уборщик зависших анализов — каждые 5 минут.
+уборщик зависших анализов — каждые 5 минут. Прогрев кэша аналитики (warm_analytics)
+ставит API после изменения ставок и банка, одна задача на участника.
 """
 
 import argparse
+import gc
 from collections.abc import Sequence
 from datetime import UTC
 from types import FunctionType
@@ -41,11 +43,13 @@ from app.agent.client import close_client
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.db.session import create_engine, create_sessionmaker
+from app.services.data_status import DATA_UPDATE_MINUTE
 from app.workers.jobs import (
     cleanup_auth_records,
     reap_stuck_analyses,
     run_analysis,
     update_data,
+    warm_analytics,
 )
 
 # Как часто воркер отмечается в Redis (ключ живет на секунду дольше). Healthcheck
@@ -53,7 +57,6 @@ from app.workers.jobs import (
 HEALTH_CHECK_INTERVAL_SECONDS = 60
 CLEANUP_HOUR_UTC = 3
 CLEANUP_MINUTE = 15
-DATA_UPDATE_MINUTE = 25
 # Ночное обновление идет секунды-минуты (только текущий год), но пересчет Эло по всей
 # истории и медленный источник не должны обрываться на общем пределе задачи
 DATA_UPDATE_TIMEOUT_SECONDS = 3600
@@ -64,6 +67,9 @@ ANALYSIS_TIMEOUT_SECONDS = 900
 # очисткой (:15) и обновлением данных (:25)
 REAP_MINUTES = frozenset(range(2, 60, 5))
 REAP_TIMEOUT_SECONDS = 60
+# Прогрев кэша аналитики: на 10 тыс. ставок бутстрэп идет секунды. Результат не хранится
+# (keep_result=0): иначе задача с тем же id участника не ставилась бы до его истечения
+WARM_TIMEOUT_SECONDS = 300
 
 
 # Имена ключей arq. В arq 0.28 они — константы модулей (arq.constants), настройки
@@ -131,20 +137,26 @@ def make_queue_name(settings: Settings) -> str:
 apply_redis_prefix(get_settings().redis_prefix)
 
 
-async def create_queue_pool(settings: Settings | None = None) -> ArqRedis:
+async def create_queue_pool(
+    settings: Settings | None = None, *, retries: int | None = None
+) -> ArqRedis:
     """Соединение для постановки задач: та же очередь и те же ключи, что у воркера.
     Статус уже поставленной задачи — Job(job_id, pool): очередь по умолчанию у Job тоже
-    с префиксом (apply_redis_prefix)."""
+    с префиксом (apply_redis_prefix). retries — попыток соединиться (по умолчанию arq —
+    5 раз с паузой в секунду); 0 — для необязательных задач вроде прогрева кэша."""
     settings = settings or get_settings()
     apply_redis_prefix(settings.redis_prefix)
-    return await create_pool(
-        RedisSettings.from_dsn(settings.redis_url),
-        default_queue_name=make_queue_name(settings),
-    )
+    redis_settings = RedisSettings.from_dsn(settings.redis_url)
+    if retries is not None:
+        redis_settings.conn_retries = retries
+    return await create_pool(redis_settings, default_queue_name=make_queue_name(settings))
 
 
 async def startup(ctx: dict[Any, Any]) -> None:
-    """Один движок БД на воркер; задачи берут сеанс из ctx["sessionmaker"]."""
+    """Один движок БД на воркер; задачи берут сеанс из ctx["sessionmaker"]. Объекты,
+    созданные при запуске (модули, схемы), — вне сборки мусора (gc.freeze): полная сборка
+    по ним идет сотни миллисекунд и останавливала бы цикл событий посреди задач."""
+    gc.freeze()
     engine = create_engine()
     ctx["engine"] = engine
     ctx["sessionmaker"] = create_sessionmaker(engine)
@@ -197,6 +209,7 @@ class WorkerSettings:
         update_data,
         job_function(run_analysis, timeout=ANALYSIS_TIMEOUT_SECONDS, max_tries=1),
         reap_stuck_analyses,
+        job_function(warm_analytics, timeout=WARM_TIMEOUT_SECONDS, max_tries=1, keep_result=0),
     )
     cron_jobs: Sequence[CronJob] | None = build_cron_jobs(get_settings())
     on_startup: StartupShutdown | None = startup

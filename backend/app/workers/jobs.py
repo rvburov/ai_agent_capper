@@ -24,6 +24,11 @@ startup в app.workers.main. Логика задачи — отдельной ф
 
 Анализ (run_analysis) и уборщик зависших анализов (reap_stuck_analyses) — тонкие
 обертки над app/services/analysis_run.py; клиент Redis для прогресса — свой на задачу.
+
+Прогрев аналитики (warm_analytics) — после расчета, сторно, закрывающего кэфа, новой
+ставки и движения банка (ставит API, app/services/analytics_cache.py): аналитика без
+фильтров за все время и главная за 30 дней считаются заранее и ложатся в кэш Redis; если
+данные изменились, пока задача считала, она считает еще раз.
 """
 
 from dataclasses import asdict, dataclass
@@ -31,22 +36,22 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
-from sqlalchemy import delete, func, or_, select
+from redis.asyncio import Redis
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
 from app.core.redis import create_redis
-from app.db.models import IngestionRun, LoginEvent, Notification, TrustedDevice, User, UserSession
+from app.db.models import LoginEvent, Notification, TrustedDevice, User, UserSession
 from app.ingest.update import run_update
-from app.services import analysis_run
+from app.schemas.analytics import AnalyticsFiltersIn
+from app.services import analysis_run, analytics, analytics_cache, dashboard
+from app.services.data_status import STALE_AFTER, is_stale, last_ok_loads
 from app.services.notifications import notify
 
 log = structlog.get_logger(__name__)
 
 LOGIN_EVENTS_RETENTION = timedelta(days=90)
-# Загрузка архива старше — данные для анализа устарели
-STALE_AFTER = timedelta(days=3)
-STALE_SOURCES = ("sackmann", "tennis_data")
 # Не чаще раза в сутки: 23 часа, чтобы ежедневный запуск, сдвинутый на секунды, не
 # пропускал день
 STALE_NOTIFY_EVERY = timedelta(hours=23)
@@ -124,28 +129,6 @@ async def cleanup_auth_records(ctx: dict[Any, Any]) -> dict[str, int]:
 # --- ночное обновление данных ---
 
 
-async def last_ok_loads(db: AsyncSession) -> dict[str, datetime | None]:
-    """Время окончания последней успешной загрузки каждого архива (None — не было).
-    Считается только запуск, который получил хотя бы один файл (новый или без
-    изменений): запуск «ok» без единого файла (источник отвечает 404 на файл текущего
-    года, пустая папка) данные не обновил."""
-    files = IngestionRun.details["files"]
-    rows = await db.execute(
-        select(IngestionRun.source, func.max(IngestionRun.finished_at))
-        .where(
-            IngestionRun.source.in_(STALE_SOURCES),
-            IngestionRun.status == "ok",
-            func.jsonb_typeof(files) == "object",
-            files != func.jsonb_build_object(),
-        )
-        .group_by(IngestionRun.source)
-    )
-    found: dict[str, datetime | None] = dict.fromkeys(STALE_SOURCES)
-    for source, finished in rows.all():
-        found[source] = finished
-    return found
-
-
 def _when(value: datetime | None) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M") if value is not None else "—"
 
@@ -155,7 +138,7 @@ async def notify_stale_data(db: AsyncSession, *, now: datetime | None = None) ->
     (см. docstring модуля). Возвращает id администраторов, кому оно ушло. Делает commit."""
     now = now or datetime.now(UTC)
     loads = await last_ok_loads(db)
-    if all(when is not None and now - when <= STALE_AFTER for when in loads.values()):
+    if not is_stale(loads, now):
         return []
     admins = (
         await db.scalars(
@@ -238,3 +221,45 @@ async def reap_stuck_analyses(ctx: dict[Any, Any]) -> int:
     if reaped:
         log.warning("worker.reap_stuck_analyses", analyses=reaped)
     return len(reaped)
+
+
+# --- прогрев аналитики (этап 4) ---
+
+
+# Сколько раз прогрев считает заново, если данные менялись, пока он считал
+WARM_PASSES = 3
+
+
+async def warm_user_analytics(db: AsyncSession, redis: Redis, user_id: int) -> list[str]:
+    """Посчитать и положить в кэш набор «без фильтров»: «Аналитику» за все время и главную
+    за 30 дней. Удаленный или неизвестный участник — ничего. Возвращает, что прогрето.
+
+    Пока задача идет, новая с тем же id не ставится (arq держит ключ задачи до конца):
+    расчет следующей ставки в это время не поставил бы прогрев своей версии данных. Поэтому
+    после расчета версия данных читается заново, и если она сменилась, набор считается еще
+    раз (не больше WARM_PASSES раз)."""
+    user = await db.get(User, user_id)
+    if user is None or user.status == "deleted":
+        return []
+    warmed: list[str] = []
+    for _ in range(WARM_PASSES):
+        version = await analytics_cache.data_version(db, user)
+        await analytics.analytics_json(db, redis, user, AnalyticsFiltersIn())
+        await dashboard.cached_core_json(db, redis, user, dashboard.DEFAULT_PERIOD)
+        warmed += ["analytics", "dashboard"]
+        if await analytics_cache.data_version(db, user) == version:
+            break
+    return warmed
+
+
+async def warm_analytics(ctx: dict[Any, Any], user_id: int) -> list[str]:
+    """Задача arq: прогрев кэша аналитики участника (см. docstring модуля)."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    redis = create_redis()
+    try:
+        async with sessionmaker() as db:
+            warmed = await warm_user_analytics(db, redis, user_id)
+    finally:
+        await redis.aclose()
+    log.info("worker.warm_analytics", user_id=user_id, warmed=warmed)
+    return warmed

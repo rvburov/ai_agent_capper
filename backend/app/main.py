@@ -5,6 +5,7 @@ create_app() подключает логирование, middleware (CSRF, за
 лежат в app.state: engine, sessionmaker, redis. Запуск: uvicorn app.main:app.
 """
 
+import gc
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -29,6 +30,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = engine
     app.state.sessionmaker = create_sessionmaker(engine)
     app.state.redis = redis
+    # Объекты запуска (модули, схемы) — вне сборки мусора: полная сборка по ~276 тыс.
+    # объектов приложения идет 250–450 мс и останавливает цикл событий посреди запросов
+    gc.freeze()
     try:
         yield
     finally:

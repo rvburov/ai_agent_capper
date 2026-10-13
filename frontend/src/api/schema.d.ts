@@ -1321,6 +1321,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Analytics
+         * @description Все блоки «Аналитики» по фильтрам: показатели с прошлым периодом, выводы, ряд банка,
+         *     срезы ROI с интервалами, экспрессы против ординаров, калибровка, Brier, CLV. Ответ
+         *     кэшируется до изменения данных участника.
+         */
+        get: operations["get_analytics_api_analytics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analytics/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Analytics Csv
+         * @description Выгрузка под фильтрами: ставки, события, калибровка или скользящий Brier.
+         */
+        get: operations["export_analytics_csv_api_analytics_export_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analytics/export.zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Analytics Zip
+         * @description Выгрузка под фильтрами одним архивом: каждая выбранная часть — отдельный CSV.
+         */
+        get: operations["export_analytics_zip_api_analytics_export_zip_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Dashboard
+         * @description Банк, показатели периода с изменением к прошлому, ряд банка и последние ставки,
+         *     открытые ставки, мои матчи сегодня, дела администратора.
+         */
+        get: operations["get_dashboard_api_dashboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/players": {
         parameters: {
             query?: never;
@@ -1423,6 +1506,19 @@ export interface components {
         AdminActionIn: {
             /** Totp Code */
             totp_code?: string | null;
+        };
+        /**
+         * AdminAttentionOut
+         * @description Дела администратора на главной.
+         */
+        AdminAttentionOut: {
+            archive: components["schemas"]["ArchiveStaleOut"] | null;
+            /** Return Requests */
+            return_requests: components["schemas"]["KeyReturnRequestOut"][];
+            /** Limits */
+            limits: components["schemas"]["LimitAlertOut"][];
+            /** Alert Pct */
+            alert_pct: number;
         };
         /**
          * AdminBudgetOut
@@ -1775,6 +1871,75 @@ export interface components {
             strategy_version: string | null;
             /** @description Только у остановленного анализа (failed, cancelled) с событиями */
             restart: components["schemas"]["RestartOut"] | null;
+        };
+        /**
+         * AnalyticsOut
+         * @description Все блоки «Аналитики» одним ответом (Т5). period null — заданы даты; date_from —
+         *     первый день (null — все время), date_to — последний (сегодня или to). filtered —
+         *     выбран рынок, покрытие или источник (ряд — результат отобранных ставок, а не банк).
+         *     prev и change — null у «всего времени», без начала периода и если в прошлом периоде
+         *     нет рассчитанных ставок.
+         */
+        AnalyticsOut: {
+            /** Currency */
+            currency: string;
+            /** Tz */
+            tz: string;
+            /** Period */
+            period: ("7d" | "30d" | "90d" | "all") | null;
+            /** Date From */
+            date_from: string | null;
+            /**
+             * Date To
+             * Format: date
+             */
+            date_to: string;
+            /** Filtered */
+            filtered: boolean;
+            thresholds: components["schemas"]["ThresholdsOut"];
+            sample: components["schemas"]["SampleOut"];
+            kpi: components["schemas"]["KpiOut"];
+            prev: components["schemas"]["PrevOut"] | null;
+            change: components["schemas"]["ChangeOut"] | null;
+            brier: components["schemas"]["BrierOut"];
+            /** Insights */
+            insights: components["schemas"]["InsightOut"][];
+            series: components["schemas"]["SeriesOut"];
+            slices: components["schemas"]["SlicesOut"];
+            parlays: components["schemas"]["ParlaysOut"] | null;
+            calibration: components["schemas"]["CalibrationOut"];
+            clv: components["schemas"]["ClvOut"];
+        };
+        /** ArchiveSourceOut */
+        ArchiveSourceOut: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "sackmann" | "tennis_data";
+            /** Last Load */
+            last_load: string | null;
+        };
+        /**
+         * ArchiveStaleOut
+         * @description Архив матчей устарел (то же правило, что уведомление data_stale): days — дней с
+         *     самой старой из последних успешных загрузок (null — какой-то архив не загружался ни
+         *     разу), stale_after_days — порог; update_hour_utc и update_minute — когда идет ночное
+         *     обновление (UTC).
+         */
+        ArchiveStaleOut: {
+            /** Days */
+            days: number | null;
+            /** Last Load */
+            last_load: string | null;
+            /** Stale After Days */
+            stale_after_days: number;
+            /** Update Hour Utc */
+            update_hour_utc: number;
+            /** Update Minute */
+            update_minute: number;
+            /** Sources */
+            sources: components["schemas"]["ArchiveSourceOut"][];
         };
         /**
          * AuditOut
@@ -2192,6 +2357,57 @@ export interface components {
             legacy_settled: number;
         };
         /**
+         * BrierOut
+         * @description Brier модели против рынка (В2): события — ноги рассчитанных ставок приложения с
+         *     итоговой вероятностью модели (p_final) и рынком в момент прогноза без маржи
+         *     (q_market_at_pred). diff = модель − рынок (меньше 0 — модель точнее), diff_ci —
+         *     парный бутстрэп по событиям, noise — интервал задевает ноль. Второй ряд — рынок
+         *     закрытия: события, где внесены обе стороны закрывающего кэфа (closing_*).
+         *     Скользящее окно: windows — число окон (шаг rolling_step), better — в скольких из них
+         *     модель точнее рынка; points — окна для графика, не больше 200 равномерно по ряду
+         *     (последнее — всегда), все окна — в выгрузке CSV.
+         */
+        BrierOut: {
+            /** N */
+            n: number;
+            /** Model */
+            model: number | null;
+            /** Market */
+            market: number | null;
+            /** Diff */
+            diff: number | null;
+            diff_ci: components["schemas"]["CiOut"] | null;
+            /** Noise */
+            noise: boolean | null;
+            /** Closing N */
+            closing_n: number;
+            /** Closing Model */
+            closing_model: number | null;
+            /** Closing Market */
+            closing_market: number | null;
+            /** Points */
+            points: components["schemas"]["BrierPointOut"][];
+            /** Windows */
+            windows: number;
+            /** Better */
+            better: number;
+        };
+        /**
+         * BrierPointOut
+         * @description Окно скользящего Brier: последние rolling_window событий по день day.
+         */
+        BrierPointOut: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Model */
+            model: number;
+            /** Market */
+            market: number;
+        };
+        /**
          * BudgetIn
          * @description Общий бюджет ключа администратора ($1–5000, не меньше потраченного за месяц),
          *     порог предупреждения о расходе и (по желанию) бюджет проверочных прогонов.
@@ -2206,6 +2422,111 @@ export interface components {
             alert_pct: 50 | 70 | 80 | 90;
             /** Eval Budget Usd */
             eval_budget_usd?: number | string | null;
+        };
+        /**
+         * CalibrationBinOut
+         * @description Корзина 5 п.п.: события с вероятностью в [low, high), средняя вероятность p (на
+         *     графике), средние p_base и p_claude (в таблице), доля сыгравших и интервал Уилсона.
+         */
+        CalibrationBinOut: {
+            /** Low */
+            low: number;
+            /** High */
+            high: number;
+            /** N */
+            n: number;
+            /** P */
+            p: number;
+            /** P Base */
+            p_base: number | null;
+            /** P Claude */
+            p_claude: number | null;
+            /** Actual */
+            actual: number;
+            /** Ci Low */
+            ci_low: number;
+            /** Ci High */
+            ci_high: number;
+        };
+        /**
+         * CalibrationFlagOut
+         * @description Диапазон с самым большим расхождением: over — модель переоценивает, under —
+         *     недооценивает; gap — |p − actual|.
+         */
+        CalibrationFlagOut: {
+            /** Low */
+            low: number;
+            /** High */
+            high: number;
+            /** N */
+            n: number;
+            /** P */
+            p: number;
+            /** Actual */
+            actual: number;
+            /** Gap */
+            gap: number;
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "over" | "under";
+        };
+        /**
+         * CalibrationOut
+         * @description Калибровка (В3, Т9): события рассчитанных ставок, по одному на пару исходов;
+         *     прогноз — последний не замененный, проверочные прогоны исключены. kind = final —
+         *     итоговая вероятность модели (ставки приложения), claude — оценка Claude ставок бота
+         *     (только под фильтром «старый бот», Т10). Корзины 5 п.п. от 50 до 95%; outside —
+         *     события вне этого отрезка. status: empty — событий нет, few — ни в одной корзине нет
+         *     calibration_min_n, off — есть расхождение на calibration_gap и больше, ok — нет.
+         *     worst — диапазон с наибольшим расхождением, opposite — самый заметный с обратным
+         *     знаком.
+         */
+        CalibrationOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "final" | "claude";
+            /** Events */
+            events: number;
+            /** Outside */
+            outside: number;
+            /** Bins */
+            bins: components["schemas"]["CalibrationBinOut"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "empty" | "few" | "off" | "ok";
+            worst: components["schemas"]["CalibrationFlagOut"] | null;
+            opposite: components["schemas"]["CalibrationFlagOut"] | null;
+        };
+        /**
+         * ChangeOut
+         * @description Изменение к прошлому периоду: прибыль — деньгами, ROI, винрейт и CLV — разницей
+         *     долей (0.021 — это +2,1 п.п.); null — сравнить не с чем.
+         */
+        ChangeOut: {
+            /** Profit */
+            profit: string | null;
+            /** Roi */
+            roi: number | null;
+            /** Winrate */
+            winrate: number | null;
+            /** Clv */
+            clv: number | null;
+        };
+        /**
+         * CiOut
+         * @description 95% доверительный интервал доли.
+         */
+        CiOut: {
+            /** Low */
+            low: number;
+            /** High */
+            high: number;
         };
         /**
          * ClosingIn
@@ -2257,6 +2578,45 @@ export interface components {
          */
         ClosingUpdateIn: {
             closing: components["schemas"]["ClosingIn"] | null;
+        };
+        /**
+         * ClvBinOut
+         * @description Столбец распределения CLV шириной 1 п.п.: [low, high); open_low — крайний левый
+         *     собирает все меньше, open_high — крайний правый все больше.
+         */
+        ClvBinOut: {
+            /** Low */
+            low: number;
+            /** High */
+            high: number;
+            /** N */
+            n: number;
+            /** Share */
+            share: number;
+            /** Open Low */
+            open_low: boolean;
+            /** Open High */
+            open_high: boolean;
+        };
+        /**
+         * ClvOut
+         * @description Распределение CLV ставок (кэф / закрытие − 1, В1) — тех же, что в KPI; positive и
+         *     negative — лучше и хуже закрытия. fair_mean — средний CLV без маржи (кэф · q_close −
+         *     1) по событиям, где внесены обе стороны закрытия (fair_n).
+         */
+        ClvOut: {
+            /** N */
+            n: number;
+            /** Positive */
+            positive: number;
+            /** Negative */
+            negative: number;
+            /** Bins */
+            bins: components["schemas"]["ClvBinOut"][];
+            /** Fair Mean */
+            fair_mean: number | null;
+            /** Fair N */
+            fair_n: number;
         };
         /**
          * ComparisonRow
@@ -2363,6 +2723,60 @@ export interface components {
         CsrfOut: {
             /** Csrf Token */
             csrf_token: string;
+        };
+        /**
+         * DashboardOut
+         * @description Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,
+         *     пик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,
+         *     до OPEN_LIMIT; всего — open_count на open_stake); admin — только у администратора.
+         */
+        DashboardOut: {
+            /**
+             * Period
+             * @enum {string}
+             */
+            period: "7d" | "30d" | "90d" | "all";
+            /** Date From */
+            date_from: string | null;
+            /**
+             * Date To
+             * Format: date
+             */
+            date_to: string;
+            kpi: components["schemas"]["KpiOut"];
+            prev: components["schemas"]["PrevOut"] | null;
+            change: components["schemas"]["ChangeOut"] | null;
+            brier: components["schemas"]["BrierOut"];
+            series: components["schemas"]["SeriesOut"];
+            /** Recent */
+            recent: components["schemas"]["RecentBetOut"][];
+            /** Small Sample */
+            small_sample: boolean;
+            /** Currency */
+            currency: string;
+            /** Tz */
+            tz: string;
+            /**
+             * Today
+             * Format: date
+             */
+            today: string;
+            /**
+             * Greeting
+             * @enum {string}
+             */
+            greeting: "morning" | "day" | "evening" | "night";
+            thresholds: components["schemas"]["ThresholdsOut"];
+            bank: components["schemas"]["BankOut"];
+            /** Open Bets */
+            open_bets: components["schemas"]["OpenBetOut"][];
+            /** Open Count */
+            open_count: number;
+            /** Open Stake */
+            open_stake: string;
+            /** My Matches */
+            my_matches: components["schemas"]["MyMatchOut"][];
+            admin: components["schemas"]["AdminAttentionOut"] | null;
         };
         /**
          * DecisionIn
@@ -2634,6 +3048,47 @@ export interface components {
             redis: "ok" | "fail";
         };
         /**
+         * InsightFilterOut
+         * @description Фильтр для действия filter: покрытие или исход.
+         */
+        InsightFilterOut: {
+            /** Surface */
+            surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown") | null;
+            /** Market */
+            market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+            /** Selection */
+            selection?: number | null;
+        };
+        /**
+         * InsightOut
+         * @description Вывод кодом (до трех, без Claude): заголовок и текст — ключи локали с числами,
+         *     основание — basis событий или ставок, действие — по кнопке.
+         */
+        InsightOut: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "sample" | "calibration_over" | "calibration_under" | "calibration_ok" | "total_negative" | "small_slice" | "brier_noise" | "brier_model_better" | "brier_market_better";
+            /**
+             * Tone
+             * @enum {string}
+             */
+            tone: "warn" | "bad" | "info" | "accent" | "good";
+            title: components["schemas"]["TextKey"];
+            text: components["schemas"]["TextKey"];
+            /** Basis */
+            basis: number;
+            /**
+             * Basis Unit
+             * @enum {string}
+             */
+            basis_unit: "events" | "bets";
+            /** Action */
+            action: ("calibration" | "bets" | "filter" | "widen" | "clear" | "explain") | null;
+            filter?: components["schemas"]["InsightFilterOut"] | null;
+        };
+        /**
          * InviteCreatedOut
          * @description Созданное приглашение и его код CAP-XXXX-XXXX (в базе только хеш).
          */
@@ -2748,6 +3203,57 @@ export interface components {
             available: boolean;
         };
         /**
+         * KeyReturnRequestOut
+         * @description Участник просит вернуть ключ администратора (Р12).
+         */
+        KeyReturnRequestOut: {
+            /** User Id */
+            user_id: number;
+            /** Name */
+            name: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+        };
+        /**
+         * KpiOut
+         * @description Показатели за период — те же правила и те же числа, что итоги «Ставок»
+         *     (GET /bets/summary): оборот и прибыль без возвратов (Т8), ROI = прибыль / оборот,
+         *     винрейт = выигрыш / (выигрыш + проигрыш), CLV — средний по рассчитанным ставкам
+         *     приложения с закрытием у всех ног (ставки бота не входят, В5). roi_ci и clv_ci —
+         *     бутстрэп по ставкам (на главной не считаются — null).
+         */
+        KpiOut: {
+            /** Settled */
+            settled: number;
+            /** Won */
+            won: number;
+            /** Lost */
+            lost: number;
+            /** Void */
+            void: number;
+            /** Turnover */
+            turnover: string;
+            /** Profit */
+            profit: string;
+            /** Roi */
+            roi: number | null;
+            roi_ci: components["schemas"]["CiOut"] | null;
+            /** Winrate */
+            winrate: number | null;
+            /** Clv */
+            clv: number | null;
+            clv_ci: components["schemas"]["CiOut"] | null;
+            /** Clv Positive */
+            clv_positive: number;
+            /** Clv N */
+            clv_n: number;
+            /** Legacy Settled */
+            legacy_settled: number;
+        };
+        /**
          * LegMatchOut
          * @description Матч ноги. Турнир из ввода участника показывается по его же вводу; покрытие и
          *     формат — из турнира, иначе из ввода анализа (null — не указано).
@@ -2786,6 +3292,29 @@ export interface components {
             /** Score */
             score?: string | null;
             closing?: components["schemas"]["ClosingIn"] | null;
+        };
+        /**
+         * LimitAlertOut
+         * @description Участник у месячного лимита на ключе администратора: level 80 — дошел до порога
+         *     предупреждения (alert_pct), 100 — остатка не хватает на анализ (то же правило, что у
+         *     уведомлений limit_80 и limit_100). Р14: только расход на ИИ.
+         */
+        LimitAlertOut: {
+            /** User Id */
+            user_id: number;
+            /** Name */
+            name: string;
+            /** Spent Usd */
+            spent_usd: number;
+            /** Limit Usd */
+            limit_usd: number;
+            /** Share */
+            share: number;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "80" | "100";
         };
         /**
          * LimitDefaultsOut
@@ -2925,6 +3454,46 @@ export interface components {
             in_express: boolean;
             /** Note Key */
             note_key: string | null;
+        };
+        /**
+         * MarketSliceOut
+         * @description Исход: рынок и сторона (П1 — ML и 1, Ф2(+1.5) — HCP_+1.5 и 2).
+         */
+        MarketSliceOut: {
+            /** N */
+            n: number;
+            /** Wins */
+            wins: number;
+            /** Winrate */
+            winrate: number;
+            /** Roi */
+            roi: number;
+            roi_ci: components["schemas"]["CiOut"] | null;
+            /** Avg Odds */
+            avg_odds: number;
+            /** Small */
+            small: boolean;
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Selection */
+            selection: number;
+        };
+        /**
+         * MarketsTotalOut
+         * @description Итоговая строка «Сводки по рынкам»: все исходы вместе.
+         */
+        MarketsTotalOut: {
+            /** N */
+            n: number;
+            /** Winrate */
+            winrate: number;
+            /** Roi */
+            roi: number;
+            /** Avg Odds */
+            avg_odds: number;
         };
         /**
          * MatchPairOut
@@ -3072,6 +3641,51 @@ export interface components {
             decision: "approve" | "reject";
             limit?: components["schemas"]["LimitIn"] | null;
         };
+        /**
+         * MyMatchBetOut
+         * @description Нога открытой ставки на этом матче.
+         */
+        MyMatchBetOut: {
+            /** Bet Id */
+            bet_id: number;
+            /** Leg Id */
+            leg_id: number;
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Selection */
+            selection: number;
+            /** Odds Taken */
+            odds_taken: string;
+        };
+        /**
+         * MyMatchOut
+         * @description Мой матч сегодня (В6): из ног открытых ставок и сегодняшних анализов участника.
+         *     rank1 и rank2 — место по Эло (null — нет в таблице текущего Эло); tournament — из
+         *     архива или своего ввода; scheduled_at — время, если известно.
+         */
+        MyMatchOut: {
+            /** Match Id */
+            match_id: number;
+            player1: components["schemas"]["PlayerRefOut"];
+            player2: components["schemas"]["PlayerRefOut"];
+            /** Rank1 */
+            rank1: number | null;
+            /** Rank2 */
+            rank2: number | null;
+            /** Tournament */
+            tournament: string | null;
+            /** Round */
+            round: string | null;
+            /** Scheduled At */
+            scheduled_at: string | null;
+            /** Bets */
+            bets: components["schemas"]["MyMatchBetOut"][];
+            /** Analyses */
+            analyses: number[];
+        };
         /** NotificationOut */
         NotificationOut: {
             /** Id */
@@ -3131,6 +3745,88 @@ export interface components {
             "HCP_-1.5": (string | null)[];
             /** Hcp +1.5 */
             "HCP_+1.5": (string | null)[];
+        };
+        /**
+         * OddsSliceOut
+         * @description Диапазон кэфа события: от low до high включительно (high null — и выше).
+         */
+        OddsSliceOut: {
+            /** N */
+            n: number;
+            /** Wins */
+            wins: number;
+            /** Winrate */
+            winrate: number;
+            /** Roi */
+            roi: number;
+            roi_ci: components["schemas"]["CiOut"] | null;
+            /** Avg Odds */
+            avg_odds: number;
+            /** Small */
+            small: boolean;
+            /** Low */
+            low: string;
+            /** High */
+            high: string | null;
+        };
+        /**
+         * OpenBetOut
+         * @description Открытая ставка: implied — 1 / кэф каждой ноги (вероятность по кэфу букмекера, с его
+         *     маржой) в порядке legs; вероятность модели — legs[].p_final.
+         */
+        OpenBetOut: {
+            /** Id */
+            id: number;
+            /** Analysis Id */
+            analysis_id: number | null;
+            /**
+             * Placed At
+             * Format: date-time
+             */
+            placed_at: string;
+            /** Bookmaker */
+            bookmaker: string;
+            /** Stake */
+            stake: string;
+            /** Currency */
+            currency: string;
+            /** Total Odds */
+            total_odds: string;
+            /** Effective Odds */
+            effective_odds: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "won" | "lost" | "void";
+            /** Profit */
+            profit: string | null;
+            /** Payout */
+            payout: string | null;
+            /** Settled At */
+            settled_at: string | null;
+            /** Settled By */
+            settled_by: ("manual" | "auto" | "legacy") | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "app" | "legacy";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Clv */
+            clv: number | null;
+            /** Clv Fair */
+            clv_fair: number | null;
+            /** Verdict */
+            verdict: ("legacy" | "void" | "no_closing" | "edge_confirmed" | "won_against_market" | "variance" | "model_error") | null;
+            /** Legs */
+            legs: components["schemas"]["BetLegItemOut"][];
+            /** Implied */
+            implied: number[];
         };
         /**
          * OwnCapIn
@@ -3196,6 +3892,34 @@ export interface components {
             name: string;
             /** Name Ru */
             name_ru: string | null;
+        };
+        /**
+         * ParlaysOut
+         * @description Р21: реальные экспрессы против тех же событий ординарами на равную сумму. Экспрессы
+         *     старого бота не входят (Т10, legacy_parlays). Интервалы — парный бутстрэп по
+         *     экспрессам; verdict — noise (интервал разницы задевает ноль), parlays (экспрессы
+         *     лучше) или singles.
+         */
+        ParlaysOut: {
+            /** Parlays */
+            parlays: number;
+            /** Events */
+            events: number;
+            /** Legacy Parlays */
+            legacy_parlays: number;
+            /** Profit */
+            profit: string;
+            /** Parlays Roi */
+            parlays_roi: number | null;
+            parlays_ci: components["schemas"]["CiOut"] | null;
+            /** Singles Roi */
+            singles_roi: number | null;
+            singles_ci: components["schemas"]["CiOut"] | null;
+            /** Diff */
+            diff: number | null;
+            diff_ci: components["schemas"]["CiOut"] | null;
+            /** Verdict */
+            verdict: ("noise" | "parlays" | "singles") | null;
         };
         /** PasswordChangeIn */
         PasswordChangeIn: {
@@ -3294,6 +4018,38 @@ export interface components {
             /** Elo Rank */
             elo_rank: number | null;
         };
+        /**
+         * PrevOut
+         * @description Прошлый период той же длины (до первого дня текущего). Его нет (null), если
+         *     история участника начинается позже начала прошлого периода или в нем нет рассчитанных
+         *     ставок.
+         */
+        PrevOut: {
+            /**
+             * Date From
+             * Format: date
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date
+             */
+            date_to: string;
+            /** Settled */
+            settled: number;
+            /** Turnover */
+            turnover: string;
+            /** Profit */
+            profit: string;
+            /** Roi */
+            roi: number | null;
+            /** Winrate */
+            winrate: number | null;
+            /** Clv */
+            clv: number | null;
+            /** Clv N */
+            clv_n: number;
+        };
         /** PreviewEvent */
         PreviewEvent: {
             /** Position */
@@ -3385,6 +4141,42 @@ export interface components {
              * @enum {string}
              */
             currency: "RUB" | "USD" | "EUR";
+        };
+        /**
+         * RecentBetOut
+         * @description Рассчитанная ставка периода для таблицы «Динамика банка»: equity_after — капитал
+         *     сразу после ее расчета («Банк после»).
+         */
+        RecentBetOut: {
+            /** Id */
+            id: number;
+            /**
+             * Placed At
+             * Format: date-time
+             */
+            placed_at: string;
+            /** Settled At */
+            settled_at: string | null;
+            /** Legs */
+            legs: number;
+            /** Total Odds */
+            total_odds: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "won" | "lost" | "void";
+            /** Stake */
+            stake: string;
+            /** Profit */
+            profit: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "app" | "legacy";
+            /** Equity After */
+            equity_after: string | null;
         };
         /**
          * RecoveryCodesIn
@@ -3571,6 +4363,117 @@ export interface components {
             };
         };
         /**
+         * SampleOut
+         * @description Что попало в выборку: bets — рассчитанные ставки (с возвратами), из них singles и
+         *     parlays; events — события (ноги с исходом «выиграл» или «проиграл») под фильтрами
+         *     рынка и покрытия; legacy_bets — ставки старого бота среди bets (в банке и ROI, но не в
+         *     CLV, Brier и калибровке, В5); legacy_parlay_events — события экспрессов бота, которые
+         *     по отдельности не считаются (Т10); open_bets — ставки в игре под теми же фильтрами (в
+         *     расчет не входят); first_day и last_day — даты первой и последней ставки выборки по
+         *     поясу участника; last_settled_at — когда рассчитана последняя.
+         */
+        SampleOut: {
+            /** Bets */
+            bets: number;
+            /** Singles */
+            singles: number;
+            /** Parlays */
+            parlays: number;
+            /** Events */
+            events: number;
+            /** Legacy Bets */
+            legacy_bets: number;
+            /** Legacy Parlay Events */
+            legacy_parlay_events: number;
+            /** Open Bets */
+            open_bets: number;
+            /** First Day */
+            first_day: string | null;
+            /** Last Day */
+            last_day: string | null;
+            /** Last Settled At */
+            last_settled_at: string | null;
+        };
+        /**
+         * SeriesOut
+         * @description Ряд по дням. kind = bank — капитал (баланс + ставки в игре) на конец дня, когда
+         *     фильтров рынка, покрытия и источника нет; result — прибыль отобранных ставок
+         *     нарастающим итогом по дню расчета (по поясу участника). Первая точка — день перед
+         *     периодом (start, значение base), у «всего времени» — первый день. peak — наибольшее
+         *     значение ряда; max_drawdown (доля от −1 до 0, только у bank) — наибольшая просадка от
+         *     пика по правилу Р22: пополнение, вывод и корректировка — не просадка; best и worst —
+         *     лучшая и худшая точка (у result худшая не выше нуля). rows — по неделям (период до 31
+         *     дня) или по месяцам.
+         */
+        SeriesOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bank" | "result";
+            /**
+             * Group
+             * @enum {string}
+             */
+            group: "week" | "month";
+            /**
+             * Start
+             * Format: date
+             */
+            start: string;
+            /** Base */
+            base: string;
+            /** Last */
+            last: string;
+            /** Peak */
+            peak: string;
+            /** Max Drawdown */
+            max_drawdown: number;
+            /** Best */
+            best: string;
+            /** Worst */
+            worst: string;
+            /** Points */
+            points: components["schemas"]["SeriesPointOut"][];
+            /** Rows */
+            rows: components["schemas"]["SeriesRowOut"][];
+        };
+        /** SeriesPointOut */
+        SeriesPointOut: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Value */
+            value: string;
+        };
+        /**
+         * SeriesRowOut
+         * @description Строка таблицы под графиком: неделя или месяц (date_from–date_to), ставки,
+         *     рассчитанные в эти дни, их прибыль и ROI, значение ряда на конец строки.
+         */
+        SeriesRowOut: {
+            /**
+             * Date From
+             * Format: date
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date
+             */
+            date_to: string;
+            /** Bets */
+            bets: number;
+            /** Profit */
+            profit: string;
+            /** Roi */
+            roi: number | null;
+            /** End */
+            end: string;
+        };
+        /**
          * SessionOut
          * @description Действующий сеанс. device_label пустой — устройство не распознано.
          */
@@ -3609,6 +4512,22 @@ export interface components {
             expected_updated_at: string;
             /** Legs */
             legs: components["schemas"]["LegSettleIn"][];
+        };
+        /**
+         * SlicesOut
+         * @description Срезы. Срез по покрытию не сужается фильтром покрытия, по рынку — фильтром рынка
+         *     (выбранное значение экран подсвечивает); по кэфу — всеми фильтрами.
+         */
+        SlicesOut: {
+            /** Surfaces */
+            surfaces: components["schemas"]["SurfaceSliceOut"][];
+            /** Markets */
+            markets: components["schemas"]["MarketSliceOut"][];
+            markets_total: components["schemas"]["MarketsTotalOut"] | null;
+            /** Odds */
+            odds: components["schemas"]["OddsSliceOut"][];
+            /** Totals */
+            totals: components["schemas"]["TotalSliceOut"][];
         };
         /** StakeBandOut */
         StakeBandOut: {
@@ -3768,6 +4687,27 @@ export interface components {
                 [key: string]: boolean;
             };
         };
+        /** SurfaceSliceOut */
+        SurfaceSliceOut: {
+            /** N */
+            n: number;
+            /** Wins */
+            wins: number;
+            /** Winrate */
+            winrate: number;
+            /** Roi */
+            roi: number;
+            roi_ci: components["schemas"]["CiOut"] | null;
+            /** Avg Odds */
+            avg_odds: number;
+            /** Small */
+            small: boolean;
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "hard" | "clay" | "grass" | "carpet" | "unknown";
+        };
         /**
          * TextKey
          * @description Текст ключом локали: key — полный ключ (analysis.draft.player_check), params —
@@ -3783,6 +4723,68 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * ThresholdsOut
+         * @description Пороги, по которым сервер ставит метки и выводы (одно место — app/services/
+         *     analytics.py): small_sample — меньше стольких событий или ставок в срезе ROI метка
+         *     «мало данных»; insight_min_events — меньше стольких событий вывод «выборка мала»;
+         *     calibration_min_n и calibration_gap — диапазон калибровки с n событиями и больше,
+         *     где прогноз расходится с фактом на gap и больше, — плохой; calibration_few — меньше
+         *     стольких событий калибровка «скачет»; slice_pattern_n — меньше стольких событий
+         *     плюс в срезе — «пока не закономерность»; dashboard_small — меньше стольких
+         *     рассчитанных ставок за период главная предупреждает о малой выборке;
+         *     rolling_window и rolling_step — окно и шаг скользящего Brier.
+         */
+        ThresholdsOut: {
+            /** Small Sample */
+            small_sample: number;
+            /** Insight Min Events */
+            insight_min_events: number;
+            /** Calibration Min N */
+            calibration_min_n: number;
+            /** Calibration Gap */
+            calibration_gap: number;
+            /** Calibration Few */
+            calibration_few: number;
+            /** Slice Pattern N */
+            slice_pattern_n: number;
+            /** Dashboard Small */
+            dashboard_small: number;
+            /** Rolling Window */
+            rolling_window: number;
+            /** Rolling Step */
+            rolling_step: number;
+        };
+        /**
+         * TotalSliceOut
+         * @description ROI реальных ставок по итоговому кэфу — диапазоны таблицы стратегии (Т20):
+         *     первый от low, остальные до следующего; low и high null — ставки вне таблицы.
+         *     bets — сыгравшие (выигрыш и проигрыш), voids — возвраты (в оборот не входят);
+         *     stake_pct — доля банка по таблице, triple — диапазон только для экспресса из 3.
+         */
+        TotalSliceOut: {
+            /** Low */
+            low: string | null;
+            /** High */
+            high: string | null;
+            /** Stake Pct */
+            stake_pct: string | null;
+            /** Triple */
+            triple: boolean;
+            /** Bets */
+            bets: number;
+            /** Voids */
+            voids: number;
+            /** Turnover */
+            turnover: string;
+            /** Profit */
+            profit: string;
+            /** Roi */
+            roi: number | null;
+            roi_ci: components["schemas"]["CiOut"] | null;
+            /** Small */
+            small: boolean;
         };
         /** TotalsOut */
         TotalsOut: {
@@ -6348,6 +7350,150 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BankEntryOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_analytics_api_analytics_get: {
+        parameters: {
+            query?: {
+                period?: "7d" | "30d" | "90d" | "all";
+                from?: string | null;
+                to?: string | null;
+                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                selection?: number | null;
+                surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
+                source?: ("app" | "legacy") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    export_analytics_csv_api_analytics_export_csv_get: {
+        parameters: {
+            query?: {
+                period?: "7d" | "30d" | "90d" | "all";
+                from?: string | null;
+                to?: string | null;
+                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                selection?: number | null;
+                surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
+                source?: ("app" | "legacy") | null;
+                part?: "bets" | "events" | "calibration" | "brier";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV одной части */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    export_analytics_zip_api_analytics_export_zip_get: {
+        parameters: {
+            query?: {
+                period?: "7d" | "30d" | "90d" | "all";
+                from?: string | null;
+                to?: string | null;
+                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                selection?: number | null;
+                surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
+                source?: ("app" | "legacy") | null;
+                part?: ("bets" | "events" | "calibration" | "brier")[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ZIP с CSV частей */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": unknown;
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_dashboard_api_dashboard_get: {
+        parameters: {
+            query?: {
+                period?: "7d" | "30d" | "90d" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

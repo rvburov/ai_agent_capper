@@ -410,7 +410,7 @@ def _confirmed_surface(bet: Any, leg: Any) -> ColumnElement[str | None]:
     )
 
 
-def _leg_surface(bet: Any, leg: Any, tournament: Any) -> ColumnElement[str | None]:
+def leg_surface_sql(bet: Any, leg: Any, tournament: Any) -> ColumnElement[str | None]:
     """Покрытие ноги в SQL, как LegContext.surface: турнир архива, иначе свой ввод."""
     archive = case((tournament.source == "user", null()), else_=tournament.surface)
     return func.coalesce(archive, _confirmed_surface(bet, leg))
@@ -487,7 +487,7 @@ def _surface_condition(surfaces: Sequence[str]) -> Callable[[_Legs], ColumnEleme
     wanted = [value for value in surfaces if value != "unknown"]
 
     def condition(legs: _Legs) -> ColumnElement[bool]:
-        surface = _leg_surface(legs.bet, legs.leg, legs.tournament)
+        surface = leg_surface_sql(legs.bet, legs.leg, legs.tournament)
         options: list[ColumnElement[bool]] = []
         if wanted:
             options.append(surface.in_(wanted))
@@ -1027,7 +1027,7 @@ CSV_COLUMNS: tuple[str, ...] = (
 _FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 
 
-def _cell(value: Any) -> str:
+def csv_cell(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
@@ -1083,7 +1083,7 @@ def _csv_rows(item: BetItemOut, zone: Any) -> Iterable[list[str]]:
             leg.clv,
             leg.clv_fair,
         ]
-        yield [_cell(value) for value in values]
+        yield [csv_cell(value) for value in values]
 
 
 # Ставок в одной части выгрузки: между частями цикл событий обслуживает другие запросы

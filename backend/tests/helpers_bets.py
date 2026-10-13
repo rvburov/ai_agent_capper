@@ -35,7 +35,8 @@ D = Decimal
 @dataclass
 class LegSpec:
     """Нога ставки. tournament None — матч из ввода участника без турнира; surface и
-    best_of — у турнира; confirmed_* — в подтвержденном вводе анализа (Т29)."""
+    best_of — у турнира; confirmed_* — в подтвержденном вводе анализа (Т29); q_market —
+    рынок при прогнозе без маржи, is_eval — прогноз проверочного прогона."""
 
     odds: str = "1.80"
     market: str = "ML"
@@ -50,6 +51,8 @@ class LegSpec:
     p_final: float | None = 0.62
     p_base: float | None = 0.60
     p_claude: float | None = 0.64
+    q_market: float | None = None
+    is_eval: bool = False
     names: tuple[str, str] | None = None
     names_ru: tuple[str | None, str | None] = (None, None)
     match_day: date | None = None
@@ -182,6 +185,8 @@ class BetMaker:
                 p_base=spec.p_base,
                 p_claude=spec.p_claude,
                 p_final=spec.p_final,
+                q_market_at_pred=spec.q_market,
+                is_eval=spec.is_eval,
             )
             self.db.add(prediction)
             await self.db.flush()

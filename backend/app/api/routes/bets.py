@@ -1,11 +1,12 @@
 """Ставки участника: «Сохранить ставку» по анализу, список «Ставок» с фильтрами и
 курсором, итоги, карточка, ручной расчет, исправление результата (сторно), закрывающий
 кэф ноги, выгрузка CSV; букмекеры. Видит и меняет только сам участник (Р14): чужая ставка —
-404, как несуществующая."""
+404, как несуществующая. После изменения ставки — прогрев кэша аналитики после ответа
+(app/services/analytics_cache.py)."""
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Path, Query, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.core.deps import CurrentUser, DbSession
@@ -21,6 +22,7 @@ from app.schemas.bets import (
     ReverseIn,
     SettleIn,
 )
+from app.services import analytics_cache
 from app.services import bets as bets_service
 from app.services import closing as closing_service
 from app.services import settlement as settlement_service
@@ -32,11 +34,14 @@ CSV_FILENAME = "bets.csv"
 
 
 @router.post("/bets", status_code=status.HTTP_201_CREATED)
-async def place_bet(body: BetIn, user: CurrentUser, db: DbSession) -> BetOut:
+async def place_bet(
+    body: BetIn, user: CurrentUser, db: DbSession, background: BackgroundTasks
+) -> BetOut:
     """Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не
     меняется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref
     возвращает ту же ставку."""
     placed = await bets_service.place_bet(db, user, body)
+    background.add_task(analytics_cache.request_warm, user.id)
     return bets_service.bet_out(placed)
 
 
@@ -83,27 +88,48 @@ async def get_bet(bet_id: RowId, user: CurrentUser, db: DbSession) -> BetItemOut
 
 
 @router.put("/bets/{bet_id}/result")
-async def settle_bet(bet_id: RowId, body: SettleIn, user: CurrentUser, db: DbSession) -> BetItemOut:
+async def settle_bet(
+    bet_id: RowId,
+    body: SettleIn,
+    user: CurrentUser,
+    db: DbSession,
+    background: BackgroundTasks,
+) -> BetItemOut:
     """Ручной расчет открытой ставки: исход каждой ноги, счет и закрывающий кэф по
     желанию. Ставка изменилась после того, как ее открыли (expected_updated_at), — 409,
     кроме повтора того же расчета."""
-    return await settlement_service.settle_bet(db, user, bet_id, body)
+    item = await settlement_service.settle_bet(db, user, bet_id, body)
+    background.add_task(analytics_cache.request_warm, user.id)
+    return item
 
 
 @router.post("/bets/{bet_id}/reverse")
 async def reverse_bet(
-    bet_id: RowId, body: ReverseIn, user: CurrentUser, db: DbSession
+    bet_id: RowId,
+    body: ReverseIn,
+    user: CurrentUser,
+    db: DbSession,
+    background: BackgroundTasks,
 ) -> BetItemOut:
     """Исправить результат: сторно выплаты или возврата, ставка снова открыта."""
-    return await settlement_service.reverse_settlement(db, user, bet_id, body)
+    item = await settlement_service.reverse_settlement(db, user, bet_id, body)
+    background.add_task(analytics_cache.request_warm, user.id)
+    return item
 
 
 @router.put("/bets/{bet_id}/legs/{leg_id}/closing")
 async def set_leg_closing(
-    bet_id: RowId, leg_id: RowId, body: ClosingUpdateIn, user: CurrentUser, db: DbSession
+    bet_id: RowId,
+    leg_id: RowId,
+    body: ClosingUpdateIn,
+    user: CurrentUser,
+    db: DbSession,
+    background: BackgroundTasks,
 ) -> BetItemOut:
     """Закрывающий кэф ноги (свой исход, обратный — по желанию, чей кэф); null — стереть."""
-    return await closing_service.set_leg_closing(db, user, bet_id, leg_id, body.closing)
+    item = await closing_service.set_leg_closing(db, user, bet_id, leg_id, body.closing)
+    background.add_task(analytics_cache.request_warm, user.id)
+    return item
 
 
 @router.get("/me/bookmakers")

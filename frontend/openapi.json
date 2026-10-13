@@ -3810,6 +3810,573 @@
         }
       }
     },
+    "/api/analytics": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Get Analytics",
+        "description": "Все блоки «Аналитики» по фильтрам: показатели с прошлым периодом, выводы, ряд банка,\nсрезы ROI с интервалами, экспрессы против ординаров, калибровка, Brier, CLV. Ответ\nкэшируется до изменения данных участника.",
+        "operationId": "get_analytics_api_analytics_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Period"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ML",
+                    "HCP_-1.5",
+                    "HCP_+1.5"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "name": "selection",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 2,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Selection"
+            }
+          },
+          {
+            "name": "surface",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "maxItems": 5,
+              "title": "Surface"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "app",
+                    "legacy"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analytics/export.csv": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Export Analytics Csv",
+        "description": "Выгрузка под фильтрами: ставки, события, калибровка или скользящий Brier.",
+        "operationId": "export_analytics_csv_api_analytics_export_csv_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Period"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ML",
+                    "HCP_-1.5",
+                    "HCP_+1.5"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "name": "selection",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 2,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Selection"
+            }
+          },
+          {
+            "name": "surface",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "maxItems": 5,
+              "title": "Surface"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "app",
+                    "legacy"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "part",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "bets",
+                "events",
+                "calibration",
+                "brier"
+              ],
+              "type": "string",
+              "default": "bets",
+              "title": "Part"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV одной части",
+            "content": {
+              "text/csv": {}
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analytics/export.zip": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Export Analytics Zip",
+        "description": "Выгрузка под фильтрами одним архивом: каждая выбранная часть — отдельный CSV.",
+        "operationId": "export_analytics_zip_api_analytics_export_zip_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Period"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ML",
+                    "HCP_-1.5",
+                    "HCP_+1.5"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "name": "selection",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 2,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Selection"
+            }
+          },
+          {
+            "name": "surface",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "maxItems": 5,
+              "title": "Surface"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "app",
+                    "legacy"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "part",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "bets",
+                  "events",
+                  "calibration",
+                  "brier"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 4,
+              "title": "Part"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ZIP с CSV частей",
+            "content": {
+              "application/zip": {}
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dashboard": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Get Dashboard",
+        "description": "Банк, показатели периода с изменением к прошлому, ряд банка и последние ставки,\nоткрытые ставки, мои матчи сегодня, дела администратора.",
+        "operationId": "get_dashboard_api_dashboard_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "30d",
+              "title": "Period"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/players": {
       "get": {
         "tags": [
@@ -4073,6 +4640,47 @@
         "type": "object",
         "title": "AdminActionIn",
         "description": "Блокировка и завершение сеансов: код 2FA нужен, только если цель — администратор\n(с угнанным сеансом без телефона нельзя по одному отключить других администраторов)."
+      },
+      "AdminAttentionOut": {
+        "properties": {
+          "archive": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArchiveStaleOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "return_requests": {
+            "items": {
+              "$ref": "#/components/schemas/KeyReturnRequestOut"
+            },
+            "type": "array",
+            "title": "Return Requests"
+          },
+          "limits": {
+            "items": {
+              "$ref": "#/components/schemas/LimitAlertOut"
+            },
+            "type": "array",
+            "title": "Limits"
+          },
+          "alert_pct": {
+            "type": "integer",
+            "title": "Alert Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "archive",
+          "return_requests",
+          "limits",
+          "alert_pct"
+        ],
+        "title": "AdminAttentionOut",
+        "description": "Дела администратора на главной."
       },
       "AdminBudgetOut": {
         "properties": {
@@ -5057,6 +5665,227 @@
           "restart"
         ],
         "title": "AnalysisOut"
+      },
+      "AnalyticsOut": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "tz": {
+            "type": "string",
+            "title": "Tz"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "7d",
+                  "30d",
+                  "90d",
+                  "all"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "date_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date From"
+          },
+          "date_to": {
+            "type": "string",
+            "format": "date",
+            "title": "Date To"
+          },
+          "filtered": {
+            "type": "boolean",
+            "title": "Filtered"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/ThresholdsOut"
+          },
+          "sample": {
+            "$ref": "#/components/schemas/SampleOut"
+          },
+          "kpi": {
+            "$ref": "#/components/schemas/KpiOut"
+          },
+          "prev": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrevOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "brier": {
+            "$ref": "#/components/schemas/BrierOut"
+          },
+          "insights": {
+            "items": {
+              "$ref": "#/components/schemas/InsightOut"
+            },
+            "type": "array",
+            "title": "Insights"
+          },
+          "series": {
+            "$ref": "#/components/schemas/SeriesOut"
+          },
+          "slices": {
+            "$ref": "#/components/schemas/SlicesOut"
+          },
+          "parlays": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParlaysOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "calibration": {
+            "$ref": "#/components/schemas/CalibrationOut"
+          },
+          "clv": {
+            "$ref": "#/components/schemas/ClvOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currency",
+          "tz",
+          "period",
+          "date_from",
+          "date_to",
+          "filtered",
+          "thresholds",
+          "sample",
+          "kpi",
+          "prev",
+          "change",
+          "brier",
+          "insights",
+          "series",
+          "slices",
+          "parlays",
+          "calibration",
+          "clv"
+        ],
+        "title": "AnalyticsOut",
+        "description": "Все блоки «Аналитики» одним ответом (Т5). period null — заданы даты; date_from —\nпервый день (null — все время), date_to — последний (сегодня или to). filtered —\nвыбран рынок, покрытие или источник (ряд — результат отобранных ставок, а не банк).\nprev и change — null у «всего времени», без начала периода и если в прошлом периоде\nнет рассчитанных ставок."
+      },
+      "ArchiveSourceOut": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "sackmann",
+              "tennis_data"
+            ],
+            "title": "Source"
+          },
+          "last_load": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Load"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "last_load"
+        ],
+        "title": "ArchiveSourceOut"
+      },
+      "ArchiveStaleOut": {
+        "properties": {
+          "days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days"
+          },
+          "last_load": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Load"
+          },
+          "stale_after_days": {
+            "type": "integer",
+            "title": "Stale After Days"
+          },
+          "update_hour_utc": {
+            "type": "integer",
+            "title": "Update Hour Utc"
+          },
+          "update_minute": {
+            "type": "integer",
+            "title": "Update Minute"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveSourceOut"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "last_load",
+          "stale_after_days",
+          "update_hour_utc",
+          "update_minute",
+          "sources"
+        ],
+        "title": "ArchiveStaleOut",
+        "description": "Архив матчей устарел (то же правило, что уведомление data_stale): days — дней с\nсамой старой из последних успешных загрузок (null — какой-то архив не загружался ни\nразу), stale_after_days — порог; update_hour_utc и update_minute — когда идет ночное\nобновление (UTC)."
       },
       "AuditOut": {
         "properties": {
@@ -6340,6 +7169,151 @@
         "title": "BetsSummaryOut",
         "description": "Итоги по фильтрам (решения Т8 и В5): рассчитано — выигрыш, проигрыш и возврат;\nоборот и прибыль — без возвратов; ROI = прибыль / оборот; винрейт — выигрыш / (выигрыш +\nпроигрыш); CLV — средний по рассчитанным ставкам приложения (без ставок бота);\nclv_positive из clv_n — лучше закрытия; legacy_settled — рассчитанных ставок бота."
       },
+      "BrierOut": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff"
+          },
+          "diff_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "noise": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise"
+          },
+          "closing_n": {
+            "type": "integer",
+            "title": "Closing N"
+          },
+          "closing_model": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing Model"
+          },
+          "closing_market": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing Market"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/BrierPointOut"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "windows": {
+            "type": "integer",
+            "title": "Windows"
+          },
+          "better": {
+            "type": "integer",
+            "title": "Better"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "model",
+          "market",
+          "diff",
+          "diff_ci",
+          "noise",
+          "closing_n",
+          "closing_model",
+          "closing_market",
+          "points",
+          "windows",
+          "better"
+        ],
+        "title": "BrierOut",
+        "description": "Brier модели против рынка (В2): события — ноги рассчитанных ставок приложения с\nитоговой вероятностью модели (p_final) и рынком в момент прогноза без маржи\n(q_market_at_pred). diff = модель − рынок (меньше 0 — модель точнее), diff_ci —\nпарный бутстрэп по событиям, noise — интервал задевает ноль. Второй ряд — рынок\nзакрытия: события, где внесены обе стороны закрывающего кэфа (closing_*).\nСкользящее окно: windows — число окон (шаг rolling_step), better — в скольких из них\nмодель точнее рынка; points — окна для графика, не больше 200 равномерно по ряду\n(последнее — всегда), все окна — в выгрузке CSV."
+      },
+      "BrierPointOut": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "model": {
+            "type": "number",
+            "title": "Model"
+          },
+          "market": {
+            "type": "number",
+            "title": "Market"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "model",
+          "market"
+        ],
+        "title": "BrierPointOut",
+        "description": "Окно скользящего Brier: последние rolling_window событий по день day."
+      },
       "BudgetIn": {
         "properties": {
           "monthly_usd": {
@@ -6392,6 +7366,267 @@
         ],
         "title": "BudgetIn",
         "description": "Общий бюджет ключа администратора ($1–5000, не меньше потраченного за месяц),\nпорог предупреждения о расходе и (по желанию) бюджет проверочных прогонов."
+      },
+      "CalibrationBinOut": {
+        "properties": {
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "p": {
+            "type": "number",
+            "title": "P"
+          },
+          "p_base": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Base"
+          },
+          "p_claude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Claude"
+          },
+          "actual": {
+            "type": "number",
+            "title": "Actual"
+          },
+          "ci_low": {
+            "type": "number",
+            "title": "Ci Low"
+          },
+          "ci_high": {
+            "type": "number",
+            "title": "Ci High"
+          }
+        },
+        "type": "object",
+        "required": [
+          "low",
+          "high",
+          "n",
+          "p",
+          "p_base",
+          "p_claude",
+          "actual",
+          "ci_low",
+          "ci_high"
+        ],
+        "title": "CalibrationBinOut",
+        "description": "Корзина 5 п.п.: события с вероятностью в [low, high), средняя вероятность p (на\nграфике), средние p_base и p_claude (в таблице), доля сыгравших и интервал Уилсона."
+      },
+      "CalibrationFlagOut": {
+        "properties": {
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "p": {
+            "type": "number",
+            "title": "P"
+          },
+          "actual": {
+            "type": "number",
+            "title": "Actual"
+          },
+          "gap": {
+            "type": "number",
+            "title": "Gap"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "over",
+              "under"
+            ],
+            "title": "Direction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "low",
+          "high",
+          "n",
+          "p",
+          "actual",
+          "gap",
+          "direction"
+        ],
+        "title": "CalibrationFlagOut",
+        "description": "Диапазон с самым большим расхождением: over — модель переоценивает, under —\nнедооценивает; gap — |p − actual|."
+      },
+      "CalibrationOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "final",
+              "claude"
+            ],
+            "title": "Kind"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "outside": {
+            "type": "integer",
+            "title": "Outside"
+          },
+          "bins": {
+            "items": {
+              "$ref": "#/components/schemas/CalibrationBinOut"
+            },
+            "type": "array",
+            "title": "Bins"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "empty",
+              "few",
+              "off",
+              "ok"
+            ],
+            "title": "Status"
+          },
+          "worst": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CalibrationFlagOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "opposite": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CalibrationFlagOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "events",
+          "outside",
+          "bins",
+          "status",
+          "worst",
+          "opposite"
+        ],
+        "title": "CalibrationOut",
+        "description": "Калибровка (В3, Т9): события рассчитанных ставок, по одному на пару исходов;\nпрогноз — последний не замененный, проверочные прогоны исключены. kind = final —\nитоговая вероятность модели (ставки приложения), claude — оценка Claude ставок бота\n(только под фильтром «старый бот», Т10). Корзины 5 п.п. от 50 до 95%; outside —\nсобытия вне этого отрезка. status: empty — событий нет, few — ни в одной корзине нет\ncalibration_min_n, off — есть расхождение на calibration_gap и больше, ok — нет.\nworst — диапазон с наибольшим расхождением, opposite — самый заметный с обратным\nзнаком."
+      },
+      "ChangeOut": {
+        "properties": {
+          "profit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "winrate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winrate"
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profit",
+          "roi",
+          "winrate",
+          "clv"
+        ],
+        "title": "ChangeOut",
+        "description": "Изменение к прошлому периоду: прибыль — деньгами, ROI, винрейт и CLV — разницей\nдолей (0.021 — это +2,1 п.п.); null — сравнить не с чем."
+      },
+      "CiOut": {
+        "properties": {
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          }
+        },
+        "type": "object",
+        "required": [
+          "low",
+          "high"
+        ],
+        "title": "CiOut",
+        "description": "95% доверительный интервал доли."
       },
       "ClosingIn": {
         "properties": {
@@ -6546,6 +7781,94 @@
         ],
         "title": "ClosingUpdateIn",
         "description": "Закрывающий кэф ноги; null — стереть."
+      },
+      "ClvBinOut": {
+        "properties": {
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share"
+          },
+          "open_low": {
+            "type": "boolean",
+            "title": "Open Low"
+          },
+          "open_high": {
+            "type": "boolean",
+            "title": "Open High"
+          }
+        },
+        "type": "object",
+        "required": [
+          "low",
+          "high",
+          "n",
+          "share",
+          "open_low",
+          "open_high"
+        ],
+        "title": "ClvBinOut",
+        "description": "Столбец распределения CLV шириной 1 п.п.: [low, high); open_low — крайний левый\nсобирает все меньше, open_high — крайний правый все больше."
+      },
+      "ClvOut": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "positive": {
+            "type": "integer",
+            "title": "Positive"
+          },
+          "negative": {
+            "type": "integer",
+            "title": "Negative"
+          },
+          "bins": {
+            "items": {
+              "$ref": "#/components/schemas/ClvBinOut"
+            },
+            "type": "array",
+            "title": "Bins"
+          },
+          "fair_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fair Mean"
+          },
+          "fair_n": {
+            "type": "integer",
+            "title": "Fair N"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "positive",
+          "negative",
+          "bins",
+          "fair_mean",
+          "fair_n"
+        ],
+        "title": "ClvOut",
+        "description": "Распределение CLV ставок (кэф / закрытие − 1, В1) — тех же, что в KPI; positive и\nnegative — лучше и хуже закрытия. fair_mean — средний CLV без маржи (кэф · q_close −\n1) по событиям, где внесены обе стороны закрытия (fair_n)."
       },
       "ComparisonRow": {
         "properties": {
@@ -6913,6 +8236,164 @@
         ],
         "title": "CsrfOut",
         "description": "CSRF-токен: то же значение, что в cookie csrf. Его шлют в заголовке X-CSRF-Token."
+      },
+      "DashboardOut": {
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "30d",
+              "90d",
+              "all"
+            ],
+            "title": "Period"
+          },
+          "date_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date From"
+          },
+          "date_to": {
+            "type": "string",
+            "format": "date",
+            "title": "Date To"
+          },
+          "kpi": {
+            "$ref": "#/components/schemas/KpiOut"
+          },
+          "prev": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrevOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "brier": {
+            "$ref": "#/components/schemas/BrierOut"
+          },
+          "series": {
+            "$ref": "#/components/schemas/SeriesOut"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/RecentBetOut"
+            },
+            "type": "array",
+            "title": "Recent"
+          },
+          "small_sample": {
+            "type": "boolean",
+            "title": "Small Sample"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "tz": {
+            "type": "string",
+            "title": "Tz"
+          },
+          "today": {
+            "type": "string",
+            "format": "date",
+            "title": "Today"
+          },
+          "greeting": {
+            "type": "string",
+            "enum": [
+              "morning",
+              "day",
+              "evening",
+              "night"
+            ],
+            "title": "Greeting"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/ThresholdsOut"
+          },
+          "bank": {
+            "$ref": "#/components/schemas/BankOut"
+          },
+          "open_bets": {
+            "items": {
+              "$ref": "#/components/schemas/OpenBetOut"
+            },
+            "type": "array",
+            "title": "Open Bets"
+          },
+          "open_count": {
+            "type": "integer",
+            "title": "Open Count"
+          },
+          "open_stake": {
+            "type": "string",
+            "title": "Open Stake"
+          },
+          "my_matches": {
+            "items": {
+              "$ref": "#/components/schemas/MyMatchOut"
+            },
+            "type": "array",
+            "title": "My Matches"
+          },
+          "admin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminAttentionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "period",
+          "date_from",
+          "date_to",
+          "kpi",
+          "prev",
+          "change",
+          "brier",
+          "series",
+          "recent",
+          "small_sample",
+          "currency",
+          "tz",
+          "today",
+          "greeting",
+          "thresholds",
+          "bank",
+          "open_bets",
+          "open_count",
+          "open_stake",
+          "my_matches",
+          "admin"
+        ],
+        "title": "DashboardOut",
+        "description": "Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,\nпик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,\nдо OPEN_LIMIT; всего — open_count на open_stake); admin — только у администратора."
       },
       "DecisionIn": {
         "properties": {
@@ -7763,6 +9244,147 @@
         ],
         "title": "HealthOut"
       },
+      "InsightFilterOut": {
+        "properties": {
+          "surface": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Surface"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ML",
+                  "HCP_-1.5",
+                  "HCP_+1.5"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection"
+          }
+        },
+        "type": "object",
+        "title": "InsightFilterOut",
+        "description": "Фильтр для действия filter: покрытие или исход."
+      },
+      "InsightOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "sample",
+              "calibration_over",
+              "calibration_under",
+              "calibration_ok",
+              "total_negative",
+              "small_slice",
+              "brier_noise",
+              "brier_model_better",
+              "brier_market_better"
+            ],
+            "title": "Code"
+          },
+          "tone": {
+            "type": "string",
+            "enum": [
+              "warn",
+              "bad",
+              "info",
+              "accent",
+              "good"
+            ],
+            "title": "Tone"
+          },
+          "title": {
+            "$ref": "#/components/schemas/TextKey"
+          },
+          "text": {
+            "$ref": "#/components/schemas/TextKey"
+          },
+          "basis": {
+            "type": "integer",
+            "title": "Basis"
+          },
+          "basis_unit": {
+            "type": "string",
+            "enum": [
+              "events",
+              "bets"
+            ],
+            "title": "Basis Unit"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "calibration",
+                  "bets",
+                  "filter",
+                  "widen",
+                  "clear",
+                  "explain"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InsightFilterOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "tone",
+          "title",
+          "text",
+          "basis",
+          "basis_unit",
+          "action"
+        ],
+        "title": "InsightOut",
+        "description": "Вывод кодом (до трех, без Claude): заголовок и текст — ключи локали с числами,\nоснование — basis событий или ставок, действие — по кнопке."
+      },
       "InviteCreatedOut": {
         "properties": {
           "invite": {
@@ -8039,6 +9661,143 @@
         "title": "KeyModelOut",
         "description": "Модель из настроек агента и доступна ли она ключу."
       },
+      "KeyReturnRequestOut": {
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "name",
+          "at"
+        ],
+        "title": "KeyReturnRequestOut",
+        "description": "Участник просит вернуть ключ администратора (Р12)."
+      },
+      "KpiOut": {
+        "properties": {
+          "settled": {
+            "type": "integer",
+            "title": "Settled"
+          },
+          "won": {
+            "type": "integer",
+            "title": "Won"
+          },
+          "lost": {
+            "type": "integer",
+            "title": "Lost"
+          },
+          "void": {
+            "type": "integer",
+            "title": "Void"
+          },
+          "turnover": {
+            "type": "string",
+            "title": "Turnover"
+          },
+          "profit": {
+            "type": "string",
+            "title": "Profit"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "roi_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "winrate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winrate"
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv"
+          },
+          "clv_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clv_positive": {
+            "type": "integer",
+            "title": "Clv Positive"
+          },
+          "clv_n": {
+            "type": "integer",
+            "title": "Clv N"
+          },
+          "legacy_settled": {
+            "type": "integer",
+            "title": "Legacy Settled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "settled",
+          "won",
+          "lost",
+          "void",
+          "turnover",
+          "profit",
+          "roi",
+          "roi_ci",
+          "winrate",
+          "clv",
+          "clv_ci",
+          "clv_positive",
+          "clv_n",
+          "legacy_settled"
+        ],
+        "title": "KpiOut",
+        "description": "Показатели за период — те же правила и те же числа, что итоги «Ставок»\n(GET /bets/summary): оборот и прибыль без возвратов (Т8), ROI = прибыль / оборот,\nвинрейт = выигрыш / (выигрыш + проигрыш), CLV — средний по рассчитанным ставкам\nприложения с закрытием у всех ног (ставки бота не входят, В5). roi_ci и clv_ci —\nбутстрэп по ставкам (на главной не считаются — null)."
+      },
       "LegMatchOut": {
         "properties": {
           "id": {
@@ -8181,6 +9940,49 @@
         ],
         "title": "LegSettleIn",
         "description": "Исход ноги, счет (необязательно; первым — игрок 1) и закрывающий кэф: поля нет —\nзакрытие не меняется, null — стирается."
+      },
+      "LimitAlertOut": {
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "spent_usd": {
+            "type": "number",
+            "title": "Spent Usd"
+          },
+          "limit_usd": {
+            "type": "number",
+            "title": "Limit Usd"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "80",
+              "100"
+            ],
+            "title": "Level"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "name",
+          "spent_usd",
+          "limit_usd",
+          "share",
+          "level"
+        ],
+        "title": "LimitAlertOut",
+        "description": "Участник у месячного лимита на ключе администратора: level 80 — дошел до порога\nпредупреждения (alert_pct), 100 — остатка не хватает на анализ (то же правило, что у\nуведомлений limit_80 и limit_100). Р14: только расход на ИИ."
       },
       "LimitDefaultsOut": {
         "properties": {
@@ -8568,6 +10370,100 @@
         "title": "MarketRow",
         "description": "Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф\nучастника, валуй p_final·кэф − 1 и уровень, попал ли в экспресс, почему нет\n(note_key — ключ analysis.leg.*)."
       },
+      "MarketSliceOut": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "winrate": {
+            "type": "number",
+            "title": "Winrate"
+          },
+          "roi": {
+            "type": "number",
+            "title": "Roi"
+          },
+          "roi_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avg_odds": {
+            "type": "number",
+            "title": "Avg Odds"
+          },
+          "small": {
+            "type": "boolean",
+            "title": "Small"
+          },
+          "market": {
+            "type": "string",
+            "enum": [
+              "ML",
+              "HCP_-1.5",
+              "HCP_+1.5"
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "type": "integer",
+            "title": "Selection"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "wins",
+          "winrate",
+          "roi",
+          "roi_ci",
+          "avg_odds",
+          "small",
+          "market",
+          "selection"
+        ],
+        "title": "MarketSliceOut",
+        "description": "Исход: рынок и сторона (П1 — ML и 1, Ф2(+1.5) — HCP_+1.5 и 2)."
+      },
+      "MarketsTotalOut": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "winrate": {
+            "type": "number",
+            "title": "Winrate"
+          },
+          "roi": {
+            "type": "number",
+            "title": "Roi"
+          },
+          "avg_odds": {
+            "type": "number",
+            "title": "Avg Odds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "winrate",
+          "roi",
+          "avg_odds"
+        ],
+        "title": "MarketsTotalOut",
+        "description": "Итоговая строка «Сводки по рынкам»: все исходы вместе."
+      },
       "MatchPairOut": {
         "properties": {
           "player1": {
@@ -8938,6 +10834,144 @@
         "title": "ModeDecisionIn",
         "description": "Решение по просьбе вернуть ключ администратора. limit — лимит на ключе\nадминистратора при одобрении (не задан — остается прежний)."
       },
+      "MyMatchBetOut": {
+        "properties": {
+          "bet_id": {
+            "type": "integer",
+            "title": "Bet Id"
+          },
+          "leg_id": {
+            "type": "integer",
+            "title": "Leg Id"
+          },
+          "market": {
+            "type": "string",
+            "enum": [
+              "ML",
+              "HCP_-1.5",
+              "HCP_+1.5"
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "type": "integer",
+            "title": "Selection"
+          },
+          "odds_taken": {
+            "type": "string",
+            "title": "Odds Taken"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bet_id",
+          "leg_id",
+          "market",
+          "selection",
+          "odds_taken"
+        ],
+        "title": "MyMatchBetOut",
+        "description": "Нога открытой ставки на этом матче."
+      },
+      "MyMatchOut": {
+        "properties": {
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "player1": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "player2": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "rank1": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank1"
+          },
+          "rank2": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank2"
+          },
+          "tournament": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Round"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "bets": {
+            "items": {
+              "$ref": "#/components/schemas/MyMatchBetOut"
+            },
+            "type": "array",
+            "title": "Bets"
+          },
+          "analyses": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Analyses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "match_id",
+          "player1",
+          "player2",
+          "rank1",
+          "rank2",
+          "tournament",
+          "round",
+          "scheduled_at",
+          "bets",
+          "analyses"
+        ],
+        "title": "MyMatchOut",
+        "description": "Мой матч сегодня (В6): из ног открытых ставок и сегодняшних анализов участника.\nrank1 и rank2 — место по Эло (null — нет в таблице текущего Эло); tournament — из\nархива или своего ввода; scheduled_at — время, если известно."
+      },
       "NotificationOut": {
         "properties": {
           "id": {
@@ -9152,6 +11186,278 @@
         ],
         "title": "OddsPairsOut"
       },
+      "OddsSliceOut": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "winrate": {
+            "type": "number",
+            "title": "Winrate"
+          },
+          "roi": {
+            "type": "number",
+            "title": "Roi"
+          },
+          "roi_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avg_odds": {
+            "type": "number",
+            "title": "Avg Odds"
+          },
+          "small": {
+            "type": "boolean",
+            "title": "Small"
+          },
+          "low": {
+            "type": "string",
+            "title": "Low"
+          },
+          "high": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "wins",
+          "winrate",
+          "roi",
+          "roi_ci",
+          "avg_odds",
+          "small",
+          "low",
+          "high"
+        ],
+        "title": "OddsSliceOut",
+        "description": "Диапазон кэфа события: от low до high включительно (high null — и выше)."
+      },
+      "OpenBetOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "analysis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Id"
+          },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Placed At"
+          },
+          "bookmaker": {
+            "type": "string",
+            "title": "Bookmaker"
+          },
+          "stake": {
+            "type": "string",
+            "title": "Stake"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "total_odds": {
+            "type": "string",
+            "title": "Total Odds"
+          },
+          "effective_odds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Odds"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "won",
+              "lost",
+              "void"
+            ],
+            "title": "Status"
+          },
+          "profit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit"
+          },
+          "payout": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout"
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled At"
+          },
+          "settled_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "manual",
+                  "auto",
+                  "legacy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled By"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "app",
+              "legacy"
+            ],
+            "title": "Source"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv"
+          },
+          "clv_fair": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv Fair"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "legacy",
+                  "void",
+                  "no_closing",
+                  "edge_confirmed",
+                  "won_against_market",
+                  "variance",
+                  "model_error"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/BetLegItemOut"
+            },
+            "type": "array",
+            "title": "Legs"
+          },
+          "implied": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Implied"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "analysis_id",
+          "placed_at",
+          "bookmaker",
+          "stake",
+          "currency",
+          "total_odds",
+          "effective_odds",
+          "status",
+          "profit",
+          "payout",
+          "settled_at",
+          "settled_by",
+          "source",
+          "updated_at",
+          "clv",
+          "clv_fair",
+          "verdict",
+          "legs",
+          "implied"
+        ],
+        "title": "OpenBetOut",
+        "description": "Открытая ставка: implied — 1 / кэф каждой ноги (вероятность по кэфу букмекера, с его\nмаржой) в порядке legs; вероятность модели — legs[].p_final."
+      },
       "OwnCapIn": {
         "properties": {
           "per_analysis_usd": {
@@ -9360,6 +11666,121 @@
           "name_ru"
         ],
         "title": "PairName"
+      },
+      "ParlaysOut": {
+        "properties": {
+          "parlays": {
+            "type": "integer",
+            "title": "Parlays"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "legacy_parlays": {
+            "type": "integer",
+            "title": "Legacy Parlays"
+          },
+          "profit": {
+            "type": "string",
+            "title": "Profit"
+          },
+          "parlays_roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parlays Roi"
+          },
+          "parlays_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "singles_roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Singles Roi"
+          },
+          "singles_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff"
+          },
+          "diff_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "noise",
+                  "parlays",
+                  "singles"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          }
+        },
+        "type": "object",
+        "required": [
+          "parlays",
+          "events",
+          "legacy_parlays",
+          "profit",
+          "parlays_roi",
+          "parlays_ci",
+          "singles_roi",
+          "singles_ci",
+          "diff",
+          "diff_ci",
+          "verdict"
+        ],
+        "title": "ParlaysOut",
+        "description": "Р21: реальные экспрессы против тех же событий ординарами на равную сумму. Экспрессы\nстарого бота не входят (Т10, legacy_parlays). Интервалы — парный бутстрэп по\nэкспрессам; verdict — noise (интервал разницы задевает ноль), parlays (экспрессы\nлучше) или singles."
       },
       "PasswordChangeIn": {
         "properties": {
@@ -9695,6 +12116,83 @@
         ],
         "title": "PlayerSide"
       },
+      "PrevOut": {
+        "properties": {
+          "date_from": {
+            "type": "string",
+            "format": "date",
+            "title": "Date From"
+          },
+          "date_to": {
+            "type": "string",
+            "format": "date",
+            "title": "Date To"
+          },
+          "settled": {
+            "type": "integer",
+            "title": "Settled"
+          },
+          "turnover": {
+            "type": "string",
+            "title": "Turnover"
+          },
+          "profit": {
+            "type": "string",
+            "title": "Profit"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "winrate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winrate"
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv"
+          },
+          "clv_n": {
+            "type": "integer",
+            "title": "Clv N"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date_from",
+          "date_to",
+          "settled",
+          "turnover",
+          "profit",
+          "roi",
+          "winrate",
+          "clv",
+          "clv_n"
+        ],
+        "title": "PrevOut",
+        "description": "Прошлый период той же длины (до первого дня текущего). Его нет (null), если\nистория участника начинается позже начала прошлого периода или в нем нет рассчитанных\nставок."
+      },
       "PreviewEvent": {
         "properties": {
           "position": {
@@ -10025,6 +12523,98 @@
         ],
         "title": "PublicSettingsOut",
         "description": "Валюта программы (Р17): в ней показываются банки, ставки и прибыль у всех."
+      },
+      "RecentBetOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Placed At"
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled At"
+          },
+          "legs": {
+            "type": "integer",
+            "title": "Legs"
+          },
+          "total_odds": {
+            "type": "string",
+            "title": "Total Odds"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "won",
+              "lost",
+              "void"
+            ],
+            "title": "Status"
+          },
+          "stake": {
+            "type": "string",
+            "title": "Stake"
+          },
+          "profit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "app",
+              "legacy"
+            ],
+            "title": "Source"
+          },
+          "equity_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equity After"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "placed_at",
+          "settled_at",
+          "legs",
+          "total_odds",
+          "status",
+          "stake",
+          "profit",
+          "source",
+          "equity_after"
+        ],
+        "title": "RecentBetOut",
+        "description": "Рассчитанная ставка периода для таблицы «Динамика банка»: equity_after — капитал\nсразу после ее расчета («Банк после»)."
       },
       "RecoveryCodesIn": {
         "properties": {
@@ -10460,6 +13050,235 @@
         ],
         "title": "RuleCheck"
       },
+      "SampleOut": {
+        "properties": {
+          "bets": {
+            "type": "integer",
+            "title": "Bets"
+          },
+          "singles": {
+            "type": "integer",
+            "title": "Singles"
+          },
+          "parlays": {
+            "type": "integer",
+            "title": "Parlays"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "legacy_bets": {
+            "type": "integer",
+            "title": "Legacy Bets"
+          },
+          "legacy_parlay_events": {
+            "type": "integer",
+            "title": "Legacy Parlay Events"
+          },
+          "open_bets": {
+            "type": "integer",
+            "title": "Open Bets"
+          },
+          "first_day": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Day"
+          },
+          "last_day": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Day"
+          },
+          "last_settled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Settled At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bets",
+          "singles",
+          "parlays",
+          "events",
+          "legacy_bets",
+          "legacy_parlay_events",
+          "open_bets",
+          "first_day",
+          "last_day",
+          "last_settled_at"
+        ],
+        "title": "SampleOut",
+        "description": "Что попало в выборку: bets — рассчитанные ставки (с возвратами), из них singles и\nparlays; events — события (ноги с исходом «выиграл» или «проиграл») под фильтрами\nрынка и покрытия; legacy_bets — ставки старого бота среди bets (в банке и ROI, но не в\nCLV, Brier и калибровке, В5); legacy_parlay_events — события экспрессов бота, которые\nпо отдельности не считаются (Т10); open_bets — ставки в игре под теми же фильтрами (в\nрасчет не входят); first_day и last_day — даты первой и последней ставки выборки по\nпоясу участника; last_settled_at — когда рассчитана последняя."
+      },
+      "SeriesOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "bank",
+              "result"
+            ],
+            "title": "Kind"
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "week",
+              "month"
+            ],
+            "title": "Group"
+          },
+          "start": {
+            "type": "string",
+            "format": "date",
+            "title": "Start"
+          },
+          "base": {
+            "type": "string",
+            "title": "Base"
+          },
+          "last": {
+            "type": "string",
+            "title": "Last"
+          },
+          "peak": {
+            "type": "string",
+            "title": "Peak"
+          },
+          "max_drawdown": {
+            "type": "number",
+            "title": "Max Drawdown"
+          },
+          "best": {
+            "type": "string",
+            "title": "Best"
+          },
+          "worst": {
+            "type": "string",
+            "title": "Worst"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesPointOut"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesRowOut"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "group",
+          "start",
+          "base",
+          "last",
+          "peak",
+          "max_drawdown",
+          "best",
+          "worst",
+          "points",
+          "rows"
+        ],
+        "title": "SeriesOut",
+        "description": "Ряд по дням. kind = bank — капитал (баланс + ставки в игре) на конец дня, когда\nфильтров рынка, покрытия и источника нет; result — прибыль отобранных ставок\nнарастающим итогом по дню расчета (по поясу участника). Первая точка — день перед\nпериодом (start, значение base), у «всего времени» — первый день. peak — наибольшее\nзначение ряда; max_drawdown (доля от −1 до 0, только у bank) — наибольшая просадка от\nпика по правилу Р22: пополнение, вывод и корректировка — не просадка; best и worst —\nлучшая и худшая точка (у result худшая не выше нуля). rows — по неделям (период до 31\nдня) или по месяцам."
+      },
+      "SeriesPointOut": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "value"
+        ],
+        "title": "SeriesPointOut"
+      },
+      "SeriesRowOut": {
+        "properties": {
+          "date_from": {
+            "type": "string",
+            "format": "date",
+            "title": "Date From"
+          },
+          "date_to": {
+            "type": "string",
+            "format": "date",
+            "title": "Date To"
+          },
+          "bets": {
+            "type": "integer",
+            "title": "Bets"
+          },
+          "profit": {
+            "type": "string",
+            "title": "Profit"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "end": {
+            "type": "string",
+            "title": "End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date_from",
+          "date_to",
+          "bets",
+          "profit",
+          "roi",
+          "end"
+        ],
+        "title": "SeriesRowOut",
+        "description": "Строка таблицы под графиком: неделя или месяц (date_from–date_to), ставки,\nрассчитанные в эти дни, их прибыль и ROI, значение ряда на конец строки."
+      },
       "SessionOut": {
         "properties": {
           "id": {
@@ -10532,6 +13351,58 @@
         ],
         "title": "SettleIn",
         "description": "Ручной расчет: исходы всех ног и версия ставки, которую видел участник."
+      },
+      "SlicesOut": {
+        "properties": {
+          "surfaces": {
+            "items": {
+              "$ref": "#/components/schemas/SurfaceSliceOut"
+            },
+            "type": "array",
+            "title": "Surfaces"
+          },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/MarketSliceOut"
+            },
+            "type": "array",
+            "title": "Markets"
+          },
+          "markets_total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MarketsTotalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "odds": {
+            "items": {
+              "$ref": "#/components/schemas/OddsSliceOut"
+            },
+            "type": "array",
+            "title": "Odds"
+          },
+          "totals": {
+            "items": {
+              "$ref": "#/components/schemas/TotalSliceOut"
+            },
+            "type": "array",
+            "title": "Totals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "surfaces",
+          "markets",
+          "markets_total",
+          "odds",
+          "totals"
+        ],
+        "title": "SlicesOut",
+        "description": "Срезы. Срез по покрытию не сужается фильтром покрытия, по рынку — фильтром рынка\n(выбранное значение экран подсвечивает); по кэфу — всеми фильтрами."
       },
       "StakeBandOut": {
         "properties": {
@@ -10982,6 +13853,67 @@
         ],
         "title": "StrategyParamsOut"
       },
+      "SurfaceSliceOut": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "winrate": {
+            "type": "number",
+            "title": "Winrate"
+          },
+          "roi": {
+            "type": "number",
+            "title": "Roi"
+          },
+          "roi_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avg_odds": {
+            "type": "number",
+            "title": "Avg Odds"
+          },
+          "small": {
+            "type": "boolean",
+            "title": "Small"
+          },
+          "surface": {
+            "type": "string",
+            "enum": [
+              "hard",
+              "clay",
+              "grass",
+              "carpet",
+              "unknown"
+            ],
+            "title": "Surface"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "wins",
+          "winrate",
+          "roi",
+          "roi_ci",
+          "avg_odds",
+          "small",
+          "surface"
+        ],
+        "title": "SurfaceSliceOut"
+      },
       "TextKey": {
         "properties": {
           "key": {
@@ -11001,6 +13933,158 @@
         ],
         "title": "TextKey",
         "description": "Текст ключом локали: key — полный ключ (analysis.draft.player_check), params —\nзначения для подстановки."
+      },
+      "ThresholdsOut": {
+        "properties": {
+          "small_sample": {
+            "type": "integer",
+            "title": "Small Sample"
+          },
+          "insight_min_events": {
+            "type": "integer",
+            "title": "Insight Min Events"
+          },
+          "calibration_min_n": {
+            "type": "integer",
+            "title": "Calibration Min N"
+          },
+          "calibration_gap": {
+            "type": "number",
+            "title": "Calibration Gap"
+          },
+          "calibration_few": {
+            "type": "integer",
+            "title": "Calibration Few"
+          },
+          "slice_pattern_n": {
+            "type": "integer",
+            "title": "Slice Pattern N"
+          },
+          "dashboard_small": {
+            "type": "integer",
+            "title": "Dashboard Small"
+          },
+          "rolling_window": {
+            "type": "integer",
+            "title": "Rolling Window"
+          },
+          "rolling_step": {
+            "type": "integer",
+            "title": "Rolling Step"
+          }
+        },
+        "type": "object",
+        "required": [
+          "small_sample",
+          "insight_min_events",
+          "calibration_min_n",
+          "calibration_gap",
+          "calibration_few",
+          "slice_pattern_n",
+          "dashboard_small",
+          "rolling_window",
+          "rolling_step"
+        ],
+        "title": "ThresholdsOut",
+        "description": "Пороги, по которым сервер ставит метки и выводы (одно место — app/services/\nanalytics.py): small_sample — меньше стольких событий или ставок в срезе ROI метка\n«мало данных»; insight_min_events — меньше стольких событий вывод «выборка мала»;\ncalibration_min_n и calibration_gap — диапазон калибровки с n событиями и больше,\nгде прогноз расходится с фактом на gap и больше, — плохой; calibration_few — меньше\nстольких событий калибровка «скачет»; slice_pattern_n — меньше стольких событий\nплюс в срезе — «пока не закономерность»; dashboard_small — меньше стольких\nрассчитанных ставок за период главная предупреждает о малой выборке;\nrolling_window и rolling_step — окно и шаг скользящего Brier."
+      },
+      "TotalSliceOut": {
+        "properties": {
+          "low": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low"
+          },
+          "high": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High"
+          },
+          "stake_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stake Pct"
+          },
+          "triple": {
+            "type": "boolean",
+            "title": "Triple"
+          },
+          "bets": {
+            "type": "integer",
+            "title": "Bets"
+          },
+          "voids": {
+            "type": "integer",
+            "title": "Voids"
+          },
+          "turnover": {
+            "type": "string",
+            "title": "Turnover"
+          },
+          "profit": {
+            "type": "string",
+            "title": "Profit"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "roi_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "small": {
+            "type": "boolean",
+            "title": "Small"
+          }
+        },
+        "type": "object",
+        "required": [
+          "low",
+          "high",
+          "stake_pct",
+          "triple",
+          "bets",
+          "voids",
+          "turnover",
+          "profit",
+          "roi",
+          "roi_ci",
+          "small"
+        ],
+        "title": "TotalSliceOut",
+        "description": "ROI реальных ставок по итоговому кэфу — диапазоны таблицы стратегии (Т20):\nпервый от low, остальные до следующего; low и high null — ставки вне таблицы.\nbets — сыгравшие (выигрыш и проигрыш), voids — возвраты (в оборот не входят);\nstake_pct — доля банка по таблице, triple — диапазон только для экспресса из 3."
       },
       "TotalsOut": {
         "properties": {
