@@ -86,6 +86,7 @@ export function betOpen(over: Partial<BetItem> = {}): BetItem {
     status: 'open',
     profit: null,
     payout: '2488.20',
+    bank_after: null,
     settled_at: null,
     settled_by: null,
     source: 'app',

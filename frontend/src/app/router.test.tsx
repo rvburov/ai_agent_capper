@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { describe, expect, it } from 'vitest';
 
 import { ToastProvider } from '../components';
+import { baseApi, dashboardApi } from '../test/factories';
 import { json, ME_MEMBER, mockFetch } from '../test/fetchMock';
 import { createTestQueryClient } from '../test/renderPage';
 import { routes } from './router';
@@ -33,14 +34,12 @@ describe('Маршруты', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Вход в AI Capper' })).toBeInTheDocument();
   });
 
-  it('главная в оболочке: меню на месте, экран — заглушка этапа 4', async () => {
-    mockFetch({
-      'GET /api/me': () => json(ME_MEMBER),
-      'GET /api/me/notifications': () => json({ items: [], unread: 0 }),
-    });
+  it('главная в оболочке: меню и плашка банка на месте, экран главной — свой файл', async () => {
+    mockFetch({ ...baseApi(ME_MEMBER), ...dashboardApi() });
     renderApp('/');
     expect(await screen.findByRole('heading', { level: 1, name: 'Главная' })).toBeInTheDocument();
-    expect(screen.getByText('Раздел появится на этапе 4')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: 'Доброе утро, Анна' })).toBeInTheDocument();
+    expect(await screen.findByTitle('Текущий банк — с учетом ставок в игре')).toHaveTextContent('Банк48 000 ₽');
   });
 
   it('участнику «Администрирование» не открывается, файл экрана не нужен', async () => {

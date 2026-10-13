@@ -1,0 +1,7 @@
+/* Плашка «Банк» в шапке — как в макете (mockup/index.html, .bank-pill). */
+.bank-pill {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 12px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line); font-size: var(--fs-sm); white-space: nowrap;
+}
+.bank-pill b { font-family: var(--font-mono); font-weight: 500; }
+@media (max-width: 960px) { .topbar .bank-pill { padding-inline: 10px; } }

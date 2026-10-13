@@ -6,6 +6,8 @@
  */
 export const TERMINAL_CLI = 'bash deploy/local.sh cli';
 export const SERVER_CLI = 'docker compose exec api python -m app.admin.cli';
+/** Обновить архив матчей вручную (загрузка и пересчет Эло), как ночное обновление. */
+export const DATA_UPDATE_CLI = 'bash deploy/local.sh data';
 
 /** Команда терминала для пользователя с email, например reset-code --email …. */
 export function terminalCommand(command: string, email = '…'): string {

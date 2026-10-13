@@ -6,7 +6,7 @@ import { conditionMet, parseMove, stakeRows, valueRows } from './display';
 import type { Adaptation } from './types';
 
 function rule(over: Partial<Adaptation> & Pick<Adaptation, 'key'>): Adaptation {
-  return { enabled: true, active: false, params: {}, ...over };
+  return { enabled: true, active: false, met: false, params: {}, ...over };
 }
 
 describe('Банк: движение', () => {

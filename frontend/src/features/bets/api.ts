@@ -46,6 +46,8 @@ export function usePlaceBet() {
       void client.invalidateQueries({ queryKey: analysisKeys.bookmakers });
       void client.invalidateQueries({ queryKey: betKeys.all });
       void client.invalidateQueries({ queryKey: DASHBOARD_PREFIX });
+      // «Аналитика» показывает, сколько ставок в игре не учитывается
+      void client.invalidateQueries({ queryKey: ANALYTICS_PREFIX });
     },
     // Ставка по анализу уже сохранена (ответ на первый запрос потерялся) или анализ сменил
     // состояние: экран должен увидеть это сразу, а не предлагать «Сохранить ставку» снова

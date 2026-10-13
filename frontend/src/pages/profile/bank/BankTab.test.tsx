@@ -11,11 +11,11 @@ import { ProfilePage } from '../ProfilePage';
 
 // Правила В7: защита банка включена, рост ставки выключен (как у стратегии после миграции 0004)
 const ADAPT: Adaptation[] = [
-  { key: 'dd10', enabled: true, active: true, params: { from: '0.10', max_pct: '0.025' } },
-  { key: 'dd20', enabled: true, active: false, params: { from: '0.20', max_pct: '0.015' } },
-  { key: 'up15', enabled: false, active: false, params: { bank_up: '0.15', min_winrate: '0.60', max_pct: '0.04' } },
-  { key: 'week_loss', enabled: true, active: false, params: { loss: '-0.05', max_pct: '0.02' } },
-  { key: 'week_win', enabled: false, active: false, params: { win: '0.10', add: '0.005' } },
+  { key: 'dd10', enabled: true, active: true, met: true, params: { from: '0.10', max_pct: '0.025' } },
+  { key: 'dd20', enabled: true, active: false, met: false, params: { from: '0.20', max_pct: '0.015' } },
+  { key: 'up15', enabled: false, active: false, met: false, params: { bank_up: '0.15', min_winrate: '0.60', max_pct: '0.04' } },
+  { key: 'week_loss', enabled: true, active: false, met: false, params: { loss: '-0.05', max_pct: '0.02' } },
+  { key: 'week_win', enabled: false, active: false, met: true, params: { win: '0.10', add: '0.005' } },
 ];
 
 const BANK = bankOut({
@@ -211,7 +211,7 @@ describe('Кабинет: банк и стратегия', () => {
       ...BANK,
       drawdown: '0.5627',
       drawdown_level: 'dd20',
-      adaptations: ADAPT.map((rule) => (rule.key === 'dd10' ? { ...rule, active: false } : rule.key === 'dd20' ? { ...rule, active: true } : rule)),
+      adaptations: ADAPT.map((rule) => (rule.key === 'dd10' ? { ...rule, active: false } : rule.key === 'dd20' ? { ...rule, active: true, met: true } : rule)),
     });
     renderBank(api({ 'GET /api/me/bank': () => json(deep) }));
     const card = (await screen.findByRole('heading', { name: 'Адаптации ставки' })).closest('section') as HTMLElement;

@@ -2,19 +2,11 @@ import { useTranslation } from 'react-i18next';
 
 import { Card, EmptyState, type IconName } from '../../components';
 
-export type StubScreen =
-  | 'dashboard'
-  | 'players'
-  | 'player'
-  | 'analytics'
-  | 'learning'
-  | 'costs';
+export type StubScreen = 'players' | 'player' | 'learning' | 'costs';
 
 const ICONS: Record<StubScreen, IconName> = {
-  dashboard: 'home',
   players: 'users',
   player: 'user',
-  analytics: 'chart',
   learning: 'brain',
   costs: 'coins',
 };

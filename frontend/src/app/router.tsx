@@ -28,6 +28,8 @@ const AnalysisPage = lazyPage(() => import('../pages/analysis/AnalysisPage').the
 const ProfilePage = lazyPage(() => import('../pages/profile/ProfilePage').then((m) => m.ProfilePage));
 const AdminPage = lazyPage(() => import('../pages/admin/AdminPage').then((m) => m.AdminPage));
 const BetsPage = lazyPage(() => import('../pages/bets/BetsPage').then((m) => m.BetsPage));
+const DashboardPage = lazyPage(() => import('../pages/dashboard/DashboardPage').then((m) => m.DashboardPage));
+const AnalyticsPage = lazyPage(() => import('../pages/analytics/AnalyticsPage').then((m) => m.AnalyticsPage));
 
 /** Экран без оболочки (вход, регистрация, сброс): пока грузится — индикатор на весь экран. */
 function bare(page: ReactNode): ReactNode {
@@ -49,7 +51,7 @@ export const routes: RouteObject[] = [
     children: [
       {
         index: true,
-        element: <StubPage screen="dashboard" stage={4} />,
+        element: <DashboardPage />,
         handle: meta({ title: 'dashboard', nav: 'dashboard' }),
       },
       {
@@ -79,7 +81,7 @@ export const routes: RouteObject[] = [
       },
       {
         path: 'analytics',
-        element: <StubPage screen="analytics" stage={4} />,
+        element: <AnalyticsPage />,
         handle: meta({ title: 'analytics', nav: 'analytics' }),
       },
       {

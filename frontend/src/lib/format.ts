@@ -253,6 +253,29 @@ export function formatInterval<T>(
   return i18n.t('format.interval', { from: format(lo), to: format(hi) });
 }
 
+/**
+ * Доля 0..1 числом процентов без знака «%», когда «%» стоит один раз на несколько чисел: начало
+ * диапазона «70» в «70–75%», подписи столбцов CLV «+2». По умолчанию — целые.
+ */
+export function formatPercentNumber(
+  fraction: number | null | undefined,
+  { digits = 0, signed = false }: { digits?: number; signed?: boolean } = {},
+): string {
+  const n = toNumber(fraction);
+  if (!Number.isFinite(n)) return DASH;
+  return formatNumber(n * 100, digits, { signed });
+}
+
+/** Интервал долей целыми процентами, «%» один раз: 95% ДИ ROI «−8…+16%». Нет конца — прочерк. */
+export function formatPercentRange(
+  lo: number | null | undefined,
+  hi: number | null | undefined,
+  { signed = false }: { signed?: boolean } = {},
+): string {
+  const range = formatInterval(lo, hi, (value) => formatPercentNumber(value, { signed }));
+  return range === DASH ? DASH : `${range}%`;
+}
+
 // ---------- даты ----------
 
 // Часовой пояс пользователя (users.tz). Пока профиль не загружен — пояс браузера.
@@ -385,6 +408,36 @@ export function formatDayMonth(
   const p = partsIn(date, zoneOf(value, options.timeZone));
   const months: readonly string[] = i18n.t('format.monthsGenitive', { returnObjects: true });
   return i18n.t('format.date', { day: p.day, month: months[p.month - 1] ?? p.month });
+}
+
+/** Время в поясе пользователя: «14:05» (начало матча на главной). */
+export function formatTime(
+  value: DateInput | null | undefined,
+  options: Pick<DateFormatOptions, 'timeZone'> = {},
+): string {
+  const date = toDate(value);
+  if (!date) return DASH;
+  const p = partsIn(date, options.timeZone ?? displayTimeZone);
+  return `${pad2(p.hour)}:${pad2(p.minute)}`;
+}
+
+const weekdayFormats = new Map<string, Intl.DateTimeFormat>();
+
+/** День недели словом: «вторник». День без времени («2026-10-13») — календарный, в любом поясе. */
+export function formatWeekday(
+  value: DateInput | null | undefined,
+  options: Pick<DateFormatOptions, 'timeZone'> = {},
+): string {
+  const date = toDate(value);
+  if (!date || value === null || value === undefined) return DASH;
+  const timeZone = zoneOf(value, options.timeZone);
+  const key = `${locale()}|${timeZone ?? ''}`;
+  let format = weekdayFormats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale(), { weekday: 'long', timeZone });
+    weekdayFormats.set(key, format);
+  }
+  return format.format(date);
 }
 
 /**

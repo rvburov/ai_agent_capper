@@ -1,5 +1,7 @@
 import { aiBudget } from '../features/ai/testData';
 import { bankOut, strategyV3 } from '../features/analysis/testData';
+import { analyticsOut } from '../features/analytics/testData';
+import { dashboardOut } from '../features/dashboard/testData';
 import { json, ME_ADMIN, ME_MEMBER, type Handler } from './fetchMock';
 
 /*
@@ -9,7 +11,7 @@ import { json, ME_ADMIN, ME_MEMBER, type Handler } from './fetchMock';
  * с разделом (features/<раздел>/testData.ts) и собираются здесь.
  */
 
-export { aiBudget, bankOut, strategyV3 };
+export { aiBudget, analyticsOut, bankOut, dashboardOut, strategyV3 };
 export { ME_ADMIN, ME_MEMBER };
 
 export type Me = typeof ME_MEMBER | typeof ME_ADMIN;
@@ -40,11 +42,12 @@ export function baseApi(me: Me | null = ME_MEMBER, currency: Currency = 'RUB'): 
 }
 
 /**
- * Ответы для главной этапа 3: банк, стратегия и лимит ИИ. Маршруты главной этапа 4
- * (GET /api/dashboard и др.) добавляются сюда вместе с экраном, когда их схема появится в OpenAPI.
+ * Ответы главной: показатели периода (GET /api/dashboard — участник 13 октября 2026, 30 дней),
+ * банк, стратегия и лимит ИИ.
  */
 export function dashboardApi(): Record<string, Handler> {
   return {
+    'GET /api/dashboard': () => json(dashboardOut()),
     'GET /api/me/bank': () => json(bankOut()),
     'GET /api/strategy/active': () => json(strategyV3()),
     'GET /api/ai/budget': () => json(aiBudget()),

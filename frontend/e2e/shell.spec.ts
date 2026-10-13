@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { expect, test } from '@playwright/test';
 
-import { betsApi, collectErrors, expectTapTargets, horizontalOverflow, ME_ADMIN, ME_MEMBER, mockApi } from './fixtures';
+import { betsApi, collectErrors, dashboardApi, expectTapTargets, horizontalOverflow, ME_ADMIN, ME_MEMBER, mockApi } from './fixtures';
 
 // 360 px — самый узкий телефон из PLAN.md, 375 px — из CLAUDE.md
 const VIEWPORTS = [
@@ -18,8 +18,8 @@ for (const vp of VIEWPORTS) {
       const errors = collectErrors(page);
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.emulateMedia({ colorScheme: theme });
-      // на компьютере смоук переходит из меню на «Ставки»
-      await mockApi(page, ME_ADMIN, betsApi());
+      // открывается главная; на компьютере смоук переходит из меню на «Ставки»
+      await mockApi(page, ME_ADMIN, { ...dashboardApi(), ...betsApi() });
       await page.goto('/');
 
       await expect(page.getByRole('heading', { level: 1, name: 'Главная' })).toBeVisible();
@@ -63,7 +63,7 @@ for (const vp of VIEWPORTS) {
 
 test('участник не видит «Управление», а по прямой ссылке — объяснение', async ({ page }) => {
   const errors = collectErrors(page);
-  await mockApi(page, ME_MEMBER);
+  await mockApi(page, ME_MEMBER, dashboardApi());
   await page.goto('/');
   const sidebar = page.getByRole('complementary', { name: 'Основная навигация' });
   await expect(sidebar.getByRole('link', { name: 'Главная' })).toBeVisible();

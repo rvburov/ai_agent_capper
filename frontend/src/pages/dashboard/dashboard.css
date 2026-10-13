@@ -1,0 +1,146 @@
+/* Главная — как в макете (mockup/js/screens/dashboard.js, CSS экрана). */
+
+.dashboard-root { gap: 16px; }
+.dashboard-min { min-width: 0; }
+.dashboard-head h2 { font-size: var(--fs-2xl); }
+@media (max-width: 720px) { .dashboard-head h2 { font-size: var(--fs-xl); } }
+.dashboard-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 16px; }
+.dashboard-tiles > div > .card { height: 100%; }
+.dashboard-main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.dashboard-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.dashboard-pending { opacity: .6; transition: opacity .2s; }
+@media (max-width: 1180px) {
+  .dashboard-top { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-main { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
+  .dashboard-col { display: contents; }
+  .dashboard-o-1 { order: 1; } .dashboard-o-2 { order: 2; } .dashboard-o-3 { order: 3; }
+  .dashboard-o-4 { order: 4; } .dashboard-o-5 { order: 5; } .dashboard-o-6 { order: 6; }
+}
+
+/* ---------- банк ---------- */
+.dashboard-hero { height: 100%; padding: 18px; gap: 16px; justify-content: space-between; }
+.dashboard-hero .stat-label { font-size: var(--fs-sm); color: var(--fg-2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dashboard-hero .stat-label svg { width: 16px; height: 16px; flex: none; }
+.dashboard-hero .stat-value { white-space: nowrap; }
+.dashboard-hero-top { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dashboard-hero-note { font-size: var(--fs-xs); color: var(--fg-3); font-weight: 400; }
+.dashboard-hero-spark .sparkline { width: 100%; height: auto; }
+.dashboard-hero-kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding-top: 14px; border-top: 1px solid var(--line); }
+.dashboard-hero-kv > div { min-width: 0; }
+.dashboard-hero-kv dt { font-size: var(--fs-xs); color: var(--fg-3); }
+.dashboard-hero-kv dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dashboard-hero-kv dd small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); }
+
+.dashboard-card .card-head { flex-wrap: nowrap; }
+.dashboard-card .card-head > .card-head-text { flex: 1 1 auto; }
+.dashboard-card .card-head > .row { flex: none; flex-wrap: nowrap; }
+.dashboard-section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dashboard-section-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: -4px; }
+
+.dashboard-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.dashboard-strip > div { background: var(--surface); padding: 10px 12px; min-width: 0; }
+.dashboard-strip dt { font-size: var(--fs-xs); color: var(--fg-3); }
+.dashboard-strip dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 720px) { .dashboard-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.dashboard-howto { font-size: var(--fs-xs); color: var(--fg-3); display: flex; gap: 6px; align-items: flex-start; }
+.dashboard-howto svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+
+.dashboard-player { color: var(--fg); font-weight: 600; text-decoration: none; }
+.dashboard-player:hover { color: var(--accent-ink); text-decoration: underline; }
+/* на телефоне зона нажатия имени — 40px в высоту и на 10px шире текста с каждой стороны (фамилия
+   из трех букв — от 40px): отрицательные поля возвращают строке прежние размеры, текст не сдвигается
+   и перед тире не появляется пустое место, как дало бы min-width */
+@media (max-width: 960px) {
+  .dashboard-player { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 10px; margin: -10px -10px; }
+  /* имя в «Моих матчах» обрезается многоточием (overflow: hidden): поля на ту же величину, чтобы
+     обрезка не съедала расширенную зону нажатия */
+  .dashboard-match-name { padding: 10px; margin: -10px; }
+}
+
+/* последние ставки на телефоне — список вместо таблицы */
+.dashboard-betlist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.dashboard-betlist li + li { border-top: 1px solid var(--line); }
+.dashboard-betlist-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 40px; padding: 10px 12px; color: var(--fg); text-decoration: none; }
+.dashboard-betlist-row:hover { background: var(--surface-2); }
+.dashboard-betlist-side { text-align: right; min-width: 0; }
+.dashboard-more { align-self: flex-start; }
+
+/* ---------- открытые ставки ---------- */
+.dashboard-bets { display: flex; flex-direction: column; gap: 12px; }
+.dashboard-bet { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); min-width: 0; }
+.dashboard-bet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.dashboard-bet-head > div { min-width: 0; }
+.dashboard-legs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dashboard-leg { display: grid; grid-template-columns: minmax(44px, auto) minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; padding: 8px 0; border-top: 1px dashed var(--line); }
+.dashboard-leg:first-child { border-top: 0; padding-top: 0; }
+.dashboard-leg-time { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--fg-2); padding-top: 1px; white-space: nowrap; }
+.dashboard-leg-match { font-size: var(--fs-md); line-height: 1.35; min-width: 0; }
+.dashboard-leg-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; column-gap: 8px; row-gap: 0; font-size: var(--fs-xs); color: var(--fg-3); min-width: 0; }
+.dashboard-leg-meta > span { white-space: nowrap; }
+.dashboard-leg-meta b { color: var(--fg-2); font-weight: 600; }
+.dashboard-leg .odds { font-size: var(--fs-md); padding-top: 1px; }
+.dashboard-bet-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 10px 12px; border-radius: var(--r-sm); background: var(--surface-2); }
+.dashboard-bet-sum > div { min-width: 0; }
+.dashboard-bet-sum dt { font-size: var(--fs-xs); color: var(--fg-3); }
+.dashboard-bet-sum dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- мои матчи сегодня: раскладка зависит от ширины карточки ---------- */
+.dashboard-matches-card { container-type: inline-size; }
+.dashboard-match { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; grid-template-areas: "time players action"; gap: 8px 18px; align-items: center; padding: 14px 18px; border-top: 1px solid var(--line); }
+.dashboard-match:first-child { border-top: 0; }
+.dashboard-match-time { grid-area: time; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dashboard-match-time .mono { font-weight: 600; font-size: var(--fs-md); color: var(--fg); }
+.dashboard-match-time .xsmall { color: var(--fg-3); line-height: 1.25; }
+.dashboard-match-players { grid-area: players; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dashboard-match-pair { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.dashboard-match-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dashboard-match-name .rank { font-size: var(--fs-xs); color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.dashboard-match-extra { display: flex; flex-wrap: wrap; gap: 6px; }
+.dashboard-match-extra .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.dashboard-match-action { grid-area: action; display: flex; justify-content: flex-end; }
+.dashboard-matches-empty { padding: 14px 18px; }
+.dashboard-foot-note { min-width: 0; flex: 1 1 220px; }
+@container (max-width: 600px) {
+  .dashboard-match { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "time action" "players players"; padding: 14px; gap: 10px 12px; }
+}
+
+/* ---------- требует внимания ---------- */
+.dashboard-attn-card { container-type: inline-size; }
+.dashboard-alerts { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.dashboard-alert { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
+.dashboard-alert:first-child { border-top: 0; padding-top: 2px; }
+.dashboard-alert:last-child { padding-bottom: 0; }
+.dashboard-alert-ic { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-2); }
+.dashboard-alert-ic svg { width: 18px; height: 18px; }
+.dashboard-alert-ic.bad { background: var(--bad-soft); color: var(--bad-ink); }
+.dashboard-alert-ic.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.dashboard-alert-ic.info { background: var(--info-soft); color: var(--info-ink); }
+.dashboard-alert-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.dashboard-alert-title { font-weight: 600; line-height: 1.3; }
+.dashboard-alert-text { font-size: var(--fs-sm); color: var(--fg-2); min-width: 0; width: 100%; }
+.dashboard-alert-text > span { display: block; }
+.dashboard-alert-body > :last-child { margin-top: auto; }
+/* правила адаптации: название с действием и статус */
+.dashboard-rules { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.dashboard-rules li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--surface-2); min-width: 0; }
+.dashboard-rule-name { min-width: 0; color: var(--fg); font-weight: 500; }
+.dashboard-rule-name small { display: block; color: var(--fg-3); font-weight: 400; font-size: var(--fs-xs); }
+.dashboard-rules .chip { flex: none; }
+.dashboard-rule-note { display: flex !important; gap: 6px; align-items: flex-start; margin-top: 8px; font-size: var(--fs-xs); color: var(--fg-2); }
+.dashboard-rule-note svg { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--fg-3); }
+@container (min-width: 560px) {
+  .dashboard-alerts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .dashboard-alert, .dashboard-alert:first-child, .dashboard-alert:last-child { border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; }
+  .dashboard-alert.is-wide { grid-column: 1 / -1; }
+}
+.dashboard-code { font-family: var(--font-mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+
+/* ---------- «Модель учится» до этапа 5 ---------- */
+.dashboard-soon { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; align-items: start; }
+.dashboard-soon-ic { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-3); }
+.dashboard-soon-ic svg { width: 20px; height: 20px; }
+.dashboard-soon p { font-size: var(--fs-sm); color: var(--fg-2); }
+
+/* ---------- расходы ИИ ---------- */
+.dashboard-cost-row { align-items: flex-end; }
+.dashboard-cost-value { font-family: var(--font-display); font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }

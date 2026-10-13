@@ -4,6 +4,7 @@ import type { Me } from '../../api/hooks/useMe';
 import { Button, IconButton } from '../../components';
 import { paths } from '../paths';
 import { useTheme } from '../theme/themeContext';
+import { BankPill } from './BankPill';
 import { NotificationsBell } from './NotificationsBell';
 import { UserMenu } from './UserMenu';
 
@@ -15,7 +16,7 @@ interface TopBarProps {
 }
 
 /**
- * Шапка: заголовок раздела, «Новый анализ», тема, колокольчик и меню пользователя.
+ * Шапка: заголовок раздела, плашка «Банк», «Новый анализ», тема, колокольчик и меню пользователя.
  * Знака AI Capper здесь нет: на компьютере он в боковой панели, а на телефоне заголовку раздела
  * нужна вся ширина (в макете знак в шапке скрыт до 960 px).
  */
@@ -30,6 +31,7 @@ export function TopBar({ title, crumbs, me, onLogout }: TopBarProps) {
         <h1>{title}</h1>
       </div>
       <div className="topbar-actions">
+        <BankPill />
         <Button kind="primary" icon="plus" to={paths.newAnalysis} className="hide-mobile">
           {t('nav.new')}
         </Button>

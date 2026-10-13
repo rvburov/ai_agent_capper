@@ -71,13 +71,96 @@ export function strategyV3(): Schemas['StrategyOut'] {
 export type MockReply = unknown | ((route: Route) => Promise<void>);
 
 /**
- * Ответы для главной этапа 4, пока экран — заглушка: банк, стратегия и лимит ИИ — тот же набор
- * и те же фабрики, что dashboardApi() в src/test/factories.ts (участник на ключе
- * администратора в октябре 2026, банк 48 000 ₽ без ставок). Маршруты новой главной
- * добавляются сюда и туда вместе с экраном.
+ * Главная нового участника (GET /api/dashboard): банк 48 000 ₽, ставок еще нет, 30 дней —
+ * показатели пустые, малая выборка. Числа рядов и порогов — как у сервера.
+ */
+export function dashboardOut(over: Partial<Schemas['DashboardOut']> = {}): Schemas['DashboardOut'] {
+  return {
+    period: '30d',
+    date_from: '2026-09-14',
+    date_to: '2026-10-13',
+    kpi: {
+      settled: 0,
+      won: 0,
+      lost: 0,
+      void: 0,
+      turnover: '0.00',
+      profit: '0.00',
+      roi: null,
+      roi_ci: null,
+      winrate: null,
+      clv: null,
+      clv_ci: null,
+      clv_positive: 0,
+      clv_n: 0,
+      legacy_settled: 0,
+    },
+    prev: null,
+    change: null,
+    brier: {
+      n: 0,
+      model: null,
+      market: null,
+      diff: null,
+      diff_ci: null,
+      noise: null,
+      closing_n: 0,
+      closing_model: null,
+      closing_market: null,
+      points: [],
+      windows: 0,
+      better: 0,
+    },
+    series: {
+      kind: 'bank',
+      group: 'week',
+      start: '2026-09-13',
+      base: '48000.00',
+      last: '48000.00',
+      peak: '48000.00',
+      max_drawdown: 0,
+      best: '48000.00',
+      worst: '48000.00',
+      points: [
+        { day: '2026-09-13', value: '48000.00' },
+        { day: '2026-10-13', value: '48000.00' },
+      ],
+      rows: [],
+    },
+    recent: [],
+    small_sample: true,
+    currency: 'RUB',
+    tz: 'Europe/Helsinki',
+    today: '2026-10-13',
+    greeting: 'day',
+    thresholds: {
+      small_sample: 20,
+      insight_min_events: 30,
+      calibration_min_n: 8,
+      calibration_gap: 0.04,
+      calibration_few: 60,
+      slice_pattern_n: 30,
+      dashboard_small: 15,
+      rolling_window: 30,
+      rolling_step: 3,
+    },
+    bank: bankOut(),
+    open_bets: [],
+    open_count: 0,
+    open_stake: '0.00',
+    my_matches: [],
+    admin: null,
+    ...over,
+  };
+}
+
+/**
+ * Ответы главной: показатели периода, банк, стратегия и лимит ИИ — как dashboardApi() в
+ * src/test/factories.ts (участник на ключе администратора в октябре 2026, банк 48 000 ₽).
  */
 export function dashboardApi(): Record<string, MockReply> {
   return {
+    'GET /api/dashboard': dashboardOut(),
     'GET /api/me/bank': bankOut(),
     'GET /api/strategy/active': strategyV3(),
     'GET /api/ai/budget': aiBudget(),
@@ -118,7 +201,7 @@ export function betsApi(): Record<string, MockReply> {
 /**
  * Подменяет /api/*: me — вошедший пользователь, null — сеанса нет (401). Сам отвечает на то,
  * что нужно любому экрану (как baseApi в src/test/factories.ts): /api/me, CSRF, валюта
- * программы, колокольчик, выход. api — ответы экрана: { 'GET /api/bets': {...} } или
+ * программы, колокольчик, банк для плашки в шапке, выход. api — ответы экрана: { 'GET /api/bets': {...} } или
  * обработчик; для главной — dashboardApi(). Остальное — 404.
  */
 export async function mockApi(page: Page, me: Me | null, api: Record<string, MockReply> = {}): Promise<void> {
@@ -144,6 +227,11 @@ export async function mockApi(page: Page, me: Me | null, api: Record<string, Moc
     // колокольчик в шапке спрашивает уведомления сам
     if (url.pathname === '/api/me/notifications') {
       await route.fulfill({ json: { items: [], unread: 0 } });
+      return;
+    }
+    // плашка «Банк» в шапке — тоже
+    if (url.pathname === '/api/me/bank' && me) {
+      await route.fulfill({ json: bankOut() });
       return;
     }
     if (url.pathname === '/api/auth/csrf') {

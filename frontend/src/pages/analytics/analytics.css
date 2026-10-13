@@ -1,0 +1,167 @@
+/* «Аналитика» — как в макете (mockup/js/screens/analytics.js, CSS экрана). */
+
+.analytics-root { gap: 16px; }
+.analytics-min { min-width: 0; }
+.analytics-head h2 { font-size: var(--fs-2xl); }
+@media (max-width: 720px) { .analytics-head h2 { font-size: var(--fs-xl); } }
+.analytics-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- фильтры ---------- */
+.analytics-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); min-width: 0; }
+.analytics-filter { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.analytics-filter-label { font-size: var(--fs-sm); font-weight: 500; color: var(--fg-2); }
+.analytics-filter .select { width: 200px; height: 38px; }
+.analytics-filter-reset { align-self: flex-end; }
+.analytics-scope { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-top: 12px; border-top: 1px solid var(--line); font-size: var(--fs-sm); color: var(--fg-2); min-width: 0; }
+.analytics-scope b { color: var(--fg); font-weight: 600; }
+.analytics-chip-btn { cursor: pointer; font: inherit; font-size: var(--fs-xs); font-weight: 600; }
+.analytics-chip-btn:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+@media (max-width: 960px) { .analytics-chip-btn { height: var(--tap); padding: 0 12px; } }
+@media (max-width: 960px) { .analytics-filter .select { height: var(--tap); } }
+@media (max-width: 720px) {
+  .analytics-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; gap: 12px; }
+  .analytics-filter-period { grid-column: 1 / -1; }
+  .analytics-filter-period .segmented { display: flex; width: 100%; }
+  .analytics-filter-period .segmented button { flex: 1 1 0; padding: 6px 4px; }
+  .analytics-filter .select { width: auto; height: 42px; }
+  .analytics-filter-reset { grid-column: 1 / -1; justify-self: start; }
+  .analytics-scope { grid-column: 1 / -1; padding-top: 10px; }
+}
+/* узкий телефон: фильтры в одну колонку, чтобы значения («Все рынки», «Старый бот») не обрезались */
+@media (max-width: 420px) { .analytics-filters { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- показатели ---------- */
+.analytics-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; transition: opacity .2s; }
+.analytics-kpis > .card { height: 100%; }
+.analytics-kpis .stat { padding: 14px 16px; }
+.analytics-kpis .stat-value { font-size: 1.5rem; white-space: nowrap; }
+.analytics-kpis .stat-value small { font-size: var(--fs-md); color: var(--fg-3); font-weight: 500; letter-spacing: 0; }
+.analytics-kpis .stat-foot { min-height: 0; }
+@media (max-width: 1280px) { .analytics-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 720px) {
+  .analytics-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .analytics-kpis .stat { padding: 12px 14px; }
+  .analytics-kpis .stat-value { font-size: var(--fs-xl); }
+}
+.analytics-pending { opacity: .6; }
+
+.analytics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 1180px) { .analytics-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 720px) { .analytics-grid { gap: 12px; } }
+.analytics-card .card-body { flex: 1 1 auto; }
+.analytics-card .card-head > .card-head-text { flex: 1 1 220px; }
+
+.analytics-section { display: flex; align-items: flex-end; justify-content: space-between; gap: 4px 16px; flex-wrap: wrap; margin-top: 8px; min-width: 0; }
+.analytics-section h3 { font-size: var(--fs-lg); }
+.analytics-section p { font-size: var(--fs-sm); color: var(--fg-3); max-width: 70ch; margin-top: 2px; }
+
+.analytics-howto { margin-top: auto; font-size: var(--fs-xs); color: var(--fg-3); display: flex; gap: 6px; align-items: flex-start; line-height: 1.45; }
+.analytics-howto svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.analytics-howto b { color: var(--fg-2); font-weight: 600; }
+.analytics-foot-note { font-size: var(--fs-xs); color: var(--fg-3); display: flex; gap: 6px; align-items: flex-start; line-height: 1.45; }
+.analytics-foot-note > span { min-width: 0; }
+.analytics-foot-note svg { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--warn-ink); }
+.analytics-foot-note.plain { padding-left: 19px; }
+.analytics-small { display: inline-flex; color: var(--warn-ink); flex: none; }
+.analytics-small svg { width: 13px; height: 13px; }
+.analytics-nowrap { white-space: nowrap; }
+/* ДИ «−8…+16%»: перенос только после «…» (там <wbr>), числа не разрываются */
+.analytics-ci { white-space: normal; }
+.analytics-roi-ci { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.analytics-roi-ci .analytics-ci { font-size: var(--fs-xs); text-align: right; }
+.analytics-cell-count { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.analytics-cell-count small { font-size: var(--fs-xs); white-space: nowrap; }
+.analytics-bold { font-weight: 600; }
+.analytics-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; display: inline-block; }
+/* подпись полосы, которую нельзя обрезать многоточием (полный текст на телефоне не прочитать) — в две строки */
+.hbar-label .analytics-hbar-wrap { white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
+.analytics-picked { color: var(--fg); font-weight: 600; }
+
+.analytics-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.analytics-strip > div { background: var(--surface); padding: 10px 12px; min-width: 0; }
+.analytics-strip dt { font-size: var(--fs-xs); color: var(--fg-3); }
+.analytics-strip dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.analytics-strip dd small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); }
+@media (max-width: 720px) { .analytics-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.analytics-strip.analytics-strip-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.analytics-strip-2 dd { white-space: normal; }
+
+/* ---------- выводы ---------- */
+.analytics-ins-card { container-type: inline-size; }
+.analytics-ins { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.analytics-ins > li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
+.analytics-ins > li:first-child { border-top: 0; padding-top: 2px; }
+.analytics-ins > li:last-child { padding-bottom: 0; }
+.analytics-ins-ic { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-2); }
+.analytics-ins-ic svg { width: 18px; height: 18px; }
+.analytics-ins-ic.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.analytics-ins-ic.bad { background: var(--bad-soft); color: var(--bad-ink); }
+.analytics-ins-ic.info { background: var(--info-soft); color: var(--info-ink); }
+.analytics-ins-ic.accent { background: var(--accent-soft); color: var(--accent-ink); }
+.analytics-ins-ic.good { background: var(--good-soft); color: var(--good-ink); }
+.analytics-ins-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.analytics-ins-title { font-weight: 600; line-height: 1.3; }
+.analytics-ins-text { font-size: var(--fs-sm); color: var(--fg-2); }
+.analytics-ins-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+@container (min-width: 640px) {
+  .analytics-ins { display: grid; grid-template-columns: repeat(var(--ins-n, 3), minmax(0, 1fr)); gap: 12px; }
+  .analytics-ins > li, .analytics-ins > li:first-child, .analytics-ins > li:last-child { border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .analytics-ins-foot { margin-top: auto; padding-top: 6px; }
+}
+
+/* ---------- сводка по рынкам ---------- */
+.analytics-mkt-card { container-type: inline-size; }
+.analytics-mtable .table td { cursor: pointer; }
+.analytics-mtable tr.is-active td { background: var(--accent-soft); }
+.analytics-mtable tr.is-total td { font-weight: 600; background: var(--surface-2); }
+.analytics-mname { font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.analytics-mdesc { font-size: var(--fs-xs); color: var(--fg-3); }
+.analytics-mlist { list-style: none; margin: 0; padding: 0; display: none; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.analytics-mlist > li + li { border-top: 1px solid var(--line); }
+.analytics-mrow { width: 100%; min-height: var(--tap); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 10px 12px; background: var(--surface); border: 0; text-align: left; cursor: pointer; color: var(--fg); font: inherit; }
+.analytics-mrow:hover { background: var(--surface-2); }
+.analytics-mrow[aria-pressed="true"] { background: var(--accent-soft); }
+.analytics-mrow > span { min-width: 0; }
+.analytics-mrow-val { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.analytics-mrow-sub { display: block; font-size: var(--fs-xs); color: var(--fg-3); font-weight: 400; }
+@container (max-width: 500px) {
+  .analytics-mtable { display: none; }
+  .analytics-mlist { display: flex; }
+}
+
+.analytics-scroll { max-height: 300px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r-md); }
+.analytics-scroll .table th { position: sticky; top: 0; background: var(--surface); }
+.analytics-tablebox { border: 1px solid var(--line); border-radius: var(--r-md); }
+/* компактные таблицы внутри карточек: без прокрутки вбок даже в узкой колонке (ДИ переносится
+   после «…», на узком экране ДИ — под ROI, см. RoiCiCell) */
+.analytics-tablebox .table th, .analytics-tablebox .table td, .analytics-scroll .table th, .analytics-scroll .table td { padding: 9px 6px; }
+.analytics-tablebox .table th, .analytics-scroll .table th { white-space: normal; letter-spacing: .03em; vertical-align: bottom; }
+.analytics-tablebox .table th:first-child, .analytics-tablebox .table td:first-child, .analytics-scroll .table th:first-child, .analytics-scroll .table td:first-child { padding-left: 12px; }
+.analytics-tablebox .table th:last-child, .analytics-tablebox .table td:last-child, .analytics-scroll .table th:last-child, .analytics-scroll .table td:last-child { padding-right: 12px; }
+@media (max-width: 720px) {
+  .analytics-tablebox .table th, .analytics-tablebox .table td, .analytics-scroll .table th, .analytics-scroll .table td { padding: 9px 5px; }
+  .analytics-tablebox .table th:first-child, .analytics-tablebox .table td:first-child, .analytics-scroll .table th:first-child, .analytics-scroll .table td:first-child { padding-left: 10px; }
+  .analytics-tablebox .table th:last-child, .analytics-tablebox .table td:last-child, .analytics-scroll .table th:last-child, .analytics-scroll .table td:last-child { padding-right: 10px; }
+}
+
+.analytics-check { display: flex; flex-direction: column; gap: 4px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.analytics-check legend { padding: 0; margin-bottom: 8px; }
+.analytics-check .check { min-height: 40px; align-items: center; }
+.analytics-sample { align-self: flex-start; max-width: 100%; }
+@media (max-width: 720px) {
+  .analytics-sample { align-self: stretch; display: flex; }
+  .analytics-sample button { flex: 1 1 auto; padding-inline: 8px; }
+}
+.analytics-sample button:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ---------- Р21: экспрессы против тех же событий ординарами ---------- */
+.analytics-r21-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.analytics-r21-side { background: var(--surface); padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.analytics-r21-l { font-size: var(--fs-xs); color: var(--fg-2); }
+.analytics-r21-v { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.02em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.analytics-r21-s { font-size: var(--fs-xs); color: var(--fg-3); }
+.analytics-r21-side .chip { margin-top: 4px; }
+@media (max-width: 720px) { .analytics-r21-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- окно «Brier и CLV простыми словами» ---------- */
+.analytics-explain { display: flex; flex-direction: column; gap: 6px; }
