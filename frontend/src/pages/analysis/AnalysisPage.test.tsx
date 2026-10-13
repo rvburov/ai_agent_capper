@@ -202,6 +202,8 @@ describe('Анализ готов: итог и экспресс', () => {
     expect(within(express).getByText('Кэф при ставке')).toBeInTheDocument();
     expect(within(express).getByText('1.91')).toBeInTheDocument();
     expect(within(express).queryByRole('button', { name: /Вернуть/ })).not.toBeInTheDocument();
+    // «Открыть в ставках» подсвечивает новую ставку на /bets (?new=ID)
+    expect(within(express).getByRole('link', { name: 'Открыть в ставках' })).toHaveAttribute('href', '/bets?new=11');
   });
 
   it('ставка уже сохранена (ответ потерялся): окно закрыто, анализ и банк перечитаны', async () => {

@@ -8,6 +8,7 @@ import {
   formatMoney,
   formatNumber,
   formatOdds,
+  formatOddsExact,
   formatPercent,
   formatRelative,
   formatUsd,
@@ -78,6 +79,15 @@ describe('числа, кэфы и проценты', () => {
     expect(formatNumber(12480)).toBe(`12${NB}480`);
     expect(formatNumber(0.25, 2)).toBe('0,25');
     expect(formatNumber(-3)).toBe(`${MINUS}3`);
+  });
+
+  it('formatOddsExact: третий знак, только если он не ноль', () => {
+    expect(formatOddsExact('1.335')).toBe('1.335');
+    expect(formatOddsExact(1.335)).toBe('1.335');
+    expect(formatOddsExact('1.300')).toBe('1.30');
+    expect(formatOddsExact('2.105')).toBe('2.105');
+    expect(formatOddsExact('12.340')).toBe('12.34');
+    expect(formatOddsExact(null)).toBe('—');
   });
 
   it('formatOdds: две цифры после точки, как на табло', () => {

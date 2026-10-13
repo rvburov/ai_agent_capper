@@ -1,0 +1,76 @@
+/* Кабинет → «Банк и стратегия» — как в макете (mockup/js/screens/profile.js, CSS вкладки «Банк»). */
+
+.profile-tiles > div > .card { height: 100%; }
+.profile-min { min-width: 0; }
+.profile-gap-top { margin-top: 6px; }
+.profile-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
+.profile-fields.bottom { align-items: end; }
+.profile-money { font-family: var(--font-mono); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* валюта программы */
+.profile-cur { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); font-size: var(--fs-sm); color: var(--fg-2); min-width: 0; }
+.profile-cur > svg { width: 18px; height: 18px; color: var(--accent-ink); flex: none; }
+.profile-cur-text { flex: 1 1 260px; min-width: 0; }
+.profile-cur-text b { color: var(--fg); font-weight: 600; }
+.profile-cur a { font-weight: 500; }
+
+/* правила стратегии — только просмотр */
+.profile-srules { margin: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); }
+.profile-srule { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+.profile-srule:last-child { border-bottom: 0; }
+.profile-srule dt { font-weight: 500; min-width: 0; }
+.profile-srule dt small { display: block; font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
+.profile-srule dd { margin: 0; font-family: var(--font-mono); font-weight: 500; font-size: var(--fs-sm); text-align: right; white-space: nowrap; }
+.profile-stakes { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); }
+.profile-stake { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.profile-stake:last-child { border-bottom: 0; }
+.profile-stake-range { font-family: var(--font-mono); font-weight: 500; }
+.profile-stake-pct { font-family: var(--font-mono); font-weight: 600; text-align: right; white-space: nowrap; }
+.profile-stake-pct small { display: block; font-family: inherit; font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
+.profile-value { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.profile-value > div { background: var(--surface); padding: 8px 12px; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.profile-value dt { font-weight: 600; font-size: var(--fs-sm); }
+.profile-value dt small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); }
+.profile-value dd { margin: 0; font-family: var(--font-mono); font-weight: 500; font-size: var(--fs-sm); color: var(--fg); white-space: nowrap; }
+
+/* адаптации */
+.profile-rule-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 12px; }
+.profile-rule-group { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; }
+.profile-rule-group-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 26px; }
+.profile-rule-group-head h4 { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .05em; color: var(--fg-3); }
+.profile-rule-group .callout { margin-top: 10px; }
+.profile-rule { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: start; }
+.profile-rule:last-of-type { border-bottom: 0; padding-bottom: 0; }
+.profile-rule-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.profile-rule-title { font-weight: 600; }
+.profile-rule-status { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.profile-dd { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--r-md); background: var(--surface-2); }
+.profile-dd-track { position: relative; height: 8px; border-radius: 999px; background: var(--surface-3); }
+.profile-dd-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--accent); }
+.profile-dd-fill.warn { background: var(--warn); }
+.profile-dd-fill.bad { background: var(--bad); }
+.profile-dd-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--fg-3); border-radius: 1px; }
+.profile-dd-scale { position: relative; height: 16px; font-size: var(--fs-xs); color: var(--fg-3); }
+.profile-dd-scale span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.profile-dd-scale span:first-child { transform: none; }
+.profile-panel .switch input:disabled { cursor: not-allowed; }
+.profile-panel .switch input:disabled + span { opacity: .5; }
+
+/* ответственная игра и движение банка */
+.card.profile-rg { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+#profile-moves .segmented, #profile-rg .segmented { align-self: flex-start; }
+
+@media (max-width: 960px) { .profile-panel .switch input { inset: -8px -4px; } }
+@media (max-width: 720px) {
+  .profile-fields.collapse { grid-template-columns: minmax(0, 1fr); }
+  /* переключатели на всю ширину карточки: на 360 px подписи не обрезаются и не прокручиваются */
+  #profile-moves .segmented, #profile-rg .segmented { display: flex; width: 100%; }
+  #profile-moves .segmented button, #profile-rg .segmented button { flex: 1 1 auto; min-width: 0; padding: 6px 4px; }
+  .profile-stake { padding: 10px; gap: 8px; }
+  .profile-value { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .profile-rule-groups { gap: 0; }
+  .profile-rule-group { border: 0; border-radius: 0; padding: 0; }
+  .profile-rule-group + .profile-rule-group { border-top: 1px solid var(--line-strong); margin-top: 14px; padding-top: 14px; }
+  .profile-srule { grid-template-columns: minmax(0, 1fr); }
+  .profile-srule dd { text-align: left; }
+}

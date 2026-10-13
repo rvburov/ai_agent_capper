@@ -165,7 +165,11 @@ export function ExpressCard(props: ExpressCardProps) {
             : t('analysis.express.savedShort', { id: analysis.bet_id ?? '' })}
         </Callout>
         <div className="analysis-actions">
-          <Button kind="primary" icon="ticket" to={paths.bets}>
+          <Button
+            kind="primary"
+            icon="ticket"
+            to={analysis.bet_id !== null ? `${paths.bets}?new=${analysis.bet_id}` : paths.bets}
+          >
             {t('analysis.express.openBets')}
           </Button>
         </div>

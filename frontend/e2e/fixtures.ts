@@ -85,6 +85,37 @@ export function dashboardApi(): Record<string, MockReply> {
 }
 
 /**
+ * Ответы «Ставок» (этап 4) для участника без ставок: пустой список, нулевые итоги и банк
+ * 48 000 ₽. Смоук оболочки открывает /bets из меню — без них экран ловил бы 404.
+ */
+export function betsApi(): Record<string, MockReply> {
+  const summary: Schemas['BetsSummaryOut'] = {
+    currency: 'RUB',
+    settled: 0,
+    won: 0,
+    lost: 0,
+    void: 0,
+    winrate: null,
+    turnover: '0.00',
+    profit: '0.00',
+    roi: null,
+    avg_stake: null,
+    open: 0,
+    open_stake: '0.00',
+    clv: null,
+    clv_positive: 0,
+    clv_n: 0,
+    legacy_settled: 0,
+  };
+  const page: Schemas['BetPageOut'] = { items: [], next_before: null };
+  return {
+    'GET /api/bets': page,
+    'GET /api/bets/summary': summary,
+    'GET /api/me/bank': bankOut(),
+  };
+}
+
+/**
  * Подменяет /api/*: me — вошедший пользователь, null — сеанса нет (401). Сам отвечает на то,
  * что нужно любому экрану (как baseApi в src/test/factories.ts): /api/me, CSRF, валюта
  * программы, колокольчик, выход. api — ответы экрана: { 'GET /api/bets': {...} } или

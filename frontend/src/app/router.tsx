@@ -27,6 +27,7 @@ const NewAnalysisPage = lazyPage(() => import('../pages/new/NewAnalysisPage').th
 const AnalysisPage = lazyPage(() => import('../pages/analysis/AnalysisPage').then((m) => m.AnalysisPage));
 const ProfilePage = lazyPage(() => import('../pages/profile/ProfilePage').then((m) => m.ProfilePage));
 const AdminPage = lazyPage(() => import('../pages/admin/AdminPage').then((m) => m.AdminPage));
+const BetsPage = lazyPage(() => import('../pages/bets/BetsPage').then((m) => m.BetsPage));
 
 /** Экран без оболочки (вход, регистрация, сброс): пока грузится — индикатор на весь экран. */
 function bare(page: ReactNode): ReactNode {
@@ -63,7 +64,7 @@ export const routes: RouteObject[] = [
       },
       {
         path: 'bets',
-        element: <StubPage screen="bets" stage={4} />,
+        element: <BetsPage />,
         handle: meta({ title: 'bets', nav: 'bets' }),
       },
       {

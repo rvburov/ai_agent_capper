@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { expect, test } from '@playwright/test';
 
-import { collectErrors, expectTapTargets, horizontalOverflow, ME_ADMIN, ME_MEMBER, mockApi } from './fixtures';
+import { betsApi, collectErrors, expectTapTargets, horizontalOverflow, ME_ADMIN, ME_MEMBER, mockApi } from './fixtures';
 
 // 360 px — самый узкий телефон из PLAN.md, 375 px — из CLAUDE.md
 const VIEWPORTS = [
@@ -18,7 +18,8 @@ for (const vp of VIEWPORTS) {
       const errors = collectErrors(page);
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.emulateMedia({ colorScheme: theme });
-      await mockApi(page, ME_ADMIN);
+      // на компьютере смоук переходит из меню на «Ставки»
+      await mockApi(page, ME_ADMIN, betsApi());
       await page.goto('/');
 
       await expect(page.getByRole('heading', { level: 1, name: 'Главная' })).toBeVisible();
@@ -101,7 +102,7 @@ test('тема: переключатель в шапке, выбор переж�
 });
 
 test('меню пользователя закрывается, когда фокус уходит из него', async ({ page }) => {
-  await mockApi(page, ME_ADMIN);
+  await mockApi(page, ME_ADMIN, betsApi());
   await page.goto('/bets');
   const avatar = page.getByRole('button', { name: 'Меню пользователя' });
   const menu = page.getByRole('dialog', { name: 'Меню пользователя' });

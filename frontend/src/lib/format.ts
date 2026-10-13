@@ -172,6 +172,17 @@ export function formatOdds(value: Amount | null | undefined): string {
   return Number.isFinite(n) ? n.toFixed(2) : DASH;
 }
 
+/**
+ * Кэф, посчитанный сервером до 0.001 (кэф расчета экспресса с возвратом ноги): третий знак,
+ * если он не ноль, — «1.335», иначе как на табло — «1.30». По нему сходится выплата.
+ */
+export function formatOddsExact(value: Amount | null | undefined): string {
+  const n = toNumber(value);
+  if (!Number.isFinite(n)) return DASH;
+  const milli = Math.round(n * 1000);
+  return (milli / 1000).toFixed(milli % 10 === 0 ? 2 : 3);
+}
+
 /** Доля 0..1 в процентах: 0.125 → «12,5%». signed — со знаком: «+3,2%», «−1,0%». */
 export function formatPercent(
   fraction: number | null | undefined,

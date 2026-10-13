@@ -8,6 +8,7 @@ import { useSuspiciousCandidates } from '../../features/profile/useLoginEvents';
 import { useSuspiciousLogin } from '../../features/profile/useSuspiciousLogin';
 import { useAiBudget } from '../../features/ai/useAiBudget';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
+import { BankTab } from './bank/BankTab';
 import { KeyTab, keyNeedsAttention } from './KeyTab';
 import { ProfileHero } from './ProfileHero';
 import { ProfileTabPanel } from './ProfileTabPanel';
@@ -23,12 +24,12 @@ const ICONS: Record<ProfileTab, IconName> = {
   data: 'database',
 };
 
-// Вкладки следующих этапов (docs/PLAN.md, раздел 10): банк, центр уведомлений и данные —
-// этап 4; push-переключатели этап 6 добавит в уже готовую вкладку «Уведомления».
-// «Ключ Claude» — этап 3 (два режима ключа, Р7 и Р12)
-type StubTab = Exclude<ProfileTab, 'profile' | 'security' | 'key'>;
-const STAGES: Record<StubTab, number> = { bank: 4, notifications: 4, data: 4 };
-const READY: readonly ProfileTab[] = ['profile', 'security', 'key'];
+// Вкладки следующих этапов (docs/PLAN.md, раздел 10): центр уведомлений и данные — этап 4
+// (волна 5); push-переключатели этап 6 добавит в уже готовую вкладку «Уведомления».
+// «Ключ Claude» — этап 3 (два режима ключа, Р7 и Р12), «Банк и стратегия» — этап 4
+type StubTab = Exclude<ProfileTab, 'profile' | 'security' | 'key' | 'bank'>;
+const STAGES: Record<StubTab, number> = { notifications: 4, data: 4 };
+const READY: readonly ProfileTab[] = ['profile', 'security', 'key', 'bank'];
 
 function isStubTab(tab: ProfileTab): tab is StubTab {
   return !READY.includes(tab);
@@ -97,6 +98,7 @@ export function ProfilePage() {
           <SecurityTab me={me} suspicious={suspicious.event} onDismissSuspicious={suspicious.dismiss} />
         )}
         {active === 'key' && <KeyTab me={me} />}
+        {active === 'bank' && <BankTab me={me} />}
         {isStubTab(active) && (
           <Card>
             <EmptyState
