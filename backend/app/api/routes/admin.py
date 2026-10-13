@@ -23,6 +23,8 @@ from app.core.deps import (
     require_admin,
 )
 from app.schemas.admin import (
+    ActivityOut,
+    ActivityPeriod,
     AdminActionIn,
     AdminUserDetailOut,
     AdminUserOut,
@@ -39,7 +41,7 @@ from app.schemas.admin import (
     TotpConfirmIn,
     UserDeleteIn,
 )
-from app.services import access_codes, admin_users, analytics_cache
+from app.services import access_codes, admin_activity, admin_users, analytics_cache
 from app.services.admin_confirm import TotpConfirm
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -65,6 +67,15 @@ async def list_users(db: DbSession, include_deleted: bool = False) -> list[Admin
     """Участники: учетная запись, расход на ИИ за месяц и лимит. Удаленные —
     только с include_deleted=true."""
     return await admin_users.list_users(db, include_deleted=include_deleted)
+
+
+@router.get("/activity")
+async def get_activity(
+    db: DbSession, admin: AdminUser, period: ActivityPeriod = "30d"
+) -> ActivityOut:
+    """Активность за период (1d, 7d, 30d или 90d): входы и число запущенных анализов по
+    людям (Р14: без адресов, устройств и содержимого анализов)."""
+    return await admin_activity.activity(db, admin, period)
 
 
 @router.get("/users/{user_id}")

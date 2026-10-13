@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Path
 from app.api.routes.admin import Confirm
 from app.core.deps import AdminUser, ClientIp, DbSession, require_admin
 from app.schemas.ai import (
+    AdminAiUsageOut,
     AdminBudgetOut,
     AdminKeyIn,
     AdminKeyOut,
@@ -24,8 +25,9 @@ from app.schemas.ai import (
     LimitPatchIn,
     MemberLimitOut,
     ModeDecisionIn,
+    MonthStr,
 )
-from app.services import ai_budget
+from app.services import ai_budget, ai_usage
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -74,6 +76,16 @@ async def update_budget(
         actor=admin,
         ip=ip,
     )
+
+
+@router.get("/ai/usage")
+async def get_usage(
+    db: DbSession, admin: AdminUser, month: MonthStr | None = None
+) -> AdminAiUsageOut:
+    """Расход ключа администратора за месяц (UTC, формат 2026-10): по людям (только
+    расход и число анализов, Р14), по задачам, общие задачи без участника, участники на
+    своих ключах и проверки (eval) — отдельно. Будущий месяц — 422 ai.usage_month."""
+    return await ai_usage.admin_usage(db, admin, month)
 
 
 @router.get("/ai/limits")

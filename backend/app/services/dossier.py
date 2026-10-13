@@ -128,28 +128,32 @@ def _round_rank(code: str | None) -> int:
         return 0
 
 
-def _day_expr() -> ColumnElement[date]:
+def match_day() -> ColumnElement[date]:
     return func.coalesce(Match.match_date, Tournament.start_date)
 
 
-def _visible(day: date) -> ColumnElement[bool]:
-    """Матч сыгран строго раньше дня day (матч без даты — см. docstring модуля)."""
+def visible(day: date | None) -> ColumnElement[bool]:
+    """Матч сыгран строго раньше дня day (матч без даты — см. docstring модуля). None —
+    все матчи в базе с днем (карточка игрока: состояние на сейчас, без момента
+    анализа)."""
+    if day is None:
+        return match_day().is_not(None)
     return or_(
         and_(Match.match_date.is_not(None), Match.match_date < day),
         and_(Match.match_date.is_(None), Tournament.start_date < day - UNDATED_DAYS),
     )
 
 
-def _plays(player_ids: Sequence[int]) -> ColumnElement[bool]:
+def plays(player_ids: Sequence[int]) -> ColumnElement[bool]:
     return or_(Match.player1_id.in_(player_ids), Match.player2_id.in_(player_ids))
 
 
-def _result() -> ColumnElement[bool]:
+def with_result() -> ColumnElement[bool]:
     return and_(Match.status.in_(RESULT_STATUSES), Match.winner_id.is_not(None))
 
 
 @dataclass(frozen=True)
-class _Played:
+class Played:
     """Сыгранный матч игрока (строка формы или нагрузки)."""
 
     match_id: int
@@ -163,15 +167,17 @@ class _Played:
     opp_elo: float | None = None
 
 
-def _sort_played(rows: Iterable[_Played]) -> list[_Played]:
+def sort_played(rows: Iterable[Played]) -> list[Played]:
     """От последнего матча к первому: день, раунд, id."""
     return sorted(
         rows, key=lambda row: (row.day, _round_rank(row.round), row.match_id), reverse=True
     )
 
 
-async def _form_rows(db: AsyncSession, player_id: int, day: date) -> list[_Played]:
-    day_expr = _day_expr()
+async def form_rows(db: AsyncSession, player_id: int, day: date | None) -> list[Played]:
+    """Последние FORM_SIZE матчей игрока, видимых на день day (None — все в базе), от
+    последнего; у соперника — его общее Эло до матча."""
+    day_expr = match_day()
     opponent = case((Match.player1_id == player_id, Match.player2_id), else_=Match.player1_id)
     opp_elo = (
         select(PlayerRating.elo)
@@ -198,14 +204,14 @@ async def _form_rows(db: AsyncSession, player_id: int, day: date) -> list[_Playe
             opp_elo,
         )
         .outerjoin(Tournament, Tournament.id == Match.tournament_id)
-        .where(_plays([player_id]), _result(), _visible(day))
+        .where(plays([player_id]), with_result(), visible(day))
         .order_by(day_expr.desc(), Match.id.desc())
         .limit(FORM_FETCH)
     )
     played = [
-        _Played(
+        Played(
             match_id=match_id,
-            day=match_day,
+            day=played_day,
             opponent=opp,
             won=winner == player_id,
             score=score,
@@ -214,16 +220,17 @@ async def _form_rows(db: AsyncSession, player_id: int, day: date) -> list[_Playe
             round=round_code or "",
             opp_elo=elo,
         )
-        for match_id, match_day, opp, winner, score, surface, tournament, round_code, elo in rows
+        for match_id, played_day, opp, winner, score, surface, tournament, round_code, elo in rows
     ]
-    return _sort_played(played)[:FORM_SIZE]
+    return sort_played(played)[:FORM_SIZE]
 
 
-async def _recent_rows(
-    db: AsyncSession, player_ids: Sequence[int], day: date
-) -> dict[int, list[_Played]]:
-    """Матчи обоих игроков за SERVE_DAYS до дня day: тай-брейки и нагрузка."""
-    day_expr = _day_expr()
+async def recent_rows(
+    db: AsyncSession, player_ids: Sequence[int], day: date, *, cutoff: bool = True
+) -> dict[int, list[Played]]:
+    """Матчи игроков за SERVE_DAYS до дня day: тай-брейки и нагрузка. cutoff=False —
+    без отсечки по дню (карточка игрока: и матчи, сыгранные в день day и позже)."""
+    day_expr = match_day()
     rows = await db.execute(
         select(
             Match.id,
@@ -236,20 +243,20 @@ async def _recent_rows(
         )
         .outerjoin(Tournament, Tournament.id == Match.tournament_id)
         .where(
-            _plays(player_ids),
-            _result(),
-            _visible(day),
+            plays(player_ids),
+            with_result(),
+            visible(day if cutoff else None),
             day_expr >= day - timedelta(days=SERVE_DAYS),
         )
     )
-    found: dict[int, list[_Played]] = defaultdict(list)
-    for match_id, match_day, player1, player2, winner, score, round_code in rows:
+    found: dict[int, list[Played]] = defaultdict(list)
+    for match_id, played_day, player1, player2, winner, score, round_code in rows:
         for player, opponent in ((player1, player2), (player2, player1)):
             if player in player_ids:
                 found[player].append(
-                    _Played(
+                    Played(
                         match_id=match_id,
-                        day=match_day,
+                        day=played_day,
                         opponent=opponent,
                         won=winner == player,
                         score=score,
@@ -261,11 +268,37 @@ async def _recent_rows(
     return found
 
 
-async def _serve_stats(
-    db: AsyncSession, player_ids: Sequence[int], day: date
-) -> dict[int, dict[str, Any]]:
-    """Подача и прием за 52 недели по match_stats (только матчи, где у обоих полная
-    статистика)."""
+@dataclass(frozen=True)
+class ServeSums:
+    """Суммы match_stats игрока за окно: свои (подача) и соперников (прием) по матчам,
+    где у обоих есть очки на подаче, первые и выигранные первые и вторые. aces, df,
+    bp_* и *_n (сколько матчей с этим полем) — по тем же матчам, где поле заполнено."""
+
+    matches: int
+    svpt: int
+    first_in: int
+    first_won: int
+    second_won: int
+    opp_svpt: int
+    opp_first_won: int
+    opp_second_won: int
+    opp_first_in: int
+    opp_first_in_n: int
+    aces: int
+    aces_n: int
+    double_faults: int
+    double_faults_n: int
+    bp_saved: int
+    bp_faced: int
+    opp_bp_saved: int
+    opp_bp_faced: int
+
+
+async def serve_sums(
+    db: AsyncSession, player_ids: Sequence[int], day: date, *, cutoff: bool = True
+) -> dict[int, ServeSums]:
+    """Суммы подачи и приема каждого игрока за SERVE_DAYS до дня day (только матчи, где у
+    обоих полная статистика очков подачи). cutoff=False — без отсечки по дню."""
     own = aliased(MatchStat)
     opp = aliased(MatchStat)
     columns = (
@@ -277,86 +310,159 @@ async def _serve_stats(
         opp.first_won,
         opp.second_won,
     )
+    extra = (
+        func.coalesce(func.sum(opp.first_in), 0),
+        func.count(opp.first_in),
+        func.coalesce(func.sum(own.aces), 0),
+        func.count(own.aces),
+        func.coalesce(func.sum(own.double_faults), 0),
+        func.count(own.double_faults),
+        func.coalesce(func.sum(own.bp_saved), 0),
+        func.coalesce(func.sum(own.bp_faced), 0),
+        func.coalesce(func.sum(opp.bp_saved), 0),
+        func.coalesce(func.sum(opp.bp_faced), 0),
+    )
     rows = await db.execute(
         select(
             own.player_id,
             func.count(),
             *(func.sum(column) for column in columns),
+            *extra,
         )
         .select_from(Match)
         .outerjoin(Tournament, Tournament.id == Match.tournament_id)
         .join(own, and_(own.match_id == Match.id, own.player_id.in_(player_ids)))
         .join(opp, and_(opp.match_id == Match.id, opp.player_id != own.player_id))
         .where(
-            _plays(player_ids),
-            _result(),
-            _visible(day),
-            _day_expr() >= day - timedelta(days=SERVE_DAYS),
+            plays(player_ids),
+            with_result(),
+            visible(day if cutoff else None),
+            match_day() >= day - timedelta(days=SERVE_DAYS),
             *(column.is_not(None) for column in columns),
             own.serve_points > 0,
             opp.serve_points > 0,
         )
         .group_by(own.player_id)
     )
+    return {int(row[0]): ServeSums(*(int(value or 0) for value in row[1:])) for row in rows}
+
+
+async def _serve_stats(
+    db: AsyncSession, player_ids: Sequence[int], day: date
+) -> dict[int, dict[str, Any]]:
+    """Подача и прием за 52 недели для досье (доли с округлением до сотых)."""
     stats: dict[int, dict[str, Any]] = {}
-    for row in rows:
-        player_id, matches = int(row[0]), int(row[1])
-        svpt, first_in, first_won, second_won, o_svpt, o_first, o_second = (
-            int(value or 0) for value in row[2:]
-        )
+    for player_id, sums in (await serve_sums(db, player_ids, day)).items():
         stats[player_id] = {
-            "m": matches,
-            "first_in": _ratio(first_in, svpt),
-            "first_won": _ratio(first_won, first_in),
-            "second_won": _ratio(second_won, svpt - first_in),
-            "return_won": _ratio(o_svpt - o_first - o_second, o_svpt),
+            "m": sums.matches,
+            "first_in": _ratio(sums.first_in, sums.svpt),
+            "first_won": _ratio(sums.first_won, sums.first_in),
+            "second_won": _ratio(sums.second_won, sums.svpt - sums.first_in),
+            "return_won": _ratio(
+                sums.opp_svpt - sums.opp_first_won - sums.opp_second_won, sums.opp_svpt
+            ),
         }
     return stats
 
 
-async def _h2h(
-    db: AsyncSession, player1: int, player2: int, day: date, surface: str | None
-) -> dict[str, Any]:
-    day_expr = _day_expr()
+@dataclass(frozen=True)
+class Meeting:
+    """Личная встреча: день, победитель, счет (со стороны победителя), турнир."""
+
+    match_id: int
+    day: date
+    winner_id: int
+    score: str | None
+    surface: str | None
+    tournament: str | None
+    category: str | None
+    round: str
+    best_of: int | None
+
+
+async def meetings(db: AsyncSession, player1: int, player2: int, day: date | None) -> list[Meeting]:
+    """Личные встречи двух игроков с результатом, видимые на день day (None — все), от
+    последней."""
+    day_expr = match_day()
     rows = await db.execute(
-        select(day_expr, Match.winner_id, Match.score, Tournament.surface, Tournament.name)
+        select(
+            Match.id,
+            day_expr,
+            Match.winner_id,
+            Match.score,
+            Tournament.surface,
+            Tournament.name,
+            Tournament.category,
+            Match.round,
+            func.coalesce(Match.best_of, Tournament.best_of),
+        )
         .outerjoin(Tournament, Tournament.id == Match.tournament_id)
         .where(
             or_(
                 and_(Match.player1_id == player1, Match.player2_id == player2),
                 and_(Match.player1_id == player2, Match.player2_id == player1),
             ),
-            _result(),
-            _visible(day),
+            with_result(),
+            visible(day),
         )
         .order_by(day_expr.desc(), Match.id.desc())
     )
-    meetings = rows.all()
-    court = rating_surface(surface)
-    same = [row for row in meetings if court is not None and rating_surface(row[3]) == court]
+    return [
+        Meeting(
+            match_id=match_id,
+            day=played_day,
+            # with_result: победитель есть всегда
+            winner_id=winner if winner is not None else 0,
+            score=score,
+            surface=surface,
+            tournament=tournament,
+            category=category,
+            round=round_code or "",
+            best_of=best_of,
+        )
+        for (
+            match_id,
+            played_day,
+            winner,
+            score,
+            surface,
+            tournament,
+            category,
+            round_code,
+            best_of,
+        ) in rows
+    ]
 
-    def wins(items: Sequence[Any], player: int) -> int:
-        return sum(1 for item in items if item[1] == player)
+
+async def h2h(
+    db: AsyncSession, player1: int, player2: int, day: date, surface: str | None
+) -> dict[str, Any]:
+    found = await meetings(db, player1, player2, day)
+    court = rating_surface(surface)
+    same = [item for item in found if court is not None and rating_surface(item.surface) == court]
+
+    def wins(items: Sequence[Meeting], player: int) -> int:
+        return sum(1 for item in items if item.winner_id == player)
 
     return {
-        "n": len(meetings),
-        "p1": wins(meetings, player1),
-        "p2": wins(meetings, player2),
+        "n": len(found),
+        "p1": wins(found, player1),
+        "p2": wins(found, player2),
         "surf": {"n": len(same), "p1": wins(same, player1), "p2": wins(same, player2)},
         "last": [
             {
-                "d": meeting_day.isoformat(),
-                "w": 1 if winner == player1 else 2,
-                "surf": meeting_surface,
-                "sc": score,
-                "t": tournament,
+                "d": item.day.isoformat(),
+                "w": 1 if item.winner_id == player1 else 2,
+                "surf": item.surface,
+                "sc": item.score,
+                "t": item.tournament,
             }
-            for meeting_day, winner, score, meeting_surface, tournament in meetings[:H2H_LAST]
+            for item in found[:H2H_LAST]
         ],
     }
 
 
-def _result_details(details: Any) -> dict[str, Any] | None:
+def result_details(details: Any) -> dict[str, Any] | None:
     """Подробности результата для досье: только ключи RESULT_DETAILS, строки (до
     DETAIL_MAX символов) и won — да/нет. Нечего показать — None."""
     if not isinstance(details, dict):
@@ -407,13 +513,14 @@ async def _news(
             "url": url,
         }
         if kind == "result":
-            item["det"] = _result_details(details)
+            item["det"] = result_details(details)
         found[player_id].append(item)
     return found
 
 
-async def _data_to(db: AsyncSession, day: date) -> date | None:
-    """Последний день матча с результатом в базе, видимый на день day."""
+async def data_to_on(db: AsyncSession, day: date) -> date | None:
+    """Последний день матча с результатом в базе, видимый на день day (раньше day; матч
+    без даты — через UNDATED_DAYS после начала турнира). Им же «архив до» в «Игроках»."""
     dated = (
         select(func.max(Match.match_date))
         .where(Match.match_date < day, Match.status.in_(RESULT_STATUSES))
@@ -439,7 +546,7 @@ async def _data_to(db: AsyncSession, day: date) -> date | None:
     return value
 
 
-async def _model_params(db: AsyncSession) -> dict[str, Any]:
+async def model_params(db: AsyncSession) -> dict[str, Any]:
     params = await db.scalar(select(MlModel.params).where(MlModel.id == MODEL_ID))
     return dict(params or {})
 
@@ -469,7 +576,7 @@ def _age(birth: date | None, day: date) -> float | None:
     return round((day - birth).days / 365.25, 1) if birth else None
 
 
-def _form_block(rows: Sequence[_Played], names: dict[int, str]) -> dict[str, Any]:
+def _form_block(rows: Sequence[Played], names: dict[int, str]) -> dict[str, Any]:
     last5 = rows[:5]
     return {
         "w5": sum(1 for row in last5 if row.won),
@@ -492,7 +599,7 @@ def _form_block(rows: Sequence[_Played], names: dict[int, str]) -> dict[str, Any
     }
 
 
-def _tiebreaks(rows: Sequence[_Played]) -> tuple[int, int]:
+def tiebreaks(rows: Sequence[Played]) -> tuple[int, int]:
     won = lost = 0
     for row in rows:
         for winner_games, loser_games, _ in parse_sets(row.score):
@@ -505,7 +612,7 @@ def _tiebreaks(rows: Sequence[_Played]) -> tuple[int, int]:
     return won, lost
 
 
-def _load(rows: Sequence[_Played], day: date, last: date | None) -> dict[str, Any]:
+def load_block(rows: Sequence[Played], day: date, last: date | None) -> dict[str, Any]:
     since = day - timedelta(days=LOAD_DAYS)
     recent = [row for row in rows if row.day >= since]
     return {
@@ -572,7 +679,7 @@ async def build_dossier(
     player_ids = (
         (match.player2_id, match.player1_id) if swap else (match.player1_id, match.player2_id)
     )
-    params = await _model_params(db)
+    params = await model_params(db)
     weight = float(params.get("surface_weight", EloParams.surface_weight))
     initial = float(params.get("initial", EloParams.initial))
     platt = _platt(params)
@@ -594,12 +701,12 @@ async def build_dossier(
     p_raw = win_probability(elo[player_ids[0]]["use_exact"], elo[player_ids[1]]["use_exact"])
     p_base = base_probs(calibrated_p1(p_raw, platt), best_of)
 
-    form = {player_id: await _form_rows(db, player_id, day) for player_id in player_ids}
-    recent = await _recent_rows(db, player_ids, day)
+    form = {player_id: await form_rows(db, player_id, day) for player_id in player_ids}
+    recent = await recent_rows(db, player_ids, day)
     serve = await _serve_stats(db, player_ids, day)
     news = await _news(db, player_ids, as_of) if with_news else {}
-    data_to = await _data_to(db, day)
-    head_to_head = await _h2h(db, *player_ids, day, surface)
+    data_to = await data_to_on(db, day)
+    head_to_head = await h2h(db, *player_ids, day, surface)
 
     people = {
         row.id: row
@@ -623,7 +730,7 @@ async def build_dossier(
         person = people.get(player_id)
         rows = form[player_id]
         last = rows[0].day if rows else None
-        tb_won, tb_lost = _tiebreaks(recent.get(player_id, []))
+        tb_won, tb_lost = tiebreaks(recent.get(player_id, []))
         serve_block = serve.get(player_id)
         if serve_block is not None or tb_won or tb_lost:
             serve_block = {**(serve_block or {"m": 0}), "tb_w": tb_won, "tb_l": tb_lost}
@@ -646,7 +753,7 @@ async def build_dossier(
             "elo": elo_block,
             "form": _form_block(rows, names),
             "serve": serve_block,
-            "load": _load(recent.get(player_id, []), day, last),
+            "load": load_block(recent.get(player_id, []), day, last),
             "news": fresh,
             "results": results,
         }

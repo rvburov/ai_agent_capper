@@ -1,23 +1,30 @@
-"""ИИ участника: лимит и расход (/api/ai/budget), свой ключ Claude, режим ключа и свой
-потолок анализа (/api/me/ai-*), решения Р7, Р9, Р12, Р13.
+"""ИИ участника: лимит и расход (/api/ai/budget), расход по вызовам (/api/ai/usage,
+/api/ai/runs, этап 4), свой ключ Claude, режим ключа и свой потолок анализа
+(/api/me/ai-*), решения Р7, Р9, Р12, Р13.
 
 Каждый маршрут берет пользователя из сеанса и меняет только его данные. Ключ Claude
 наружу не отдается: в ответах только последние 4 символа.
 """
 
-from fastapi import APIRouter, Response, status
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Response, status
 
 from app.core.deps import ClientIp, CurrentUser, DbSession, RedisClient
 from app.schemas.ai import (
     AiBudgetOut,
     AiModeIn,
+    AiRunsOut,
+    AiUsageOut,
+    MonthStr,
     OwnCapIn,
     OwnCapOut,
     OwnKeyIn,
     OwnKeyOut,
     ReturnRequestOut,
+    RunFilter,
 )
-from app.services import ai_budget, ai_keys
+from app.services import ai_budget, ai_keys, ai_usage
 
 router = APIRouter(tags=["ai"])
 
@@ -28,6 +35,32 @@ async def budget(user: CurrentUser, db: DbSession) -> AiBudgetOut:
     свой ключ (последние 4 символа) и причина, по которой анализ сейчас не запустится.
     Администратору — еще общий бюджет ключа администратора."""
     return await ai_budget.member_budget(db, user)
+
+
+@router.get("/ai/usage")
+async def usage(user: CurrentUser, db: DbSession, month: MonthStr | None = None) -> AiUsageOut:
+    """Свой расход на Claude за месяц (UTC, по умолчанию текущий; формат 2026-10): по
+    дням, видам вызовов, моделям, шагам и версиям инструкций, доля кэша, свои анализы,
+    цены моделей и настройки агента (только показ, Р23). Администратору — еще общие
+    задачи без участника; прогоны приемки отдельно. Проверки (eval) не входят. Будущий
+    месяц — 422 ai.usage_month."""
+    return await ai_usage.usage(db, user, month)
+
+
+@router.get("/ai/runs")
+async def runs(
+    user: CurrentUser,
+    db: DbSession,
+    month: MonthStr | None = None,
+    kind: RunFilter | None = None,
+    before: Annotated[int | None, Query(ge=1, le=2**63 - 1)] = None,
+    limit: Annotated[int, Query(ge=1, le=ai_usage.RUNS_LIMIT_MAX)] = ai_usage.RUNS_LIMIT,
+) -> AiRunsOut:
+    """Свои вызовы Claude за месяц, новые сверху (строка — вызов): шаг, модель и effort,
+    токены, цена и ее разбор по model_prices. kind — вид вызова или shared (общие задачи
+    без участника и прогоны приемки, только у администратора). before — id последнего
+    вызова прошлой страницы (чужой или неизвестный — 422 ai.bad_cursor)."""
+    return await ai_usage.runs(db, user, month=month, kind=kind, before=before, limit=limit)
 
 
 @router.put("/me/ai-key")

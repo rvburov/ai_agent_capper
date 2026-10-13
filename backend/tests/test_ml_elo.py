@@ -382,6 +382,7 @@ async def test_rebuild_writes_only_changes(
         "история загружена",
         "рейтинги посчитаны",
         "строки записаны",
+        "текущее Эло записано",
     ]
     assert said[0].startswith(f"история загружена: матчей {first.matches}, не учтено 0 за ")
     assert said[2].startswith(f"строки записаны: новых и изменившихся {first.rows}, удалено 0")

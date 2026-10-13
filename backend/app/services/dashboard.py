@@ -213,7 +213,7 @@ class _Today:
     analyses: list[int]
 
 
-async def _my_matches(
+async def my_matches(
     db: AsyncSession, user: User, zone: ZoneInfo, today: date, now: datetime
 ) -> list[MyMatchOut]:
     """Ноги открытых ставок и события сегодняшних анализов на сегодняшние матчи (В6)."""
@@ -440,6 +440,6 @@ async def dashboard(
         open_bets=open_bets,
         open_count=open_count,
         open_stake=open_stake,
-        my_matches=await _my_matches(db, user, zone, today, moment),
+        my_matches=await my_matches(db, user, zone, today, moment),
         admin=await _admin_attention(db, moment) if user.role == "admin" else None,
     )

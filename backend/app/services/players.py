@@ -24,17 +24,27 @@ Aliassime), потому что имена игроков из разных ст
 зависит от смысла таблицы): без него слияние матчей останавливается с ошибкой.
 """
 
-from collections import Counter
-from collections.abc import Callable, Collection, Iterable, Sequence
+import asyncio
+import re
+import time
+from collections import Counter, defaultdict
+from collections.abc import Callable, Collection, Generator, Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from functools import cache
 from pathlib import PurePosixPath
-from typing import Any, Literal
+from typing import Any, Literal, Self
+from weakref import WeakKeyDictionary
 
+import numpy as np
 from sqlalchemy import (
+    ARRAY,
+    BigInteger,
     Table,
     UniqueConstraint,
     and_,
+    any_,
+    bindparam,
     case,
     delete,
     exists,
@@ -49,14 +59,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.dml import Delete, Update
 
+from app.agent.config import load_agent_config
 from app.core.errors import AppError
-from app.core.i18n import t
+from app.core.i18n import has_key, t
 from app.db.base import Base
-from app.db.models import IngestionRun, Match, Player, Tournament
+from app.db.models import IngestionRun, Match, Player, PlayerEloCurrent, Tournament, User
 from app.ingest.names import fold, has_cyrillic, translit_ru
 from app.ingest.sackmann import GENERIC_CATEGORY, PROMOTE_AFTER, PROMOTE_BEFORE
+from app.ml.elo import CURRENT_DAYS
+from app.schemas.players import PlayerCountsOut, PlayerRankingOut, PlayerRowOut
+from app.services import player_card
 from app.services.audit import write_audit
 from app.services.bet_versions import touch_bets_on_matches
+from app.services.sessions import utcnow
 
 QUERY_MAX_LENGTH = 100
 # players.name_ru — VARCHAR(200); псевдонимы того же предела
@@ -233,15 +248,23 @@ async def _scores(
     ]
 
 
-async def search_players(db: AsyncSession, query: str, *, limit: int = 10) -> list[PlayerHit]:
-    """Игроки, похожие на запрос, лучшие первыми (не больше limit, предел 50).
-    Пустой запрос и запрос длиннее QUERY_MAX_LENGTH — PlayerError."""
+def checked_query(query: str) -> str:
+    """Запрос поиска без лишних пробелов. Пустой и длиннее QUERY_MAX_LENGTH — PlayerError."""
     cleaned = clean_text(query)
     if not fold(cleaned):
         raise PlayerError(422, "players.errors.query_empty")
     if len(cleaned) > QUERY_MAX_LENGTH:
         raise PlayerError(422, "players.errors.query_too_long", max=QUERY_MAX_LENGTH)
-    limit = max(1, min(limit, SEARCH_LIMIT_MAX))
+    return cleaned
+
+
+async def search_players(db: AsyncSession, query: str, *, limit: int = 10) -> list[PlayerHit]:
+    """Игроки, похожие на запрос, лучшие первыми (не больше limit, предел 50).
+    Пустой запрос и запрос длиннее QUERY_MAX_LENGTH — PlayerError."""
+    return await _hits(db, checked_query(query), max(1, min(limit, SEARCH_LIMIT_MAX)))
+
+
+async def _hits(db: AsyncSession, cleaned: str, limit: int) -> list[PlayerHit]:
     scores = await _scores(db, query_variants(cleaned), threshold=SEARCH_THRESHOLD, limit=limit)
     found = await db.scalars(
         select(Player).where(Player.id.in_([score.player_id for score in scores]))
@@ -1141,3 +1164,433 @@ async def recent_unmatched(
         if found is not None:
             runs.append(found)
     return runs
+
+
+# --- список «Игроки» (этап 4) ---
+
+RANKING_LIMIT = 50
+RANKING_LIMIT_MAX = 100
+_WORD_SPLIT = re.compile(r"[\s\-]+")
+# Поиск в списке — как в согласованном макете (mockup/js/screens/players.js, searchMatch).
+# Точное совпадение: каждое слово запроса — часть слова имени (по-русски, латиницей, в
+# упрощенном написании) или страны (код IOC или название по-русски, players.countries в
+# локали). Если точных нет — похожие: слово запроса от NEAR_MIN букв — часть слова или
+# отличается от слова, его начала той же длины или на букву длиннее не больше чем на
+# NEAR_EDITS правок (NEAR_EDITS_LONG у слов запроса от NEAR_LONG букв, расстояние
+# Левенштейна): «синер» — Синнер, «рублв» — Рублев, а не все имена с похожими слогами
+NEAR_MIN = 4
+NEAR_LONG = 7
+NEAR_EDITS = 1
+NEAR_EDITS_LONG = 2
+# Больше слов в имени и стране не бывает: остальные слова запроса не учитываются
+SEARCH_WORDS_MAX = 8
+
+
+@dataclass(frozen=True)
+class RankingQuery:
+    """Параметры списка «Игроки» (см. app/schemas/players.PlayerRankingOut)."""
+
+    q: str | None = None
+    surface: str = "hard"
+    data: str = "active"
+    sort: str = "rank"
+    offset: int = 0
+    limit: int = RANKING_LIMIT
+
+
+def _text_words(text: str) -> set[str]:
+    """Слова текста, сложенные, и упрощенное написание слов латиницей."""
+    words = {word for word in _WORD_SPLIT.split(fold(text)) if word}
+    return words | {word.translate(_SKELETON) for word in words if not has_cyrillic(word)}
+
+
+@cache
+def _country_words(country: str) -> frozenset[str]:
+    """Слова страны: код и название по-русски (players.countries в локали). Стран около
+    150 на 2 800 игроков — при сборке индекса каждая разбирается один раз."""
+    words = _text_words(country)
+    key = f"players.countries.{country.upper()}"
+    if has_key(key):
+        words |= _text_words(t(key))
+    return frozenset(words)
+
+
+def _words_of(names: Iterable[str | None], country: str | None) -> set[str]:
+    """Слова имен игрока (имя, по-русски, псевдонимы) и страны (код и название по-русски),
+    сложенные, и упрощенное написание слов латиницей."""
+    words = {word for name in names if name for word in _text_words(name)}
+    return words | _country_words(country) if country else words
+
+
+def _query_tokens(cleaned: str) -> list[list[str]]:
+    """Слова запроса в каждом варианте (как введен, транслитерации, упрощенное написание),
+    без повторов и не больше SEARCH_WORDS_MAX."""
+    variants = query_variants(cleaned)
+    found: list[list[str]] = []
+    for variant in [*variants, *skeletons(variants)]:
+        tokens = list(dict.fromkeys(token for token in _WORD_SPLIT.split(variant) if token))
+        if tokens and tokens[:SEARCH_WORDS_MAX] not in found:
+            found.append(tokens[:SEARCH_WORDS_MAX])
+    return found
+
+
+def exact_match(player: Player, cleaned: str) -> bool:
+    """Каждое слово запроса — часть какого-то слова имени или страны (в любом из вариантов
+    запроса). Как «точное» совпадение макета: «синнер», «sinn», «Джок», «ITA», «Италия» —
+    точные, «синер» — только с учетом опечатки."""
+    words = _words_of((player.name, player.name_ru, *player.aliases), player.country)
+    return any(
+        all(any(token in word for word in words) for token in tokens)
+        for tokens in _query_tokens(cleaned)
+    )
+
+
+def _codes(text: str) -> list[int]:
+    return [ord(char) for char in text]
+
+
+def _code_rows(texts: list[str], size: int) -> Any:
+    """Коды букв строк одной длины size — матрица N × size (одним вызовом numpy)."""
+    return np.frombuffer("".join(texts).encode("utf-32-le"), dtype="<u4").reshape(-1, size)
+
+
+def _near_rows(token: str, block: Any, edits: int) -> Any:
+    """Строки блока (N × m, коды букв) на расстоянии Левенштейна от token не больше edits:
+    таблица расстояний считается строкой за строкой для всех строк блока сразу, вставки —
+    накопленным минимумом по строке."""
+    rows, width = block.shape
+    cols = np.arange(width + 1)
+    prev = np.broadcast_to(cols, (rows, width + 1)).copy()
+    for position, code in enumerate(_codes(token), start=1):
+        cur = np.empty_like(prev)
+        cur[:, 0] = position
+        cur[:, 1:] = np.minimum(prev[:, 1:] + 1, prev[:, :-1] + (block != code))
+        prev = np.minimum.accumulate(cur - cols, axis=1) + cols
+    return prev[:, width] <= edits
+
+
+# Строка таблицы players для индекса: id, имя, по-русски, псевдонимы, страна
+_IndexRow = tuple[int, str, str | None, list[str], str | None]
+# Сколько секунд сборка индекса работает подряд, не отдавая цикл событий
+BUILD_SLICE = 0.004
+
+
+@dataclass(frozen=True)
+class _Block:
+    """Строки одной длины (коды букв, N × длина) и слова каждой строки."""
+
+    codes: Any
+    words: list[list[int]]
+
+
+@dataclass
+class SearchIndex:
+    """Слова всех игроков для поиска в списке: слово → игроки; начала слов по длине (для
+    похожих). Строится по таблице players и живет, пока она не изменилась."""
+
+    words: list[str]
+    owners: list[frozenset[int]]
+    prefixes: dict[int, _Block]
+    whole: dict[int, _Block]
+
+    @classmethod
+    def build(cls, rows: Iterable[_IndexRow]) -> Self:
+        steps = cls._steps(rows)
+        while True:
+            try:
+                next(steps)
+            except StopIteration as done:
+                index: Self = done.value
+                return index
+
+    @classmethod
+    async def build_async(cls, rows: Iterable[_IndexRow]) -> Self:
+        """Как build, но отдает цикл событий каждые BUILD_SLICE секунд работы: сборка —
+        чистый Python на десятки миллисекунд, и в отдельном потоке она держала бы GIL, а
+        параллельные запросы ждали бы так же."""
+        steps = cls._steps(rows)
+        while True:
+            try:
+                next(steps)
+            except StopIteration as done:
+                index: Self = done.value
+                return index
+            await asyncio.sleep(0)
+
+    @classmethod
+    def _steps(cls, rows: Iterable[_IndexRow]) -> Generator[None, None, Self]:
+        """Сборка по шагам: yield — место, где можно отдать цикл событий."""
+        mark = time.perf_counter()
+
+        def due() -> bool:
+            nonlocal mark
+            now = time.perf_counter()
+            if now - mark < BUILD_SLICE:
+                return False
+            mark = now
+            return True
+
+        owners: dict[str, set[int]] = defaultdict(set)
+        for player_id, name, name_ru, aliases, country in rows:
+            for word in _words_of((name, name_ru, *aliases), country):
+                owners[word].add(player_id)
+            if due():
+                yield
+        words = sorted(owners)
+        prefixes: dict[int, dict[str, list[int]]] = defaultdict(dict)
+        whole: dict[int, list[int]] = defaultdict(list)
+        for number, word in enumerate(words):
+            whole[len(word)].append(number)
+            for size in range(NEAR_MIN, len(word) + 1):
+                prefixes[size].setdefault(word[:size], []).append(number)
+            if due():
+                yield
+        prefix_blocks: dict[int, _Block] = {}
+        for size, found in prefixes.items():
+            prefix_blocks[size] = _Block(_code_rows(list(found), size), list(found.values()))
+            if due():
+                yield
+        whole_blocks = {
+            size: _Block(_code_rows([words[n] for n in numbers], size), [[n] for n in numbers])
+            for size, numbers in whole.items()
+        }
+        return cls(
+            words=words,
+            owners=[frozenset(owners[word]) for word in words],
+            prefixes=prefix_blocks,
+            whole=whole_blocks,
+        )
+
+    def _owners(self, numbers: Iterable[int]) -> set[int]:
+        found: set[int] = set()
+        for number in numbers:
+            found |= self.owners[number]
+        return found
+
+    def _containing(self, token: str) -> set[int]:
+        return {number for number, word in enumerate(self.words) if token in word}
+
+    def _near(self, token: str) -> set[int]:
+        """Слова, похожие на token (как near в макете): само слово, его начало длины token
+        или на букву длиннее."""
+        size = len(token)
+        if size < NEAR_MIN:
+            return set()
+        edits = NEAR_EDITS_LONG if size >= NEAR_LONG else NEAR_EDITS
+        found: set[int] = set()
+        blocks = [self.prefixes.get(size), self.prefixes.get(size + 1)]
+        blocks += [
+            self.whole.get(length)
+            for length in range(size - edits, size + edits + 1)
+            if length not in (size, size + 1)
+        ]
+        for block in blocks:
+            if block is None:
+                continue
+            for row in np.flatnonzero(_near_rows(token, block.codes, edits)):
+                found.update(block.words[int(row)])
+        return found
+
+    def find(self, cleaned: str, pool: Collection[int] | None = None) -> tuple[set[int], bool]:
+        """Игроки по запросу и признак «только похожие»: сначала точные совпадения по всей
+        базе (pool — только среди этих игроков), если их нет — похожие."""
+        variants = _query_tokens(cleaned)
+        # Варианты запроса часто дают те же слова: каждое слово ищется один раз
+        containing: dict[str, set[int]] = {}
+
+        def owners(token: str, near: bool) -> set[int]:
+            if token not in containing:
+                containing[token] = self._owners(self._containing(token))
+            found = containing[token]
+            return found | self._owners(self._near(token)) if near else found
+
+        def matched(near: bool) -> set[int]:
+            found: set[int] = set()
+            cache: dict[str, set[int]] = {}
+            for tokens in variants:
+                players: set[int] | None = None
+                for token in tokens:
+                    if token not in cache:
+                        cache[token] = owners(token, near)
+                    players = cache[token] if players is None else players & cache[token]
+                    if not players:
+                        break
+                found |= players or set()
+            return found if pool is None else found & set(pool)
+
+        exact = matched(near=False)
+        if exact:
+            return exact, False
+        return matched(near=True), True
+
+
+# Отпечаток таблицы players для SearchIndex: число строк и сумма хешей полей поиска
+_INDEX_VERSION_SQL = text(
+    """
+SELECT current_database(), count(*), coalesce(sum(hashtext(
+    id::text || '|' || name || '|' || coalesce(name_ru, '') || '|'
+    || array_to_string(aliases, '|') || '|' || coalesce(country, '')
+)), 0)
+FROM players
+"""
+)
+_SEARCH_INDEX: dict[str, tuple[tuple[int, int], SearchIndex]] = {}
+# Одна сборка за раз на цикл событий: параллельные запросы ждут ее, а не строят индекс
+# второй раз (asyncio.Lock привязан к циклу, у тестов циклы разные)
+_SEARCH_LOCKS: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = WeakKeyDictionary()
+
+
+async def search_index(db: AsyncSession) -> SearchIndex:
+    """Индекс поиска в списке «Игроки»: пересобирается, только если таблица players
+    изменилась (загрузка, слияние, правка имени), иначе берется из памяти процесса.
+    Ключ — база (у тестов своя). Сборка — работа процессора на десятки миллисекунд: она
+    идет кусками и между ними отдает цикл событий (SearchIndex.build_async)."""
+    database, count, digest = (await db.execute(_INDEX_VERSION_SQL)).one()
+    version = (int(count), int(digest))
+    cached = _SEARCH_INDEX.get(database)
+    if cached is not None and cached[0] == version:
+        return cached[1]
+    lock = _SEARCH_LOCKS.setdefault(asyncio.get_running_loop(), asyncio.Lock())
+    async with lock:
+        cached = _SEARCH_INDEX.get(database)
+        if cached is not None and cached[0] == version:
+            return cached[1]
+        rows = await db.execute(
+            select(Player.id, Player.name, Player.name_ru, Player.aliases, Player.country)
+        )
+        players = [
+            (int(pid), name, name_ru, list(aliases or []), country)
+            for pid, name, name_ru, aliases, country in rows
+        ]
+        index = await SearchIndex.build_async(players)
+        _SEARCH_INDEX[database] = (version, index)
+        return index
+
+
+def _elo_column(surface: str) -> Any:
+    return {
+        "hard": PlayerEloCurrent.elo_hard,
+        "clay": PlayerEloCurrent.elo_clay,
+        "grass": PlayerEloCurrent.elo_grass,
+    }[surface]
+
+
+def _ranking_order(sort: str, surface: str) -> list[Any]:
+    current = PlayerEloCurrent
+    by_rank = [current.rank_all.asc().nulls_last(), current.elo_all.desc().nulls_last()]
+    if sort == "elo":
+        return [_elo_column(surface).desc().nulls_last(), *by_rank, Player.id]
+    if sort == "last":
+        return [current.last_match.desc().nulls_last(), *by_rank, Player.id]
+    return [*by_rank, Player.id]
+
+
+async def ranking(
+    db: AsyncSession, user: User, params: RankingQuery, *, now: datetime | None = None
+) -> PlayerRankingOut:
+    """Страница списка «Игроки» по player_elo_current: без поиска — набор по data
+    (active — с матчами за 52 недели, news — новости свежее кэша новостей, all — вся
+    база), с поиском — вся база (data = news сужает; см. SearchIndex.find). Сортировка —
+    sort, страницы — offset и limit. «Сегодня» — только из своих ставок и анализов (user)."""
+    now = now or utcnow()
+    config = await load_agent_config(db)
+    fresh_since = now - timedelta(hours=config.news_ttl_hours)
+    news_fresh = Player.news_checked_at >= fresh_since
+    conds: list[Any] = []
+    fuzzy = False
+    query: str | None = None
+    if params.q is not None and params.q.strip():
+        query = checked_query(params.q)
+        # data = news сужает поиск, как в макете: точные и похожие — среди свежих новостей
+        pool = (
+            set(await db.scalars(select(Player.id).where(news_fresh)))
+            if params.data == "news"
+            else None
+        )
+        found, fuzzy = (await search_index(db)).find(query, pool)
+        conds.append(Player.id == any_(bindparam("found", sorted(found), ARRAY(BigInteger))))
+    elif params.data == "active":
+        conds.append(PlayerEloCurrent.matches_52w > 0)
+    elif params.data == "news":
+        conds.append(news_fresh)
+    base = (
+        select(Player.id)
+        .select_from(Player)
+        .outerjoin(PlayerEloCurrent, PlayerEloCurrent.player_id == Player.id)
+        .where(*conds)
+    )
+    total = await db.scalar(select(func.count()).select_from(base.subquery()))
+    ids = list(
+        await db.scalars(
+            base.order_by(*_ranking_order(params.sort, params.surface))
+            .offset(params.offset)
+            .limit(params.limit)
+        )
+    )
+    players = {
+        player.id: player for player in await db.scalars(select(Player).where(Player.id.in_(ids)))
+    }
+    current = await player_card.current_rows(db, ids)
+    forms = await player_card.recent_forms(db, ids)
+    today = player_card.today_players(await player_card.today_matches(db, user, now))
+    counts = (
+        await db.execute(
+            select(
+                select(func.count()).select_from(Player).scalar_subquery(),
+                select(func.count())
+                .select_from(PlayerEloCurrent)
+                .where(PlayerEloCurrent.matches_52w > 0)
+                .scalar_subquery(),
+                select(func.count()).select_from(Player).where(news_fresh).scalar_subquery(),
+            )
+        )
+    ).one()
+    as_of = await db.scalar(select(func.max(PlayerEloCurrent.as_of)))
+    day = now.date()
+    items: list[PlayerRowOut] = []
+    for pid in ids:
+        player = players[pid]
+        row = current.get(pid)
+        overall = row.elo_all if row is not None else None
+        on_surface = getattr(row, f"elo_{params.surface}") if row is not None else None
+        form = forms.get(pid)
+        results = form.results if form is not None else []
+        items.append(
+            PlayerRowOut(
+                id=pid,
+                name=player.name,
+                name_ru=player.name_ru,
+                country=player.country,
+                age=player_card.age_on(player.birth_date, day),
+                rank=row.rank_all if row is not None else None,
+                elo_all=player_card.elo_int(overall),
+                elo_surface=player_card.elo_int(on_surface),
+                elo_delta=player_card.elo_delta(on_surface, overall),
+                matches_52w=row.matches_52w if row is not None else 0,
+                form=["W" if won else "L" for won in results],
+                wins=sum(results),
+                losses=len(results) - sum(results),
+                last_match=form.last if form is not None else None,
+                news_checked_at=player.news_checked_at,
+                news_fresh=(
+                    player.news_checked_at is not None and player.news_checked_at >= fresh_since
+                ),
+                today=pid in today,
+            )
+        )
+    return PlayerRankingOut(
+        items=items,
+        total=int(total or 0),
+        offset=params.offset,
+        limit=params.limit,
+        query=query,
+        fuzzy=fuzzy,
+        data=params.data,  # type: ignore[arg-type]
+        surface=params.surface,  # type: ignore[arg-type]
+        sort=params.sort,  # type: ignore[arg-type]
+        counts=PlayerCountsOut(all=counts[0], active=counts[1], news=counts[2]),
+        as_of=as_of,
+        rank_days=CURRENT_DAYS,
+        news_ttl_hours=config.news_ttl_hours,
+        archive=await player_card.archive_info(db, now),
+    )

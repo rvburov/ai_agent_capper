@@ -407,3 +407,99 @@ async def parlays_vs_singles(db: AsyncSession, user_id: int) -> ParlaysRef:
         parlays_roi=float(row.parlays_roi),
         singles_roi=float(row.singles_roi),
     )
+
+
+# --- банк после ставки (этап 4, волна 3) ---
+
+
+async def bank_after(db: AsyncSession, user_id: int) -> dict[int, Decimal]:
+    """Капитал сразу после расчета каждой рассчитанной ставки: действующие пополнения,
+    выводы и корректировки не позже момента расчета плюс прибыль (bets.profit, у возврата
+    0) рассчитанных ставок, рассчитанных не позже нее (по времени расчета, затем id).
+    Подзапросами по ставкам, а не окном по журналу, как bank.equity_after_bets."""
+    rows = await db.execute(
+        text(
+            """
+            SELECT b.id,
+                   (SELECT coalesce(sum(l.amount), 0) FROM bankroll_ledger l
+                    WHERE l.user_id = b.user_id AND l.bet_id IS NULL
+                      AND l.reversed_by IS NULL
+                      AND NOT EXISTS (SELECT 1 FROM bankroll_ledger r
+                                      WHERE r.reversed_by = l.id)
+                      AND l.at <= b.settled_at)
+                   + (SELECT coalesce(sum(o.profit), 0) FROM bets o
+                      WHERE o.user_id = b.user_id AND o.status IN ('won', 'lost', 'void')
+                        AND (o.settled_at, o.id) <= (b.settled_at, b.id)) AS capital
+            FROM bets b
+            WHERE b.user_id = :user_id AND b.status IN ('won', 'lost', 'void')
+            """
+        ),
+        {"user_id": user_id},
+    )
+    return {int(bet_id): Decimal(capital) for bet_id, capital in rows}
+
+
+# --- расход на ИИ (этап 4, волна 3) ---
+#
+# Видимые вызовы участника — свои (user_id), администратора — еще общие без участника на
+# ключе администратора; проверки (eval, shadow) не входят. Месяц и дни — по UTC. Доля
+# кэша — PLAN.md, раздел 8: cache_read / (input + cache_write + cache_read).
+
+_AI_SCOPE = """
+    created_at >= :start AND created_at < :end AND kind NOT IN ('eval', 'shadow')
+    AND (user_id = :user_id OR (:admin AND user_id IS NULL AND key_source = 'admin'))
+"""
+
+
+async def ai_by_day(
+    db: AsyncSession, user_id: int, start: datetime, end: datetime, *, admin: bool = False
+) -> dict[date, Decimal]:
+    rows = await db.execute(
+        text(
+            "SELECT (created_at AT TIME ZONE 'UTC')::date AS day, sum(cost_usd) "
+            f"FROM agent_runs WHERE {_AI_SCOPE} GROUP BY 1"
+        ),
+        {"user_id": user_id, "start": start, "end": end, "admin": admin},
+    )
+    return {day: Decimal(cost) for day, cost in rows}
+
+
+async def ai_by_kind(
+    db: AsyncSession, user_id: int, start: datetime, end: datetime, *, admin: bool = False
+) -> dict[str, tuple[int, Decimal]]:
+    rows = await db.execute(
+        text(
+            f"SELECT kind, count(*), sum(cost_usd) FROM agent_runs WHERE {_AI_SCOPE} GROUP BY kind"
+        ),
+        {"user_id": user_id, "start": start, "end": end, "admin": admin},
+    )
+    return {kind: (int(count), Decimal(cost)) for kind, count, cost in rows}
+
+
+async def ai_cache_share(
+    db: AsyncSession, user_id: int, start: datetime, end: datetime, *, admin: bool = False
+) -> float | None:
+    value = await db.scalar(
+        text(
+            "SELECT sum(cache_read_tokens)::numeric"
+            " / nullif(sum(input_tokens + cache_write_tokens + cache_read_tokens), 0) "
+            f"FROM agent_runs WHERE {_AI_SCOPE}"
+        ),
+        {"user_id": user_id, "start": start, "end": end, "admin": admin},
+    )
+    return float(value) if value is not None else None
+
+
+async def ai_key_spend(
+    db: AsyncSession, start: datetime, end: datetime
+) -> dict[tuple[int | None, str], Decimal]:
+    """Расход по людям и ключам за месяц, без проверок (Р14: только деньги)."""
+    rows = await db.execute(
+        text(
+            "SELECT user_id, key_source, sum(cost_usd) FROM agent_runs"
+            " WHERE created_at >= :start AND created_at < :end"
+            " AND kind NOT IN ('eval', 'shadow') GROUP BY user_id, key_source"
+        ),
+        {"start": start, "end": end},
+    )
+    return {(user_id, source): Decimal(cost) for user_id, source, cost in rows}

@@ -32,6 +32,7 @@ from app.main import create_app
 from app.services.notifications import notify
 from app.services.sessions import utcnow
 from tests.helpers_bets import BetMaker, LegSpec
+from tests.players_world import own_open_bet
 from tests.support import ClientFactory, LoginFn, MadeUser, UserFactory
 
 _SCHEMA = create_app().openapi()
@@ -177,11 +178,62 @@ FOREIGN_CASES: dict[tuple[str, str], tuple[Create, Untouched]] = {
 }
 
 
+# Общие данные (игроки, матчи, новости): чужой участник получает их (200), но без личного
+# владельца — «сегодня» в карточке игрока строится только из своих ставок и анализов
+SHARED_ROUTES = {
+    ("GET", "/api/players/{player_id}"),
+    ("GET", "/api/players/{player_id}/matches"),
+    ("GET", "/api/players/{player_id}/news"),
+    ("GET", "/api/players/{player_id}/h2h/{opponent_id}"),
+}
+
+
 def test_every_id_route_is_checked() -> None:
     """Новый адрес с id в пути (например, /api/bets/{bet_id}) должен попасть сюда."""
-    assert set(ID_ROUTES) == set(FOREIGN_CASES), (
+    assert set(ID_ROUTES) == set(FOREIGN_CASES) | SHARED_ROUTES, (
         "добавьте в FOREIGN_CASES проверку чужого объекта для новых адресов"
     )
+    assert not set(FOREIGN_CASES) & SHARED_ROUTES
+
+
+def _keys(node: Any) -> set[str]:
+    if isinstance(node, dict):
+        return set(node) | {key for value in node.values() for key in _keys(value)}
+    if isinstance(node, list):
+        return {key for item in node for key in _keys(item)}
+    return set()
+
+
+@pytest.mark.parametrize(("method", "path"), sorted(SHARED_ROUTES), ids=lambda v: str(v))
+async def test_shared_player_routes_hide_foreign_bets(
+    method: str,
+    path: str,
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    db: AsyncSession,
+) -> None:
+    owner = await make_user()
+    maker = BetMaker(db)
+    first = await maker.player("Owner Pick")
+    second = await maker.player("Owner Opponent")
+    await db.commit()
+    _, bet_id, analysis_id = await own_open_bet(db, owner.id, first.id, second.id)
+    alice = await login(await make_client("10.0.0.1"), await make_user())
+    url = path.replace("{player_id}", str(first.id)).replace("{opponent_id}", str(second.id))
+    response = await alice.request(method, url)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    if path == "/api/players/{player_id}":
+        assert body["today"] == []
+    assert not _keys(body) & {"bet_id", "leg_id", "analysis_id", "analyses", "bets"} - (
+        {"analyses", "bets"} if path == "/api/players/{player_id}" else set()
+    )
+    owner_client = await login(await make_client("10.0.0.2"), owner)
+    mine = (await owner_client.request(method, url)).json()
+    if path == "/api/players/{player_id}":
+        assert [bet["bet_id"] for bet in mine["today"][0]["bets"]] == [bet_id]
+        assert mine["today"][0]["analyses"] == [analysis_id]
 
 
 @pytest.mark.parametrize(("method", "path"), sorted(FOREIGN_CASES), ids=lambda v: str(v))

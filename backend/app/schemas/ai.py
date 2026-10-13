@@ -6,7 +6,7 @@
 Р14: в ответах администратору об участнике — только расход на ИИ и активность.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -23,6 +23,8 @@ from app.schemas.admin import (
 from app.schemas.me import AiMode, Role, TotpCodeStr, UserStatus
 
 KeySource = Literal["admin", "own"]
+
+
 # Итог проверки своего ключа: ok — ключ рабочий и все модели доступны; rejected —
 # Anthropic не принял ключ (401/403); error — Anthropic ответил другой ошибкой;
 # models — ключ рабочий, но части моделей из настроек агента нет
@@ -273,3 +275,343 @@ class ModeDecisionIn(BaseModel):
 
     decision: ModeDecision
     limit: LimitIn | None = None
+
+
+# --- расход по вызовам: «ИИ и расходы» и «Администрирование → Расход ИИ» (этап 4) ---
+
+# Месяц расходов по UTC: 2026-10
+MonthStr = Annotated[str, StringConstraints(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")]
+# Вид вызова в журнале: шаги анализа и задачи этапа 5; проверки (eval, shadow) — только
+# у администратора, в «Расходе ИИ» отдельной строкой
+RunKind = Literal["parse", "news", "analysis", "refresh", "postmortem"]
+# Фильтр журнала: вид вызова или shared — общие задачи без участника и прогоны приемки
+# (только у администратора, у участника их нет)
+RunFilter = Literal["parse", "news", "analysis", "refresh", "postmortem", "shared"]
+
+
+class UsageSumsOut(BaseModel):
+    """Сумма вызовов: число (errors — с ошибкой), цена, токены по видам и поиски.
+    input_tokens — вход без кэша (как usage.input_tokens API), prompt_tokens — весь вход
+    (без кэша, запись и чтение кэша). cache_share — доля кэша по формуле PLAN.md, раздел 8:
+    cache_read / (input + cache_write + cache_read); пусто — входа нет."""
+
+    runs: int
+    errors: int
+    cost_usd: UsdOut
+    input_tokens: int
+    cache_write_tokens: int
+    cache_read_tokens: int
+    output_tokens: int
+    prompt_tokens: int
+    web_searches: int
+    cache_share: float | None
+
+
+class UsageKindCostOut(BaseModel):
+    """Вид вызова в дне: число вызовов и цена (состав столбца «Расходы по дням»)."""
+
+    kind: str
+    runs: int
+    cost_usd: UsdOut
+
+
+class UsageDayOut(UsageSumsOut):
+    """День по UTC (месяц расходов тоже по UTC, поэтому сумма дней — расход месяца)."""
+
+    day: date
+    kinds: list[UsageKindCostOut]
+
+
+class UsageKindOut(UsageSumsOut):
+    """Вид вызова за месяц. avg_* — в среднем на вызов без ошибки (пусто — таких нет);
+    models и efforts — какие модели и effort были у вызовов."""
+
+    kind: str
+    avg_cost_usd: UsdOut | None
+    avg_prompt_tokens: int | None
+    avg_output_tokens: int | None
+    models: list[str]
+    efforts: list[str]
+
+
+class UsageModelOut(UsageSumsOut):
+    model: str
+
+
+class UsageStepOut(BaseModel):
+    """Шаг анализа (agent_runs.step; 0 — вызов вне анализа) и вид вызова."""
+
+    kind: str
+    step: int
+    runs: int
+    cost_usd: UsdOut
+
+
+class UsageVersionOut(BaseModel):
+    """Версия инструкций вида вызова: цена за месяц и в среднем на вызов без ошибки.
+    Качество версии — этап 5."""
+
+    kind: str
+    prompt_version: str | None
+    runs: int
+    cost_usd: UsdOut
+    avg_cost_usd: UsdOut | None
+
+
+class AnalysisCostOut(BaseModel):
+    """Свой анализ месяца: цена (сумма его вызовов), закончен ли, прогон приемки ли, на
+    чьем ключе шел (key_source фиксируется при запуске)."""
+
+    id: int
+    started_at: datetime
+    cost_usd: UsdOut
+    done: bool
+    acceptance: bool
+    key_source: KeySource | None
+
+
+class ModelPriceOut(BaseModel):
+    """Действующая цена модели в долларах за 1 млн токенов и за один веб-поиск (из
+    model_prices). Вторая ступень: весь вход запроса больше long_input_threshold —
+    цены токенов × long_multiplier."""
+
+    model: str
+    valid_from: datetime
+    input: UsdOut
+    output: UsdOut
+    cache_read: UsdOut
+    cache_write_5m: UsdOut
+    cache_write_1h: UsdOut
+    search_price: UsdOut
+    long_input_threshold: int | None
+    long_multiplier: UsdOut | None
+
+
+class AgentSettingsOut(BaseModel):
+    """Настройки агента только для показа (Р23): меняются командой agent-config.
+    Потолки анализа программы — из app_settings."""
+
+    parse_model: str
+    parse_effort: str
+    news_enabled: bool
+    news_model: str
+    news_effort: str
+    news_searches_per_match: int
+    news_searches_per_analysis: int
+    news_searches_per_day: int
+    news_ttl_hours: int
+    news_lookback_days: int
+    news_domains: list[str]
+    news_prompt_cache: bool
+    analysis_model: str
+    analysis_effort: str
+    analysis_parallel: int
+    assessment_reuse_hours: int
+    soft_cap_usd: UsdOut
+    hard_cap_usd: UsdOut
+    default_per_analysis_usd: UsdOut
+
+
+class AiUsageOut(BaseModel):
+    """Свой расход на Claude за месяц (UTC) по вызовам agent_runs, без проверок (eval).
+    У администратора — свои вызовы и общие задачи без участника (shared_usd), прогоны
+    приемки — отдельно (acceptance_usd); own_usd — свои остальные вызовы.
+
+    days — с 1-го числа по last_day (сегодня, если месяц текущий). admin_key_usd и
+    own_key_usd — чей ключ платил. search_usd — цена поисков, cache_saved_usd — сколько
+    сэкономило чтение кэша против обычного входа (по model_prices на момент вызова).
+    avg_analysis_usd — средняя цена своего законченного анализа месяца без прогонов
+    приемки (на обоих ключах). admin_key_avg_usd — то же только на ключе администратора
+    (шаг $0,0001): у участника на ключе администратора — то же число, что
+    avg_analysis_usd в GET /ai/budget; ее показывать рядом с лимитом. forecast_usd —
+    прогноз на конец месяца по темпу (участник на ключе администратора — не выше лимита,
+    на паузе — потрачено); у прошедшего месяца — итог. analyses_left — на сколько
+    анализов по admin_key_avg_usd хватит остатка лимита (left_usd в GET /ai/budget;
+    только участник на ключе администратора в текущем месяце)."""
+
+    month: str
+    month_start: date
+    last_day: date
+    days_in_month: int
+    days_elapsed: int
+    current: bool
+    totals: UsageSumsOut
+    own_usd: UsdOut
+    acceptance_usd: UsdOut
+    shared_usd: UsdOut
+    admin_key_usd: UsdOut
+    own_key_usd: UsdOut
+    search_usd: UsdOut
+    cache_saved_usd: UsdOut
+    days: list[UsageDayOut]
+    kinds: list[UsageKindOut]
+    models: list[UsageModelOut]
+    steps: list[UsageStepOut]
+    versions: list[UsageVersionOut]
+    analyses: list[AnalysisCostOut]
+    avg_analysis_usd: UsdOut | None
+    admin_key_avg_usd: UsdOut | None
+    forecast_usd: UsdOut
+    analyses_left: int | None
+    prices: list[ModelPriceOut]
+    settings: AgentSettingsOut
+
+
+class CostPartOut(BaseModel):
+    """Часть цены вызова: токены (у поисков — число поисков), цена за 1 млн токенов (у
+    поисков — за один поиск) и сумма с учетом второй ступени и Batch."""
+
+    tokens: int
+    price: UsdOut
+    cost_usd: UsdOut
+
+
+class RunCostOut(BaseModel):
+    """Из чего сложилась цена вызова по model_prices на момент вызова. long_factor —
+    множитель второй ступени (1 — нет), batch — половина цены токенов. Части округлены
+    до миллионной доли, cost_usd вызова — как записано в agent_runs."""
+
+    valid_from: datetime
+    input: CostPartOut
+    cache_write_5m: CostPartOut
+    cache_write_1h: CostPartOut
+    cache_read: CostPartOut
+    output: CostPartOut
+    searches: CostPartOut
+    long_factor: UsdOut
+    batch: bool
+
+
+class AiRunOut(BaseModel):
+    """Вызов Claude (строка журнала): вид, шаг анализа, модель и effort, токены, цена.
+    shared — общая задача без участника, acceptance — прогон приемки (у администратора).
+    analysis_id — свой анализ. error — код сбоя вызова. price — разбор цены (пусто —
+    цены модели на момент вызова нет)."""
+
+    id: int
+    created_at: datetime
+    kind: str
+    step: int
+    model: str
+    effort: str | None
+    prompt_version: str | None
+    key_source: KeySource
+    analysis_id: int | None
+    shared: bool
+    acceptance: bool
+    batch: bool
+    input_tokens: int
+    cache_write_tokens: int
+    cache_read_tokens: int
+    output_tokens: int
+    thinking_tokens: int | None
+    prompt_tokens: int
+    web_searches: int
+    cache_share: float | None
+    cost_usd: UsdOut
+    duration_ms: int | None
+    stop_reason: str | None
+    error: str | None
+    price: RunCostOut | None
+
+
+class AiRunsOut(BaseModel):
+    """Страница журнала вызовов месяца, новые сверху. total_* — все вызовы фильтра за
+    месяц; next_before — курсор следующей страницы."""
+
+    items: list[AiRunOut]
+    total_runs: int
+    total_cost_usd: UsdOut
+    next_before: int | None
+
+
+class PersonUsageOut(BaseModel):
+    """Человек в «Расходе ИИ» администратора (Р14: только расход на ИИ и число анализов).
+    key_spent_usd — на ключе администратора, own_spent_usd — на своем (вне бюджета);
+    analyses — анализы на ключе администратора, own_analyses — на своем. limit_usd —
+    месячный лимит (пусто у администратора); budget_share и limit_share — доля бюджета
+    и лимита."""
+
+    user_id: int
+    display_name: str
+    role: Role
+    status: UserStatus
+    ai_mode: AiMode
+    key_spent_usd: UsdOut
+    own_spent_usd: UsdOut
+    analyses: int
+    own_analyses: int
+    limit_usd: UsdOut | None
+    paused: bool
+    budget_share: float | None
+    limit_share: float | None
+
+
+class TaskUsageOut(BaseModel):
+    """Задача (вид вызова) на ключе администратора: вызовы участников, без общих задач."""
+
+    kind: str
+    runs: int
+    cost_usd: UsdOut
+    cache_share: float | None
+    budget_share: float | None
+    models: list[str]
+
+
+class SharedUsageOut(BaseModel):
+    """Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke)."""
+
+    runs: int
+    cost_usd: UsdOut
+    cache_share: float | None
+    budget_share: float | None
+    kinds: list[str]
+
+
+class EvalRunUsageOut(BaseModel):
+    """Проверочный прогон (eval) месяца: вызовы и цена; eval_run_id пустой — вызовы без
+    записи прогона."""
+
+    eval_run_id: int | None
+    created_at: datetime | None
+    name: str | None
+    eval_set: str | None
+    n_events: int | None
+    models: list[str]
+    runs: int
+    cost_usd: UsdOut
+
+
+class EvalUsageOut(BaseModel):
+    """Проверки (eval, shadow) — свой бюджет на ключе администратора, в общий не входят."""
+
+    budget_usd: UsdOut
+    spent_usd: UsdOut
+    runs: int
+    items: list[EvalRunUsageOut]
+
+
+class AdminAiUsageOut(BaseModel):
+    """«Администрирование → Расход ИИ» за месяц (UTC). spent_usd — ключ администратора
+    без проверок (как бюджет), из него shared — общие задачи; own_key_usd — участники на
+    своих ключах (вне бюджета). analyses — анализы на ключе администратора за месяц,
+    avg_analysis_usd — средняя цена законченного. cache_share — по всем вызовам ключа
+    администратора без проверок. Р14: ни анализов, ни ввода, ни ставок участников."""
+
+    month: str
+    month_start: date
+    last_day: date
+    days_in_month: int
+    days_elapsed: int
+    current: bool
+    budget_usd: UsdOut
+    spent_usd: UsdOut
+    budget_share: float | None
+    analyses: int
+    avg_analysis_usd: UsdOut | None
+    cache_share: float | None
+    own_key_usd: UsdOut
+    people: list[PersonUsageOut]
+    shared: SharedUsageOut
+    tasks: list[TaskUsageOut]
+    eval: EvalUsageOut

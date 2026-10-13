@@ -451,6 +451,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Activity
+         * @description Активность за период (1d, 7d, 30d или 90d): входы и число запущенных анализов по
+         *     людям (Р14: без адресов, устройств и содержимого анализов).
+         */
+        get: operations["get_activity_api_admin_activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/users/{user_id}": {
         parameters: {
             query?: never;
@@ -680,6 +701,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ai/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage
+         * @description Свой расход на Claude за месяц (UTC, по умолчанию текущий; формат 2026-10): по
+         *     дням, видам вызовов, моделям, шагам и версиям инструкций, доля кэша, свои анализы,
+         *     цены моделей и настройки агента (только показ, Р23). Администратору — еще общие
+         *     задачи без участника; прогоны приемки отдельно. Проверки (eval) не входят. Будущий
+         *     месяц — 422 ai.usage_month.
+         */
+        get: operations["usage_api_ai_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ai/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Runs
+         * @description Свои вызовы Claude за месяц, новые сверху (строка — вызов): шаг, модель и effort,
+         *     токены, цена и ее разбор по model_prices. kind — вид вызова или shared (общие задачи
+         *     без участника и прогоны приемки, только у администратора). before — id последнего
+         *     вызова прошлой страницы (чужой или неизвестный — 422 ai.bad_cursor).
+         */
+        get: operations["runs_api_ai_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/ai-key": {
         parameters: {
             query?: never;
@@ -844,6 +912,28 @@ export interface paths {
          *     budget_change. Бюджет меньше потраченного за месяц — 400 ai.budget_below_spent.
          */
         put: operations["update_budget_api_admin_ai_budget_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Usage
+         * @description Расход ключа администратора за месяц (UTC, формат 2026-10): по людям (только
+         *     расход и число анализов, Р14), по задачам, общие задачи без участника, участники на
+         *     своих ключах и проверки (eval) — отдельно. Будущий месяц — 422 ai.usage_month.
+         */
+        get: operations["get_usage_api_admin_ai_usage_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1425,6 +1515,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/players/ranking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Players Ranking
+         * @description Список «Игроки»: по умолчанию игроки с матчами за 52 недели по месту по Эло, по 50
+         *     на странице. q — поиск по всей базе (по-русски и латиницей, с опечатками; fuzzy —
+         *     точных совпадений нет); data — active, news (новости свежее кэша) или all; surface —
+         *     покрытие колонки «Эло на покрытии»; sort — rank, elo (на покрытии) или last
+         *     (последний матч в базе).
+         */
+        get: operations["players_ranking_api_players_ranking_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/players/{player_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Player
+         * @description Карточка игрока: шапка, «Обзор» (Эло по покрытиям, форма, подача и прием против
+         *     тура, результаты по покрытиям, ключевые матчи), свежесть данных, профиль из старого
+         *     бота и «сегодня» — только из своих ставок и анализов. Нет игрока — 404
+         *     player.not_found.
+         */
+        get: operations["get_player_api_players__player_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/players/{player_id}/matches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Player Matches
+         * @description Матчи игрока в базе страницами, сначала последние; before — id последнего матча
+         *     прошлой страницы (матч другого игрока — 422 player.bad_cursor).
+         */
+        get: operations["get_player_matches_api_players__player_id__matches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/players/{player_id}/news": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Player News
+         * @description Факты из новостей игрока за окно новостей, новые сверху, страницами.
+         */
+        get: operations["get_player_news_api_players__player_id__news_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/players/{player_id}/h2h/{opponent_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Head To Head
+         * @description Личные встречи двух игроков в базе. Тот же игрок — 422 player.h2h_same.
+         */
+        get: operations["get_head_to_head_api_players__player_id__h2h__opponent_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/strategy/active": {
         parameters: {
             query?: never;
@@ -1480,8 +1678,39 @@ export interface components {
             own_key_last4: string | null;
         };
         /**
+         * ActivityOut
+         * @description Входы и анализы по людям за период с since. active_users — сколько людей входили,
+         *     today_users — сколько входили сегодня (с полуночи в поясе администратора).
+         */
+        ActivityOut: {
+            /**
+             * Period
+             * @enum {string}
+             */
+            period: "1d" | "7d" | "30d" | "90d";
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /** Logins */
+            logins: number;
+            /** Failed Logins */
+            failed_logins: number;
+            /** Analyses */
+            analyses: number;
+            /** Active Users */
+            active_users: number;
+            /** Today Users */
+            today_users: number;
+            /** People */
+            people: components["schemas"]["PersonActivityOut"][];
+        };
+        /**
          * AdaptationOut
-         * @description Правило адаптации суммы (Р22): включено ли в стратегии и действует ли сейчас.
+         * @description Правило адаптации суммы (Р22): включено ли в стратегии, действует ли сейчас и
+         *     выполнено ли его условие (met — независимо от enabled; у просадки — порог достигнут,
+         *     даже если действует более строгий лимит).
          */
         AdaptationOut: {
             /**
@@ -1493,6 +1722,8 @@ export interface components {
             enabled: boolean;
             /** Active */
             active: boolean;
+            /** Met */
+            met: boolean;
             /** Params */
             params: {
                 [key: string]: unknown;
@@ -1506,6 +1737,54 @@ export interface components {
         AdminActionIn: {
             /** Totp Code */
             totp_code?: string | null;
+        };
+        /**
+         * AdminAiUsageOut
+         * @description «Администрирование → Расход ИИ» за месяц (UTC). spent_usd — ключ администратора
+         *     без проверок (как бюджет), из него shared — общие задачи; own_key_usd — участники на
+         *     своих ключах (вне бюджета). analyses — анализы на ключе администратора за месяц,
+         *     avg_analysis_usd — средняя цена законченного. cache_share — по всем вызовам ключа
+         *     администратора без проверок. Р14: ни анализов, ни ввода, ни ставок участников.
+         */
+        AdminAiUsageOut: {
+            /** Month */
+            month: string;
+            /**
+             * Month Start
+             * Format: date
+             */
+            month_start: string;
+            /**
+             * Last Day
+             * Format: date
+             */
+            last_day: string;
+            /** Days In Month */
+            days_in_month: number;
+            /** Days Elapsed */
+            days_elapsed: number;
+            /** Current */
+            current: boolean;
+            /** Budget Usd */
+            budget_usd: number;
+            /** Spent Usd */
+            spent_usd: number;
+            /** Budget Share */
+            budget_share: number | null;
+            /** Analyses */
+            analyses: number;
+            /** Avg Analysis Usd */
+            avg_analysis_usd: number | null;
+            /** Cache Share */
+            cache_share: number | null;
+            /** Own Key Usd */
+            own_key_usd: number;
+            /** People */
+            people: components["schemas"]["PersonUsageOut"][];
+            shared: components["schemas"]["SharedUsageOut"];
+            /** Tasks */
+            tasks: components["schemas"]["TaskUsageOut"][];
+            eval: components["schemas"]["EvalUsageOut"];
         };
         /**
          * AdminAttentionOut
@@ -1686,6 +1965,51 @@ export interface components {
             limit: components["schemas"]["LimitOut"] | null;
         };
         /**
+         * AgentSettingsOut
+         * @description Настройки агента только для показа (Р23): меняются командой agent-config.
+         *     Потолки анализа программы — из app_settings.
+         */
+        AgentSettingsOut: {
+            /** Parse Model */
+            parse_model: string;
+            /** Parse Effort */
+            parse_effort: string;
+            /** News Enabled */
+            news_enabled: boolean;
+            /** News Model */
+            news_model: string;
+            /** News Effort */
+            news_effort: string;
+            /** News Searches Per Match */
+            news_searches_per_match: number;
+            /** News Searches Per Analysis */
+            news_searches_per_analysis: number;
+            /** News Searches Per Day */
+            news_searches_per_day: number;
+            /** News Ttl Hours */
+            news_ttl_hours: number;
+            /** News Lookback Days */
+            news_lookback_days: number;
+            /** News Domains */
+            news_domains: string[];
+            /** News Prompt Cache */
+            news_prompt_cache: boolean;
+            /** Analysis Model */
+            analysis_model: string;
+            /** Analysis Effort */
+            analysis_effort: string;
+            /** Analysis Parallel */
+            analysis_parallel: number;
+            /** Assessment Reuse Hours */
+            assessment_reuse_hours: number;
+            /** Soft Cap Usd */
+            soft_cap_usd: number;
+            /** Hard Cap Usd */
+            hard_cap_usd: number;
+            /** Default Per Analysis Usd */
+            default_per_analysis_usd: number;
+        };
+        /**
          * AiBudgetOut
          * @description Лимит и расход участника на ИИ (экраны «Ключ Claude» и «Новый анализ»).
          *
@@ -1765,6 +2089,183 @@ export interface components {
              * @enum {string}
              */
             mode: "shared" | "own";
+        };
+        /**
+         * AiRunOut
+         * @description Вызов Claude (строка журнала): вид, шаг анализа, модель и effort, токены, цена.
+         *     shared — общая задача без участника, acceptance — прогон приемки (у администратора).
+         *     analysis_id — свой анализ. error — код сбоя вызова. price — разбор цены (пусто —
+         *     цены модели на момент вызова нет).
+         */
+        AiRunOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Kind */
+            kind: string;
+            /** Step */
+            step: number;
+            /** Model */
+            model: string;
+            /** Effort */
+            effort: string | null;
+            /** Prompt Version */
+            prompt_version: string | null;
+            /**
+             * Key Source
+             * @enum {string}
+             */
+            key_source: "admin" | "own";
+            /** Analysis Id */
+            analysis_id: number | null;
+            /** Shared */
+            shared: boolean;
+            /** Acceptance */
+            acceptance: boolean;
+            /** Batch */
+            batch: boolean;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Thinking Tokens */
+            thinking_tokens: number | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Web Searches */
+            web_searches: number;
+            /** Cache Share */
+            cache_share: number | null;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** Stop Reason */
+            stop_reason: string | null;
+            /** Error */
+            error: string | null;
+            price: components["schemas"]["RunCostOut"] | null;
+        };
+        /**
+         * AiRunsOut
+         * @description Страница журнала вызовов месяца, новые сверху. total_* — все вызовы фильтра за
+         *     месяц; next_before — курсор следующей страницы.
+         */
+        AiRunsOut: {
+            /** Items */
+            items: components["schemas"]["AiRunOut"][];
+            /** Total Runs */
+            total_runs: number;
+            /** Total Cost Usd */
+            total_cost_usd: number;
+            /** Next Before */
+            next_before: number | null;
+        };
+        /**
+         * AiUsageOut
+         * @description Свой расход на Claude за месяц (UTC) по вызовам agent_runs, без проверок (eval).
+         *     У администратора — свои вызовы и общие задачи без участника (shared_usd), прогоны
+         *     приемки — отдельно (acceptance_usd); own_usd — свои остальные вызовы.
+         *
+         *     days — с 1-го числа по last_day (сегодня, если месяц текущий). admin_key_usd и
+         *     own_key_usd — чей ключ платил. search_usd — цена поисков, cache_saved_usd — сколько
+         *     сэкономило чтение кэша против обычного входа (по model_prices на момент вызова).
+         *     avg_analysis_usd — средняя цена своего законченного анализа месяца без прогонов
+         *     приемки (на обоих ключах). admin_key_avg_usd — то же только на ключе администратора
+         *     (шаг $0,0001): у участника на ключе администратора — то же число, что
+         *     avg_analysis_usd в GET /ai/budget; ее показывать рядом с лимитом. forecast_usd —
+         *     прогноз на конец месяца по темпу (участник на ключе администратора — не выше лимита,
+         *     на паузе — потрачено); у прошедшего месяца — итог. analyses_left — на сколько
+         *     анализов по admin_key_avg_usd хватит остатка лимита (left_usd в GET /ai/budget;
+         *     только участник на ключе администратора в текущем месяце).
+         */
+        AiUsageOut: {
+            /** Month */
+            month: string;
+            /**
+             * Month Start
+             * Format: date
+             */
+            month_start: string;
+            /**
+             * Last Day
+             * Format: date
+             */
+            last_day: string;
+            /** Days In Month */
+            days_in_month: number;
+            /** Days Elapsed */
+            days_elapsed: number;
+            /** Current */
+            current: boolean;
+            totals: components["schemas"]["UsageSumsOut"];
+            /** Own Usd */
+            own_usd: number;
+            /** Acceptance Usd */
+            acceptance_usd: number;
+            /** Shared Usd */
+            shared_usd: number;
+            /** Admin Key Usd */
+            admin_key_usd: number;
+            /** Own Key Usd */
+            own_key_usd: number;
+            /** Search Usd */
+            search_usd: number;
+            /** Cache Saved Usd */
+            cache_saved_usd: number;
+            /** Days */
+            days: components["schemas"]["UsageDayOut"][];
+            /** Kinds */
+            kinds: components["schemas"]["UsageKindOut"][];
+            /** Models */
+            models: components["schemas"]["UsageModelOut"][];
+            /** Steps */
+            steps: components["schemas"]["UsageStepOut"][];
+            /** Versions */
+            versions: components["schemas"]["UsageVersionOut"][];
+            /** Analyses */
+            analyses: components["schemas"]["AnalysisCostOut"][];
+            /** Avg Analysis Usd */
+            avg_analysis_usd: number | null;
+            /** Admin Key Avg Usd */
+            admin_key_avg_usd: number | null;
+            /** Forecast Usd */
+            forecast_usd: number;
+            /** Analyses Left */
+            analyses_left: number | null;
+            /** Prices */
+            prices: components["schemas"]["ModelPriceOut"][];
+            settings: components["schemas"]["AgentSettingsOut"];
+        };
+        /**
+         * AnalysisCostOut
+         * @description Свой анализ месяца: цена (сумма его вызовов), закончен ли, прогон приемки ли, на
+         *     чьем ключе шел (key_source фиксируется при запуске).
+         */
+        AnalysisCostOut: {
+            /** Id */
+            id: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Done */
+            done: boolean;
+            /** Acceptance */
+            acceptance: boolean;
+            /** Key Source */
+            key_source: ("admin" | "own") | null;
         };
         /**
          * AnalysisCreateIn
@@ -1909,6 +2410,27 @@ export interface components {
             parlays: components["schemas"]["ParlaysOut"] | null;
             calibration: components["schemas"]["CalibrationOut"];
             clv: components["schemas"]["ClvOut"];
+        };
+        /**
+         * ArchiveInfoOut
+         * @description Свежесть архива матчей: data_to — последний день матча с результатом в базе,
+         *     last_load — последняя успешная загрузка, stale — архив устарел (правило уведомления
+         *     data_stale), stale_days — дней с самой старой из последних загрузок (null — какой-то
+         *     архив не загружался ни разу).
+         */
+        ArchiveInfoOut: {
+            /** Data To */
+            data_to: string | null;
+            /** Last Load */
+            last_load: string | null;
+            /** Stale */
+            stale: boolean;
+            /** Stale Days */
+            stale_days: number | null;
+            /** Stale After Days */
+            stale_after_days: number;
+            /** Sources */
+            sources: components["schemas"]["ArchiveSourceOut"][];
         };
         /** ArchiveSourceOut */
         ArchiveSourceOut: {
@@ -2137,7 +2659,9 @@ export interface components {
          * BetItemOut
          * @description Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если
          *     закрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги
-         *     считается с кэфом 1.00), payout — выплата (у открытой — возможная). updated_at —
+         *     считается с кэфом 1.00), payout — выплата (у открытой — возможная). bank_after —
+         *     капитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у
+         *     открытой), то же число, что equity_after в последних ставках главной. updated_at —
          *     версия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,
          *     app/services/bet_versions.py).
          */
@@ -2170,6 +2694,8 @@ export interface components {
             profit: string | null;
             /** Payout */
             payout: string | null;
+            /** Bank After */
+            bank_after: string | null;
             /** Settled At */
             settled_at: string | null;
             /** Settled By */
@@ -2699,6 +3225,19 @@ export interface components {
             /** Odds */
             odds: string;
         };
+        /**
+         * CostPartOut
+         * @description Часть цены вызова: токены (у поисков — число поисков), цена за 1 млн токенов (у
+         *     поисков — за один поиск) и сумма с учетом второй ступени и Batch.
+         */
+        CostPartOut: {
+            /** Tokens */
+            tokens: number;
+            /** Price */
+            price: number;
+            /** Cost Usd */
+            cost_usd: number;
+        };
         /** CostsOut */
         CostsOut: {
             /** Tokens */
@@ -2848,6 +3387,20 @@ export interface components {
             /** Max Leg Odds */
             max_leg_odds: string | null;
         };
+        /**
+         * EloOut
+         * @description Эло игрока сейчас: общий, по покрытиям, лучшее покрытие (null — рейтинга нет).
+         */
+        EloOut: {
+            /** All */
+            all: number | null;
+            /** Matches */
+            matches: number;
+            /** Surfaces */
+            surfaces: components["schemas"]["SurfaceEloOut"][];
+            /** Best Surface */
+            best_surface: ("hard" | "clay" | "grass") | null;
+        };
         /** ErrorDetail */
         ErrorDetail: {
             /** Code */
@@ -2907,6 +3460,43 @@ export interface components {
             news_players: number;
             /** Reused Matches */
             reused_matches: number;
+        };
+        /**
+         * EvalRunUsageOut
+         * @description Проверочный прогон (eval) месяца: вызовы и цена; eval_run_id пустой — вызовы без
+         *     записи прогона.
+         */
+        EvalRunUsageOut: {
+            /** Eval Run Id */
+            eval_run_id: number | null;
+            /** Created At */
+            created_at: string | null;
+            /** Name */
+            name: string | null;
+            /** Eval Set */
+            eval_set: string | null;
+            /** N Events */
+            n_events: number | null;
+            /** Models */
+            models: string[];
+            /** Runs */
+            runs: number;
+            /** Cost Usd */
+            cost_usd: number;
+        };
+        /**
+         * EvalUsageOut
+         * @description Проверки (eval, shadow) — свой бюджет на ключе администратора, в общий не входят.
+         */
+        EvalUsageOut: {
+            /** Budget Usd */
+            budget_usd: number;
+            /** Spent Usd */
+            spent_usd: number;
+            /** Runs */
+            runs: number;
+            /** Items */
+            items: components["schemas"]["EvalRunUsageOut"][];
         };
         /**
          * EventIn
@@ -3011,6 +3601,32 @@ export interface components {
             /** P2 */
             p2: ("injury" | "fatigue" | "form" | "motivation")[];
         };
+        /**
+         * FormMatchOut
+         * @description Матч формы: соперник, его место по Эло сейчас, счет со стороны игрока.
+         */
+        FormMatchOut: {
+            /** Match Id */
+            match_id: number;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Won */
+            won: boolean;
+            opponent: components["schemas"]["PlayerRefOut"];
+            /** Opponent Rank */
+            opponent_rank: number | null;
+            /** Score */
+            score: string | null;
+            /** Surface */
+            surface: string | null;
+            /** Tournament */
+            tournament: string | null;
+            /** Round */
+            round: string;
+        };
         /** FormOut */
         FormOut: {
             /** P1 */
@@ -3026,6 +3642,54 @@ export interface components {
             min_winrate: string;
             /** Max Pct */
             max_pct: string;
+        };
+        /**
+         * H2HMatchOut
+         * @description Личная встреча: победитель (id), счет со стороны победителя, турнир, покрытие.
+         */
+        H2HMatchOut: {
+            /** Match Id */
+            match_id: number;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Winner Id */
+            winner_id: number;
+            /** Score */
+            score: string | null;
+            /** Surface */
+            surface: string | null;
+            /** Tournament */
+            tournament: string | null;
+            /** Category */
+            category: string | null;
+            /** Round */
+            round: string;
+            /** Best Of */
+            best_of: number | null;
+        };
+        /**
+         * H2HOut
+         * @description Личные встречи игрока (player) и соперника (opponent) в базе: победы каждого,
+         *     по покрытиям (ковер — как хард), все встречи, сначала последняя.
+         */
+        H2HOut: {
+            player: components["schemas"]["PlayerRefOut"];
+            opponent: components["schemas"]["PlayerRefOut"];
+            /** Player Rank */
+            player_rank: number | null;
+            /** Opponent Rank */
+            opponent_rank: number | null;
+            /** Player Wins */
+            player_wins: number;
+            /** Opponent Wins */
+            opponent_wins: number;
+            /** Surfaces */
+            surfaces: components["schemas"]["SurfaceResultOut"][];
+            /** Matches */
+            matches: components["schemas"]["H2HMatchOut"][];
         };
         /** HealthOut */
         HealthOut: {
@@ -3193,6 +3857,22 @@ export interface components {
             status: "active" | "used" | "expired" | "revoked";
         };
         /**
+         * KeyMatchesOut
+         * @description Ключевые матчи за 52 недели (364 дня с since по сегодня включительно, как
+         *     matches_52w): против нынешней десятки по месту по Эло, решающие сеты (матч дошел до
+         *     последнего сета), тай-брейки (по сетам).
+         */
+        KeyMatchesOut: {
+            /**
+             * Since
+             * Format: date
+             */
+            since: string;
+            top10: components["schemas"]["WinLossOut"];
+            deciders: components["schemas"]["WinLossOut"];
+            tiebreaks: components["schemas"]["WinLossOut"];
+        };
+        /**
          * KeyModelOut
          * @description Модель из настроек агента и доступна ли она ключу.
          */
@@ -3254,6 +3934,26 @@ export interface components {
             legacy_settled: number;
         };
         /**
+         * LastMatchOut
+         * @description Последний сыгранный матч игрока в базе: день (у матча без даты — начало турнира),
+         *     турнир архива, круг.
+         */
+        LastMatchOut: {
+            /** Match Id */
+            match_id: number;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Tournament */
+            tournament: string | null;
+            /** Category */
+            category: string | null;
+            /** Round */
+            round: string;
+        };
+        /**
          * LegMatchOut
          * @description Матч ноги. Турнир из ввода участника показывается по его же вводу; покрытие и
          *     формат — из турнира, иначе из ввода анализа (null — не указано).
@@ -3292,6 +3992,22 @@ export interface components {
             /** Score */
             score?: string | null;
             closing?: components["schemas"]["ClosingIn"] | null;
+        };
+        /**
+         * LegacyProfileOut
+         * @description Профиль из старого бота (шаблоны 01–04 как есть): заполнен моделью бота, часто по
+         *     памяти; в анализ не идет, новых профилей программа не собирает (Р24).
+         */
+        LegacyProfileOut: {
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Profile */
+            profile: {
+                [key: string]: unknown;
+            };
         };
         /**
          * LimitAlertOut
@@ -3642,6 +4358,37 @@ export interface components {
             limit?: components["schemas"]["LimitIn"] | null;
         };
         /**
+         * ModelPriceOut
+         * @description Действующая цена модели в долларах за 1 млн токенов и за один веб-поиск (из
+         *     model_prices). Вторая ступень: весь вход запроса больше long_input_threshold —
+         *     цены токенов × long_multiplier.
+         */
+        ModelPriceOut: {
+            /** Model */
+            model: string;
+            /**
+             * Valid From
+             * Format: date-time
+             */
+            valid_from: string;
+            /** Input */
+            input: number;
+            /** Output */
+            output: number;
+            /** Cache Read */
+            cache_read: number;
+            /** Cache Write 5M */
+            cache_write_5m: number;
+            /** Cache Write 1H */
+            cache_write_1h: number;
+            /** Search Price */
+            search_price: number;
+            /** Long Input Threshold */
+            long_input_threshold: number | null;
+            /** Long Multiplier */
+            long_multiplier: number | null;
+        };
+        /**
          * MyMatchBetOut
          * @description Нога открытой ставки на этом матче.
          */
@@ -3685,6 +4432,23 @@ export interface components {
             bets: components["schemas"]["MyMatchBetOut"][];
             /** Analyses */
             analyses: number[];
+        };
+        /**
+         * NewsStatusOut
+         * @description Новости игрока: когда последний раз искали, свежие ли (моложе ttl_hours), сколько
+         *     фактов за lookback_days.
+         */
+        NewsStatusOut: {
+            /** Checked At */
+            checked_at: string | null;
+            /** Fresh */
+            fresh: boolean;
+            /** Ttl Hours */
+            ttl_hours: number;
+            /** Lookback Days */
+            lookback_days: number;
+            /** Count */
+            count: number;
         };
         /** NotificationOut */
         NotificationOut: {
@@ -3803,6 +4567,8 @@ export interface components {
             profit: string | null;
             /** Payout */
             payout: string | null;
+            /** Bank After */
+            bank_after: string | null;
             /** Settled At */
             settled_at: string | null;
             /** Settled By */
@@ -3928,6 +4694,82 @@ export interface components {
             /** New Password */
             new_password: string;
         };
+        /**
+         * PersonActivityOut
+         * @description Активность человека за период (Р14: только входы и число анализов). logins —
+         *     успешные входы, failed_logins — неудачные попытки; analyses — запущенные анализы.
+         */
+        PersonActivityOut: {
+            /** User Id */
+            user_id: number;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "blocked" | "deleted";
+            /** Logins */
+            logins: number;
+            /** Failed Logins */
+            failed_logins: number;
+            /** Last Login At */
+            last_login_at: string | null;
+            /** Analyses */
+            analyses: number;
+            /** Last Analysis At */
+            last_analysis_at: string | null;
+        };
+        /**
+         * PersonUsageOut
+         * @description Человек в «Расходе ИИ» администратора (Р14: только расход на ИИ и число анализов).
+         *     key_spent_usd — на ключе администратора, own_spent_usd — на своем (вне бюджета);
+         *     analyses — анализы на ключе администратора, own_analyses — на своем. limit_usd —
+         *     месячный лимит (пусто у администратора); budget_share и limit_share — доля бюджета
+         *     и лимита.
+         */
+        PersonUsageOut: {
+            /** User Id */
+            user_id: number;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "blocked" | "deleted";
+            /**
+             * Ai Mode
+             * @enum {string}
+             */
+            ai_mode: "shared" | "own";
+            /** Key Spent Usd */
+            key_spent_usd: number;
+            /** Own Spent Usd */
+            own_spent_usd: number;
+            /** Analyses */
+            analyses: number;
+            /** Own Analyses */
+            own_analyses: number;
+            /** Limit Usd */
+            limit_usd: number | null;
+            /** Paused */
+            paused: boolean;
+            /** Budget Share */
+            budget_share: number | null;
+            /** Limit Share */
+            limit_share: number | null;
+        };
         /** PlayerBrief */
         PlayerBrief: {
             /** Id */
@@ -3955,6 +4797,78 @@ export interface components {
             score: number;
         };
         /**
+         * PlayerCardOut
+         * @description Карточка игрока: шапка, «Обзор», свежесть данных, профиль из бота и «сегодня».
+         *     sackmann — в карточке данные архива Сакманна (строка авторства CC BY-NC-SA).
+         */
+        PlayerCardOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Name Ru */
+            name_ru: string | null;
+            /** Country */
+            country: string | null;
+            /** Birth Date */
+            birth_date: string | null;
+            /** Age */
+            age: number | null;
+            /** Hand */
+            hand: string | null;
+            /** Backhand */
+            backhand: string | null;
+            /** Rank */
+            rank: number | null;
+            /** Matches 52W */
+            matches_52w: number;
+            /** Rank Days */
+            rank_days: number;
+            elo: components["schemas"]["EloOut"];
+            form: components["schemas"]["PlayerFormOut"];
+            last_match: components["schemas"]["LastMatchOut"] | null;
+            serve: components["schemas"]["ServeOut"] | null;
+            results: components["schemas"]["ResultsOut"];
+            key_matches: components["schemas"]["KeyMatchesOut"];
+            news: components["schemas"]["NewsStatusOut"];
+            archive: components["schemas"]["ArchiveInfoOut"];
+            /** Sackmann */
+            sackmann: boolean;
+            legacy_profile: components["schemas"]["LegacyProfileOut"] | null;
+            /** Today */
+            today: components["schemas"]["TodayOut"][];
+        };
+        /**
+         * PlayerCountsOut
+         * @description Сколько игроков в базе, с матчами за 52 недели и со свежими новостями.
+         */
+        PlayerCountsOut: {
+            /** All */
+            all: number;
+            /** Active */
+            active: number;
+            /** News */
+            news: number;
+        };
+        /**
+         * PlayerFormOut
+         * @description Форма: последние 10 матчей в базе (сначала последний), победы и поражения;
+         *     matches_14d — сыгранных матчей за 14 дней по сегодня (UTC) включительно, rest_days —
+         *     дней с последнего матча.
+         */
+        PlayerFormOut: {
+            /** Matches */
+            matches: components["schemas"]["FormMatchOut"][];
+            /** Wins */
+            wins: number;
+            /** Losses */
+            losses: number;
+            /** Matches 14D */
+            matches_14d: number;
+            /** Rest Days */
+            rest_days: number | null;
+        };
+        /**
          * PlayerHitOut
          * @description Найденный игрок: сходство 0…1, по какому полю найден, матчей в базе, место по Эло
          *     и последний матч.
@@ -3980,6 +4894,121 @@ export interface components {
             last_match: string | null;
         };
         /**
+         * PlayerMatchOut
+         * @description Матч игрока в базе: турнир и категория, покрытие, круг, соперник и его место по
+         *     Эло сейчас, счет со стороны игрока, исход (W, L или walkover — неявка соперника или
+         *     самого игрока, won говорит, кто прошел дальше), формат.
+         */
+        PlayerMatchOut: {
+            /** Match Id */
+            match_id: number;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Tournament */
+            tournament: string | null;
+            /** Category */
+            category: string | null;
+            /** Surface */
+            surface: string | null;
+            /** Round */
+            round: string;
+            opponent: components["schemas"]["PlayerRefOut"];
+            /** Opponent Rank */
+            opponent_rank: number | null;
+            /** Score */
+            score: string | null;
+            /** Won */
+            won: boolean;
+            /** Walkover */
+            walkover: boolean;
+            /** Best Of */
+            best_of: number | null;
+        };
+        /**
+         * PlayerMatchesOut
+         * @description Страница матчей игрока, сначала последние. next_before — курсор (id матча) следующей
+         *     страницы; summary — только на первой странице.
+         */
+        PlayerMatchesOut: {
+            /** Items */
+            items: components["schemas"]["PlayerMatchOut"][];
+            /** Next Before */
+            next_before: number | null;
+            /** Total */
+            total: number;
+            summary: components["schemas"]["PlayerMatchesSummaryOut"] | null;
+        };
+        /**
+         * PlayerMatchesSummaryOut
+         * @description Итоги матчей за 2 сезона (since): победы из сыгранных, тай-брейки, решающие
+         *     сеты, матчи до трех побед.
+         */
+        PlayerMatchesSummaryOut: {
+            /**
+             * Since
+             * Format: date
+             */
+            since: string;
+            /** Played */
+            played: number;
+            /** Wins */
+            wins: number;
+            tiebreaks: components["schemas"]["WinLossOut"];
+            deciders: components["schemas"]["WinLossOut"];
+            /** Best Of 5 */
+            best_of_5: number;
+        };
+        /**
+         * PlayerNewsItemOut
+         * @description Факт из новостей (шаг новостей анализа, общий кэш для всех): вид, дата, текст,
+         *     сайт и ссылка; у результата — подробности (соперник, счет, турнир, дата, победа).
+         */
+        PlayerNewsItemOut: {
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "injury" | "withdrawal" | "motivation" | "other" | "result";
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+            /** Summary */
+            summary: string;
+            /** Source Url */
+            source_url: string;
+            /** Source Name */
+            source_name: string | null;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * PlayerNewsOut
+         * @description Новости игрока за lookback_days, новые сверху, страницами. next_before — курсор.
+         */
+        PlayerNewsOut: {
+            /** Items */
+            items: components["schemas"]["PlayerNewsItemOut"][];
+            /** Next Before */
+            next_before: number | null;
+            /** Checked At */
+            checked_at: string | null;
+            /** Fresh */
+            fresh: boolean;
+            /** Ttl Hours */
+            ttl_hours: number;
+            /** Lookback Days */
+            lookback_days: number;
+        };
+        /**
          * PlayerPick
          * @description Игрок из текста: matched — найден (сходство ≥ 0,9), check — проверьте
          *     (0,7–0,9), missing — нет в базе. candidates — до 3 похожих.
@@ -3998,6 +5027,51 @@ export interface components {
             /** Candidates */
             candidates: components["schemas"]["PlayerCandidate"][];
         };
+        /**
+         * PlayerRankingOut
+         * @description Страница списка «Игроки». Без поиска — набор по data, с поиском — вся база (data =
+         *     news сужает до игроков со свежими новостями); fuzzy — точных совпадений нет, найдено
+         *     с учетом опечаток. total — сколько всего по условиям. as_of — день расчета текущего
+         *     Эло, rank_days — окно места по Эло, news_ttl_hours — сколько новости считаются
+         *     свежими.
+         */
+        PlayerRankingOut: {
+            /** Items */
+            items: components["schemas"]["PlayerRowOut"][];
+            /** Total */
+            total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+            /** Query */
+            query: string | null;
+            /** Fuzzy */
+            fuzzy: boolean;
+            /**
+             * Data
+             * @enum {string}
+             */
+            data: "active" | "news" | "all";
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "hard" | "clay" | "grass";
+            /**
+             * Sort
+             * @enum {string}
+             */
+            sort: "rank" | "elo" | "last";
+            counts: components["schemas"]["PlayerCountsOut"];
+            /** As Of */
+            as_of: string | null;
+            /** Rank Days */
+            rank_days: number;
+            /** News Ttl Hours */
+            news_ttl_hours: number;
+            archive: components["schemas"]["ArchiveInfoOut"];
+        };
         /** PlayerRefOut */
         PlayerRefOut: {
             /** Id */
@@ -4006,6 +5080,48 @@ export interface components {
             name: string;
             /** Name Ru */
             name_ru: string | null;
+        };
+        /**
+         * PlayerRowOut
+         * @description Строка списка: место по Эло (null — нет матчей за 52 недели), Эло общий и на
+         *     выбранном покрытии (delta — разница с общим), форма — последние 10 матчей, сначала
+         *     последний; новости — когда проверялись и свежие ли (моложе кэша новостей); today —
+         *     игрок есть в своих матчах сегодня (открытые ставки и сегодняшние анализы).
+         */
+        PlayerRowOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Name Ru */
+            name_ru: string | null;
+            /** Country */
+            country: string | null;
+            /** Age */
+            age: number | null;
+            /** Rank */
+            rank: number | null;
+            /** Elo All */
+            elo_all: number | null;
+            /** Elo Surface */
+            elo_surface: number | null;
+            /** Elo Delta */
+            elo_delta: number | null;
+            /** Matches 52W */
+            matches_52w: number;
+            /** Form */
+            form: ("W" | "L")[];
+            /** Wins */
+            wins: number;
+            /** Losses */
+            losses: number;
+            last_match: components["schemas"]["LastMatchOut"] | null;
+            /** News Checked At */
+            news_checked_at: string | null;
+            /** News Fresh */
+            news_fresh: boolean;
+            /** Today */
+            today: boolean;
         };
         /** PlayerSide */
         PlayerSide: {
@@ -4320,6 +5436,20 @@ export interface components {
             costs: components["schemas"]["CostsOut"];
         };
         /**
+         * ResultsOut
+         * @description Результаты по покрытиям с since (2 сезона: с 1 января прошлого года) и итог.
+         */
+        ResultsOut: {
+            /**
+             * Since
+             * Format: date
+             */
+            since: string;
+            /** Surfaces */
+            surfaces: components["schemas"]["SurfaceResultOut"][];
+            total: components["schemas"]["WinLossOut"];
+        };
+        /**
          * ReturnRequestOut
          * @description Когда отправлена просьба вернуть ключ администратора.
          */
@@ -4361,6 +5491,29 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * RunCostOut
+         * @description Из чего сложилась цена вызова по model_prices на момент вызова. long_factor —
+         *     множитель второй ступени (1 — нет), batch — половина цены токенов. Части округлены
+         *     до миллионной доли, cost_usd вызова — как записано в agent_runs.
+         */
+        RunCostOut: {
+            /**
+             * Valid From
+             * Format: date-time
+             */
+            valid_from: string;
+            input: components["schemas"]["CostPartOut"];
+            cache_write_5m: components["schemas"]["CostPartOut"];
+            cache_write_1h: components["schemas"]["CostPartOut"];
+            cache_read: components["schemas"]["CostPartOut"];
+            output: components["schemas"]["CostPartOut"];
+            searches: components["schemas"]["CostPartOut"];
+            /** Long Factor */
+            long_factor: number;
+            /** Batch */
+            batch: boolean;
         };
         /**
          * SampleOut
@@ -4474,6 +5627,56 @@ export interface components {
             end: string;
         };
         /**
+         * ServeMetricsOut
+         * @description Подача и прием (доли 0…1, null — нет данных): попадание первой, очки на первой и
+         *     второй, эйсы и двойные за матч, очки на приеме первой и второй соперника, реализация
+         *     и спасение брейкпоинтов. matches — матчей со статистикой.
+         */
+        ServeMetricsOut: {
+            /** Matches */
+            matches: number;
+            /** First In */
+            first_in: number | null;
+            /** First Won */
+            first_won: number | null;
+            /** Second Won */
+            second_won: number | null;
+            /** Aces Per Match */
+            aces_per_match: number | null;
+            /** Double Faults Per Match */
+            double_faults_per_match: number | null;
+            /** First Return Won */
+            first_return_won: number | null;
+            /** Second Return Won */
+            second_return_won: number | null;
+            /** Bp Converted */
+            bp_converted: number | null;
+            /** Bp Saved */
+            bp_saved: number | null;
+        };
+        /**
+         * ServeOut
+         * @description Подача и прием за 52 недели до последнего дня со статистикой в архиве (period_to;
+         *     статистика есть только в архиве Сакманна) против среднего по туру — игроков из первых
+         *     tour_players по месту по Эло, суммами за то же окно.
+         */
+        ServeOut: {
+            /**
+             * Period From
+             * Format: date
+             */
+            period_from: string;
+            /**
+             * Period To
+             * Format: date
+             */
+            period_to: string;
+            player: components["schemas"]["ServeMetricsOut"] | null;
+            tour: components["schemas"]["ServeMetricsOut"] | null;
+            /** Tour Players */
+            tour_players: number;
+        };
+        /**
          * SessionOut
          * @description Действующий сеанс. device_label пустой — устройство не распознано.
          */
@@ -4512,6 +5715,22 @@ export interface components {
             expected_updated_at: string;
             /** Legs */
             legs: components["schemas"]["LegSettleIn"][];
+        };
+        /**
+         * SharedUsageOut
+         * @description Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke).
+         */
+        SharedUsageOut: {
+            /** Runs */
+            runs: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Cache Share */
+            cache_share: number | null;
+            /** Budget Share */
+            budget_share: number | null;
+            /** Kinds */
+            kinds: string[];
         };
         /**
          * SlicesOut
@@ -4687,6 +5906,32 @@ export interface components {
                 [key: string]: boolean;
             };
         };
+        /**
+         * SurfaceEloOut
+         * @description Эло на покрытии: значение (null — матчей на нем нет), матчей и разница с общим.
+         */
+        SurfaceEloOut: {
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "hard" | "clay" | "grass";
+            /** Elo */
+            elo: number | null;
+            /** Matches */
+            matches: number;
+            /** Delta */
+            delta: number | null;
+        };
+        /** SurfaceResultOut */
+        SurfaceResultOut: {
+            /** Wins */
+            wins: number;
+            /** Losses */
+            losses: number;
+            /** Surface */
+            surface: string;
+        };
         /** SurfaceSliceOut */
         SurfaceSliceOut: {
             /** N */
@@ -4707,6 +5952,24 @@ export interface components {
              * @enum {string}
              */
             surface: "hard" | "clay" | "grass" | "carpet" | "unknown";
+        };
+        /**
+         * TaskUsageOut
+         * @description Задача (вид вызова) на ключе администратора: вызовы участников, без общих задач.
+         */
+        TaskUsageOut: {
+            /** Kind */
+            kind: string;
+            /** Runs */
+            runs: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Cache Share */
+            cache_share: number | null;
+            /** Budget Share */
+            budget_share: number | null;
+            /** Models */
+            models: string[];
         };
         /**
          * TextKey
@@ -4755,6 +6018,55 @@ export interface components {
             rolling_window: number;
             /** Rolling Step */
             rolling_step: number;
+        };
+        /**
+         * TodayH2HOut
+         * @description Личные встречи с соперником сегодняшнего матча: всего и на его покрытии,
+         *     последняя встреча.
+         */
+        TodayH2HOut: {
+            /** Wins */
+            wins: number;
+            /** Losses */
+            losses: number;
+            /** Surface Wins */
+            surface_wins: number;
+            /** Surface Losses */
+            surface_losses: number;
+            /** Last Day */
+            last_day: string | null;
+            /** Last Won */
+            last_won: boolean | null;
+        };
+        /**
+         * TodayOut
+         * @description Мой матч сегодня с этим игроком (только из своих ставок и анализов): соперник и
+         *     его место по Эло, ноги своих открытых ставок, свои анализы; surface — покрытие
+         *     турнира (null — неизвестно); elo_prob — вероятность победы игрока по текущему Эло
+         *     (вес покрытия как у модели, без калибровки) — входная точка, не прогноз; h2h — личные
+         *     встречи.
+         */
+        TodayOut: {
+            /** Match Id */
+            match_id: number;
+            opponent: components["schemas"]["PlayerRefOut"];
+            /** Opponent Rank */
+            opponent_rank: number | null;
+            /** Tournament */
+            tournament: string | null;
+            /** Round */
+            round: string | null;
+            /** Scheduled At */
+            scheduled_at: string | null;
+            /** Surface */
+            surface: string | null;
+            /** Bets */
+            bets: components["schemas"]["MyMatchBetOut"][];
+            /** Analyses */
+            analyses: number[];
+            /** Elo Prob */
+            elo_prob: number | null;
+            h2h: components["schemas"]["TodayH2HOut"];
         };
         /**
          * TotalSliceOut
@@ -4907,6 +6219,175 @@ export interface components {
             text: string;
         };
         /**
+         * UsageDayOut
+         * @description День по UTC (месяц расходов тоже по UTC, поэтому сумма дней — расход месяца).
+         */
+        UsageDayOut: {
+            /** Runs */
+            runs: number;
+            /** Errors */
+            errors: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Web Searches */
+            web_searches: number;
+            /** Cache Share */
+            cache_share: number | null;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Kinds */
+            kinds: components["schemas"]["UsageKindCostOut"][];
+        };
+        /**
+         * UsageKindCostOut
+         * @description Вид вызова в дне: число вызовов и цена (состав столбца «Расходы по дням»).
+         */
+        UsageKindCostOut: {
+            /** Kind */
+            kind: string;
+            /** Runs */
+            runs: number;
+            /** Cost Usd */
+            cost_usd: number;
+        };
+        /**
+         * UsageKindOut
+         * @description Вид вызова за месяц. avg_* — в среднем на вызов без ошибки (пусто — таких нет);
+         *     models и efforts — какие модели и effort были у вызовов.
+         */
+        UsageKindOut: {
+            /** Runs */
+            runs: number;
+            /** Errors */
+            errors: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Web Searches */
+            web_searches: number;
+            /** Cache Share */
+            cache_share: number | null;
+            /** Kind */
+            kind: string;
+            /** Avg Cost Usd */
+            avg_cost_usd: number | null;
+            /** Avg Prompt Tokens */
+            avg_prompt_tokens: number | null;
+            /** Avg Output Tokens */
+            avg_output_tokens: number | null;
+            /** Models */
+            models: string[];
+            /** Efforts */
+            efforts: string[];
+        };
+        /** UsageModelOut */
+        UsageModelOut: {
+            /** Runs */
+            runs: number;
+            /** Errors */
+            errors: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Web Searches */
+            web_searches: number;
+            /** Cache Share */
+            cache_share: number | null;
+            /** Model */
+            model: string;
+        };
+        /**
+         * UsageStepOut
+         * @description Шаг анализа (agent_runs.step; 0 — вызов вне анализа) и вид вызова.
+         */
+        UsageStepOut: {
+            /** Kind */
+            kind: string;
+            /** Step */
+            step: number;
+            /** Runs */
+            runs: number;
+            /** Cost Usd */
+            cost_usd: number;
+        };
+        /**
+         * UsageSumsOut
+         * @description Сумма вызовов: число (errors — с ошибкой), цена, токены по видам и поиски.
+         *     input_tokens — вход без кэша (как usage.input_tokens API), prompt_tokens — весь вход
+         *     (без кэша, запись и чтение кэша). cache_share — доля кэша по формуле PLAN.md, раздел 8:
+         *     cache_read / (input + cache_write + cache_read); пусто — входа нет.
+         */
+        UsageSumsOut: {
+            /** Runs */
+            runs: number;
+            /** Errors */
+            errors: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Web Searches */
+            web_searches: number;
+            /** Cache Share */
+            cache_share: number | null;
+        };
+        /**
+         * UsageVersionOut
+         * @description Версия инструкций вида вызова: цена за месяц и в среднем на вызов без ошибки.
+         *     Качество версии — этап 5.
+         */
+        UsageVersionOut: {
+            /** Kind */
+            kind: string;
+            /** Prompt Version */
+            prompt_version: string | null;
+            /** Runs */
+            runs: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Avg Cost Usd */
+            avg_cost_usd: number | null;
+        };
+        /**
          * UserDeleteIn
          * @description Удаление участника (Р15): email участника для подтверждения и код 2FA.
          */
@@ -4933,6 +6414,13 @@ export interface components {
             win: string;
             /** Win Add */
             win_add: string;
+        };
+        /** WinLossOut */
+        WinLossOut: {
+            /** Wins */
+            wins: number;
+            /** Losses */
+            losses: number;
         };
     };
     responses: never;
@@ -5708,6 +7196,37 @@ export interface operations {
             };
         };
     };
+    get_activity_api_admin_activity_get: {
+        parameters: {
+            query?: {
+                period?: "1d" | "7d" | "30d" | "90d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     get_user_api_admin_users__user_id__get: {
         parameters: {
             query?: never;
@@ -6187,6 +7706,71 @@ export interface operations {
             };
         };
     };
+    usage_api_ai_usage_get: {
+        parameters: {
+            query?: {
+                month?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiUsageOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    runs_api_ai_runs_get: {
+        parameters: {
+            query?: {
+                month?: string | null;
+                kind?: ("parse" | "news" | "analysis" | "refresh" | "postmortem" | "shared") | null;
+                before?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiRunsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     save_own_key_api_me_ai_key_put: {
         parameters: {
             query?: never;
@@ -6511,6 +8095,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminBudgetOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_usage_api_admin_ai_usage_get: {
+        parameters: {
+            query?: {
+                month?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAiUsageOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */
@@ -6928,7 +8543,7 @@ export interface operations {
                 period?: "7d" | "30d" | "90d" | "all";
                 from?: string | null;
                 to?: string | null;
-                status?: ("open" | "won" | "lost" | "void") | null;
+                status?: ("open" | "won" | "lost" | "void" | "settled") | null;
                 market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
@@ -7001,7 +8616,7 @@ export interface operations {
                 period?: "7d" | "30d" | "90d" | "all";
                 from?: string | null;
                 to?: string | null;
-                status?: ("open" | "won" | "lost" | "void") | null;
+                status?: ("open" | "won" | "lost" | "void" | "settled") | null;
                 market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
@@ -7039,7 +8654,7 @@ export interface operations {
                 period?: "7d" | "30d" | "90d" | "all";
                 from?: string | null;
                 to?: string | null;
-                status?: ("open" | "won" | "lost" | "void") | null;
+                status?: ("open" | "won" | "lost" | "void" | "settled") | null;
                 market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
@@ -7526,6 +9141,173 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlayerHitOut"][];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    players_ranking_api_players_ranking_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                surface?: "hard" | "clay" | "grass";
+                data?: "active" | "news" | "all";
+                sort?: "rank" | "elo" | "last";
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerRankingOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_player_api_players__player_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerCardOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_player_matches_api_players__player_id__matches_get: {
+        parameters: {
+            query?: {
+                before?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                player_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerMatchesOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_player_news_api_players__player_id__news_get: {
+        parameters: {
+            query?: {
+                before?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                player_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerNewsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_head_to_head_api_players__player_id__h2h__opponent_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: number;
+                opponent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["H2HOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

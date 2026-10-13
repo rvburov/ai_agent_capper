@@ -234,3 +234,38 @@ class AuditOut(BaseModel):
     target_name: str
     details: dict[str, Any]
     ip: str | None
+
+
+# --- активность (этап 4) ---
+
+# Период активности: последние сутки, 7, 30 или 90 дней (журнал входов хранится 90 дней)
+ActivityPeriod = Literal["1d", "7d", "30d", "90d"]
+
+
+class PersonActivityOut(BaseModel):
+    """Активность человека за период (Р14: только входы и число анализов). logins —
+    успешные входы, failed_logins — неудачные попытки; analyses — запущенные анализы."""
+
+    user_id: int
+    display_name: str
+    role: Role
+    status: UserStatus
+    logins: int
+    failed_logins: int
+    last_login_at: datetime | None
+    analyses: int
+    last_analysis_at: datetime | None
+
+
+class ActivityOut(BaseModel):
+    """Входы и анализы по людям за период с since. active_users — сколько людей входили,
+    today_users — сколько входили сегодня (с полуночи в поясе администратора)."""
+
+    period: ActivityPeriod
+    since: datetime
+    logins: int
+    failed_logins: int
+    analyses: int
+    active_users: int
+    today_users: int
+    people: list[PersonActivityOut]

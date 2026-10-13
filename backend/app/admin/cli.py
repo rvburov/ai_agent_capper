@@ -32,6 +32,7 @@ Claude (этап 3):
     python -m app.admin.cli players-link-legacy [--dry-run]
     python -m app.admin.cli players-unmatched [--limit 50]
     python -m app.admin.cli matches-merge --from 40 --into 41 [--yes]
+    python -m app.admin.cli elo-current
 
 Пароль и ключ вводятся без отображения (getpass) или одной строкой из stdin
 (--password-stdin, --key-stdin) — так их не видно в истории команд и в списке процессов.
@@ -76,6 +77,7 @@ from app.db.models import BetLeg, Match, OddsSnapshot, Player, Tournament, User
 from app.db.session import get_session
 from app.ingest import players_link
 from app.ingest.runs import IngestError, update_lock
+from app.ml import elo
 from app.services import access_codes, admin_key, admin_users, agent_smoke, players
 from app.services.app_settings import get_app_settings
 
@@ -801,6 +803,13 @@ async def _matches_merge(args: argparse.Namespace) -> None:
     _say(t("cli.matches_merge_done", source=args.source, target=args.target))
 
 
+async def _elo_current(args: argparse.Namespace) -> None:
+    # Не одновременно с обновлением данных: оно само перепишет таблицу шагом elo
+    async with update_lock(get_session):
+        players_count, ranked = await elo.refresh_current()
+    _say(t("cli.elo_current_done", players=players_count, ranked=ranked))
+
+
 def _add_player_commands(command: Callable[[str, str], argparse.ArgumentParser]) -> None:
     find = command("players-find", "players_find")
     find.add_argument("query", help=t("cli.help.players_query"))
@@ -843,6 +852,9 @@ def _add_player_commands(command: Callable[[str, str], argparse.ArgumentParser])
     )
     matches.add_argument("--yes", action="store_true", help=t("cli.help.players_yes"))
     matches.set_defaults(handler=_matches_merge)
+
+    current = command("elo-current", "elo_current")
+    current.set_defaults(handler=_elo_current)
 
 
 # --- разбор аргументов ---

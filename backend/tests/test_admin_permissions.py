@@ -110,8 +110,8 @@ def _schema_properties(node: Any, seen: set[str]) -> set[str]:
 def test_admin_user_responses_have_no_private_fields() -> None:
     checked = 0
     for path, operations in _SCHEMA["paths"].items():
-        # Участники и их расход на ИИ (лимиты, режим ключа)
-        if not path.startswith(("/api/admin/users", "/api/admin/ai")):
+        # Участники, их расход на ИИ (лимиты, режим ключа, разбивки) и активность
+        if not path.startswith(("/api/admin/users", "/api/admin/ai", "/api/admin/activity")):
             continue
         for operation in operations.values():
             for code, response in operation["responses"].items():
@@ -123,7 +123,18 @@ def test_admin_user_responses_have_no_private_fields() -> None:
                 leaked = {f for f in fields if any(word in f.lower() for word in _PRIVATE_WORDS)}
                 assert not leaked, (path, leaked)
                 checked += 1
-    assert checked >= 12
+    assert checked >= 14
+
+
+def test_admin_breakdowns_have_no_analysis_or_input() -> None:
+    """Р14: разбивки расхода и активность — только деньги, число анализов и входов: без
+    анализов, текстов ввода, игроков, адресов и устройств."""
+    words = ("analysis_id", "input_text", "player", "match", "ip", "user_agent", "device")
+    for path in ("/api/admin/ai/usage", "/api/admin/activity"):
+        schema = _SCHEMA["paths"][path]["get"]["responses"]["200"]["content"]["application/json"]
+        fields = _schema_properties(schema["schema"], set())
+        assert {"display_name", "user_id"} <= fields, path
+        assert not {field for field in fields if field in words or field.startswith("player")}
 
 
 async def test_admin_user_payload_keys(

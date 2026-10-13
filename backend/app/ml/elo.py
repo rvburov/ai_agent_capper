@@ -23,9 +23,17 @@ p1 = 1 / (1 + 10^((R2 − R1)/400)), R = (1 − w)·общий + w·покрыт
 исход показывается с запасом, позже, но не раньше времени.
 
     rebuild_ratings()  — пересчет по всей истории из БД в player_ratings (пишутся только
-                         строки, которые изменились: write_ratings);
+                         строки, которые изменились: write_ratings) и в player_elo_current
+                         (write_current);
+    refresh_current()  — только player_elo_current по уже посчитанным рейтингам (команда
+                         elo-current);
     current_elo(...)   — рейтинг игрока на дату (для анализа матча, этап 3);
     EloEngine          — расчет без БД (бэктест, тесты).
+
+player_elo_current — текущее состояние для списка игроков (этап 4): последняя строка
+player_ratings каждого игрока по каждому покрытию (то же, что current_elo без before),
+последний сыгранный матч в базе, число матчей за CURRENT_DAYS и место по общему Эло
+среди игроков, у которых такие матчи есть (как место по Эло в анализе).
 """
 
 import argparse
@@ -35,7 +43,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, field, replace
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import BigInteger, Date, Table, bindparam, delete, func, literal, select, text
@@ -45,7 +53,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import t
-from app.db.models import Match, MlModel, PlayerRating, Tournament
+from app.db.models import Match, MlModel, PlayerEloCurrent, PlayerRating, Tournament
 from app.db.session import create_engine, create_sessionmaker
 from app.ingest.rounds import round_order
 from app.ingest.runs import ingestion_run
@@ -62,6 +70,16 @@ INGEST_SOURCE = "elo"
 RATING_COLUMNS = ("player_id", "surface", "as_of", "elo", "matches")
 # Ключ pg_advisory_xact_lock: два пересчета одновременно не идут
 LOCK_KEY = 0x656C6F0000000001
+# Окно «матчей за 52 недели» в player_elo_current: то же, что у места по Эло в анализе
+# (app/services/analysis_input.ELO_RANK_DAYS). Анализ на день D смотрит CURRENT_DAYS дней
+# до D, а текущее состояние на день as_of — CURRENT_DAYS дней по as_of включительно, как
+# анализ на следующий день: [as_of − (CURRENT_DAYS − 1), as_of] (current_since)
+CURRENT_DAYS = 364
+
+
+def current_since(today: date) -> date:
+    """Первый день окна CURRENT_DAYS дней, которое кончается днем today включительно."""
+    return today - timedelta(days=CURRENT_DAYS - 1)
 
 
 def rating_surface(surface: str | None) -> str | None:
@@ -436,6 +454,9 @@ class EloSummary:
     train_to: date | None
     written: int = 0
     deleted: int = 0
+    # player_elo_current: игроков в таблице и сколько из них с местом по Эло
+    current: int = 0
+    ranked: int = 0
 
 
 def daily_states(
@@ -522,6 +543,96 @@ async def _delete_keys(
     )
 
 
+# Текущее Эло: последняя строка рейтинга игрока по каждому покрытию (как current_elo без
+# before), последний сыгранный матч и матчи за окно [since, today] (день матча — дата,
+# иначе начало турнира, как last_match_days анализа), место по общему Эло среди игроков с
+# матчами за окно (rank, как место по Эло анализа на день today + 1). Пишутся только
+# игроки с рейтингом
+_CURRENT_SQL = """
+WITH latest AS (
+    SELECT DISTINCT ON (player_id, surface) player_id, surface, elo, matches
+    FROM player_ratings
+    ORDER BY player_id, surface, as_of DESC
+),
+rated AS (
+    SELECT player_id,
+        max(elo) FILTER (WHERE surface = 'all') AS elo_all,
+        max(elo) FILTER (WHERE surface = 'hard') AS elo_hard,
+        max(elo) FILTER (WHERE surface = 'clay') AS elo_clay,
+        max(elo) FILTER (WHERE surface = 'grass') AS elo_grass,
+        coalesce(max(matches) FILTER (WHERE surface = 'all'), 0) AS n_all,
+        coalesce(max(matches) FILTER (WHERE surface = 'hard'), 0) AS n_hard,
+        coalesce(max(matches) FILTER (WHERE surface = 'clay'), 0) AS n_clay,
+        coalesce(max(matches) FILTER (WHERE surface = 'grass'), 0) AS n_grass
+    FROM latest GROUP BY player_id
+),
+days AS (
+    SELECT m.player1_id AS pid, coalesce(m.match_date, t.start_date) AS day
+    FROM matches m LEFT JOIN tournaments t ON t.id = m.tournament_id
+    WHERE m.status IN ('finished', 'retired')
+    UNION ALL
+    SELECT m.player2_id, coalesce(m.match_date, t.start_date)
+    FROM matches m LEFT JOIN tournaments t ON t.id = m.tournament_id
+    WHERE m.status IN ('finished', 'retired')
+),
+played AS (
+    SELECT pid, max(day) FILTER (WHERE day <= :today) AS last_match,
+        count(*) FILTER (WHERE day >= :since AND day <= :today) AS recent
+    FROM days WHERE day IS NOT NULL GROUP BY pid
+),
+joined AS (
+    SELECT r.*, p.last_match, coalesce(p.recent, 0) AS recent,
+        coalesce(p.recent, 0) > 0 AND r.elo_all IS NOT NULL AS ranked
+    FROM rated r LEFT JOIN played p ON p.pid = r.player_id
+)
+INSERT INTO player_elo_current (
+    player_id, elo_all, elo_hard, elo_clay, elo_grass, n_all, n_hard, n_clay, n_grass,
+    rank_all, last_match, matches_52w, as_of
+)
+SELECT player_id, elo_all, elo_hard, elo_clay, elo_grass, n_all, n_hard, n_clay, n_grass,
+    CASE WHEN ranked THEN rank() OVER (PARTITION BY ranked ORDER BY elo_all DESC) END,
+    last_match, recent, :today
+FROM joined
+"""
+
+
+async def write_current(db: AsyncSession, today: date) -> tuple[int, int]:
+    """player_elo_current заново по player_ratings и матчам (см. _CURRENT_SQL) на день
+    today. Удаление и запись — в транзакции вызывающего: читатели до commit видят прежнюю
+    таблицу, повторный запуск дает то же. → (игроков, из них с местом по Эло)."""
+    table = cast(Table, PlayerEloCurrent.__table__)
+    await db.execute(delete(table))
+    await db.execute(
+        text(_CURRENT_SQL),
+        {"today": today, "since": current_since(today)},
+    )
+    total, ranked = (
+        await db.execute(select(func.count(), func.count(table.c.rank_all)).select_from(table))
+    ).one()
+    return int(total), int(ranked)
+
+
+async def refresh_current(
+    *,
+    today: date | None = None,
+    db_factory: Callable[[], AsyncSession] | None = None,
+) -> tuple[int, int]:
+    """Только player_elo_current по уже посчитанным рейтингам (команда elo-current: база,
+    где Эло пересчитано до этапа 4). Под той же блокировкой, что пересчет, — не
+    одновременно с ним. → (игроков, из них с местом по Эло)."""
+    if db_factory is None:
+        db_engine = create_engine()
+        try:
+            return await refresh_current(today=today, db_factory=create_sessionmaker(db_engine))
+        finally:
+            await db_engine.dispose()
+    async with db_factory() as db:
+        await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": LOCK_KEY})
+        result = await write_current(db, today or datetime.now(UTC).date())
+        await db.commit()
+    return result
+
+
 async def upsert_model(
     db: AsyncSession,
     *,
@@ -559,10 +670,12 @@ async def rebuild_ratings(
     params: EloParams | None = None,
     db_factory: Callable[[], AsyncSession] | None = None,
     progress: Callable[[str], None] | None = None,
+    today: date | None = None,
 ) -> EloSummary:
     """Пересчитать Эло по всей истории из БД: в одной транзакции привести player_ratings к
-    строке на (игрок, покрытие, день) с состоянием на конец дня (write_ratings); обновить
-    ml_models elo-v1. Журнал — ingestion_runs (source = elo).
+    строке на (игрок, покрытие, день) с состоянием на конец дня (write_ratings), заново
+    записать player_elo_current на день today (по умолчанию — сегодня по UTC,
+    write_current); обновить ml_models elo-v1. Журнал — ingestion_runs (source = elo).
 
     db_factory — фабрика сеансов (async_sessionmaker); без нее открывается свой движок
     по настройкам. progress — куда сообщать ход работы по этапам (история загружена,
@@ -572,7 +685,10 @@ async def rebuild_ratings(
         db_engine = create_engine()
         try:
             return await rebuild_ratings(
-                params=params, db_factory=create_sessionmaker(db_engine), progress=progress
+                params=params,
+                db_factory=create_sessionmaker(db_engine),
+                progress=progress,
+                today=today,
             )
         finally:
             await db_engine.dispose()
@@ -601,6 +717,9 @@ async def rebuild_ratings(
             started = time.monotonic()
             written, deleted = await write_ratings(db, states)
             say("written", started, written=written, deleted=deleted)
+            started = time.monotonic()
+            current, ranked = await write_current(db, today or datetime.now(UTC).date())
+            say("current", started, players=current, ranked=ranked)
             first = history.matches[0].day if history.matches else None
             last = history.matches[-1].day if history.matches else None
             await upsert_model(
@@ -620,6 +739,8 @@ async def rebuild_ratings(
         report.counts["players"] = len(engine.players())
         report.counts["rows.written"] = written
         report.counts["rows.deleted"] = deleted
+        report.counts["current.players"] = current
+        report.counts["current.ranked"] = ranked
         report.freshness = {"first_day": first, "last_day": last}
     return EloSummary(
         run_id=run.id,
@@ -631,6 +752,8 @@ async def rebuild_ratings(
         train_to=last,
         written=written,
         deleted=deleted,
+        current=current,
+        ranked=ranked,
     )
 
 
@@ -719,6 +842,7 @@ def summary_lines(summary: EloSummary) -> list[str]:
     for reason, count in summary.skipped.items():
         lines.append(t("ml.elo.report.skipped", reason=_skip_text(reason), count=count))
     lines.append(t("ml.elo.report.written", written=summary.written, deleted=summary.deleted))
+    lines.append(t("ml.elo.report.current", players=summary.current, ranked=summary.ranked))
     return lines
 
 

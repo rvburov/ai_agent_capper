@@ -958,20 +958,40 @@ async def test_unmatched_counts_from_examples(db: AsyncSession) -> None:
 
 
 def test_player_texts_exist() -> None:
-    """Ключи players.* из кода есть в локали (общий тест локали видит только t(...))."""
+    """Ключи players.* из кода есть в локали (общий тест локали видит только t(...)).
+    Ключ из f-строки (f"players.countries.{code}") — раздел локали: он есть и не пуст."""
     import ast
+    import json
     from pathlib import Path
 
     app_dir = Path(__file__).resolve().parent.parent / "app"
+    locale = json.loads((app_dir / "locales" / "ru.json").read_text(encoding="utf-8"))
     found: set[str] = set()
+    sections: set[str] = set()
     for path in (app_dir / "services" / "players.py", app_dir / "ingest" / "players_link.py"):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        in_fstrings = {
+            id(part)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.JoinedStr)
+            for part in node.values
+        }
+        for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
                 and node.value.startswith("players.")
                 and " " not in node.value
             ):
-                found.add(node.value)
+                (sections if id(node) in in_fstrings else found).add(node.value)
     assert len(found) > 10
     assert sorted(key for key in found if not has_key(key)) == []
+
+    def section(key: str) -> object:
+        node: object = locale
+        for part in key.rstrip(".").split("."):
+            node = node.get(part) if isinstance(node, dict) else None
+        return node
+
+    assert sections == {"players.countries."}
+    assert all(isinstance(section(key), dict) and section(key) for key in sections)

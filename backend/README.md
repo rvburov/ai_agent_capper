@@ -138,7 +138,8 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
   - `python -m app.ingest.sackmann [--years 2000-2026] [--dir ПАПКА] [--force]` — архив Сакманна (`atp_players.csv`, `atp_matches_ГОД.csv`). Данные: Jeff Sackmann / Tennis Abstract, CC BY-NC-SA 4.0;
   - `python -m app.ingest.tennis_data [--years 2013-2026] [--dir ПАПКА] [--force]` — дни матчей, кэфы (`odds_snapshots`, вид `archive`) и матчи, которых у Сакманна еще нет;
   - `python -m app.admin.cli players-link-legacy [--dry-run]` — привязка ставок старого бота к матчам архивов;
-  - `python -m app.ml.elo` — пересчет Эло по всей истории в `player_ratings` и модель `elo-v1`.
+  - `python -m app.ml.elo` — пересчет Эло по всей истории в `player_ratings`, `player_elo_current` (текущее Эло, место по Эло среди игроков с матчами за 52 недели, последний матч — для списка «Игроки») и модель `elo-v1`;
+  - `python -m app.admin.cli elo-current` — только `player_elo_current` по уже посчитанным рейтингам (база, где Эло пересчитали до этапа 4; иначе таблицу заполнит следующее обновление данных).
 - Бэктест (`app/ml/backtest.py`, отчет — `app/ml/report.py`): вес покрытия подбирается на 2019–2021, калибровка Платта — на 2022–2023, тест — 2024–2025 (`--test-years`), сравнение с рынком без маржи (эталон по порядку: Pinnacle → биржа Betfair → средний кэф рынка, степенной метод), ROI по правилам стратегии, проверка приманкой. Результат пишется в `ml_models` и `eval_runs` (`--no-save` — без записи).
 
 Модули:
@@ -215,8 +216,12 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 | `services/analytics_cache.py` | кэш ответов в Redis по ключу «участник, фильтры, версия данных» (TTL сутки); один расчет на ключ (замок в Redis), версия кода расчета в ключе, метка удаления участника; очистка при удалении участника, прогрев задачей воркера `warm_analytics` после расчета, сторно, закрытия, новой ставки и движения банка |
 | `services/dashboard.py` | главная: показатели периода из кэша, банк, открытые ставки, «Мои матчи сегодня», дела администратора |
 | `services/data_status.py` | свежесть архивов матчей — общее правило уведомления `data_stale` и пункта главной |
+| `services/players.py` | еще список «Игроки» (`ranking`): по `player_elo_current`, поиск — тот же, что `GET /api/players` |
+| `services/player_card.py` | карточка игрока, его матчи, новости и личные встречи — запросами досье (`services/dossier.py`) на сейчас; «сегодня» — только свои ставки и анализы |
+| `services/ai_usage.py` | свой расход на Claude за месяц по дням UTC, видам, моделям, шагам, журнал вызовов с разбором цены по `model_prices`; у администратора — расход ключа по людям и задачам, проверки отдельно (Р14) |
+| `services/admin_activity.py` | входы и запущенные анализы по людям за период (Р14) |
 
-Маршруты: `GET /api/bets` (фильтры `period`, `from`, `to`, `status`, `market`, `surface` — можно несколько, `source`, `q`; курсор `before`, `limit` до 100), `GET /api/bets/summary`, `GET /api/bets/export.csv` (те же фильтры без курсора), `GET /api/bets/{id}`, `PUT /api/bets/{id}/result`, `POST /api/bets/{id}/reverse`, `PUT /api/bets/{id}/legs/{leg_id}/closing`, `GET /api/me/bank/history?period=`, `GET /api/me/bank/entries`, `POST /api/me/bank/entries`, `GET /api/analytics` (фильтры `period`, `from`, `to`, `market`, `selection`, `surface`, `source`), `GET /api/analytics/export.csv?part=`, `GET /api/analytics/export.zip?part=…`, `GET /api/dashboard?period=`. Чужая ставка — 404, как несуществующая. Результат, перенесенный импортом старого бота, не пересчитывается (409 `bet.legacy`); открытую ставку бота участник рассчитывает сам.
+Маршруты: `GET /api/bets` (фильтры `period`, `from`, `to`, `status`, `market`, `surface` — можно несколько, `source`, `q`; курсор `before`, `limit` до 100), `GET /api/bets/summary`, `GET /api/bets/export.csv` (те же фильтры без курсора), `GET /api/bets/{id}`, `PUT /api/bets/{id}/result`, `POST /api/bets/{id}/reverse`, `PUT /api/bets/{id}/legs/{leg_id}/closing`, `GET /api/me/bank/history?period=`, `GET /api/me/bank/entries`, `POST /api/me/bank/entries`, `GET /api/analytics` (фильтры `period`, `from`, `to`, `market`, `selection`, `surface`, `source`), `GET /api/analytics/export.csv?part=`, `GET /api/analytics/export.zip?part=…`, `GET /api/dashboard?period=`, `GET /api/players/ranking`, `GET /api/players/{id}` (и `/matches`, `/news`, `/h2h/{opponent_id}`), `GET /api/ai/usage?month=`, `GET /api/ai/runs`, `GET /api/admin/ai/usage?month=`, `GET /api/admin/activity?period=`. Фильтр `status=settled` — все рассчитанные ставки. Чужая ставка — 404, как несуществующая. Результат, перенесенный импортом старого бота, не пересчитывается (409 `bet.legacy`); открытую ставку бота участник рассчитывает сам.
 
 ## Где что лежит
 

@@ -96,6 +96,7 @@ from app.services.bank import (
     bank_state,
     day_start,
     drawdown_level,
+    equity_after_bets,
     local_today,
     lock_member_money,
     period_start,
@@ -110,6 +111,8 @@ TOTAL_MAX = Decimal("999.999")
 ODDS_STEP = Decimal("0.001")
 CENT = Decimal("0.01")
 BOOKMAKERS_LIMIT = 20
+# Рассчитанная ставка: фильтр «Ставок» status=settled
+SETTLED_STATUSES = ("won", "lost", "void")
 
 
 @dataclass(frozen=True)
@@ -275,25 +278,34 @@ async def place_bet(db: AsyncSession, user: User, body: BetIn) -> PlacedBet:
 
 
 def _adaptations(state: BankState, params: StrategyParams) -> list[AdaptationOut]:
+    """Правила адаптации: active — правило включено и действует (из лимитов просадки —
+    только самый строгий достигнутый), met — условие выполнено, даже если правило
+    выключено или действует более строгий лимит."""
     level = drawdown_level(state, params)
     growth, week = params.growth, params.week
     change = state.week_change
-    rules: list[tuple[str, bool, dict[str, Any]]] = []
+    # (ключ, действует при включенном правиле, условие выполнено, параметры)
+    rules: list[tuple[str, bool, bool, dict[str, Any]]] = []
     for item in params.drawdown:
         rules.append(
             (
                 item.key,
                 level is not None and level.key == item.key,
+                state.drawdown >= item.start,
                 {"from": str(item.start), "max_pct": str(item.max_pct)},
             )
         )
+    grown = (
+        state.growth is not None
+        and state.winrate is not None
+        and state.growth >= growth.bank_up
+        and state.winrate >= growth.min_winrate
+    )
     rules.append(
         (
             "up15",
-            state.growth is not None
-            and state.winrate is not None
-            and state.growth >= growth.bank_up
-            and state.winrate >= growth.min_winrate,
+            grown,
+            grown,
             {
                 "bank_up": str(growth.bank_up),
                 "min_winrate": str(growth.min_winrate),
@@ -301,17 +313,21 @@ def _adaptations(state: BankState, params: StrategyParams) -> list[AdaptationOut
             },
         )
     )
+    lost_week = change is not None and change <= week.loss
     rules.append(
         (
             "week_loss",
-            change is not None and change <= week.loss,
+            lost_week,
+            lost_week,
             {"loss": str(week.loss), "max_pct": str(week.loss_max_pct)},
         )
     )
+    won_week = change is not None and change >= week.win
     rules.append(
         (
             "week_win",
-            change is not None and change >= week.win,
+            won_week,
+            won_week,
             {"win": str(week.win), "add": str(week.win_add)},
         )
     )
@@ -320,9 +336,10 @@ def _adaptations(state: BankState, params: StrategyParams) -> list[AdaptationOut
             key=key,  # type: ignore[arg-type]
             enabled=params.adapt_on(key),
             active=active and params.adapt_on(key),
+            met=met,
             params=values,
         )
-        for key, active, values in rules
+        for key, active, met, values in rules
     ]
 
 
@@ -511,7 +528,9 @@ def bet_conditions(
         conds.append(Bet.placed_at >= start)
     if end is not None:
         conds.append(Bet.placed_at < end)
-    if filters.status is not None:
+    if filters.status == "settled":
+        conds.append(Bet.status.in_(SETTLED_STATUSES))
+    elif filters.status is not None:
         conds.append(Bet.status == filters.status)
     if filters.source is not None:
         conds.append(Bet.source == filters.source)
@@ -805,7 +824,12 @@ def _payout(bet: Bet) -> Decimal | None:
     return bet.stake + bet.profit
 
 
-def bet_item(bet: Bet, contexts: Sequence[LegContext], players: dict[int, Player]) -> BetItemOut:
+def bet_item(
+    bet: Bet,
+    contexts: Sequence[LegContext],
+    players: dict[int, Player],
+    bank_after: Decimal | None = None,
+) -> BetItemOut:
     legs = [context.leg for context in contexts]
     live = [leg for leg in legs if leg.result != "void"]
     bet_clv = clv_parlay([(leg.odds_taken, leg.closing_odds) for leg in live])
@@ -824,6 +848,7 @@ def bet_item(bet: Bet, contexts: Sequence[LegContext], players: dict[int, Player
         status=bet.status,  # type: ignore[arg-type]
         profit=bet.profit,
         payout=_payout(bet),
+        bank_after=bank_after,
         settled_at=bet.settled_at,
         settled_by=bet.settled_by,  # type: ignore[arg-type]
         source=bet.source,  # type: ignore[arg-type]
@@ -859,7 +884,9 @@ async def bet_items(db: AsyncSession, user: User, bet_ids: Sequence[int]) -> lis
         player.id: player
         for player in await db.scalars(select(Player).where(Player.id.in_(player_ids)))
     }
-    return [bet_item(bet, contexts[bet.id], players) for bet in bets]
+    # «Банк после» — капитал сразу после расчета, как в последних ставках главной
+    after = await equity_after_bets(db, user.id, [bet.id for bet in bets if bet.status != "open"])
+    return [bet_item(bet, contexts[bet.id], players, after.get(bet.id)) for bet in bets]
 
 
 async def bet_detail(db: AsyncSession, user: User, bet_id: int) -> BetItemOut:

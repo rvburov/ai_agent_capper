@@ -55,6 +55,10 @@ class BetLegOut(BaseModel):
 BetStatus = Literal["open", "won", "lost", "void"]
 
 
+# Фильтр статуса: settled — все рассчитанные (выигрыш, проигрыш, возврат)
+BetStatusFilter = Literal["open", "won", "lost", "void", "settled"]
+
+
 class BetOut(BaseModel):
     id: int
     analysis_id: int | None
@@ -69,11 +73,14 @@ class BetOut(BaseModel):
 
 
 class AdaptationOut(BaseModel):
-    """Правило адаптации суммы (Р22): включено ли в стратегии и действует ли сейчас."""
+    """Правило адаптации суммы (Р22): включено ли в стратегии, действует ли сейчас и
+    выполнено ли его условие (met — независимо от enabled; у просадки — порог достигнут,
+    даже если действует более строгий лимит)."""
 
     key: Literal["dd10", "dd20", "up15", "week_loss", "week_win"]
     enabled: bool
     active: bool
+    met: bool
     params: dict[str, Any]
 
 
@@ -133,16 +140,16 @@ DATE_MAX = date(2100, 12, 31)
 
 class BetFiltersIn(BaseModel):
     """Фильтры «Ставок»: период (или даты from–to по поясу участника, включительно, в
-    пределах 2000–2100 годов), статус, рынок (есть нога этого рынка), покрытия (есть нога
-    на одном из них), источник и поиск по игрокам, турниру, букмекеру и номеру ставки
-    (№12)."""
+    пределах 2000–2100 годов), статус (settled — все рассчитанные: выигрыш, проигрыш,
+    возврат), рынок (есть нога этого рынка), покрытия (есть нога на одном из них),
+    источник и поиск по игрокам, турниру, букмекеру и номеру ставки (№12)."""
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     period: Period = "all"
     date_from: date | None = Field(default=None, alias="from", ge=DATE_MIN, le=DATE_MAX)
     date_to: date | None = Field(default=None, alias="to", ge=DATE_MIN, le=DATE_MAX)
-    status: BetStatus | None = None
+    status: BetStatusFilter | None = None
     market: Market | None = None
     surface: list[SurfaceFilter] = Field(default_factory=list, max_length=5)
     source: BetSource | None = None
@@ -219,7 +226,9 @@ class BetLegItemOut(BaseModel):
 class BetItemOut(BaseModel):
     """Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если
     закрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги
-    считается с кэфом 1.00), payout — выплата (у открытой — возможная). updated_at —
+    считается с кэфом 1.00), payout — выплата (у открытой — возможная). bank_after —
+    капитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у
+    открытой), то же число, что equity_after в последних ставках главной. updated_at —
     версия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,
     app/services/bet_versions.py)."""
 
@@ -234,6 +243,7 @@ class BetItemOut(BaseModel):
     status: BetStatus
     profit: DecimalOut | None
     payout: DecimalOut | None
+    bank_after: DecimalOut | None
     settled_at: datetime | None
     settled_by: SettledBy | None
     source: BetSource

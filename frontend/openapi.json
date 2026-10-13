@@ -955,6 +955,56 @@
         }
       }
     },
+    "/api/admin/activity": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Activity",
+        "description": "Активность за период (1d, 7d, 30d или 90d): входы и число запущенных анализов по\nлюдям (Р14: без адресов, устройств и содержимого анализов).",
+        "operationId": "get_activity_api_admin_activity_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1d",
+                "7d",
+                "30d",
+                "90d"
+              ],
+              "type": "string",
+              "default": "30d",
+              "title": "Period"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/users/{user_id}": {
       "get": {
         "tags": [
@@ -1721,6 +1771,162 @@
         }
       }
     },
+    "/api/ai/usage": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Usage",
+        "description": "Свой расход на Claude за месяц (UTC, по умолчанию текущий; формат 2026-10): по\nдням, видам вызовов, моделям, шагам и версиям инструкций, доля кэша, свои анализы,\nцены моделей и настройки агента (только показ, Р23). Администратору — еще общие\nзадачи без участника; прогоны приемки отдельно. Проверки (eval) не входят. Будущий\nмесяц — 422 ai.usage_month.",
+        "operationId": "usage_api_ai_usage_get",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiUsageOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/runs": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Runs",
+        "description": "Свои вызовы Claude за месяц, новые сверху (строка — вызов): шаг, модель и effort,\nтокены, цена и ее разбор по model_prices. kind — вид вызова или shared (общие задачи\nбез участника и прогоны приемки, только у администратора). before — id последнего\nвызова прошлой страницы (чужой или неизвестный — 422 ai.bad_cursor).",
+        "operationId": "runs_api_ai_runs_get",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "parse",
+                    "news",
+                    "analysis",
+                    "refresh",
+                    "postmortem",
+                    "shared"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 9223372036854775807,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiRunsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/me/ai-key": {
       "put": {
         "tags": [
@@ -2091,6 +2297,57 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AdminBudgetOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ai/usage": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Usage",
+        "description": "Расход ключа администратора за месяц (UTC, формат 2026-10): по людям (только\nрасход и число анализов, Р14), по задачам, общие задачи без участника, участники на\nсвоих ключах и проверки (eval) — отдельно. Будущий месяц — 422 ai.usage_month.",
+        "operationId": "get_usage_api_admin_ai_usage_get",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAiUsageOut"
                 }
               }
             }
@@ -2846,7 +3103,8 @@
                     "open",
                     "won",
                     "lost",
-                    "void"
+                    "void",
+                    "settled"
                   ],
                   "type": "string"
                 },
@@ -3061,7 +3319,8 @@
                     "open",
                     "won",
                     "lost",
-                    "void"
+                    "void",
+                    "settled"
                   ],
                   "type": "string"
                 },
@@ -3246,7 +3505,8 @@
                     "open",
                     "won",
                     "lost",
-                    "void"
+                    "void",
+                    "settled"
                   ],
                   "type": "string"
                 },
@@ -4438,6 +4698,378 @@
         }
       }
     },
+    "/api/players/ranking": {
+      "get": {
+        "tags": [
+          "players"
+        ],
+        "summary": "Players Ranking",
+        "description": "Список «Игроки»: по умолчанию игроки с матчами за 52 недели по месту по Эло, по 50\nна странице. q — поиск по всей базе (по-русски и латиницей, с опечатками; fuzzy —\nточных совпадений нет); data — active, news (новости свежее кэша) или all; surface —\nпокрытие колонки «Эло на покрытии»; sort — rank, elo (на покрытии) или last\n(последний матч в базе).",
+        "operationId": "players_ranking_api_players_ranking_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "surface",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "hard",
+                "clay",
+                "grass"
+              ],
+              "type": "string",
+              "default": "hard",
+              "title": "Surface"
+            }
+          },
+          {
+            "name": "data",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "news",
+                "all"
+              ],
+              "type": "string",
+              "default": "active",
+              "title": "Data"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "rank",
+                "elo",
+                "last"
+              ],
+              "type": "string",
+              "default": "rank",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100000,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerRankingOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/players/{player_id}": {
+      "get": {
+        "tags": [
+          "players"
+        ],
+        "summary": "Get Player",
+        "description": "Карточка игрока: шапка, «Обзор» (Эло по покрытиям, форма, подача и прием против\nтура, результаты по покрытиям, ключевые матчи), свежесть данных, профиль из старого\nбота и «сегодня» — только из своих ставок и анализов. Нет игрока — 404\nplayer.not_found.",
+        "operationId": "get_player_api_players__player_id__get",
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Player Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerCardOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/players/{player_id}/matches": {
+      "get": {
+        "tags": [
+          "players"
+        ],
+        "summary": "Get Player Matches",
+        "description": "Матчи игрока в базе страницами, сначала последние; before — id последнего матча\nпрошлой страницы (матч другого игрока — 422 player.bad_cursor).",
+        "operationId": "get_player_matches_api_players__player_id__matches_get",
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Player Id"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 9223372036854775807,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerMatchesOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/players/{player_id}/news": {
+      "get": {
+        "tags": [
+          "players"
+        ],
+        "summary": "Get Player News",
+        "description": "Факты из новостей игрока за окно новостей, новые сверху, страницами.",
+        "operationId": "get_player_news_api_players__player_id__news_get",
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Player Id"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 9223372036854775807,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerNewsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/players/{player_id}/h2h/{opponent_id}": {
+      "get": {
+        "tags": [
+          "players"
+        ],
+        "summary": "Get Head To Head",
+        "description": "Личные встречи двух игроков в базе. Тот же игрок — 422 player.h2h_same.",
+        "operationId": "get_head_to_head_api_players__player_id__h2h__opponent_id__get",
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Player Id"
+            }
+          },
+          {
+            "name": "opponent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Opponent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/H2HOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/strategy/active": {
       "get": {
         "tags": [
@@ -4585,6 +5217,65 @@
         "title": "AccessOut",
         "description": "Можно ли запустить: причина отказа — код ошибки errors.<reason_code>."
       },
+      "ActivityOut": {
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "1d",
+              "7d",
+              "30d",
+              "90d"
+            ],
+            "title": "Period"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Since"
+          },
+          "logins": {
+            "type": "integer",
+            "title": "Logins"
+          },
+          "failed_logins": {
+            "type": "integer",
+            "title": "Failed Logins"
+          },
+          "analyses": {
+            "type": "integer",
+            "title": "Analyses"
+          },
+          "active_users": {
+            "type": "integer",
+            "title": "Active Users"
+          },
+          "today_users": {
+            "type": "integer",
+            "title": "Today Users"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/PersonActivityOut"
+            },
+            "type": "array",
+            "title": "People"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period",
+          "since",
+          "logins",
+          "failed_logins",
+          "analyses",
+          "active_users",
+          "today_users",
+          "people"
+        ],
+        "title": "ActivityOut",
+        "description": "Входы и анализы по людям за период с since. active_users — сколько людей входили,\ntoday_users — сколько входили сегодня (с полуночи в поясе администратора)."
+      },
       "AdaptationOut": {
         "properties": {
           "key": {
@@ -4606,6 +5297,10 @@
             "type": "boolean",
             "title": "Active"
           },
+          "met": {
+            "type": "boolean",
+            "title": "Met"
+          },
           "params": {
             "additionalProperties": true,
             "type": "object",
@@ -4617,10 +5312,11 @@
           "key",
           "enabled",
           "active",
+          "met",
           "params"
         ],
         "title": "AdaptationOut",
-        "description": "Правило адаптации суммы (Р22): включено ли в стратегии и действует ли сейчас."
+        "description": "Правило адаптации суммы (Р22): включено ли в стратегии, действует ли сейчас и\nвыполнено ли его условие (met — независимо от enabled; у просадки — порог достигнут,\nдаже если действует более строгий лимит)."
       },
       "AdminActionIn": {
         "properties": {
@@ -4640,6 +5336,127 @@
         "type": "object",
         "title": "AdminActionIn",
         "description": "Блокировка и завершение сеансов: код 2FA нужен, только если цель — администратор\n(с угнанным сеансом без телефона нельзя по одному отключить других администраторов)."
+      },
+      "AdminAiUsageOut": {
+        "properties": {
+          "month": {
+            "type": "string",
+            "title": "Month"
+          },
+          "month_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Month Start"
+          },
+          "last_day": {
+            "type": "string",
+            "format": "date",
+            "title": "Last Day"
+          },
+          "days_in_month": {
+            "type": "integer",
+            "title": "Days In Month"
+          },
+          "days_elapsed": {
+            "type": "integer",
+            "title": "Days Elapsed"
+          },
+          "current": {
+            "type": "boolean",
+            "title": "Current"
+          },
+          "budget_usd": {
+            "type": "number",
+            "title": "Budget Usd"
+          },
+          "spent_usd": {
+            "type": "number",
+            "title": "Spent Usd"
+          },
+          "budget_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Share"
+          },
+          "analyses": {
+            "type": "integer",
+            "title": "Analyses"
+          },
+          "avg_analysis_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Analysis Usd"
+          },
+          "cache_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Share"
+          },
+          "own_key_usd": {
+            "type": "number",
+            "title": "Own Key Usd"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/PersonUsageOut"
+            },
+            "type": "array",
+            "title": "People"
+          },
+          "shared": {
+            "$ref": "#/components/schemas/SharedUsageOut"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskUsageOut"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "eval": {
+            "$ref": "#/components/schemas/EvalUsageOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "month",
+          "month_start",
+          "last_day",
+          "days_in_month",
+          "days_elapsed",
+          "current",
+          "budget_usd",
+          "spent_usd",
+          "budget_share",
+          "analyses",
+          "avg_analysis_usd",
+          "cache_share",
+          "own_key_usd",
+          "people",
+          "shared",
+          "tasks",
+          "eval"
+        ],
+        "title": "AdminAiUsageOut",
+        "description": "«Администрирование → Расход ИИ» за месяц (UTC). spent_usd — ключ администратора\nбез проверок (как бюджет), из него shared — общие задачи; own_key_usd — участники на\nсвоих ключах (вне бюджета). analyses — анализы на ключе администратора за месяц,\navg_analysis_usd — средняя цена законченного. cache_share — по всем вызовам ключа\nадминистратора без проверок. Р14: ни анализов, ни ввода, ни ставок участников."
       },
       "AdminAttentionOut": {
         "properties": {
@@ -5055,6 +5872,113 @@
         "title": "AdminUserOut",
         "description": "Строка списка участников. Только учетная запись, расход на ИИ и активность (Р14).\n\nai_spent_month_usd и analyses_month — за текущий месяц (UTC) на ключе администратора.\nlimit пустой, если лимита нет (участник на своем ключе)."
       },
+      "AgentSettingsOut": {
+        "properties": {
+          "parse_model": {
+            "type": "string",
+            "title": "Parse Model"
+          },
+          "parse_effort": {
+            "type": "string",
+            "title": "Parse Effort"
+          },
+          "news_enabled": {
+            "type": "boolean",
+            "title": "News Enabled"
+          },
+          "news_model": {
+            "type": "string",
+            "title": "News Model"
+          },
+          "news_effort": {
+            "type": "string",
+            "title": "News Effort"
+          },
+          "news_searches_per_match": {
+            "type": "integer",
+            "title": "News Searches Per Match"
+          },
+          "news_searches_per_analysis": {
+            "type": "integer",
+            "title": "News Searches Per Analysis"
+          },
+          "news_searches_per_day": {
+            "type": "integer",
+            "title": "News Searches Per Day"
+          },
+          "news_ttl_hours": {
+            "type": "integer",
+            "title": "News Ttl Hours"
+          },
+          "news_lookback_days": {
+            "type": "integer",
+            "title": "News Lookback Days"
+          },
+          "news_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "News Domains"
+          },
+          "news_prompt_cache": {
+            "type": "boolean",
+            "title": "News Prompt Cache"
+          },
+          "analysis_model": {
+            "type": "string",
+            "title": "Analysis Model"
+          },
+          "analysis_effort": {
+            "type": "string",
+            "title": "Analysis Effort"
+          },
+          "analysis_parallel": {
+            "type": "integer",
+            "title": "Analysis Parallel"
+          },
+          "assessment_reuse_hours": {
+            "type": "integer",
+            "title": "Assessment Reuse Hours"
+          },
+          "soft_cap_usd": {
+            "type": "number",
+            "title": "Soft Cap Usd"
+          },
+          "hard_cap_usd": {
+            "type": "number",
+            "title": "Hard Cap Usd"
+          },
+          "default_per_analysis_usd": {
+            "type": "number",
+            "title": "Default Per Analysis Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "parse_model",
+          "parse_effort",
+          "news_enabled",
+          "news_model",
+          "news_effort",
+          "news_searches_per_match",
+          "news_searches_per_analysis",
+          "news_searches_per_day",
+          "news_ttl_hours",
+          "news_lookback_days",
+          "news_domains",
+          "news_prompt_cache",
+          "analysis_model",
+          "analysis_effort",
+          "analysis_parallel",
+          "assessment_reuse_hours",
+          "soft_cap_usd",
+          "hard_cap_usd",
+          "default_per_analysis_usd"
+        ],
+        "title": "AgentSettingsOut",
+        "description": "Настройки агента только для показа (Р23): меняются командой agent-config.\nПотолки анализа программы — из app_settings."
+      },
       "AiBudgetOut": {
         "properties": {
           "mode": {
@@ -5256,6 +6180,478 @@
         ],
         "title": "AiModeIn",
         "description": "Режим ключа. Участник сам переходит только на own; вернуться на ключ\nадминистратора — просьбой (POST /me/ai-mode/return-request)."
+      },
+      "AiRunOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "step": {
+            "type": "integer",
+            "title": "Step"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effort"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "key_source": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "own"
+            ],
+            "title": "Key Source"
+          },
+          "analysis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Id"
+          },
+          "shared": {
+            "type": "boolean",
+            "title": "Shared"
+          },
+          "acceptance": {
+            "type": "boolean",
+            "title": "Acceptance"
+          },
+          "batch": {
+            "type": "boolean",
+            "title": "Batch"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "title": "Cache Write Tokens"
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "thinking_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Tokens"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "web_searches": {
+            "type": "integer",
+            "title": "Web Searches"
+          },
+          "cache_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Share"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Reason"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunCostOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "kind",
+          "step",
+          "model",
+          "effort",
+          "prompt_version",
+          "key_source",
+          "analysis_id",
+          "shared",
+          "acceptance",
+          "batch",
+          "input_tokens",
+          "cache_write_tokens",
+          "cache_read_tokens",
+          "output_tokens",
+          "thinking_tokens",
+          "prompt_tokens",
+          "web_searches",
+          "cache_share",
+          "cost_usd",
+          "duration_ms",
+          "stop_reason",
+          "error",
+          "price"
+        ],
+        "title": "AiRunOut",
+        "description": "Вызов Claude (строка журнала): вид, шаг анализа, модель и effort, токены, цена.\nshared — общая задача без участника, acceptance — прогон приемки (у администратора).\nanalysis_id — свой анализ. error — код сбоя вызова. price — разбор цены (пусто —\nцены модели на момент вызова нет)."
+      },
+      "AiRunsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AiRunOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total_runs": {
+            "type": "integer",
+            "title": "Total Runs"
+          },
+          "total_cost_usd": {
+            "type": "number",
+            "title": "Total Cost Usd"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total_runs",
+          "total_cost_usd",
+          "next_before"
+        ],
+        "title": "AiRunsOut",
+        "description": "Страница журнала вызовов месяца, новые сверху. total_* — все вызовы фильтра за\nмесяц; next_before — курсор следующей страницы."
+      },
+      "AiUsageOut": {
+        "properties": {
+          "month": {
+            "type": "string",
+            "title": "Month"
+          },
+          "month_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Month Start"
+          },
+          "last_day": {
+            "type": "string",
+            "format": "date",
+            "title": "Last Day"
+          },
+          "days_in_month": {
+            "type": "integer",
+            "title": "Days In Month"
+          },
+          "days_elapsed": {
+            "type": "integer",
+            "title": "Days Elapsed"
+          },
+          "current": {
+            "type": "boolean",
+            "title": "Current"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/UsageSumsOut"
+          },
+          "own_usd": {
+            "type": "number",
+            "title": "Own Usd"
+          },
+          "acceptance_usd": {
+            "type": "number",
+            "title": "Acceptance Usd"
+          },
+          "shared_usd": {
+            "type": "number",
+            "title": "Shared Usd"
+          },
+          "admin_key_usd": {
+            "type": "number",
+            "title": "Admin Key Usd"
+          },
+          "own_key_usd": {
+            "type": "number",
+            "title": "Own Key Usd"
+          },
+          "search_usd": {
+            "type": "number",
+            "title": "Search Usd"
+          },
+          "cache_saved_usd": {
+            "type": "number",
+            "title": "Cache Saved Usd"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/UsageDayOut"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "kinds": {
+            "items": {
+              "$ref": "#/components/schemas/UsageKindOut"
+            },
+            "type": "array",
+            "title": "Kinds"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/UsageModelOut"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/UsageStepOut"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/UsageVersionOut"
+            },
+            "type": "array",
+            "title": "Versions"
+          },
+          "analyses": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisCostOut"
+            },
+            "type": "array",
+            "title": "Analyses"
+          },
+          "avg_analysis_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Analysis Usd"
+          },
+          "admin_key_avg_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Key Avg Usd"
+          },
+          "forecast_usd": {
+            "type": "number",
+            "title": "Forecast Usd"
+          },
+          "analyses_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyses Left"
+          },
+          "prices": {
+            "items": {
+              "$ref": "#/components/schemas/ModelPriceOut"
+            },
+            "type": "array",
+            "title": "Prices"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/AgentSettingsOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "month",
+          "month_start",
+          "last_day",
+          "days_in_month",
+          "days_elapsed",
+          "current",
+          "totals",
+          "own_usd",
+          "acceptance_usd",
+          "shared_usd",
+          "admin_key_usd",
+          "own_key_usd",
+          "search_usd",
+          "cache_saved_usd",
+          "days",
+          "kinds",
+          "models",
+          "steps",
+          "versions",
+          "analyses",
+          "avg_analysis_usd",
+          "admin_key_avg_usd",
+          "forecast_usd",
+          "analyses_left",
+          "prices",
+          "settings"
+        ],
+        "title": "AiUsageOut",
+        "description": "Свой расход на Claude за месяц (UTC) по вызовам agent_runs, без проверок (eval).\nУ администратора — свои вызовы и общие задачи без участника (shared_usd), прогоны\nприемки — отдельно (acceptance_usd); own_usd — свои остальные вызовы.\n\ndays — с 1-го числа по last_day (сегодня, если месяц текущий). admin_key_usd и\nown_key_usd — чей ключ платил. search_usd — цена поисков, cache_saved_usd — сколько\nсэкономило чтение кэша против обычного входа (по model_prices на момент вызова).\navg_analysis_usd — средняя цена своего законченного анализа месяца без прогонов\nприемки (на обоих ключах). admin_key_avg_usd — то же только на ключе администратора\n(шаг $0,0001): у участника на ключе администратора — то же число, что\navg_analysis_usd в GET /ai/budget; ее показывать рядом с лимитом. forecast_usd —\nпрогноз на конец месяца по темпу (участник на ключе администратора — не выше лимита,\nна паузе — потрачено); у прошедшего месяца — итог. analyses_left — на сколько\nанализов по admin_key_avg_usd хватит остатка лимита (left_usd в GET /ai/budget;\nтолько участник на ключе администратора в текущем месяце)."
+      },
+      "AnalysisCostOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "done": {
+            "type": "boolean",
+            "title": "Done"
+          },
+          "acceptance": {
+            "type": "boolean",
+            "title": "Acceptance"
+          },
+          "key_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "admin",
+                  "own"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "started_at",
+          "cost_usd",
+          "done",
+          "acceptance",
+          "key_source"
+        ],
+        "title": "AnalysisCostOut",
+        "description": "Свой анализ месяца: цена (сумма его вызовов), закончен ли, прогон приемки ли, на\nчьем ключе шел (key_source фиксируется при запуске)."
       },
       "AnalysisCreateIn": {
         "properties": {
@@ -5799,6 +7195,71 @@
         ],
         "title": "AnalyticsOut",
         "description": "Все блоки «Аналитики» одним ответом (Т5). period null — заданы даты; date_from —\nпервый день (null — все время), date_to — последний (сегодня или to). filtered —\nвыбран рынок, покрытие или источник (ряд — результат отобранных ставок, а не банк).\nprev и change — null у «всего времени», без начала периода и если в прошлом периоде\nнет рассчитанных ставок."
+      },
+      "ArchiveInfoOut": {
+        "properties": {
+          "data_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data To"
+          },
+          "last_load": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Load"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "stale_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Days"
+          },
+          "stale_after_days": {
+            "type": "integer",
+            "title": "Stale After Days"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveSourceOut"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data_to",
+          "last_load",
+          "stale",
+          "stale_days",
+          "stale_after_days",
+          "sources"
+        ],
+        "title": "ArchiveInfoOut",
+        "description": "Свежесть архива матчей: data_to — последний день матча с результатом в базе,\nlast_load — последняя успешная загрузка, stale — архив устарел (правило уведомления\ndata_stale), stale_days — дней с самой старой из последних загрузок (null — какой-то\nархив не загружался ни разу)."
       },
       "ArchiveSourceOut": {
         "properties": {
@@ -6520,6 +7981,17 @@
             ],
             "title": "Payout"
           },
+          "bank_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank After"
+          },
           "settled_at": {
             "anyOf": [
               {
@@ -6624,6 +8096,7 @@
           "status",
           "profit",
           "payout",
+          "bank_after",
           "settled_at",
           "settled_by",
           "source",
@@ -6634,7 +8107,7 @@
           "legs"
         ],
         "title": "BetItemOut",
-        "description": "Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если\nзакрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги\nсчитается с кэфом 1.00), payout — выплата (у открытой — возможная). updated_at —\nверсия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,\napp/services/bet_versions.py)."
+        "description": "Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если\nзакрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги\nсчитается с кэфом 1.00), payout — выплата (у открытой — возможная). bank_after —\nкапитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у\nоткрытой), то же число, что equity_after в последних ставках главной. updated_at —\nверсия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,\napp/services/bet_versions.py)."
       },
       "BetLegBrief": {
         "properties": {
@@ -8170,6 +9643,30 @@
         ],
         "title": "CorridorOut"
       },
+      "CostPartOut": {
+        "properties": {
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tokens",
+          "price",
+          "cost_usd"
+        ],
+        "title": "CostPartOut",
+        "description": "Часть цены вызова: токены (у поисков — число поисков), цена за 1 млн токенов (у\nпоисков — за один поиск) и сумма с учетом второй ступени и Batch."
+      },
       "CostsOut": {
         "properties": {
           "tokens": {
@@ -8653,6 +10150,57 @@
         ],
         "title": "DrawdownOut"
       },
+      "EloOut": {
+        "properties": {
+          "all": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "All"
+          },
+          "matches": {
+            "type": "integer",
+            "title": "Matches"
+          },
+          "surfaces": {
+            "items": {
+              "$ref": "#/components/schemas/SurfaceEloOut"
+            },
+            "type": "array",
+            "title": "Surfaces"
+          },
+          "best_surface": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Surface"
+          }
+        },
+        "type": "object",
+        "required": [
+          "all",
+          "matches",
+          "surfaces",
+          "best_surface"
+        ],
+        "title": "EloOut",
+        "description": "Эло игрока сейчас: общий, по покрытиям, лучшее покрытие (null — рейтинга нет)."
+      },
       "ErrorDetail": {
         "properties": {
           "code": {
@@ -8799,6 +10347,126 @@
         ],
         "title": "EstimateOut",
         "description": "Оценка до запуска: цена, время, у скольких игроков поищем новости (из тех, у кого\nони устарели, — сколько помещается в лимит поисков анализа), сколько матчей возьмут\nготовую оценку Claude (бесплатно)."
+      },
+      "EvalRunUsageOut": {
+        "properties": {
+          "eval_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Run Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "eval_set": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Set"
+          },
+          "n_events": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Events"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_run_id",
+          "created_at",
+          "name",
+          "eval_set",
+          "n_events",
+          "models",
+          "runs",
+          "cost_usd"
+        ],
+        "title": "EvalRunUsageOut",
+        "description": "Проверочный прогон (eval) месяца: вызовы и цена; eval_run_id пустой — вызовы без\nзаписи прогона."
+      },
+      "EvalUsageOut": {
+        "properties": {
+          "budget_usd": {
+            "type": "number",
+            "title": "Budget Usd"
+          },
+          "spent_usd": {
+            "type": "number",
+            "title": "Spent Usd"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvalRunUsageOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "budget_usd",
+          "spent_usd",
+          "runs",
+          "items"
+        ],
+        "title": "EvalUsageOut",
+        "description": "Проверки (eval, shadow) — свой бюджет на ключе администратора, в общий не входят."
       },
       "EventIn": {
         "properties": {
@@ -9149,6 +10817,88 @@
         ],
         "title": "FlagsOut"
       },
+      "FormMatchOut": {
+        "properties": {
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "won": {
+            "type": "boolean",
+            "title": "Won"
+          },
+          "opponent": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "opponent_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Rank"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Surface"
+          },
+          "tournament": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament"
+          },
+          "round": {
+            "type": "string",
+            "title": "Round"
+          }
+        },
+        "type": "object",
+        "required": [
+          "match_id",
+          "day",
+          "won",
+          "opponent",
+          "opponent_rank",
+          "score",
+          "surface",
+          "tournament",
+          "round"
+        ],
+        "title": "FormMatchOut",
+        "description": "Матч формы: соперник, его место по Эло сейчас, счет со стороны игрока."
+      },
       "FormOut": {
         "properties": {
           "p1": {
@@ -9203,6 +10953,163 @@
           "max_pct"
         ],
         "title": "GrowthOut"
+      },
+      "H2HMatchOut": {
+        "properties": {
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "winner_id": {
+            "type": "integer",
+            "title": "Winner Id"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Surface"
+          },
+          "tournament": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "round": {
+            "type": "string",
+            "title": "Round"
+          },
+          "best_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "match_id",
+          "day",
+          "winner_id",
+          "score",
+          "surface",
+          "tournament",
+          "category",
+          "round",
+          "best_of"
+        ],
+        "title": "H2HMatchOut",
+        "description": "Личная встреча: победитель (id), счет со стороны победителя, турнир, покрытие."
+      },
+      "H2HOut": {
+        "properties": {
+          "player": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "opponent": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "player_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Player Rank"
+          },
+          "opponent_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Rank"
+          },
+          "player_wins": {
+            "type": "integer",
+            "title": "Player Wins"
+          },
+          "opponent_wins": {
+            "type": "integer",
+            "title": "Opponent Wins"
+          },
+          "surfaces": {
+            "items": {
+              "$ref": "#/components/schemas/SurfaceResultOut"
+            },
+            "type": "array",
+            "title": "Surfaces"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/H2HMatchOut"
+            },
+            "type": "array",
+            "title": "Matches"
+          }
+        },
+        "type": "object",
+        "required": [
+          "player",
+          "opponent",
+          "player_rank",
+          "opponent_rank",
+          "player_wins",
+          "opponent_wins",
+          "surfaces",
+          "matches"
+        ],
+        "title": "H2HOut",
+        "description": "Личные встречи игрока (player) и соперника (opponent) в базе: победы каждого,\nпо покрытиям (ковер — как хард), все встречи, сначала последняя."
       },
       "HealthOut": {
         "properties": {
@@ -9642,6 +11549,33 @@
         "title": "InviteOut",
         "description": "Приглашение без кода: код показывается один раз при создании.\ncreated_by_name пустой — код выдан командой терминала; автор удален —\nподпись «Удаленный пользователь» (его имя стерто по Р15)."
       },
+      "KeyMatchesOut": {
+        "properties": {
+          "since": {
+            "type": "string",
+            "format": "date",
+            "title": "Since"
+          },
+          "top10": {
+            "$ref": "#/components/schemas/WinLossOut"
+          },
+          "deciders": {
+            "$ref": "#/components/schemas/WinLossOut"
+          },
+          "tiebreaks": {
+            "$ref": "#/components/schemas/WinLossOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "since",
+          "top10",
+          "deciders",
+          "tiebreaks"
+        ],
+        "title": "KeyMatchesOut",
+        "description": "Ключевые матчи за 52 недели (364 дня с since по сегодня включительно, как\nmatches_52w): против нынешней десятки по месту по Эло, решающие сеты (матч дошел до\nпоследнего сета), тай-брейки (по сетам)."
+      },
       "KeyModelOut": {
         "properties": {
           "model": {
@@ -9798,6 +11732,55 @@
         "title": "KpiOut",
         "description": "Показатели за период — те же правила и те же числа, что итоги «Ставок»\n(GET /bets/summary): оборот и прибыль без возвратов (Т8), ROI = прибыль / оборот,\nвинрейт = выигрыш / (выигрыш + проигрыш), CLV — средний по рассчитанным ставкам\nприложения с закрытием у всех ног (ставки бота не входят, В5). roi_ci и clv_ci —\nбутстрэп по ставкам (на главной не считаются — null)."
       },
+      "LastMatchOut": {
+        "properties": {
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "tournament": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "round": {
+            "type": "string",
+            "title": "Round"
+          }
+        },
+        "type": "object",
+        "required": [
+          "match_id",
+          "day",
+          "tournament",
+          "category",
+          "round"
+        ],
+        "title": "LastMatchOut",
+        "description": "Последний сыгранный матч игрока в базе: день (у матча без даты — начало турнира),\nтурнир архива, круг."
+      },
       "LegMatchOut": {
         "properties": {
           "id": {
@@ -9940,6 +11923,27 @@
         ],
         "title": "LegSettleIn",
         "description": "Исход ноги, счет (необязательно; первым — игрок 1) и закрывающий кэф: поля нет —\nзакрытие не меняется, null — стирается."
+      },
+      "LegacyProfileOut": {
+        "properties": {
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "profile": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Profile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "updated_at",
+          "profile"
+        ],
+        "title": "LegacyProfileOut",
+        "description": "Профиль из старого бота (шаблоны 01–04 как есть): заполнен моделью бота, часто по\nпамяти; в анализ не идет, новых профилей программа не собирает (Р24)."
       },
       "LimitAlertOut": {
         "properties": {
@@ -10834,6 +12838,80 @@
         "title": "ModeDecisionIn",
         "description": "Решение по просьбе вернуть ключ администратора. limit — лимит на ключе\nадминистратора при одобрении (не задан — остается прежний)."
       },
+      "ModelPriceOut": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Valid From"
+          },
+          "input": {
+            "type": "number",
+            "title": "Input"
+          },
+          "output": {
+            "type": "number",
+            "title": "Output"
+          },
+          "cache_read": {
+            "type": "number",
+            "title": "Cache Read"
+          },
+          "cache_write_5m": {
+            "type": "number",
+            "title": "Cache Write 5M"
+          },
+          "cache_write_1h": {
+            "type": "number",
+            "title": "Cache Write 1H"
+          },
+          "search_price": {
+            "type": "number",
+            "title": "Search Price"
+          },
+          "long_input_threshold": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Long Input Threshold"
+          },
+          "long_multiplier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Long Multiplier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "valid_from",
+          "input",
+          "output",
+          "cache_read",
+          "cache_write_5m",
+          "cache_write_1h",
+          "search_price",
+          "long_input_threshold",
+          "long_multiplier"
+        ],
+        "title": "ModelPriceOut",
+        "description": "Действующая цена модели в долларах за 1 млн токенов и за один веб-поиск (из\nmodel_prices). Вторая ступень: весь вход запроса больше long_input_threshold —\nцены токенов × long_multiplier."
+      },
       "MyMatchBetOut": {
         "properties": {
           "bet_id": {
@@ -10971,6 +13049,48 @@
         ],
         "title": "MyMatchOut",
         "description": "Мой матч сегодня (В6): из ног открытых ставок и сегодняшних анализов участника.\nrank1 и rank2 — место по Эло (null — нет в таблице текущего Эло); tournament — из\nархива или своего ввода; scheduled_at — время, если известно."
+      },
+      "NewsStatusOut": {
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "fresh": {
+            "type": "boolean",
+            "title": "Fresh"
+          },
+          "ttl_hours": {
+            "type": "integer",
+            "title": "Ttl Hours"
+          },
+          "lookback_days": {
+            "type": "integer",
+            "title": "Lookback Days"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "checked_at",
+          "fresh",
+          "ttl_hours",
+          "lookback_days",
+          "count"
+        ],
+        "title": "NewsStatusOut",
+        "description": "Новости игрока: когда последний раз искали, свежие ли (моложе ttl_hours), сколько\nфактов за lookback_days."
       },
       "NotificationOut": {
         "properties": {
@@ -11334,6 +13454,17 @@
             ],
             "title": "Payout"
           },
+          "bank_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank After"
+          },
           "settled_at": {
             "anyOf": [
               {
@@ -11445,6 +13576,7 @@
           "status",
           "profit",
           "payout",
+          "bank_after",
           "settled_at",
           "settled_by",
           "source",
@@ -11804,6 +13936,193 @@
         ],
         "title": "PasswordChangeIn"
       },
+      "PersonActivityOut": {
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ],
+            "title": "Role"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "blocked",
+              "deleted"
+            ],
+            "title": "Status"
+          },
+          "logins": {
+            "type": "integer",
+            "title": "Logins"
+          },
+          "failed_logins": {
+            "type": "integer",
+            "title": "Failed Logins"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "analyses": {
+            "type": "integer",
+            "title": "Analyses"
+          },
+          "last_analysis_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Analysis At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "display_name",
+          "role",
+          "status",
+          "logins",
+          "failed_logins",
+          "last_login_at",
+          "analyses",
+          "last_analysis_at"
+        ],
+        "title": "PersonActivityOut",
+        "description": "Активность человека за период (Р14: только входы и число анализов). logins —\nуспешные входы, failed_logins — неудачные попытки; analyses — запущенные анализы."
+      },
+      "PersonUsageOut": {
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ],
+            "title": "Role"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "blocked",
+              "deleted"
+            ],
+            "title": "Status"
+          },
+          "ai_mode": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "own"
+            ],
+            "title": "Ai Mode"
+          },
+          "key_spent_usd": {
+            "type": "number",
+            "title": "Key Spent Usd"
+          },
+          "own_spent_usd": {
+            "type": "number",
+            "title": "Own Spent Usd"
+          },
+          "analyses": {
+            "type": "integer",
+            "title": "Analyses"
+          },
+          "own_analyses": {
+            "type": "integer",
+            "title": "Own Analyses"
+          },
+          "limit_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Usd"
+          },
+          "paused": {
+            "type": "boolean",
+            "title": "Paused"
+          },
+          "budget_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Share"
+          },
+          "limit_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Share"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "display_name",
+          "role",
+          "status",
+          "ai_mode",
+          "key_spent_usd",
+          "own_spent_usd",
+          "analyses",
+          "own_analyses",
+          "limit_usd",
+          "paused",
+          "budget_share",
+          "limit_share"
+        ],
+        "title": "PersonUsageOut",
+        "description": "Человек в «Расходе ИИ» администратора (Р14: только расход на ИИ и число анализов).\nkey_spent_usd — на ключе администратора, own_spent_usd — на своем (вне бюджета);\nanalyses — анализы на ключе администратора, own_analyses — на своем. limit_usd —\nмесячный лимит (пусто у администратора); budget_share и limit_share — доля бюджета\nи лимита."
+      },
       "PlayerBrief": {
         "properties": {
           "id": {
@@ -11906,6 +14225,258 @@
         ],
         "title": "PlayerCandidate"
       },
+      "PlayerCardOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "name_ru": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Ru"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "birth_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Birth Date"
+          },
+          "age": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age"
+          },
+          "hand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hand"
+          },
+          "backhand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backhand"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "matches_52w": {
+            "type": "integer",
+            "title": "Matches 52W"
+          },
+          "rank_days": {
+            "type": "integer",
+            "title": "Rank Days"
+          },
+          "elo": {
+            "$ref": "#/components/schemas/EloOut"
+          },
+          "form": {
+            "$ref": "#/components/schemas/PlayerFormOut"
+          },
+          "last_match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LastMatchOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "serve": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "results": {
+            "$ref": "#/components/schemas/ResultsOut"
+          },
+          "key_matches": {
+            "$ref": "#/components/schemas/KeyMatchesOut"
+          },
+          "news": {
+            "$ref": "#/components/schemas/NewsStatusOut"
+          },
+          "archive": {
+            "$ref": "#/components/schemas/ArchiveInfoOut"
+          },
+          "sackmann": {
+            "type": "boolean",
+            "title": "Sackmann"
+          },
+          "legacy_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LegacyProfileOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "today": {
+            "items": {
+              "$ref": "#/components/schemas/TodayOut"
+            },
+            "type": "array",
+            "title": "Today"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "name_ru",
+          "country",
+          "birth_date",
+          "age",
+          "hand",
+          "backhand",
+          "rank",
+          "matches_52w",
+          "rank_days",
+          "elo",
+          "form",
+          "last_match",
+          "serve",
+          "results",
+          "key_matches",
+          "news",
+          "archive",
+          "sackmann",
+          "legacy_profile",
+          "today"
+        ],
+        "title": "PlayerCardOut",
+        "description": "Карточка игрока: шапка, «Обзор», свежесть данных, профиль из бота и «сегодня».\nsackmann — в карточке данные архива Сакманна (строка авторства CC BY-NC-SA)."
+      },
+      "PlayerCountsOut": {
+        "properties": {
+          "all": {
+            "type": "integer",
+            "title": "All"
+          },
+          "active": {
+            "type": "integer",
+            "title": "Active"
+          },
+          "news": {
+            "type": "integer",
+            "title": "News"
+          }
+        },
+        "type": "object",
+        "required": [
+          "all",
+          "active",
+          "news"
+        ],
+        "title": "PlayerCountsOut",
+        "description": "Сколько игроков в базе, с матчами за 52 недели и со свежими новостями."
+      },
+      "PlayerFormOut": {
+        "properties": {
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/FormMatchOut"
+            },
+            "type": "array",
+            "title": "Matches"
+          },
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "losses": {
+            "type": "integer",
+            "title": "Losses"
+          },
+          "matches_14d": {
+            "type": "integer",
+            "title": "Matches 14D"
+          },
+          "rest_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rest Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "matches",
+          "wins",
+          "losses",
+          "matches_14d",
+          "rest_days"
+        ],
+        "title": "PlayerFormOut",
+        "description": "Форма: последние 10 матчей в базе (сначала последний), победы и поражения;\nmatches_14d — сыгранных матчей за 14 дней по сегодня (UTC) включительно, rest_days —\nдней с последнего матча."
+      },
       "PlayerHitOut": {
         "properties": {
           "id": {
@@ -11989,6 +14560,324 @@
         "title": "PlayerHitOut",
         "description": "Найденный игрок: сходство 0…1, по какому полю найден, матчей в базе, место по Эло\nи последний матч."
       },
+      "PlayerMatchOut": {
+        "properties": {
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "tournament": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Surface"
+          },
+          "round": {
+            "type": "string",
+            "title": "Round"
+          },
+          "opponent": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "opponent_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Rank"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "won": {
+            "type": "boolean",
+            "title": "Won"
+          },
+          "walkover": {
+            "type": "boolean",
+            "title": "Walkover"
+          },
+          "best_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "match_id",
+          "day",
+          "tournament",
+          "category",
+          "surface",
+          "round",
+          "opponent",
+          "opponent_rank",
+          "score",
+          "won",
+          "walkover",
+          "best_of"
+        ],
+        "title": "PlayerMatchOut",
+        "description": "Матч игрока в базе: турнир и категория, покрытие, круг, соперник и его место по\nЭло сейчас, счет со стороны игрока, исход (W, L или walkover — неявка соперника или\nсамого игрока, won говорит, кто прошел дальше), формат."
+      },
+      "PlayerMatchesOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerMatchOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlayerMatchesSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_before",
+          "total",
+          "summary"
+        ],
+        "title": "PlayerMatchesOut",
+        "description": "Страница матчей игрока, сначала последние. next_before — курсор (id матча) следующей\nстраницы; summary — только на первой странице."
+      },
+      "PlayerMatchesSummaryOut": {
+        "properties": {
+          "since": {
+            "type": "string",
+            "format": "date",
+            "title": "Since"
+          },
+          "played": {
+            "type": "integer",
+            "title": "Played"
+          },
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "tiebreaks": {
+            "$ref": "#/components/schemas/WinLossOut"
+          },
+          "deciders": {
+            "$ref": "#/components/schemas/WinLossOut"
+          },
+          "best_of_5": {
+            "type": "integer",
+            "title": "Best Of 5"
+          }
+        },
+        "type": "object",
+        "required": [
+          "since",
+          "played",
+          "wins",
+          "tiebreaks",
+          "deciders",
+          "best_of_5"
+        ],
+        "title": "PlayerMatchesSummaryOut",
+        "description": "Итоги матчей за 2 сезона (since): победы из сыгранных, тай-брейки, решающие\nсеты, матчи до трех побед."
+      },
+      "PlayerNewsItemOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "injury",
+              "withdrawal",
+              "motivation",
+              "other",
+              "result"
+            ],
+            "title": "Kind"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "published_at",
+          "summary",
+          "source_url",
+          "source_name",
+          "details"
+        ],
+        "title": "PlayerNewsItemOut",
+        "description": "Факт из новостей (шаг новостей анализа, общий кэш для всех): вид, дата, текст,\nсайт и ссылка; у результата — подробности (соперник, счет, турнир, дата, победа)."
+      },
+      "PlayerNewsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerNewsItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "fresh": {
+            "type": "boolean",
+            "title": "Fresh"
+          },
+          "ttl_hours": {
+            "type": "integer",
+            "title": "Ttl Hours"
+          },
+          "lookback_days": {
+            "type": "integer",
+            "title": "Lookback Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_before",
+          "checked_at",
+          "fresh",
+          "ttl_hours",
+          "lookback_days"
+        ],
+        "title": "PlayerNewsOut",
+        "description": "Новости игрока за lookback_days, новые сверху, страницами. next_before — курсор."
+      },
       "PlayerPick": {
         "properties": {
           "status": {
@@ -12044,6 +14933,116 @@
         "title": "PlayerPick",
         "description": "Игрок из текста: matched — найден (сходство ≥ 0,9), check — проверьте\n(0,7–0,9), missing — нет в базе. candidates — до 3 похожих."
       },
+      "PlayerRankingOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerRowOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "fuzzy": {
+            "type": "boolean",
+            "title": "Fuzzy"
+          },
+          "data": {
+            "type": "string",
+            "enum": [
+              "active",
+              "news",
+              "all"
+            ],
+            "title": "Data"
+          },
+          "surface": {
+            "type": "string",
+            "enum": [
+              "hard",
+              "clay",
+              "grass"
+            ],
+            "title": "Surface"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "rank",
+              "elo",
+              "last"
+            ],
+            "title": "Sort"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/PlayerCountsOut"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "rank_days": {
+            "type": "integer",
+            "title": "Rank Days"
+          },
+          "news_ttl_hours": {
+            "type": "integer",
+            "title": "News Ttl Hours"
+          },
+          "archive": {
+            "$ref": "#/components/schemas/ArchiveInfoOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit",
+          "query",
+          "fuzzy",
+          "data",
+          "surface",
+          "sort",
+          "counts",
+          "as_of",
+          "rank_days",
+          "news_ttl_hours",
+          "archive"
+        ],
+        "title": "PlayerRankingOut",
+        "description": "Страница списка «Игроки». Без поиска — набор по data, с поиском — вся база (data =\nnews сужает до игроков со свежими новостями); fuzzy — точных совпадений нет, найдено\nс учетом опечаток. total — сколько всего по условиям. as_of — день расчета текущего\nЭло, rank_days — окно места по Эло, news_ttl_hours — сколько новости считаются\nсвежими."
+      },
       "PlayerRefOut": {
         "properties": {
           "id": {
@@ -12073,6 +15072,170 @@
           "name_ru"
         ],
         "title": "PlayerRefOut"
+      },
+      "PlayerRowOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "name_ru": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Ru"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "age": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "elo_all": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elo All"
+          },
+          "elo_surface": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elo Surface"
+          },
+          "elo_delta": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elo Delta"
+          },
+          "matches_52w": {
+            "type": "integer",
+            "title": "Matches 52W"
+          },
+          "form": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "W",
+                "L"
+              ]
+            },
+            "type": "array",
+            "title": "Form"
+          },
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "losses": {
+            "type": "integer",
+            "title": "Losses"
+          },
+          "last_match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LastMatchOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "news_checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News Checked At"
+          },
+          "news_fresh": {
+            "type": "boolean",
+            "title": "News Fresh"
+          },
+          "today": {
+            "type": "boolean",
+            "title": "Today"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "name_ru",
+          "country",
+          "age",
+          "rank",
+          "elo_all",
+          "elo_surface",
+          "elo_delta",
+          "matches_52w",
+          "form",
+          "wins",
+          "losses",
+          "last_match",
+          "news_checked_at",
+          "news_fresh",
+          "today"
+        ],
+        "title": "PlayerRowOut",
+        "description": "Строка списка: место по Эло (null — нет матчей за 52 недели), Эло общий и на\nвыбранном покрытии (delta — разница с общим), форма — последние 10 матчей, сначала\nпоследний; новости — когда проверялись и свежие ли (моложе кэша новостей); today —\nигрок есть в своих матчах сегодня (открытые ставки и сегодняшние анализы)."
       },
       "PlayerSide": {
         "properties": {
@@ -12973,6 +16136,33 @@
         ],
         "title": "ResultOut"
       },
+      "ResultsOut": {
+        "properties": {
+          "since": {
+            "type": "string",
+            "format": "date",
+            "title": "Since"
+          },
+          "surfaces": {
+            "items": {
+              "$ref": "#/components/schemas/SurfaceResultOut"
+            },
+            "type": "array",
+            "title": "Surfaces"
+          },
+          "total": {
+            "$ref": "#/components/schemas/WinLossOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "since",
+          "surfaces",
+          "total"
+        ],
+        "title": "ResultsOut",
+        "description": "Результаты по покрытиям с since (2 сезона: с 1 января прошлого года) и итог."
+      },
       "ReturnRequestOut": {
         "properties": {
           "requested_at": {
@@ -13049,6 +16239,55 @@
           "params"
         ],
         "title": "RuleCheck"
+      },
+      "RunCostOut": {
+        "properties": {
+          "valid_from": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Valid From"
+          },
+          "input": {
+            "$ref": "#/components/schemas/CostPartOut"
+          },
+          "cache_write_5m": {
+            "$ref": "#/components/schemas/CostPartOut"
+          },
+          "cache_write_1h": {
+            "$ref": "#/components/schemas/CostPartOut"
+          },
+          "cache_read": {
+            "$ref": "#/components/schemas/CostPartOut"
+          },
+          "output": {
+            "$ref": "#/components/schemas/CostPartOut"
+          },
+          "searches": {
+            "$ref": "#/components/schemas/CostPartOut"
+          },
+          "long_factor": {
+            "type": "number",
+            "title": "Long Factor"
+          },
+          "batch": {
+            "type": "boolean",
+            "title": "Batch"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid_from",
+          "input",
+          "cache_write_5m",
+          "cache_write_1h",
+          "cache_read",
+          "output",
+          "searches",
+          "long_factor",
+          "batch"
+        ],
+        "title": "RunCostOut",
+        "description": "Из чего сложилась цена вызова по model_prices на момент вызова. long_factor —\nмножитель второй ступени (1 — нет), batch — половина цены токенов. Части округлены\nдо миллионной доли, cost_usd вызова — как записано в agent_runs."
       },
       "SampleOut": {
         "properties": {
@@ -13279,6 +16518,176 @@
         "title": "SeriesRowOut",
         "description": "Строка таблицы под графиком: неделя или месяц (date_from–date_to), ставки,\nрассчитанные в эти дни, их прибыль и ROI, значение ряда на конец строки."
       },
+      "ServeMetricsOut": {
+        "properties": {
+          "matches": {
+            "type": "integer",
+            "title": "Matches"
+          },
+          "first_in": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First In"
+          },
+          "first_won": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Won"
+          },
+          "second_won": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Second Won"
+          },
+          "aces_per_match": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aces Per Match"
+          },
+          "double_faults_per_match": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Double Faults Per Match"
+          },
+          "first_return_won": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Return Won"
+          },
+          "second_return_won": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Second Return Won"
+          },
+          "bp_converted": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bp Converted"
+          },
+          "bp_saved": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bp Saved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "matches",
+          "first_in",
+          "first_won",
+          "second_won",
+          "aces_per_match",
+          "double_faults_per_match",
+          "first_return_won",
+          "second_return_won",
+          "bp_converted",
+          "bp_saved"
+        ],
+        "title": "ServeMetricsOut",
+        "description": "Подача и прием (доли 0…1, null — нет данных): попадание первой, очки на первой и\nвторой, эйсы и двойные за матч, очки на приеме первой и второй соперника, реализация\nи спасение брейкпоинтов. matches — матчей со статистикой."
+      },
+      "ServeOut": {
+        "properties": {
+          "period_from": {
+            "type": "string",
+            "format": "date",
+            "title": "Period From"
+          },
+          "period_to": {
+            "type": "string",
+            "format": "date",
+            "title": "Period To"
+          },
+          "player": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServeMetricsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tour": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServeMetricsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tour_players": {
+            "type": "integer",
+            "title": "Tour Players"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period_from",
+          "period_to",
+          "player",
+          "tour",
+          "tour_players"
+        ],
+        "title": "ServeOut",
+        "description": "Подача и прием за 52 недели до последнего дня со статистикой в архиве (period_to;\nстатистика есть только в архиве Сакманна) против среднего по туру — игроков из первых\ntour_players по месту по Эло, суммами за то же окно."
+      },
       "SessionOut": {
         "properties": {
           "id": {
@@ -13351,6 +16760,57 @@
         ],
         "title": "SettleIn",
         "description": "Ручной расчет: исходы всех ног и версия ставки, которую видел участник."
+      },
+      "SharedUsageOut": {
+        "properties": {
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "cache_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Share"
+          },
+          "budget_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Share"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Kinds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "cost_usd",
+          "cache_share",
+          "budget_share",
+          "kinds"
+        ],
+        "title": "SharedUsageOut",
+        "description": "Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke)."
       },
       "SlicesOut": {
         "properties": {
@@ -13853,6 +17313,77 @@
         ],
         "title": "StrategyParamsOut"
       },
+      "SurfaceEloOut": {
+        "properties": {
+          "surface": {
+            "type": "string",
+            "enum": [
+              "hard",
+              "clay",
+              "grass"
+            ],
+            "title": "Surface"
+          },
+          "elo": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elo"
+          },
+          "matches": {
+            "type": "integer",
+            "title": "Matches"
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "surface",
+          "elo",
+          "matches",
+          "delta"
+        ],
+        "title": "SurfaceEloOut",
+        "description": "Эло на покрытии: значение (null — матчей на нем нет), матчей и разница с общим."
+      },
+      "SurfaceResultOut": {
+        "properties": {
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "losses": {
+            "type": "integer",
+            "title": "Losses"
+          },
+          "surface": {
+            "type": "string",
+            "title": "Surface"
+          }
+        },
+        "type": "object",
+        "required": [
+          "wins",
+          "losses",
+          "surface"
+        ],
+        "title": "SurfaceResultOut"
+      },
       "SurfaceSliceOut": {
         "properties": {
           "n": {
@@ -13913,6 +17444,62 @@
           "surface"
         ],
         "title": "SurfaceSliceOut"
+      },
+      "TaskUsageOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "cache_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Share"
+          },
+          "budget_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Share"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "runs",
+          "cost_usd",
+          "cache_share",
+          "budget_share",
+          "models"
+        ],
+        "title": "TaskUsageOut",
+        "description": "Задача (вид вызова) на ключе администратора: вызовы участников, без общих задач."
       },
       "TextKey": {
         "properties": {
@@ -13987,6 +17574,171 @@
         ],
         "title": "ThresholdsOut",
         "description": "Пороги, по которым сервер ставит метки и выводы (одно место — app/services/\nanalytics.py): small_sample — меньше стольких событий или ставок в срезе ROI метка\n«мало данных»; insight_min_events — меньше стольких событий вывод «выборка мала»;\ncalibration_min_n и calibration_gap — диапазон калибровки с n событиями и больше,\nгде прогноз расходится с фактом на gap и больше, — плохой; calibration_few — меньше\nстольких событий калибровка «скачет»; slice_pattern_n — меньше стольких событий\nплюс в срезе — «пока не закономерность»; dashboard_small — меньше стольких\nрассчитанных ставок за период главная предупреждает о малой выборке;\nrolling_window и rolling_step — окно и шаг скользящего Brier."
+      },
+      "TodayH2HOut": {
+        "properties": {
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "losses": {
+            "type": "integer",
+            "title": "Losses"
+          },
+          "surface_wins": {
+            "type": "integer",
+            "title": "Surface Wins"
+          },
+          "surface_losses": {
+            "type": "integer",
+            "title": "Surface Losses"
+          },
+          "last_day": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Day"
+          },
+          "last_won": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Won"
+          }
+        },
+        "type": "object",
+        "required": [
+          "wins",
+          "losses",
+          "surface_wins",
+          "surface_losses",
+          "last_day",
+          "last_won"
+        ],
+        "title": "TodayH2HOut",
+        "description": "Личные встречи с соперником сегодняшнего матча: всего и на его покрытии,\nпоследняя встреча."
+      },
+      "TodayOut": {
+        "properties": {
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "opponent": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "opponent_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Rank"
+          },
+          "tournament": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Round"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Surface"
+          },
+          "bets": {
+            "items": {
+              "$ref": "#/components/schemas/MyMatchBetOut"
+            },
+            "type": "array",
+            "title": "Bets"
+          },
+          "analyses": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Analyses"
+          },
+          "elo_prob": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elo Prob"
+          },
+          "h2h": {
+            "$ref": "#/components/schemas/TodayH2HOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "match_id",
+          "opponent",
+          "opponent_rank",
+          "tournament",
+          "round",
+          "scheduled_at",
+          "surface",
+          "bets",
+          "analyses",
+          "elo_prob",
+          "h2h"
+        ],
+        "title": "TodayOut",
+        "description": "Мой матч сегодня с этим игроком (только из своих ставок и анализов): соперник и\nего место по Эло, ноги своих открытых ставок, свои анализы; surface — покрытие\nтурнира (null — неизвестно); elo_prob — вероятность победы игрока по текущему Эло\n(вес покрытия как у модели, без калибровки) — входная точка, не прогноз; h2h — личные\nвстречи."
       },
       "TotalSliceOut": {
         "properties": {
@@ -14383,6 +18135,446 @@
         ],
         "title": "UnknownLineOut"
       },
+      "UsageDayOut": {
+        "properties": {
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "errors": {
+            "type": "integer",
+            "title": "Errors"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "title": "Cache Write Tokens"
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "web_searches": {
+            "type": "integer",
+            "title": "Web Searches"
+          },
+          "cache_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Share"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "kinds": {
+            "items": {
+              "$ref": "#/components/schemas/UsageKindCostOut"
+            },
+            "type": "array",
+            "title": "Kinds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "errors",
+          "cost_usd",
+          "input_tokens",
+          "cache_write_tokens",
+          "cache_read_tokens",
+          "output_tokens",
+          "prompt_tokens",
+          "web_searches",
+          "cache_share",
+          "day",
+          "kinds"
+        ],
+        "title": "UsageDayOut",
+        "description": "День по UTC (месяц расходов тоже по UTC, поэтому сумма дней — расход месяца)."
+      },
+      "UsageKindCostOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "runs",
+          "cost_usd"
+        ],
+        "title": "UsageKindCostOut",
+        "description": "Вид вызова в дне: число вызовов и цена (состав столбца «Расходы по дням»)."
+      },
+      "UsageKindOut": {
+        "properties": {
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "errors": {
+            "type": "integer",
+            "title": "Errors"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "title": "Cache Write Tokens"
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "web_searches": {
+            "type": "integer",
+            "title": "Web Searches"
+          },
+          "cache_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Share"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "avg_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Cost Usd"
+          },
+          "avg_prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Prompt Tokens"
+          },
+          "avg_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Output Tokens"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "efforts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Efforts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "errors",
+          "cost_usd",
+          "input_tokens",
+          "cache_write_tokens",
+          "cache_read_tokens",
+          "output_tokens",
+          "prompt_tokens",
+          "web_searches",
+          "cache_share",
+          "kind",
+          "avg_cost_usd",
+          "avg_prompt_tokens",
+          "avg_output_tokens",
+          "models",
+          "efforts"
+        ],
+        "title": "UsageKindOut",
+        "description": "Вид вызова за месяц. avg_* — в среднем на вызов без ошибки (пусто — таких нет);\nmodels и efforts — какие модели и effort были у вызовов."
+      },
+      "UsageModelOut": {
+        "properties": {
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "errors": {
+            "type": "integer",
+            "title": "Errors"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "title": "Cache Write Tokens"
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "web_searches": {
+            "type": "integer",
+            "title": "Web Searches"
+          },
+          "cache_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Share"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "errors",
+          "cost_usd",
+          "input_tokens",
+          "cache_write_tokens",
+          "cache_read_tokens",
+          "output_tokens",
+          "prompt_tokens",
+          "web_searches",
+          "cache_share",
+          "model"
+        ],
+        "title": "UsageModelOut"
+      },
+      "UsageStepOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "step": {
+            "type": "integer",
+            "title": "Step"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "step",
+          "runs",
+          "cost_usd"
+        ],
+        "title": "UsageStepOut",
+        "description": "Шаг анализа (agent_runs.step; 0 — вызов вне анализа) и вид вызова."
+      },
+      "UsageSumsOut": {
+        "properties": {
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "errors": {
+            "type": "integer",
+            "title": "Errors"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "title": "Cache Write Tokens"
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "web_searches": {
+            "type": "integer",
+            "title": "Web Searches"
+          },
+          "cache_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Share"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "errors",
+          "cost_usd",
+          "input_tokens",
+          "cache_write_tokens",
+          "cache_read_tokens",
+          "output_tokens",
+          "prompt_tokens",
+          "web_searches",
+          "cache_share"
+        ],
+        "title": "UsageSumsOut",
+        "description": "Сумма вызовов: число (errors — с ошибкой), цена, токены по видам и поиски.\ninput_tokens — вход без кэша (как usage.input_tokens API), prompt_tokens — весь вход\n(без кэша, запись и чтение кэша). cache_share — доля кэша по формуле PLAN.md, раздел 8:\ncache_read / (input + cache_write + cache_read); пусто — входа нет."
+      },
+      "UsageVersionOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "avg_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "prompt_version",
+          "runs",
+          "cost_usd",
+          "avg_cost_usd"
+        ],
+        "title": "UsageVersionOut",
+        "description": "Версия инструкций вида вызова: цена за месяц и в среднем на вызов без ошибки.\nКачество версии — этап 5."
+      },
       "UserDeleteIn": {
         "properties": {
           "confirm_email": {
@@ -14457,6 +18649,24 @@
           "win_add"
         ],
         "title": "WeekOut"
+      },
+      "WinLossOut": {
+        "properties": {
+          "wins": {
+            "type": "integer",
+            "title": "Wins"
+          },
+          "losses": {
+            "type": "integer",
+            "title": "Losses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "wins",
+          "losses"
+        ],
+        "title": "WinLossOut"
       }
     }
   }
