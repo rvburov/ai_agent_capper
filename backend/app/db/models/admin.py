@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import CURRENCIES, Base, BigIntPK, CurrencyCode, IpAddress, UsdLimit, check_in
+from app.db.models.auth import DEFAULT_TZ
 
 AUDIT_ACTIONS = (
     "invite",
@@ -93,6 +94,8 @@ class AppSettings(Base):
     agent_config: Mapped[dict[str, Any]] = mapped_column(server_default=text("'{}'::jsonb"))
     budget_alert_pct: Mapped[int] = mapped_column(SmallInteger, server_default="80")
     eval_budget_usd: Mapped[UsdLimit] = mapped_column(server_default="25")
+    # Часовой пояс новых участников по умолчанию (у каждого участника свой users.tz)
+    default_tz: Mapped[str] = mapped_column(String(64), server_default=DEFAULT_TZ)
     updated_by: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )

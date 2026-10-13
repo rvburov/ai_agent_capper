@@ -56,6 +56,7 @@ from app.db.models import IngestionRun, Match, Player, Tournament
 from app.ingest.names import fold, has_cyrillic, translit_ru
 from app.ingest.sackmann import GENERIC_CATEGORY, PROMOTE_AFTER, PROMOTE_BEFORE
 from app.services.audit import write_audit
+from app.services.bet_versions import touch_bets_on_matches
 
 QUERY_MAX_LENGTH = 100
 # players.name_ru — VARCHAR(200); псевдонимы того же предела
@@ -328,6 +329,8 @@ _PLAYER_RULES: dict[str, _PlayerRule] = {
     "matches": "matches",
     # Рейтинги Эло источника не нужны: Эло пересчитывается по всей истории
     "player_ratings": "drop",
+    # Текущее Эло и место (этап 4) — тоже: их заново пишет шаг elo
+    "player_elo_current": "drop",
     # Профиль один на игрока: у цели остается свой, если он есть
     "player_profiles": "profile",
 }
@@ -849,6 +852,9 @@ async def _merge_matches(
                 409, "players.errors.match_players_differ", source=source_id, target=target_id
             )
     report = MatchMergeReport(source_id=source_id, target_id=target_id, flipped=flip)
+    if flip:
+        # Сторона ног перевернется: открытые до слияния окна расчета — устаревшие
+        await touch_bets_on_matches(db, [source_id])
     for table_name, (rule, columns) in rules.items():
         table = Base.metadata.tables[table_name]
         twin = table.alias("twin")

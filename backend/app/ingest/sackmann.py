@@ -82,6 +82,7 @@ from app.db.models import (
 )
 from app.db.models.tennis import HANDS
 from app.db.session import create_engine, create_sessionmaker
+from app.ingest import user_matches
 from app.ingest.fetch import DataSource, FetchedFile
 from app.ingest.names import name_keys, parse_tennis_data_name
 from app.ingest.rounds import ROUNDS
@@ -92,6 +93,7 @@ from app.ingest.runs import (
     last_ok_file_hashes,
     update_lock,
 )
+from app.services.bet_versions import touch_bets_on_matches
 
 SOURCE = "sackmann"
 TENNIS_DATA = "tennis_data"
@@ -933,11 +935,14 @@ async def _flip_sides(db: AsyncSession, match_ids: Sequence[int]) -> None:
     Обмен одним UPDATE нарушил бы уникальные индексы (PostgreSQL проверяет их построчно,
     и строка «1 → 2» сталкивается с еще не обновленной «2»). Поэтому кэфы удаляются и
     вставляются заново с теми же id (на них никто не ссылается), а у прогнозов (на них
-    ссылаются ставки) к рынку на время обмена добавляется метка.
+    ссылаются ставки) к рынку на время обмена добавляется метка. У ставок с ногами на
+    этих матчах — новая версия: счет из окна расчета («первым — игрок 1»), открытого до
+    обмена, относился бы уже к другому игроку (app/services/bet_versions.py).
     """
     if not match_ids:
         return
     ids = list(match_ids)
+    await touch_bets_on_matches(db, ids)
     odds = cast(Table, OddsSnapshot.__table__)
     old = (
         (await db.execute(delete(odds).where(odds.c.match_id.in_(ids)).returning(*odds.c)))
@@ -1739,6 +1744,17 @@ class _Loader:
                 new.append(target)
                 continue
             ids[target.ref] = current.id
+            if current.source == user_matches.USER_SOURCE:
+                # Т14: матч из ввода участника на месте этой строки становится матчем
+                # архива (тот же id: ставки и прогнозы остаются, сторона переворачивается)
+                self.counts["matches.user_merged"] += 1
+                self.report.add_warning(
+                    "ingest_sackmann.warnings.user_match_merged",
+                    file=path,
+                    line=target.row.line,
+                    match_id=current.id,
+                    match=target.row.describe(),
+                )
             if target.ref in promoted and current.tournament_id is not None:
                 self.moved[current.tournament_id] = target.tour_id
             if (current.player1_id, current.player2_id) == (target.loser, target.winner):

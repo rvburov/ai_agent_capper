@@ -20,6 +20,7 @@ from app.db.models import (
     MatchStat,
     OddsSnapshot,
     Player,
+    PlayerEloCurrent,
     PlayerNews,
     PlayerProfile,
     PlayerRating,
@@ -211,6 +212,7 @@ EXPECTED_PLAYER_REFS = {
     "player_news": ("player_id",),
     "player_profiles": ("player_id",),
     "player_ratings": ("player_id",),
+    "player_elo_current": ("player_id",),
 }
 
 
@@ -267,6 +269,8 @@ async def test_merge_players_moves_every_reference(db: AsyncSession) -> None:
             PlayerRating(player_id=source.id, surface="all", as_of=date(2025, 1, 1), elo=1700),
             PlayerRating(player_id=source.id, surface="hard", as_of=date(2025, 1, 1), elo=1710),
             PlayerRating(player_id=target.id, surface="all", as_of=date(2025, 1, 1), elo=2100),
+            PlayerEloCurrent(player_id=source.id, elo_all=1700, as_of=date(2025, 1, 1)),
+            PlayerEloCurrent(player_id=target.id, elo_all=2100, as_of=date(2025, 1, 1)),
         ]
     )
     await db.commit()
@@ -284,7 +288,7 @@ async def test_merge_players_moves_every_reference(db: AsyncSession) -> None:
         "player_news.player_id": 1,
         "player_profiles.player_id": 1,
     }
-    assert report.removed == {"player_news": 1, "player_ratings": 2}
+    assert report.removed == {"player_news": 1, "player_ratings": 2, "player_elo_current": 1}
     assert report.filled == ["hand", "country", "name_ru"]
     assert report.aliases_added == ["Синнер Я."]
     assert not report.profile_kept_target

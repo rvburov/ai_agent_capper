@@ -62,12 +62,13 @@ async def test_strategy_defaults_before_first_analysis(
         "max_legs": 2,
         "max_leg_odds": "1.50",
     }
+    # Рост ставки и прибыльная неделя выключены по умолчанию (В7, Р24)
     assert params["adapt"] == {
         "dd10": True,
         "dd20": True,
-        "up15": True,
+        "up15": False,
         "week_loss": True,
-        "week_win": True,
+        "week_win": False,
     }
 
 

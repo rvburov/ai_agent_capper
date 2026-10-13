@@ -4,6 +4,7 @@ GET /api/me/bookmakers: начальный банк, журнал, идемпо�
 
 import asyncio
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -17,7 +18,10 @@ from tests.analysis_helpers import install, make_analysis, run, seed_world, set_
 from tests.claude_mock import seed_prices
 from tests.fake_claude import FakeClaude
 from tests.helpers_admin import Signed, error_code, signed_in
+from tests.helpers_bets import BetMaker, LegSpec, get_bet, settle_body
 from tests.support import ClientFactory, LoginFn, UserFactory
+
+D = Decimal
 
 PAIRS = (("sinner", "rune"), ("djokovic", "rublev"))
 
@@ -246,3 +250,73 @@ async def test_bank_of_new_member_and_csrf(
     no_csrf = await login(await make_client("10.0.0.9", csrf=False), user)
     response = await no_csrf.post("/api/bets", json={})
     assert response.status_code == 403 and error_code(response) == "common.csrf"
+
+
+async def test_settlement_and_new_bet_race(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    db: AsyncSession,
+    engine: AsyncEngine,
+    redis: Redis,
+    world: dict[str, int],
+    fake: FakeClaude,
+) -> None:
+    """Расчет одной ставки и новая ставка одновременно: обе под одной блокировкой денег
+    участника — новая ставка проверяет сумму по банку уже с выплатой или без нее, журнал
+    сходится, начальный банк второй раз не пишется."""
+    member = await signed_in(make_client, make_user, login)
+    analysis = await _done(
+        db, engine, redis, member, world, ("sinner", "rune"), ("djokovic", "rublev")
+    )
+    open_bet = await BetMaker(db).bet(member.user, [LegSpec(odds="2.00")], stake="9000")
+    card = await get_bet(member.client, open_bet.id)
+    # Банк 1000: ставка на 1500 пройдет, только если выплата 18 000 уже записана
+    settled, placed = await asyncio.gather(
+        member.client.put(f"/api/bets/{open_bet.id}/result", json=settle_body(card, "win")),
+        member.client.post("/api/bets", json=_bet(analysis, stake="1500")),
+    )
+    assert settled.status_code == 200
+    assert placed.status_code in (201, 422)
+    kinds = [row.kind for row in await _ledger(db, member.id)]
+    assert kinds.count("deposit") == 1 and kinds.count("payout") == 1
+    assert kinds.count("stake") == (2 if placed.status_code == 201 else 1)
+    if placed.status_code == 422:
+        assert error_code(placed) == "bet.stake_range"
+    bank = (await member.client.get("/api/me/bank")).json()
+    in_play = D("1500") if placed.status_code == 201 else D(0)
+    assert D(bank["balance"]) == D("10000") - D("9000") + D("18000") - in_play
+    assert D(bank["in_play"]) == in_play
+
+
+async def test_bet_payout_over_money_limit(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    db: AsyncSession,
+    engine: AsyncEngine,
+    redis: Redis,
+    world: dict[str, int],
+    fake: FakeClaude,
+) -> None:
+    """Возможная выплата больше NUMERIC(12, 2): ставку не принимаем, иначе ее выигрыш
+    нельзя было бы рассчитать."""
+    member = await signed_in(make_client, make_user, login)
+    analysis = await _done(
+        db, engine, redis, member, world, ("sinner", "rune"), ("djokovic", "rublev")
+    )
+    db.add(
+        BankrollLedger(
+            user_id=member.id,
+            at=datetime.now(UTC),
+            kind="deposit",
+            amount=D("9500000000"),
+            currency="RUB",
+        )
+    )
+    await db.commit()
+    response = await member.client.post("/api/bets", json=_bet(analysis, stake="9000000000"))
+    assert response.status_code == 422 and error_code(response) == "bet.payout_range"
+    assert await db.scalar(select(Bet.id)) is None
+    placed = await member.client.post("/api/bets", json=_bet(analysis, stake="1000000"))
+    assert placed.status_code == 201

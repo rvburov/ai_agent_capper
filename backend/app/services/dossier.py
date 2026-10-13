@@ -28,7 +28,6 @@ serve за 52 недели {m, first_in, first_won, second_won, return_won, tb_w
 
 import hashlib
 import json
-import re
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -61,7 +60,7 @@ from app.ml.elo import (
     rating_surface,
     win_probability,
 )
-from app.ml.sets import Probs3, base_probs
+from app.ml.sets import Probs3, base_probs, parse_sets, score_for
 
 FEATURE_SET = "d1"
 FORM_SIZE = 10
@@ -78,7 +77,6 @@ UNDATED_DAYS = timedelta(days=16)
 # Название турнира в досье и запросе новостей
 TOUR_NAME_MAX = 80
 
-_SET = re.compile(r"^\[?(\d+)-(\d+)(\(\d+\))?\]?$")
 # Подробности свежего результата из поиска (player_news.details, kind='result'): ключ
 # details → короткий ключ досье. Другие ключи в досье не попадают
 RESULT_DETAILS = {
@@ -128,32 +126,6 @@ def _round_rank(code: str | None) -> int:
         return round_order(code or "")
     except ValueError:
         return 0
-
-
-def _sets(score: str | None) -> list[tuple[int, int, str]]:
-    """Сеты счета со стороны победителя: (геймы победителя, геймы проигравшего, очки
-    тай-брейка)."""
-    found: list[tuple[int, int, str]] = []
-    for token in (score or "").split():
-        match = _SET.match(token)
-        if match:
-            found.append((int(match.group(1)), int(match.group(2)), match.group(3) or ""))
-    return found
-
-
-def _score_for(score: str | None, won: bool) -> str | None:
-    """Счет со стороны игрока: у проигравшего геймы в каждом сете меняются местами."""
-    if not score or won:
-        return score
-    parts: list[str] = []
-    for token in score.split():
-        match = _SET.match(token)
-        if match is None:
-            parts.append(token)
-            continue
-        text = f"{match.group(2)}-{match.group(1)}{match.group(3) or ''}"
-        parts.append(f"[{text}]" if token.startswith("[") else text)
-    return " ".join(parts)
 
 
 def _day_expr() -> ColumnElement[date]:
@@ -511,7 +483,7 @@ def _form_block(rows: Sequence[_Played], names: dict[int, str]) -> dict[str, Any
                 "opp": names.get(row.opponent),
                 "opp_elo": round(row.opp_elo) if row.opp_elo is not None else None,
                 "surf": row.surface,
-                "sc": _score_for(row.score, row.won),
+                "sc": score_for(row.score, row.won),
                 "t": row.tournament,
                 "rd": row.round,
             }
@@ -523,7 +495,7 @@ def _form_block(rows: Sequence[_Played], names: dict[int, str]) -> dict[str, Any
 def _tiebreaks(rows: Sequence[_Played]) -> tuple[int, int]:
     won = lost = 0
     for row in rows:
-        for winner_games, loser_games, _ in _sets(row.score):
+        for winner_games, loser_games, _ in parse_sets(row.score):
             if {winner_games, loser_games} == {6, 7}:
                 set_won = winner_games > loser_games
                 if set_won == row.won:
@@ -538,7 +510,7 @@ def _load(rows: Sequence[_Played], day: date, last: date | None) -> dict[str, An
     recent = [row for row in rows if row.day >= since]
     return {
         "m14": len(recent),
-        "s14": sum(len(_sets(row.score)) for row in recent),
+        "s14": sum(len(parse_sets(row.score)) for row in recent),
         "rest": (day - last).days if last is not None else None,
     }
 

@@ -14,12 +14,15 @@ strategy_versions.params (StrategyParams.from_params / to_params), значен�
 поправка на средний валуй ног → прибыльная неделя (+0,5 п.п.) → потолок: 3% или 4% при
 росте банка на 15% и винрейте от 60%, не больше лимита просадки Р22 и лимита убыточной
 недели → округление вниз до шага валюты → меньше минимума — суммы нет. Правила серий не
-применяются (Р22). Каждое правило адаптации включается и выключается в params.adapt.
+применяются (Р22). Каждое правило адаптации включается и выключается в params.adapt; рост
+ставки при росте банка (up15) и прибыльная неделя (week_win) по умолчанию выключены
+(решение В7, Р24): они опираются на шум.
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_FLOOR, Decimal, InvalidOperation
+from types import MappingProxyType
 from typing import Any, Protocol, Self
 
 from app.core.i18n import t
@@ -28,6 +31,11 @@ from app.ml.sets import MARKET_MINUS, MARKETS, PROBS3_FIELDS, SHOWN_DIGITS, Prob
 CURRENCIES: tuple[str, ...] = ("RUB", "USD", "EUR")
 # Ключи правил адаптации суммы в params.adapt (карточка «Адаптации ставки» макета)
 ADAPT_KEYS: tuple[str, ...] = ("dd10", "dd20", "up15", "week_loss", "week_win")
+# Включено ли правило, если в params.adapt его нет: защита банка при просадке (Р22) и
+# убыточная неделя — да, рост ставки и прибыльная неделя — нет (В7, Р24)
+ADAPT_DEFAULTS: Mapping[str, bool] = MappingProxyType(
+    {"dd10": True, "dd20": True, "up15": False, "week_loss": True, "week_win": False}
+)
 # Флаги Claude, при которых исходы на игрока не берутся в экспресс (шаг 4: «нет травм
 # или перегруза»)
 BLOCKING_FLAGS: tuple[str, ...] = ("injury", "fatigue")
@@ -211,7 +219,7 @@ class StrategyParams:
     max_pct: Decimal = Decimal("0.03")
     growth: GrowthRule = field(default_factory=GrowthRule)
     week: WeekRule = field(default_factory=WeekRule)
-    adapt: Mapping[str, bool] = field(default_factory=lambda: dict.fromkeys(ADAPT_KEYS, True))
+    adapt: Mapping[str, bool] = field(default_factory=lambda: dict(ADAPT_DEFAULTS))
 
     @property
     def rules(self) -> StrategyRules:
@@ -227,8 +235,8 @@ class StrategyParams:
         )
 
     def adapt_on(self, key: str) -> bool:
-        """Правило адаптации включено (нет ключа — включено)."""
-        return self.adapt.get(key, True)
+        """Правило адаптации включено (нет ключа — по ADAPT_DEFAULTS)."""
+        return self.adapt.get(key, ADAPT_DEFAULTS.get(key, True))
 
     def drawdown_level(self, drawdown: Decimal) -> DrawdownLevel | None:
         """Самый строгий включенный лимит просадки, порог которого достигнут."""
@@ -441,7 +449,7 @@ def _to_week(raw: Any) -> WeekRule:
 
 def _to_adapt(raw: Any) -> dict[str, bool]:
     given = {str(key): _to_bool(flag) for key, flag in dict(raw).items()}
-    return {**dict.fromkeys(ADAPT_KEYS, True), **given}
+    return {**ADAPT_DEFAULTS, **given}
 
 
 _PARSERS: dict[str, Callable[[Any], Any]] = {

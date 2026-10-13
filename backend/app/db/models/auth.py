@@ -48,6 +48,8 @@ NOTIFICATION_KINDS = (
     "ai_mode_decision",
     "budget_80",
     "budget_100",
+    # Этап 4: сигналы расхода ИИ администраторам (TOKEN_ECONOMY.md, раздел 6), правило — в params
+    "ai_alert",
 )
 DEFAULT_TZ = "Europe/Helsinki"
 
@@ -94,6 +96,9 @@ class User(CreatedAtMixin, UpdatedAtMixin, Base):
     last_login_at: Mapped[datetime | None]
     blocked_at: Mapped[datetime | None]
     deleted_at: Mapped[datetime | None]
+    # Участник сам попросил удалить аккаунт: удаление через 7 дней, до этого можно
+    # отменить (В10, Р24)
+    deletion_requested_at: Mapped[datetime | None]
 
 
 class UserSession(CreatedAtMixin, Base):
@@ -240,6 +245,19 @@ class Notification(CreatedAtMixin, Base):
     params: Mapped[dict[str, Any]] = mapped_column(server_default=text("'{}'::jsonb"))
     link: Mapped[str | None] = mapped_column(String(500))
     read_at: Mapped[datetime | None]
+
+
+class NotificationPref(Base):
+    """Что присылать участнику: вид уведомления → на сайте (колокольчик) и push (этап 6).
+    Строки нет — значение по умолчанию: на сайте да, push нет."""
+
+    __tablename__ = "notification_prefs"
+    __table_args__ = (check_in("kind", NOTIFICATION_KINDS, "kind"),)
+
+    user_id: Mapped[int] = mapped_column(BigInteger, _user_fk(), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), primary_key=True)
+    on_site: Mapped[bool] = mapped_column(server_default=text("true"))
+    push: Mapped[bool] = mapped_column(server_default=text("false"))
 
 
 class PushSubscription(CreatedAtMixin, Base):

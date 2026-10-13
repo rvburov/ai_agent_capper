@@ -154,7 +154,7 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 | `services/players.py` | поиск, слияние и правка игроков, слияние матчей |
 | `ml/elo.py`, `ml/market.py`, `ml/metrics.py` | Эло по покрытиям, снятие маржи, лог-лосс, Brier, ECE, бутстрэп |
 | `ml/backtest.py`, `ml/report.py` | бэктест и отчет Markdown |
-| `ml/sets.py`, `ml/strategy.py` | модель сетов (форы ±1.5), правила стратегии v3: валуй, экспресс, сумма ставки, поправка Claude (Р22) |
+| `ml/sets.py`, `ml/strategy.py` | модель сетов (форы ±1.5), разбор счета по сетам и исход ноги по счету; правила стратегии v3: валуй, экспресс, сумма ставки, поправка Claude (Р22) |
 | `services/dossier.py`, `services/bank.py` | досье матча для Claude (0 токенов), банк, пик и просадка по журналу |
 
 ## Агент Claude (этап 3, в работе)
@@ -196,6 +196,23 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 Приемка этапа 3: `python -m app.admin.cli acceptance-runs [--count 20] [--email АДМИН] [--yes] [--report ПУТЬ.md]`, `smoke-eval [--events 40] [--since 2026-08-01] [--before-cutoff] [--no-wait] | --resume ID | --abandon ID`, `parse-eval --file ПАРЫ.json` и `parse-eval --draft --from-telegram result.json --out ПАРЫ.json` (критерии и цены — `docs/PLAN.md`, этап 3, «Как принять этап»). Анализы приемки — обычные анализы администратора с меткой `acceptance` в чекпойнте: их прогнозы пишутся с `is_eval`, поиски новостей не входят в дневной лимит поисков программы (`analysis_run.ACCEPTANCE_MARK`). Коды команд: 0 — приемка пройдена, 1 — нет, 2 — отменено, 3 — пробный прогон, 130 — Ctrl+C (`app/admin/terminal.py`). `smoke-eval` пишет `eval_runs` (`version_kind = strategy`, `split = test`) и строки `agent_runs` с `kind = eval`, `batch = true`, `request_id = «пакет/запрос»`; `parse-eval` — `agent_runs` с `kind = eval`. Обе тратят бюджет проверок (`eval_budget_usd`), в резерве — худший случай незабранных пакетов (29 дней после отправки) и потерянных или закрытых (`lost`, `abandoned`) до конца месяца отправки. Поддельный сервер отвечает и на Message Batches (`POST /v1/messages/batches`, опрос, результаты JSONL).
 
 Локальный прогон без ключа: поддельный сервер Claude `uvicorn tests.fake_claude:app --port 8099` (из `backend/`) и `CAPPER_ANTHROPIC_BASE_URL=http://127.0.0.1:8099` у API и воркера; ключ администратора — любой `sk-ant-...` (`set-admin-key`, проверку ключа тоже отвечает поддельный сервер). Сбои включаются запросом `POST /_fake/fail` (сбросить — `POST /_fake/reset`) или переменной `FAKE_CLAUDE_FAIL`. В prod адрес Claude API — только https.
+
+## Ставки и банк (этап 4, в работе)
+
+Числа считает код: выплата, CLV, итоги «Ставок» и капитал по дням считаются на сервере (суммы — в SQL), фронтенд их только показывает. Все деньги участника меняются под блокировкой его денег (`lock_member_money`) и `FOR UPDATE`; расчет, сторно и закрытие несут версию ставки, иначе 409.
+
+| Модуль | Что делает |
+|---|---|
+| `services/bets.py` | ставка по экспрессу; список «Ставок» с фильтрами и курсором, итоги, карточка (ноги, закрытие, CLV, вердикт, исход по каждому полному счету), выгрузка CSV частями |
+| `services/settlement.py` | ручной расчет ставки и исправление результата (сторно): выплата и возврат в журнал до копеек, повтор того же действия — 200 |
+| `services/closing.py` | закрывающий кэф ноги: свой исход, обратный по желанию, чей кэф; `q_close` степенным методом, CLV |
+| `services/bet_versions.py` | версия ставки `updated_at`: допуск меньше 1 мс (браузер хранит миллисекунды), новая версия позже прежней хотя бы на 2 мс |
+| `services/bank.py` | состояние банка одним запросом, капитал на конец дня по поясу участника, журнал с балансом после строки, пополнение, вывод и корректировка |
+| `ml/metrics.py` | еще CLV ноги и экспресса: с маржой (кэф / закрытие − 1) и без маржи (кэф · `q_close` − 1) |
+| `ingest/user_matches.py` | Т14: матч из ввода участника при загрузке tennis-data сливается в архивную строку (ноги, прогнозы, кэфы переходят, сторона переворачивается) |
+| `core/timing.py` | время ответа в лог `http.request`: метод, шаблон маршрута, статус, `ms`, `ttfb_ms` (основа p95) |
+
+Маршруты: `GET /api/bets` (фильтры `period`, `from`, `to`, `status`, `market`, `surface` — можно несколько, `source`, `q`; курсор `before`, `limit` до 100), `GET /api/bets/summary`, `GET /api/bets/export.csv` (те же фильтры без курсора), `GET /api/bets/{id}`, `PUT /api/bets/{id}/result`, `POST /api/bets/{id}/reverse`, `PUT /api/bets/{id}/legs/{leg_id}/closing`, `GET /api/me/bank/history?period=`, `GET /api/me/bank/entries`, `POST /api/me/bank/entries`. Чужая ставка — 404, как несуществующая. Результат, перенесенный импортом старого бота, не пересчитывается (409 `bet.legacy`); открытую ставку бота участник рассчитывает сам.
 
 ## Где что лежит
 

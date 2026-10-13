@@ -119,7 +119,7 @@ from app.core.i18n import t
 from app.db.base import Base
 from app.db.models import SURFACES, Match, OddsSnapshot, Player, Tournament
 from app.db.session import create_engine, create_sessionmaker
-from app.ingest import rounds
+from app.ingest import rounds, user_matches
 from app.ingest.fetch import DataSource, FetchError
 from app.ingest.names import fold, name_keys, parse_tennis_data_name
 from app.ingest.runs import (
@@ -210,6 +210,8 @@ ProgressStep = Literal["fetched", "unchanged", "missing", "loaded"]
 PROGRESS_STEPS: tuple[str, ...] = get_args(ProgressStep)
 # Строка запроса к matches (поля по имени)
 type _DbRow = Row[*tuple[Any, ...]]
+# Ключ матча UNIQUE(tournament_id, round, player1_id, player2_id)
+type _Key = tuple[int, str, int, int]
 
 # --- разбор файла ---
 
@@ -1581,7 +1583,8 @@ class _YearLoader:
 
     async def _write_own_matches(self) -> None:
         """Свои матчи: найти в базе (_assign), лишние матчи своих турниров убрать
-        (_remove_orphans), остальные обновить или вставить."""
+        (_remove_orphans), остальные обновить или вставить. Матч из ввода участника,
+        занявший ключ строки, сливается в нее (Т14, app/ingest/user_matches.py)."""
         if not self.plans and not self.own_groups:
             return
         tournament_ids = sorted({plan.tournament_id for plan in self.plans} | set(self.own_groups))
@@ -1618,9 +1621,18 @@ class _YearLoader:
             [row for row in own if row.tournament_id in self.own_groups and row.id not in used]
         )
         rows = [row for row in rows if row.id not in removed]
+        # Т14: user-матч строки файла (тот же турнир, круг и пара игроков в любом порядке)
+        # сливается в нее после записи. С тем же порядком игроков он занимает ключ строки
+        # и сначала освобождает его (hold); с обратным ключ свободен, а слияние
+        # перевернет сторону исхода
+        users = self._user_matches(rows)
+        held = [row for _, row, same in users if same]
+        await user_matches.hold(self.db, [row.id for row in held])
         # Ключ UNIQUE(tournament_id, round, player1_id, player2_id) занят любым матчем турнира,
         # UNIQUE(source, source_ref) — любым своим матчем
-        taken = {(row.tournament_id, row.round, row.player1_id, row.player2_id) for row in rows}
+        taken = {(row.tournament_id, row.round, row.player1_id, row.player2_id) for row in rows} - {
+            (row.tournament_id, row.round, row.player1_id, row.player2_id) for row in held
+        }
         refs = {row.source_ref for row in rows if row.source == SOURCE}
         inserts: list[tuple[_Plan, dict[str, Any]]] = []
         updates: list[dict[str, Any]] = []
@@ -1662,6 +1674,7 @@ class _YearLoader:
         await _update_by_id(self.db, Match, updates)
         for _ in updates:
             self._count("matches.updated", created=False)
+        await self._merge_user_matches(users, ids)
         for plan, mid in ids:
             self.stats.own += 1
             self.report.counts["rows.own"] += 1
@@ -1669,6 +1682,49 @@ class _YearLoader:
             self.index.played(plan.loser_id, plan.row.day.year)
             for (bookmaker, side), odds in plan.row.odds.items():
                 self.odds[(mid, side, bookmaker)] = (odds, plan.row.day)
+
+    def _user_matches(self, rows: Sequence[_DbRow]) -> list[tuple[_Key, _DbRow, bool]]:
+        """User-матчи строк файла: (ключ строки, матч, тот же ли порядок игроков)."""
+        wanted = {plan.key for plan in self.plans}
+        found: list[tuple[_Key, _DbRow, bool]] = []
+        for row in rows:
+            if not user_matches.is_user(row) or row.tournament_id is None:
+                continue
+            key = (row.tournament_id, row.round, row.player1_id, row.player2_id)
+            back = (row.tournament_id, row.round, row.player2_id, row.player1_id)
+            if key in wanted:
+                found.append((key, row, True))
+            elif back in wanted:
+                found.append((back, row, False))
+        return found
+
+    async def _merge_user_matches(
+        self, users: Sequence[tuple[_Key, _DbRow, bool]], ids: Sequence[tuple[_Plan, int]]
+    ) -> None:
+        """User-матчи строк файла сливаются в записанные строки (сторону исхода
+        merge_matches переворачивает сама); строка не записалась — круг освободившего ключ
+        матча возвращается (Т14)."""
+        if not users:
+            return
+        written = {plan.key: mid for plan, mid in ids}
+        restore: dict[int, str] = {}
+        for key, row, same in users:
+            mid = written.get(key)
+            if mid is None:
+                if same:
+                    restore[row.id] = row.round
+                continue
+            merged = await user_matches.merge_into_archive(self.db, row.id, mid)
+            kept = "user_match_kept" if same else "user_match_kept_flipped"
+            self.report.add_warning(
+                f"ingest_tennis_data.warnings.{'user_match_merged' if merged else kept}",
+                path=self.path,
+                match_id=row.id,
+                archive_id=mid,
+                round=row.round,
+            )
+            self.report.counts["matches.user_merged" if merged else "matches.user_kept"] += 1
+        await user_matches.restore(self.db, restore)
 
     def _assign(self, own: Sequence[_DbRow]) -> dict[int, _DbRow]:
         """Номер плана → его матч в базе. Сначала по source_ref, затем по ключу UNIQUE,

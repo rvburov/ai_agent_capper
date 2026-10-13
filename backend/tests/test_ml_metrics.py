@@ -1,10 +1,12 @@
 """Метрики (app/ml/metrics.py) против ручного расчета."""
 
 import math
+from decimal import Decimal
 
 import numpy as np
 import pytest
 
+from app.ml.market import devig_pair
 from app.ml.metrics import (
     COIN_BRIER,
     COIN_LOG_LOSS,
@@ -16,6 +18,10 @@ from app.ml.metrics import (
     brier_skill_score,
     calibration_table,
     clip_probabilities,
+    clv,
+    clv_fair,
+    clv_fair_parlay,
+    clv_parlay,
     ece,
     log_loss,
     log_losses,
@@ -133,3 +139,41 @@ def test_roi_by_hand() -> None:
         roi_with_ci([0.0], [1.0])
     with pytest.raises(ValueError):
         roi_with_ci([1.0], [-1.0])
+
+
+# --- CLV (В1, Р24) ---
+
+
+def test_clv_leg() -> None:
+    # Кэф 1.85 при закрытии 1.75: взяли на 5,7% лучше рынка
+    assert clv(Decimal("1.85"), Decimal("1.75")) == pytest.approx(1.85 / 1.75 - 1, abs=1e-15)
+    assert clv("1.70", "1.70") == 0.0
+    assert clv(1.6, 1.8) < 0
+    # Точно в Decimal: 2.2 / 2 − 1 = 0,1 без хвоста плавающей точки
+    assert clv(Decimal("2.2"), Decimal("2")) == 0.1
+    with pytest.raises(ValueError):
+        clv("1.8", "0")
+    with pytest.raises(ValueError):
+        clv("nan", "1.8")
+
+
+def test_clv_fair_uses_power_devig() -> None:
+    q = devig_pair(1.75, 2.10)
+    assert clv_fair(Decimal("1.85"), q) == pytest.approx(1.85 * q - 1)
+    # «С маржой» CLV завышен: 1/закрытие больше вероятности без маржи (q < 1/кэф)
+    assert clv_fair(Decimal("1.85"), q) < clv(Decimal("1.85"), Decimal("1.75"))
+    with pytest.raises(ValueError):
+        clv_fair("1.8", 1.2)
+
+
+def test_clv_parlay() -> None:
+    legs = [(Decimal("1.50"), Decimal("1.40")), (Decimal("1.30"), Decimal("1.35"))]
+    expected = (1.5 * 1.3) / (1.4 * 1.35) - 1
+    assert clv_parlay(legs) == pytest.approx(expected, abs=1e-12)
+    # Нет закрытия у одной ноги — CLV экспресса нет
+    assert clv_parlay([(Decimal("1.5"), Decimal("1.4")), (Decimal("1.3"), None)]) is None
+    assert clv_parlay([]) is None
+    assert clv_fair_parlay([(Decimal("1.5"), 0.7), (Decimal("1.3"), 0.8)]) == pytest.approx(
+        1.5 * 0.7 * 1.3 * 0.8 - 1
+    )
+    assert clv_fair_parlay([(Decimal("1.5"), 0.7), (Decimal("1.3"), None)]) is None

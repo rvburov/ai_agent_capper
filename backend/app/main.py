@@ -1,8 +1,8 @@
 """Точка входа: создание приложения FastAPI.
 
-create_app() подключает логирование, middleware (CSRF, заголовки), обработчики ошибок
-и маршруты. Подключения к PostgreSQL и Redis открываются в lifespan и лежат в app.state:
-engine, sessionmaker, redis. Запуск: uvicorn app.main:app.
+create_app() подключает логирование, middleware (CSRF, заголовки, время ответа),
+обработчики ошибок и маршруты. Подключения к PostgreSQL и Redis открываются в lifespan и
+лежат в app.state: engine, sessionmaker, redis. Запуск: uvicorn app.main:app.
 """
 
 from collections.abc import AsyncIterator
@@ -18,6 +18,7 @@ from app.core.errors import install_error_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import CsrfMiddleware, SecurityHeadersMiddleware
 from app.core.redis import create_redis
+from app.core.timing import TimingMiddleware
 from app.db.session import create_engine, create_sessionmaker
 
 
@@ -54,6 +55,8 @@ def create_app() -> FastAPI:
     # Последний добавленный middleware — внешний: заголовки получает и ответ CSRF-проверки
     app.add_middleware(CsrfMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    # Время ответа в лог (основа p95): снаружи CSRF и заголовков, чтобы считались и отказы
+    app.add_middleware(TimingMiddleware)
     # Самый внешний: IP клиента из X-Forwarded-For, но только от прокси из
     # CAPPER_TRUSTED_PROXIES (Caddy). Иначе у всех клиентов был бы адрес Caddy, и лимиты
     # попыток входа закрыли бы вход всем сразу

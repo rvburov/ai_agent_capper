@@ -1,4 +1,5 @@
-"""Модель сетов (app/ml/sets.py): формулы, обратная функция, форы и шесть исходов."""
+"""Модель сетов (app/ml/sets.py): формулы, обратная функция, форы и шесть исходов; счет
+по сетам и исход ноги ставки по счету."""
 
 import pytest
 
@@ -6,12 +7,27 @@ from app.ml.sets import (
     MARKET_MINUS,
     MARKET_ML,
     MARKET_PLUS,
+    OUTCOME_INCOMPLETE,
+    OUTCOME_NO_RESULT,
+    OUTCOME_RETIRED,
+    OUTCOME_WALKOVER,
+    LegOutcome,
     Probs3,
+    SetCount,
     base_probs,
     cover_prob,
+    infer_best_of,
+    leg_result,
     market_probs,
+    match_leg_outcome,
     match_prob_from_set,
+    parse_set_count,
+    parse_sets,
+    score_for,
+    score_outcomes,
+    set_count_from_score,
     set_prob_from_match,
+    wins_needed,
 )
 
 
@@ -106,3 +122,164 @@ def test_market_probs() -> None:
     triple = Probs3(0.7, 0.45, 0.1)
     assert triple.markets() == probs
     assert triple.as_dict() == {"p1_win": 0.7, "p1_cover": 0.45, "p2_cover": 0.1}
+
+
+# --- счет по сетам и исход ноги ---
+
+
+def test_parse_sets_and_score_for_side() -> None:
+    # Разбор счета архива — тот же, что был в досье (app/services/dossier.py)
+    assert parse_sets("6-4 3-6 7-6(5)") == [(6, 4, ""), (3, 6, ""), (7, 6, "(5)")]
+    assert parse_sets("6-3 [10-8]") == [(6, 3, ""), (10, 8, "")]
+    assert parse_sets("6-4 3-2 RET") == [(6, 4, ""), (3, 2, "")]
+    assert parse_sets("W/O") == [] and parse_sets(None) == []
+    assert score_for("6-4 3-6 7-6(5)", True) == "6-4 3-6 7-6(5)"
+    assert score_for("6-4 3-6 7-6(5) RET", False) == "4-6 6-3 6-7(5) RET"
+    assert score_for("6-3 [10-8]", False) == "3-6 [8-10]"
+    assert score_for(None, False) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "best_of", "expected"),
+    [
+        ("2:0", 3, SetCount(2, 0)),
+        ("1-2", 3, SetCount(1, 2)),
+        (" 2 : 1 ", 3, SetCount(2, 1)),
+        ("21", 3, SetCount(2, 1)),
+        ("3:2", 5, SetCount(3, 2)),
+        ("0–3", 5, SetCount(0, 3)),
+        ("2:1", 5, None),  # до трех побед — неполный
+        ("3:0", 3, None),
+        ("2:2", 3, None),
+        ("1:1", None, None),
+        ("3:1", None, SetCount(3, 1)),
+        ("2:0", None, SetCount(2, 0)),
+        ("6-4", 3, None),
+        ("", 3, None),
+        (None, 3, None),
+    ],
+)
+def test_parse_set_count(text: str | None, best_of: int | None, expected: SetCount | None) -> None:
+    assert parse_set_count(text, best_of) == expected
+
+
+def test_wins_needed_and_infer() -> None:
+    assert wins_needed(3) == 2 and wins_needed(5) == 3
+    with pytest.raises(ValueError):
+        wins_needed(4)
+    assert infer_best_of(SetCount(3, 1)) == 5
+    assert infer_best_of(SetCount(0, 2)) == 3
+    assert infer_best_of(SetCount(2, 2)) is None
+    assert infer_best_of(SetCount(1, 1)) is None
+    assert SetCount(2, 1).swapped() == SetCount(1, 2) and SetCount(2, 1).text() == "2:1"
+
+
+# Исход ноги по счету (сеты игрока 1 : игрока 2): все шесть исходов при обоих форматах
+LEG_CASES = [
+    # best_of = 3
+    (3, "2:0", {("ML", 1): "win", ("ML", 2): "loss", ("HCP_-1.5", 1): "win",
+                ("HCP_-1.5", 2): "loss", ("HCP_+1.5", 1): "win", ("HCP_+1.5", 2): "loss"}),
+    (3, "2:1", {("ML", 1): "win", ("ML", 2): "loss", ("HCP_-1.5", 1): "loss",
+                ("HCP_-1.5", 2): "loss", ("HCP_+1.5", 1): "win", ("HCP_+1.5", 2): "win"}),
+    (3, "1:2", {("ML", 1): "loss", ("ML", 2): "win", ("HCP_-1.5", 1): "loss",
+                ("HCP_-1.5", 2): "loss", ("HCP_+1.5", 1): "win", ("HCP_+1.5", 2): "win"}),
+    (3, "0:2", {("ML", 1): "loss", ("ML", 2): "win", ("HCP_-1.5", 1): "loss",
+                ("HCP_-1.5", 2): "win", ("HCP_+1.5", 1): "loss", ("HCP_+1.5", 2): "win"}),
+    # best_of = 5: фора −1.5 — 3:0 и 3:1
+    (5, "3:0", {("ML", 1): "win", ("HCP_-1.5", 1): "win", ("HCP_+1.5", 2): "loss"}),
+    (5, "3:1", {("ML", 1): "win", ("HCP_-1.5", 1): "win", ("HCP_+1.5", 2): "loss",
+                ("HCP_-1.5", 2): "loss"}),
+    (5, "3:2", {("ML", 1): "win", ("HCP_-1.5", 1): "loss", ("HCP_+1.5", 2): "win",
+                ("HCP_+1.5", 1): "win"}),
+    (5, "2:3", {("ML", 2): "win", ("HCP_-1.5", 2): "loss", ("HCP_+1.5", 1): "win"}),
+    (5, "1:3", {("ML", 2): "win", ("HCP_-1.5", 2): "win", ("HCP_+1.5", 1): "loss"}),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("best_of", "score", "expected"), LEG_CASES)
+def test_leg_result_by_score(
+    best_of: int, score: str, expected: dict[tuple[str, int], str]
+) -> None:
+    count = parse_set_count(score, best_of)
+    assert count is not None
+    for (market, selection), result in expected.items():
+        assert leg_result(market, selection, count, best_of) == result, (market, selection)
+
+
+def test_leg_result_incomplete_and_bad_input() -> None:
+    assert leg_result(MARKET_ML, 1, SetCount(1, 1), 3) is None
+    assert leg_result(MARKET_MINUS, 1, SetCount(2, 1), 5) is None
+    with pytest.raises(ValueError):
+        leg_result("TOTAL", 1, SetCount(2, 0), 3)
+    with pytest.raises(ValueError):
+        leg_result(MARKET_ML, 3, SetCount(2, 0), 3)
+
+
+def test_set_count_from_archive_score() -> None:
+    # Счет архива — со стороны победителя
+    assert set_count_from_score("6-4 3-6 7-6(5)", winner_is_first=True) == SetCount(2, 1)
+    assert set_count_from_score("6-4 3-6 7-6(5)", winner_is_first=False) == SetCount(1, 2)
+    assert set_count_from_score("6-3 6-4 6-2", winner_is_first=True) == SetCount(3, 0)
+
+
+def _finished(market: str, selection: int, *, winner_is_p1: bool, score: str | None) -> LegOutcome:
+    return match_leg_outcome(
+        market, selection, status="finished", winner_is_p1=winner_is_p1, score=score, best_of=3
+    )
+
+
+def test_match_leg_outcome() -> None:
+    assert _finished(MARKET_MINUS, 1, winner_is_p1=True, score="6-4 6-3") == LegOutcome("win")
+    assert _finished(MARKET_MINUS, 2, winner_is_p1=True, score="6-4 3-6 6-3") == LegOutcome("loss")
+    assert _finished(MARKET_PLUS, 2, winner_is_p1=True, score="6-4 3-6 6-3") == LegOutcome("win")
+    # Игрок 2 выиграл: счет архива со стороны победителя
+    assert _finished(MARKET_MINUS, 2, winner_is_p1=False, score="6-1 6-2") == LegOutcome("win")
+    # Формат неизвестен — по полному счету
+    unknown = match_leg_outcome(
+        MARKET_MINUS,
+        1,
+        status="finished",
+        winner_is_p1=True,
+        score="6-4 4-6 6-3 6-4",
+        best_of=None,
+    )
+    assert unknown == LegOutcome("win")
+    # Отказ и снятие — выбор участника (В16)
+    walkover = match_leg_outcome(
+        MARKET_ML, 1, status="walkover", winner_is_p1=True, score="W/O", best_of=3
+    )
+    assert walkover == LegOutcome(None, OUTCOME_WALKOVER)
+    retired = match_leg_outcome(
+        MARKET_ML, 1, status="retired", winner_is_p1=True, score="6-4 2-1 RET", best_of=3
+    )
+    assert retired == LegOutcome(None, OUTCOME_RETIRED)
+    scheduled = match_leg_outcome(
+        MARKET_ML, 1, status="scheduled", winner_is_p1=None, score=None, best_of=3
+    )
+    assert scheduled == LegOutcome(None, OUTCOME_NO_RESULT)
+    # Счета нет: у ML хватает победителя, у форы — нет
+    assert _finished(MARKET_ML, 2, winner_is_p1=True, score=None) == LegOutcome("loss")
+    no_score = _finished(MARKET_PLUS, 1, winner_is_p1=True, score=None)
+    assert no_score == LegOutcome(None, OUTCOME_INCOMPLETE)
+
+
+def test_score_outcomes_table() -> None:
+    """Таблица «счет → исход» для окна расчета совпадает с leg_result по каждому полному
+    счету; формат неизвестен — счета обоих форматов."""
+    assert score_outcomes("HCP_+1.5", 2, 3) == {
+        "2:0": "loss",
+        "2:1": "win",
+        "1:2": "win",
+        "0:2": "win",
+    }
+    both = score_outcomes("ML", 1, None)
+    assert len(both) == 10 and both["3:2"] == "win" and both["1:2"] == "loss"
+    for market in ("ML", "HCP_-1.5", "HCP_+1.5"):
+        for selection in (1, 2):
+            for best_of in (3, 5):
+                table = score_outcomes(market, selection, best_of)
+                assert len(table) == 2 * wins_needed(best_of)
+                for text, result in table.items():
+                    count = parse_set_count(text, best_of)
+                    assert count is not None
+                    assert leg_result(market, selection, count, best_of) == result

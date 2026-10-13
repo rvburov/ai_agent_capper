@@ -1395,3 +1395,90 @@ async def test_main_errors(
     assert "winner_id" in capsys.readouterr().err
     run = await db.scalar(select(IngestionRun))
     assert run is not None and run.status == "failed"
+
+
+@pytest.mark.parametrize("flipped", [False, True], ids=["same_order", "flipped"])
+async def test_user_match_on_row_key_becomes_archive_match(
+    flipped: bool,
+    db: AsyncSession,
+    factory: async_sessionmaker[AsyncSession],
+    make_user: UserFactory,
+) -> None:
+    """Т14: матч из ввода участника с турниром, кругом и игроками строки Сакманна не
+    вытесняет ее — строка записывается в этот матч (тот же id, нога ставки и прогноз
+    остаются, сторона переворачивается при обратном порядке игроков), отчет это показывает."""
+    await load(factory, [2024])
+    final = await match(db, "2024-580-701")
+    ao = await tournament(db, "2024-580")
+    sinner, medvedev = await player(db, SINNER), await player(db, MEDVEDEV)
+    await db.delete(final)
+    await db.flush()
+    first, second = (medvedev, sinner) if flipped else (sinner, medvedev)
+    user_match = Match(
+        tournament_id=ao.id,
+        round="F",
+        player1_id=first.id,
+        player2_id=second.id,
+        status="scheduled",
+        source="user",
+        source_ref="user:2024-01-28:t14",
+    )
+    user = (await make_user()).user
+    analysis = Analysis(user_id=user.id, input_text="финал")
+    db.add_all([user_match, analysis])
+    await db.flush()
+    db.add(
+        Prediction(
+            user_id=user.id,
+            analysis_id=analysis.id,
+            match_id=user_match.id,
+            market="ML",
+            selection=1,
+            as_of=datetime(2024, 1, 28, tzinfo=UTC),
+            p_final=0.55,
+        )
+    )
+    bet = Bet(
+        user_id=user.id,
+        placed_at=datetime(2024, 1, 28, tzinfo=UTC),
+        bookmaker="fonbet",
+        stake=Decimal("100.00"),
+        currency="RUB",
+        total_odds=Decimal("1.80"),
+    )
+    db.add(bet)
+    await db.flush()
+    db.add(
+        BetLeg(
+            bet_id=bet.id,
+            match_id=user_match.id,
+            market="ML",
+            selection=1,
+            odds_taken=Decimal("1.80"),
+        )
+    )
+    await db.commit()
+
+    report = await load(factory, [2024], force=True)
+    db.expunge_all()
+    assert report.counts["matches.user_merged"] == 1
+    assert not [row for row in report.unmatched if row["kind"] == "match"]
+    assert any(
+        f"матч {user_match.id} из ввода участника стал матчем архива" in warning
+        for warning in report.warnings
+    )
+    archive = await match(db, "2024-580-701")
+    assert archive.id == user_match.id and archive.source == "sackmann"
+    assert (archive.player1_id, archive.winner_id, archive.status) == (
+        sinner.id,
+        sinner.id,
+        "finished",
+    )
+    # Ставили на игрока 1 матча из ввода: при обратном порядке это теперь игрок 2
+    expected = 2 if flipped else 1
+    legs = list(await db.scalars(select(BetLeg.selection).where(BetLeg.match_id == archive.id)))
+    assert legs == [expected]
+    selections = list(
+        await db.scalars(select(Prediction.selection).where(Prediction.match_id == archive.id))
+    )
+    assert selections == [expected]

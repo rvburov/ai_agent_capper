@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    CHAR,
     BigInteger,
     CheckConstraint,
     ForeignKey,
@@ -62,6 +63,10 @@ ANALYSIS_DECISIONS = ("bet", "skip")
 BET_STATUSES = ("open", "won", "lost", "void")
 BET_SOURCES = ("app", "legacy")
 LEG_RESULTS = ("win", "loss", "void")
+# Кто рассчитал ставку и ногу: участник вручную, авторасчет (этап 5), импорт старого бота
+SETTLED_BY = ("manual", "auto", "legacy")
+# Откуда закрывающий кэф ноги: ввел участник или архив tennis-data (этап 5)
+CLOSING_SOURCES = ("user", "archive")
 LEDGER_KINDS = ("deposit", "withdrawal", "stake", "payout", "refund", "reversal", "correction")
 
 
@@ -266,14 +271,26 @@ class Prediction(CreatedAtMixin, Base):
 
 class Bet(CreatedAtMixin, UpdatedAtMixin, Base):
     """Ставка участника (одиночная или экспресс). Сумма — в валюте программы.
-    Ставки из старого бота: source = 'legacy', source_ref — id записи в его JSON."""
+    Ставки из старого бота: source = 'legacy', source_ref — id записи в его JSON.
+
+    settled_by — кто рассчитал: manual (участник), auto (авторасчет, этап 5; ручной расчет
+    он не трогает), legacy (импорт бота). updated_at — версия ставки для защиты от гонки:
+    расчет и сторно приходят с ожидаемым updated_at (409, если ставка уже изменилась).
+    """
 
     __tablename__ = "bets"
     __table_args__ = (
         UniqueConstraint("user_id", "source", "source_ref"),
         Index("ix_bets_user_id_status", "user_id", "status"),
+        Index(
+            "ix_bets_user_id_settled_at",
+            "user_id",
+            "settled_at",
+            postgresql_where=text("status <> 'open'"),
+        ),
         check_in("status", BET_STATUSES, "status"),
         check_in("source", BET_SOURCES, "source"),
+        check_in("settled_by", SETTLED_BY, "settled_by"),
         check_in("currency", CURRENCIES, "currency"),
         CheckConstraint("stake > 0", name="stake_positive"),
         CheckConstraint("total_odds >= 1", name="total_odds_min"),
@@ -292,21 +309,39 @@ class Bet(CreatedAtMixin, UpdatedAtMixin, Base):
     status: Mapped[str] = mapped_column(String(8), server_default="open")
     profit: Mapped[Money | None]
     settled_at: Mapped[datetime | None]
+    settled_by: Mapped[str | None] = mapped_column(String(8))
     source: Mapped[str] = mapped_column(String(8), server_default="app")
     source_ref: Mapped[str | None] = mapped_column(String(64))
 
 
 class BetLeg(Base):
-    """Событие ставки (у экспресса их несколько). Возврат — кэф 1.00 в расчете."""
+    """Событие ставки (у экспресса их несколько). Возврат — кэф 1.00 в расчете.
+
+    Исход и счет вносит участник (в matches не пишутся: матч общий, и Эло посчитало бы
+    его дважды, решение Т11). score — счет по сетам со стороны выбранного игрока («2:1» —
+    его 2 сета): при слиянии матчей сторона ноги переворачивается, а счет остается верным.
+    result_source и settled_at — кто и когда рассчитал ногу.
+
+    Закрывающий кэф (В1, Р24): closing_odds — на свой исход, closing_opp_odds — на
+    обратный (по желанию), closing_bookmaker — чей кэф: код эталона (pinnacle,
+    betfair_ex, avg) или название своего букмекера; closing_source — ввел участник или
+    архив. q_close — вероятность своего исхода без маржи, только при двух сторонах.
+    clv — кэф / закрывающий − 1.
+    """
 
     __tablename__ = "bet_legs"
     __table_args__ = (
         Index("ix_bet_legs_bet_id", "bet_id"),
         Index("ix_bet_legs_match_id", "match_id"),
+        Index("ix_bet_legs_open_match_id", "match_id", postgresql_where=text("result IS NULL")),
         check_in("selection", (1, 2), "selection"),
         check_in("result", LEG_RESULTS, "result"),
+        check_in("result_source", SETTLED_BY, "result_source"),
+        check_in("closing_source", CLOSING_SOURCES, "closing_source"),
+        check_probability("q_close"),
         CheckConstraint("odds_taken >= 1", name="odds_taken_min"),
         CheckConstraint("closing_odds >= 1", name="closing_odds_min"),
+        CheckConstraint("closing_opp_odds >= 1.01", name="closing_opp_odds_min"),
     )
 
     id: Mapped[BigIntPK]
@@ -322,6 +357,13 @@ class BetLeg(Base):
     # NULL — событие еще не рассчитано
     result: Mapped[str | None] = mapped_column(String(8))
     clv: Mapped[float | None]
+    score: Mapped[str | None] = mapped_column(String(32))
+    settled_at: Mapped[datetime | None]
+    result_source: Mapped[str | None] = mapped_column(String(8))
+    closing_opp_odds: Mapped[Odds | None]
+    closing_bookmaker: Mapped[str | None] = mapped_column(String(64))
+    closing_source: Mapped[str | None] = mapped_column(String(8))
+    q_close: Mapped[float | None]
 
 
 class BankrollLedger(CreatedAtMixin, Base):
@@ -376,6 +418,54 @@ class BankrollLedger(CreatedAtMixin, Base):
         BigInteger, ForeignKey("bankroll_ledger.id", ondelete="SET NULL")
     )
     note: Mapped[str | None]
+
+
+class Bookmaker(CreatedAtMixin, Base):
+    """Букмекер из списка участника («Мои букмекеры», В9): добавить, переименовать,
+    скрыть (archived_at). bets.bookmaker остается строкой: переименование не меняет уже
+    сохраненные ставки. Название уникально у участника без учета регистра."""
+
+    __tablename__ = "bookmakers"
+    __table_args__ = (
+        Index("uq_bookmakers_user_id_name", "user_id", func.lower(text("name")), unique=True),
+    )
+
+    id: Mapped[BigIntPK]
+    user_id: Mapped[int] = mapped_column(BigInteger, _user_fk())
+    name: Mapped[str] = mapped_column(String(64))
+    archived_at: Mapped[datetime | None]
+
+
+class PlayLimit(Base):
+    """Ответственная игра (В8): лимиты числа и суммы ставок в день и пауза. NULL —
+    лимита нет. Снизить лимит можно сразу, повысить или снять — через 24 часа: новое
+    значение ждет в pending_* до pending_from (pending_from задан — изменение ждет, даже
+    если pending-значение NULL, то есть «без лимита»). Паузу до paused_until досрочно не
+    снять. Сумма — в валюте программы (currency)."""
+
+    __tablename__ = "play_limits"
+    __table_args__ = (
+        CheckConstraint("bets_per_day BETWEEN 1 AND 20", name="bets_per_day_range"),
+        CheckConstraint("pending_bets_per_day BETWEEN 1 AND 20", name="pending_bets_per_day_range"),
+        CheckConstraint(
+            "stake_per_day > 0 AND pending_stake_per_day > 0", name="stake_per_day_positive"
+        ),
+        CheckConstraint(
+            "(stake_per_day IS NULL AND pending_stake_per_day IS NULL) OR currency IS NOT NULL",
+            name="stake_currency",
+        ),
+        check_in("currency", CURRENCIES, "currency"),
+    )
+
+    user_id: Mapped[int] = mapped_column(BigInteger, _user_fk(), primary_key=True)
+    bets_per_day: Mapped[int | None] = mapped_column(SmallInteger)
+    stake_per_day: Mapped[Money | None]
+    currency: Mapped[str | None] = mapped_column(CHAR(3))
+    pending_bets_per_day: Mapped[int | None] = mapped_column(SmallInteger)
+    pending_stake_per_day: Mapped[Money | None]
+    pending_from: Mapped[datetime | None]
+    paused_until: Mapped[datetime | None]
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 
 Index("ix_analyses_user_id_created_at", Analysis.user_id, Analysis.created_at.desc())

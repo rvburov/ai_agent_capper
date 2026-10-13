@@ -1,7 +1,9 @@
 """Миграции: схема на месте, строка app_settings есть, upgrade → downgrade → upgrade
 проходит, и после upgrade модели не расходятся с базой. Миграция этапа 2 сохраняет
 данные этапа 1 (турниры старого бота получают source = legacy), миграция этапа 3 —
-данные этапа 2 (откат переводит новые статусы анализов в старые и не теряет строк).
+данные этапа 2 (откат переводит новые статусы анализов в старые и не теряет строк),
+миграция этапа 4 — данные этапа 3 (история бота помечена, букмекеры собраны из ставок,
+правила роста ставки выключены у версий в работе).
 
 Расхождение моделей и миграции ловится двумя способами:
 - compare_metadata, как alembic check: таблицы, колонки, типы, DEFAULT, индексы, FK;
@@ -75,6 +77,10 @@ EXPECTED_TABLES = {
     "agent_runs",
     "model_prices",
     "ingestion_runs",
+    "player_elo_current",
+    "bookmakers",
+    "notification_prefs",
+    "play_limits",
 }
 
 
@@ -88,7 +94,7 @@ async def test_all_tables_exist(engine: AsyncEngine) -> None:
         extension = (
             await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'"))
         ).scalar()
-    assert len(EXPECTED_TABLES) == 34
+    assert len(EXPECTED_TABLES) == 38
     assert names == EXPECTED_TABLES | {"alembic_version"}
     assert set(Base.metadata.tables) == EXPECTED_TABLES
     assert extension == 1
@@ -665,5 +671,186 @@ async def test_stage3_migration_keeps_stage2_data(settings: Settings) -> None:
                     )
                 )
                 assert threshold == 100000
+        finally:
+            await engine.dispose()
+
+
+async def test_stage4_migration_keeps_stage3_data(settings: Settings) -> None:
+    """0003 → 0004: ставки и ноги старого бота помечены legacy (рассчитанные), букмекеры
+    собраны из ставок и анализов участника (одно название без учета регистра), у версий
+    стратегии в работе выключены «рост ставки» и «прибыльная неделя» (В7), архивные
+    версии не тронуты. Новые ограничения действуют. Откат до 0003 удаляет уведомления
+    ai_alert и не теряет ставок; повторный upgrade проходит."""
+    async with _temp_database(settings, "stage4") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0003")
+                await conn.execute(
+                    text("INSERT INTO users (email) VALUES ('m@example.com'), ('o@example.com')")
+                )
+                await conn.execute(
+                    text("INSERT INTO players (name) VALUES ('Sinner J.'), ('Alcaraz C.')")
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO matches (player1_id, player2_id, source, source_ref)"
+                        " VALUES (1, 2, 'legacy', 'b1')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO bets (user_id, placed_at, bookmaker, stake, currency,"
+                        " total_odds, status, profit, settled_at, source, source_ref) VALUES"
+                        " (1, '2026-05-01', 'Fonbet', 100, 'RUB', 1.8, 'won', 80,"
+                        " '2026-05-01', 'legacy', 'r1'),"
+                        " (1, '2026-05-02', ' fonbet ', 100, 'RUB', 1.8, 'open', NULL,"
+                        " NULL, 'legacy', 'r2'),"
+                        " (1, '2026-10-01', 'Pari', 100, 'RUB', 1.8, 'open', NULL, NULL,"
+                        " 'app', 'c1'),"
+                        " (2, '2026-10-01', 'Fonbet', 50, 'RUB', 2, 'lost', -50,"
+                        " '2026-10-02', 'app', 'c2'),"
+                        " (2, '2026-10-03', 'Fonbet', 10, 'RUB', 2, 'open', NULL, NULL,"
+                        " 'app', 'c3')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO bet_legs (bet_id, match_id, market, selection, odds_taken,"
+                        " result) VALUES (1, 1, 'ML', 1, 1.8, 'win'), (2, 1, 'ML', 2, 1.8, NULL),"
+                        " (4, 1, 'ML', 1, 2, 'loss')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO analyses (user_id, input_text, status, bookmaker)"
+                        " VALUES (1, 'x', 'done', 'Winline'), (1, 'y', 'done', 'PARI'),"
+                        " (2, 'a', 'done', 'Fonbet'), (2, 'b', 'done', 'Fonbet'),"
+                        " (2, 'c', 'done', 'FONBET'), (2, 'd', 'done', 'FONBET'),"
+                        " (2, 'e', 'done', 'FONBET')"
+                    )
+                )
+                adapt = (
+                    '{"adapt": {"dd10": true, "dd20": true, "up15": true,'
+                    ' "week_loss": true, "week_win": true}, "max_pct": "0.03"}'
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO strategy_versions (user_id, code, status, params) VALUES"
+                        f" (1, 'v3', 'active', '{adapt}'), (1, 'v2', 'archived', '{adapt}'),"
+                        " (2, 'v3', 'candidate', '{}'), (1, 'legacy', 'archived', '{}')"
+                    )
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                bets = await conn.execute(text("SELECT id, settled_by FROM bets ORDER BY id"))
+                assert [tuple(row) for row in bets] == [
+                    (1, "legacy"),
+                    (2, None),
+                    (3, None),
+                    (4, None),
+                    (5, None),
+                ]
+                legs = await conn.execute(
+                    text(
+                        "SELECT bet_id, result_source, settled_at, score, closing_source"
+                        " FROM bet_legs ORDER BY id"
+                    )
+                )
+                rows = [tuple(row) for row in legs]
+                assert [row[:2] for row in rows] == [(1, "legacy"), (2, None), (4, None)]
+                assert rows[0][2] is not None and rows[1][2] is None
+                assert all(row[3] is None and row[4] is None for row in rows)
+                books = await conn.execute(
+                    text("SELECT user_id, name FROM bookmakers ORDER BY user_id, lower(name)")
+                )
+                # «Fonbet» и « fonbet » — один букмекер; «Pari» и «PARI» — тоже
+                found = [tuple(row) for row in books]
+                assert [row[0] for row in found] == [1, 1, 1, 2]
+                assert {row[1].lower() for row in found if row[0] == 1} == {
+                    "fonbet",
+                    "pari",
+                    "winline",
+                }
+                # Написание — самое частое по ставкам и анализам вместе (Fonbet: 2 + 2 против
+                # FONBET: 3), добавлен — при первом упоминании в любом из источников
+                second = await conn.execute(
+                    text(
+                        "SELECT name, created_at = (SELECT placed_at FROM bets"
+                        " WHERE source_ref = 'c2') FROM bookmakers WHERE user_id = 2"
+                    )
+                )
+                assert [tuple(row) for row in second] == [("Fonbet", True)]
+                first_pari = await conn.scalar(
+                    text(
+                        "SELECT created_at = (SELECT placed_at FROM bets WHERE source_ref = 'c1')"
+                        " FROM bookmakers WHERE user_id = 1 AND lower(name) = 'pari'"
+                    )
+                )
+                assert first_pari is True
+                versions = await conn.execute(
+                    text(
+                        "SELECT code, user_id, params -> 'adapt' FROM strategy_versions ORDER BY id"
+                    )
+                )
+                adapt_by = {(row[0], row[1]): row[2] for row in versions}
+                assert adapt_by[("v3", 1)] == {
+                    "dd10": True,
+                    "dd20": True,
+                    "up15": False,
+                    "week_loss": True,
+                    "week_win": False,
+                }
+                assert adapt_by[("v2", 1)]["up15"] is True
+                assert adapt_by[("v3", 2)] == {"up15": False, "week_win": False}
+                assert adapt_by[("legacy", 1)] is None
+                default_tz = await conn.scalar(text("SELECT default_tz FROM app_settings"))
+                assert default_tz == "Europe/Helsinki"
+
+                await conn.execute(
+                    text(
+                        "INSERT INTO notifications (user_id, kind, title)"
+                        " VALUES (1, 'ai_alert', 'Доля кэша'), (1, 'new_device', 'Вход')"
+                    )
+                )
+                await conn.execute(
+                    text("INSERT INTO notification_prefs (user_id, kind) VALUES (1, 'ai_alert')")
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO play_limits (user_id, bets_per_day, stake_per_day, currency)"
+                        " VALUES (1, 3, 1000, 'RUB')"
+                    )
+                )
+                for sql in (
+                    "INSERT INTO bookmakers (user_id, name) VALUES (1, 'WINLINE')",
+                    "INSERT INTO notification_prefs (user_id, kind) VALUES (1, 'hack')",
+                    "INSERT INTO play_limits (user_id, bets_per_day) VALUES (2, 21)",
+                    "INSERT INTO play_limits (user_id, stake_per_day) VALUES (2, 100)",
+                    "UPDATE bet_legs SET q_close = 1.5",
+                    "UPDATE bet_legs SET closing_opp_odds = 1.0",
+                    "UPDATE bet_legs SET closing_source = 'guess'",
+                    "UPDATE bets SET settled_by = 'robot'",
+                ):
+                    assert await _refused(conn, sql), sql
+                assert not await _refused(
+                    conn, "INSERT INTO bookmakers (user_id, name) VALUES (2, 'Winline')"
+                )
+
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0003")
+            async with engine.begin() as conn:
+                kinds = await conn.execute(text("SELECT kind FROM notifications"))
+                assert list(kinds.scalars()) == ["new_device"]
+                assert await conn.scalar(text("SELECT count(*) FROM bets")) == 5
+                assert await _refused(
+                    conn,
+                    "INSERT INTO notifications (user_id, kind, title) VALUES (1, 'ai_alert', 'x')",
+                )
+                assert not await _refused(conn, "UPDATE notifications SET read_at = now()")
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+                assert await conn.scalar(text("SELECT count(*) FROM bookmakers")) == 4
         finally:
             await engine.dispose()

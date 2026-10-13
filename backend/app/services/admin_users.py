@@ -44,9 +44,12 @@ from app.db.models import (
     Analysis,
     BankrollLedger,
     Bet,
+    Bookmaker,
     Lesson,
     LoginEvent,
     Notification,
+    NotificationPref,
+    PlayLimit,
     Prediction,
     PushSubscription,
     RecoveryCode,
@@ -500,6 +503,10 @@ async def _erase_personal_data(db: AsyncSession, user: User) -> None:
         delete(StrategyVersion).where(StrategyVersion.user_id == uid),
         delete(UserSecret).where(UserSecret.user_id == uid),
         delete(AiLimit).where(AiLimit.user_id == uid),
+        # Этап 4: «Мои букмекеры», ответственная игра, настройки уведомлений
+        delete(Bookmaker).where(Bookmaker.user_id == uid),
+        delete(PlayLimit).where(PlayLimit.user_id == uid),
+        delete(NotificationPref).where(NotificationPref.user_id == uid),
         delete(Notification).where(Notification.user_id == uid),
         # Уведомления администраторов об этом участнике (просьба вернуть ключ, его лимит)
         # несут его имя в params: удаляются вместе с его данными

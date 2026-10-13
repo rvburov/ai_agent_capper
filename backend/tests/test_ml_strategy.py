@@ -80,7 +80,8 @@ def test_default_params_match_brief() -> None:
         "max_pct": "0.03",
         "growth": {"bank_up": "0.15", "min_winrate": "0.60", "max_pct": "0.04"},
         "week": {"loss": "-0.05", "loss_max_pct": "0.02", "win": "0.10", "win_add": "0.005"},
-        "adapt": {"dd10": True, "dd20": True, "up15": True, "week_loss": True, "week_win": True},
+        # Рост ставки и прибыльная неделя выключены по умолчанию (В7, Р24)
+        "adapt": {"dd10": True, "dd20": True, "up15": False, "week_loss": True, "week_win": False},
     }
     # Поля правил — те же, что у бэктеста (класс один)
     assert BacktestRules is StrategyRules
@@ -101,6 +102,10 @@ def test_params_round_trip_and_partial() -> None:
     assert custom.min_p == 0.7
     assert custom.rules.min_odds == D("1.20") and custom.rules.max_odds == D("1.75")
     assert custom.adapt_on("dd10") is False and custom.adapt_on("dd20") is True
+    # Ключа нет — значение по умолчанию В7: рост ставки и прибыльная неделя выключены
+    assert custom.adapt_on("up15") is False and custom.adapt_on("week_win") is False
+    assert StrategyParams(adapt={}).adapt_on("up15") is False
+    assert StrategyParams(adapt={}).adapt_on("week_loss") is True
     assert custom.week.win_add == D("0.0025") and custom.week.loss == D("-0.05")
     assert StrategyParams.from_params(custom.to_params()) == custom
 
@@ -485,14 +490,19 @@ def test_stake_caps_and_adaptations() -> None:
     capped = calc("100000", "1.50", (0.2, 0.2))
     assert capped.pct == D("0.03") and capped.amount == D("3000.00")
     assert [step.kind for step in capped.steps][-2:] == ["cap", "round"]
-    # Рост на 15% и винрейт 60% — потолок 4%
+    # Рост ставки и прибыльная неделя по умолчанию выключены (В7): сумма не меняется
     grown = BankSignals(growth=D("0.15"), winrate=D("0.6"))
-    assert calc("100000", "1.50", (0.2, 0.2), signals=grown).pct == D("0.0325")
-    assert calc("100000", "1.50", (0.2, 0.2), signals=BankSignals(growth=D("0.2"))).pct == D("0.03")
-    # Прибыльная неделя: +0,5 п.п., но не выше потолка
     week_win = BankSignals(week_change=D("0.10"))
-    assert calc("100000", "2.00", signals=week_win).pct == D("0.0275")
-    assert calc("100000", "1.50", (0.2, 0.2), signals=week_win).pct == D("0.03")
+    assert calc("100000", "1.50", (0.2, 0.2), signals=grown).pct == D("0.03")
+    assert calc("100000", "2.00", signals=week_win).pct == D("0.0225")
+    # Включенные в версии стратегии: рост на 15% и винрейт 60% — потолок 4%
+    on = StrategyParams.from_params({"adapt": {"up15": True, "week_win": True}})
+    assert calc("100000", "1.50", (0.2, 0.2), signals=grown, params=on).pct == D("0.0325")
+    no_winrate = BankSignals(growth=D("0.2"))
+    assert calc("100000", "1.50", (0.2, 0.2), signals=no_winrate, params=on).pct == D("0.03")
+    # Прибыльная неделя: +0,5 п.п., но не выше потолка
+    assert calc("100000", "2.00", signals=week_win, params=on).pct == D("0.0275")
+    assert calc("100000", "1.50", (0.2, 0.2), signals=week_win, params=on).pct == D("0.03")
     # Убыточная неделя: не больше 2%
     week_loss = BankSignals(week_change=D("-0.05"))
     assert calc("100000", "1.50", signals=week_loss).pct == D("0.02")
@@ -509,7 +519,7 @@ def test_stake_caps_and_adaptations() -> None:
     plain = calc("100000", "1.50", signals=BankSignals(drawdown=D("0.3")), params=off)
     assert plain.pct == D("0.0275") and plain.drawdown_level is None
     assert calc("100000", "2.00", signals=week_win, params=off).pct == D("0.0225")
-    no_growth = StrategyParams.from_params({"adapt": {"up15": False}})
+    no_growth = StrategyParams.from_params({"adapt": {"up15": False, "week_win": True}})
     assert calc("100000", "1.50", (0.2, 0.2), signals=grown, params=no_growth).pct == D("0.03")
 
 

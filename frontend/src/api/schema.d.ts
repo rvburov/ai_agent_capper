@@ -1091,7 +1091,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Bets
+         * @description Свои ставки по фильтрам, новые сверху, по 20 (limit до 100); before — номер
+         *     последней ставки прошлой страницы.
+         */
+        get: operations["list_bets_api_bets_get"];
         put?: never;
         /**
          * Place Bet
@@ -1100,6 +1105,150 @@ export interface paths {
          *     возвращает ту же ставку.
          */
         post: operations["place_bet_api_bets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bets/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bets Summary
+         * @description Итоги по тем же фильтрам: рассчитано, выигрыш · проигрыш · возврат, оборот,
+         *     прибыль, ROI (возвраты — отдельно), средний CLV без ставок старого бота.
+         */
+        get: operations["bets_summary_api_bets_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bets/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Bets
+         * @description Выгрузка своих ставок по фильтрам: строка на событие (ногу), файл отдается
+         *     частями.
+         */
+        get: operations["export_bets_api_bets_export_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bets/{bet_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bet
+         * @description Карточка ставки: ноги, матчи, исходы, закрытие, CLV и вердикт.
+         */
+        get: operations["get_bet_api_bets__bet_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bets/{bet_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Settle Bet
+         * @description Ручной расчет открытой ставки: исход каждой ноги, счет и закрывающий кэф по
+         *     желанию. Ставка изменилась после того, как ее открыли (expected_updated_at), — 409,
+         *     кроме повтора того же расчета.
+         */
+        put: operations["settle_bet_api_bets__bet_id__result_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bets/{bet_id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reverse Bet
+         * @description Исправить результат: сторно выплаты или возврата, ставка снова открыта.
+         */
+        post: operations["reverse_bet_api_bets__bet_id__reverse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bets/{bet_id}/legs/{leg_id}/closing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Leg Closing
+         * @description Закрывающий кэф ноги (свой исход, обратный — по желанию, чей кэф); null — стереть.
+         */
+        put: operations["set_leg_closing_api_bets__bet_id__legs__leg_id__closing_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/bookmakers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Bookmakers
+         * @description Букмекеры участника из ставок и анализов, частые первыми.
+         */
+        get: operations["my_bookmakers_api_me_bookmakers_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1126,7 +1275,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/me/bookmakers": {
+    "/api/me/bank/history": {
         parameters: {
             query?: never;
             header?: never;
@@ -1134,12 +1283,38 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * My Bookmakers
-         * @description Букмекеры участника из ставок и анализов, частые первыми.
+         * Bank History
+         * @description Капитал (баланс + ставки в игре) на конец каждого дня периода по поясу участника.
          */
-        get: operations["my_bookmakers_api_me_bookmakers_get"];
+        get: operations["bank_history_api_me_bank_history_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/bank/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bank Entries
+         * @description Журнал банка, новые сверху, с балансом после каждой строки; flows_only — только
+         *     пополнения, выводы и корректировки.
+         */
+        get: operations["bank_entries_api_me_bank_entries_get"];
+        put?: never;
+        /**
+         * Add Bank Entry
+         * @description Пополнение, вывод (не больше баланса) или корректировка. Повтор той же записи
+         *     (двойная отправка) возвращает ее же с кодом 200.
+         */
+        post: operations["add_bank_entry_api_me_bank_entries_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1637,6 +1812,83 @@ export interface components {
             ip: string | null;
         };
         /**
+         * BankEntriesOut
+         * @description Страница журнала. last_id — самая новая запись журнала (по id): ее присылает
+         *     POST /me/bank/entries в expected_last_id.
+         */
+        BankEntriesOut: {
+            /** Items */
+            items: components["schemas"]["BankEntryOut"][];
+            /** Next Before */
+            next_before: number | null;
+            /** Last Id */
+            last_id: number | null;
+        };
+        /**
+         * BankEntryIn
+         * @description Пополнение, вывод или корректировка. amount у пополнения и вывода — больше нуля,
+         *     у корректировки — со знаком, не ноль. expected_last_id — последняя строка журнала,
+         *     которую видел участник (null — журнал пуст): защита от двойной отправки и гонки.
+         */
+        BankEntryIn: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "deposit" | "withdrawal" | "correction";
+            /** Amount */
+            amount: number | string;
+            /** Note */
+            note?: string | null;
+            /** Expected Last Id */
+            expected_last_id: number | null;
+        };
+        /**
+         * BankEntryOut
+         * @description Строка журнала банка. amount — со знаком; balance_after — баланс по учету после
+         *     этой строки (по времени записи); reversed_by — сторно, которое ее отменило.
+         */
+        BankEntryOut: {
+            /** Id */
+            id: number;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "deposit" | "withdrawal" | "stake" | "payout" | "refund" | "reversal" | "correction";
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string;
+            /** Bet Id */
+            bet_id: number | null;
+            /** Note */
+            note: string | null;
+            /** Reversed By */
+            reversed_by: number | null;
+            /** Balance After */
+            balance_after: string;
+        };
+        /** BankHistoryOut */
+        BankHistoryOut: {
+            /** Currency */
+            currency: string;
+            /** Tz */
+            tz: string;
+            /**
+             * Period
+             * @enum {string}
+             */
+            period: "7d" | "30d" | "90d" | "all";
+            /** Points */
+            points: components["schemas"]["BankPointOut"][];
+        };
+        /**
          * BankOut
          * @description Банк по учету: баланс, в игре, капитал, пик и просадка (0..1), стартовый банк
          *     (пополнения минус выводы), рост к нему, итог 7 дней, винрейт и адаптации.
@@ -1672,6 +1924,19 @@ export interface components {
             adaptations: components["schemas"]["AdaptationOut"][];
         };
         /**
+         * BankPointOut
+         * @description Капитал (баланс + ставки в игре) на конец дня по поясу участника.
+         */
+        BankPointOut: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Equity */
+            equity: string;
+        };
+        /**
          * BetBrief
          * @description Сохраненная ставка по анализу: после перезагрузки экран показывает ее сумму и кэфы,
          *     а не рекомендацию анализа.
@@ -1703,6 +1968,66 @@ export interface components {
             /** Client Ref */
             client_ref: string;
         };
+        /**
+         * BetItemOut
+         * @description Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если
+         *     закрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги
+         *     считается с кэфом 1.00), payout — выплата (у открытой — возможная). updated_at —
+         *     версия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,
+         *     app/services/bet_versions.py).
+         */
+        BetItemOut: {
+            /** Id */
+            id: number;
+            /** Analysis Id */
+            analysis_id: number | null;
+            /**
+             * Placed At
+             * Format: date-time
+             */
+            placed_at: string;
+            /** Bookmaker */
+            bookmaker: string;
+            /** Stake */
+            stake: string;
+            /** Currency */
+            currency: string;
+            /** Total Odds */
+            total_odds: string;
+            /** Effective Odds */
+            effective_odds: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "won" | "lost" | "void";
+            /** Profit */
+            profit: string | null;
+            /** Payout */
+            payout: string | null;
+            /** Settled At */
+            settled_at: string | null;
+            /** Settled By */
+            settled_by: ("manual" | "auto" | "legacy") | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "app" | "legacy";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Clv */
+            clv: number | null;
+            /** Clv Fair */
+            clv_fair: number | null;
+            /** Verdict */
+            verdict: ("legacy" | "void" | "no_closing" | "edge_confirmed" | "won_against_market" | "variance" | "model_error") | null;
+            /** Legs */
+            legs: components["schemas"]["BetLegItemOut"][];
+        };
         /** BetLegBrief */
         BetLegBrief: {
             /** Prediction Id */
@@ -1719,6 +2044,54 @@ export interface components {
             prediction_id: number;
             /** Odds Taken */
             odds_taken: number | string;
+        };
+        /**
+         * BetLegItemOut
+         * @description Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда
+         *     рассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),
+         *     вероятности прогноза (p_final; у ставок бота — только p_claude). score_outcomes — у
+         *     открытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для
+         *     окна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все
+         *     равно за участником (В16).
+         */
+        BetLegItemOut: {
+            /** Id */
+            id: number;
+            match: components["schemas"]["LegMatchOut"];
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Selection */
+            selection: number;
+            /** Odds Taken */
+            odds_taken: string;
+            /** Prediction Id */
+            prediction_id: number | null;
+            /** P Final */
+            p_final: number | null;
+            /** P Base */
+            p_base: number | null;
+            /** P Claude */
+            p_claude: number | null;
+            /** Result */
+            result: ("win" | "loss" | "void") | null;
+            /** Score */
+            score: string | null;
+            /** Settled At */
+            settled_at: string | null;
+            /** Result Source */
+            result_source: ("manual" | "auto" | "legacy") | null;
+            closing: components["schemas"]["ClosingOut"] | null;
+            /** Clv */
+            clv: number | null;
+            /** Clv Fair */
+            clv_fair: number | null;
+            /** Score Outcomes */
+            score_outcomes: {
+                [key: string]: "win" | "loss" | "void";
+            } | null;
         };
         /** BetLegOut */
         BetLegOut: {
@@ -1768,6 +2141,57 @@ export interface components {
             client_ref: string | null;
         };
         /**
+         * BetPageOut
+         * @description Страница ставок, новые сверху. next_before — курсор следующей страницы.
+         */
+        BetPageOut: {
+            /** Items */
+            items: components["schemas"]["BetItemOut"][];
+            /** Next Before */
+            next_before: number | null;
+        };
+        /**
+         * BetsSummaryOut
+         * @description Итоги по фильтрам (решения Т8 и В5): рассчитано — выигрыш, проигрыш и возврат;
+         *     оборот и прибыль — без возвратов; ROI = прибыль / оборот; винрейт — выигрыш / (выигрыш +
+         *     проигрыш); CLV — средний по рассчитанным ставкам приложения (без ставок бота);
+         *     clv_positive из clv_n — лучше закрытия; legacy_settled — рассчитанных ставок бота.
+         */
+        BetsSummaryOut: {
+            /** Currency */
+            currency: string;
+            /** Settled */
+            settled: number;
+            /** Won */
+            won: number;
+            /** Lost */
+            lost: number;
+            /** Void */
+            void: number;
+            /** Winrate */
+            winrate: number | null;
+            /** Turnover */
+            turnover: string;
+            /** Profit */
+            profit: string;
+            /** Roi */
+            roi: number | null;
+            /** Avg Stake */
+            avg_stake: string | null;
+            /** Open */
+            open: number;
+            /** Open Stake */
+            open_stake: string;
+            /** Clv */
+            clv: number | null;
+            /** Clv Positive */
+            clv_positive: number;
+            /** Clv N */
+            clv_n: number;
+            /** Legacy Settled */
+            legacy_settled: number;
+        };
+        /**
          * BudgetIn
          * @description Общий бюджет ключа администратора ($1–5000, не меньше потраченного за месяц),
          *     порог предупреждения о расходе и (по желанию) бюджет проверочных прогонов.
@@ -1782,6 +2206,57 @@ export interface components {
             alert_pct: 50 | 70 | 80 | 90;
             /** Eval Budget Usd */
             eval_budget_usd?: number | string | null;
+        };
+        /**
+         * ClosingIn
+         * @description Закрывающий кэф ноги (В1): на свой исход обязательно, на обратный — по желанию
+         *     (тогда есть вероятность без маржи и CLV без маржи). by — эталон рынка или свой
+         *     букмекер (bookmaker; не указан — букмекер ставки). Кэфы 1.01–50 проверяет сервис.
+         */
+        ClosingIn: {
+            /** Odds */
+            odds: number | string;
+            /** Opp Odds */
+            opp_odds?: number | string | null;
+            /**
+             * By
+             * @enum {string}
+             */
+            by: "pinnacle" | "betfair_ex" | "avg" | "bookmaker";
+            /** Bookmaker */
+            bookmaker?: string | null;
+        };
+        /**
+         * ClosingOut
+         * @description Закрывающий кэф ноги: на свой исход и обратный, чей он (by; bookmaker — название
+         *     своего букмекера), откуда, вероятность своего исхода без маржи при двух сторонах.
+         */
+        ClosingOut: {
+            /** Odds */
+            odds: string;
+            /** Opp Odds */
+            opp_odds: string | null;
+            /**
+             * By
+             * @enum {string}
+             */
+            by: "pinnacle" | "betfair_ex" | "avg" | "bookmaker";
+            /** Bookmaker */
+            bookmaker: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "user" | "archive";
+            /** Q Close */
+            q_close: number | null;
+        };
+        /**
+         * ClosingUpdateIn
+         * @description Закрывающий кэф ноги; null — стереть.
+         */
+        ClosingUpdateIn: {
+            closing: components["schemas"]["ClosingIn"] | null;
         };
         /**
          * ComparisonRow
@@ -2273,6 +2748,46 @@ export interface components {
             available: boolean;
         };
         /**
+         * LegMatchOut
+         * @description Матч ноги. Турнир из ввода участника показывается по его же вводу; покрытие и
+         *     формат — из турнира, иначе из ввода анализа (null — не указано).
+         */
+        LegMatchOut: {
+            /** Id */
+            id: number;
+            player1: components["schemas"]["PlayerRefOut"];
+            player2: components["schemas"]["PlayerRefOut"];
+            /** Day */
+            day: string | null;
+            /** Tournament */
+            tournament: string | null;
+            /** Category */
+            category: string | null;
+            /** Surface */
+            surface: ("hard" | "clay" | "grass" | "carpet") | null;
+            /** Round */
+            round: string;
+            /** Best Of */
+            best_of: number | null;
+        };
+        /**
+         * LegSettleIn
+         * @description Исход ноги, счет (необязательно; первым — игрок 1) и закрывающий кэф: поля нет —
+         *     закрытие не меняется, null — стирается.
+         */
+        LegSettleIn: {
+            /** Leg Id */
+            leg_id: number;
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "win" | "loss" | "void";
+            /** Score */
+            score?: string | null;
+            closing?: components["schemas"]["ClosingIn"] | null;
+        };
+        /**
          * LimitDefaultsOut
          * @description Лимиты по умолчанию для новых участников (Р13): у зарегистрированных не меняются.
          *     per_analysis_usd — потолок анализа нового участника (и потолок своего ключа по
@@ -2759,6 +3274,15 @@ export interface components {
             /** Candidates */
             candidates: components["schemas"]["PlayerCandidate"][];
         };
+        /** PlayerRefOut */
+        PlayerRefOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Name Ru */
+            name_ru: string | null;
+        };
         /** PlayerSide */
         PlayerSide: {
             /** Id */
@@ -3014,6 +3538,17 @@ export interface components {
              */
             requested_at: string;
         };
+        /**
+         * ReverseIn
+         * @description Исправление результата: версия ставки, которую видел участник.
+         */
+        ReverseIn: {
+            /**
+             * Expected Updated At
+             * Format: date-time
+             */
+            expected_updated_at: string;
+        };
         /** RoleChangeIn */
         RoleChangeIn: {
             /**
@@ -3061,6 +3596,19 @@ export interface components {
              * @default false
              */
             current: boolean;
+        };
+        /**
+         * SettleIn
+         * @description Ручной расчет: исходы всех ног и версия ставки, которую видел участник.
+         */
+        SettleIn: {
+            /**
+             * Expected Updated At
+             * Format: date-time
+             */
+            expected_updated_at: string;
+            /** Legs */
+            legs: components["schemas"]["LegSettleIn"][];
         };
         /** StakeBandOut */
         StakeBandOut: {
@@ -5372,6 +5920,46 @@ export interface operations {
             };
         };
     };
+    list_bets_api_bets_get: {
+        parameters: {
+            query?: {
+                period?: "7d" | "30d" | "90d" | "all";
+                from?: string | null;
+                to?: string | null;
+                status?: ("open" | "won" | "lost" | "void") | null;
+                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
+                source?: ("app" | "legacy") | null;
+                q?: string | null;
+                before?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetPageOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     place_bet_api_bets_post: {
         parameters: {
             query?: never;
@@ -5392,6 +5980,248 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BetOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    bets_summary_api_bets_summary_get: {
+        parameters: {
+            query?: {
+                period?: "7d" | "30d" | "90d" | "all";
+                from?: string | null;
+                to?: string | null;
+                status?: ("open" | "won" | "lost" | "void") | null;
+                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
+                source?: ("app" | "legacy") | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetsSummaryOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    export_bets_api_bets_export_csv_get: {
+        parameters: {
+            query?: {
+                period?: "7d" | "30d" | "90d" | "all";
+                from?: string | null;
+                to?: string | null;
+                status?: ("open" | "won" | "lost" | "void") | null;
+                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
+                source?: ("app" | "legacy") | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV: строка на событие */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_bet_api_bets__bet_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bet_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetItemOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    settle_bet_api_bets__bet_id__result_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bet_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetItemOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    reverse_bet_api_bets__bet_id__reverse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bet_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReverseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetItemOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    set_leg_closing_api_bets__bet_id__legs__leg_id__closing_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bet_id: number;
+                leg_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClosingUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetItemOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    my_bookmakers_api_me_bookmakers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */
@@ -5434,9 +6264,11 @@ export interface operations {
             };
         };
     };
-    my_bookmakers_api_me_bookmakers_get: {
+    bank_history_api_me_bank_history_get: {
         parameters: {
-            query?: never;
+            query?: {
+                period?: "7d" | "30d" | "90d" | "all";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5449,7 +6281,73 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": string[];
+                    "application/json": components["schemas"]["BankHistoryOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    bank_entries_api_me_bank_entries_get: {
+        parameters: {
+            query?: {
+                before?: number | null;
+                limit?: number;
+                flows_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankEntriesOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    add_bank_entry_api_me_bank_entries_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BankEntryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankEntryOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

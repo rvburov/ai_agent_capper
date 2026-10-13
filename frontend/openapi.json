@@ -2745,14 +2745,14 @@
         "description": "Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не\nменяется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref\nвозвращает ту же ставку.",
         "operationId": "place_bet_api_bets_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BetIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -2776,23 +2776,791 @@
             }
           }
         }
-      }
-    },
-    "/api/me/bank": {
+      },
       "get": {
         "tags": [
           "bets"
         ],
-        "summary": "My Bank",
-        "description": "Банк по учету: баланс, пик, просадка, стартовый банк, итог 7 дней, адаптации.",
-        "operationId": "my_bank_api_me_bank_get",
+        "summary": "List Bets",
+        "description": "Свои ставки по фильтрам, новые сверху, по 20 (limit до 100); before — номер\nпоследней ставки прошлой страницы.",
+        "operationId": "list_bets_api_bets_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Period"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "won",
+                    "lost",
+                    "void"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ML",
+                    "HCP_-1.5",
+                    "HCP_+1.5"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "name": "surface",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "maxItems": 5,
+              "title": "Surface"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "app",
+                    "legacy"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 9223372036854775807,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BankOut"
+                  "$ref": "#/components/schemas/BetPageOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bets/summary": {
+      "get": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "Bets Summary",
+        "description": "Итоги по тем же фильтрам: рассчитано, выигрыш · проигрыш · возврат, оборот,\nприбыль, ROI (возвраты — отдельно), средний CLV без ставок старого бота.",
+        "operationId": "bets_summary_api_bets_summary_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Period"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "won",
+                    "lost",
+                    "void"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ML",
+                    "HCP_-1.5",
+                    "HCP_+1.5"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "name": "surface",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "maxItems": 5,
+              "title": "Surface"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "app",
+                    "legacy"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetsSummaryOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bets/export.csv": {
+      "get": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "Export Bets",
+        "description": "Выгрузка своих ставок по фильтрам: строка на событие (ногу), файл отдается\nчастями.",
+        "operationId": "export_bets_api_bets_export_csv_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Period"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "won",
+                    "lost",
+                    "void"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ML",
+                    "HCP_-1.5",
+                    "HCP_+1.5"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "name": "surface",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "maxItems": 5,
+              "title": "Surface"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "app",
+                    "legacy"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV: строка на событие",
+            "content": {
+              "text/csv": {}
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bets/{bet_id}": {
+      "get": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "Get Bet",
+        "description": "Карточка ставки: ноги, матчи, исходы, закрытие, CLV и вердикт.",
+        "operationId": "get_bet_api_bets__bet_id__get",
+        "parameters": [
+          {
+            "name": "bet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Bet Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetItemOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bets/{bet_id}/result": {
+      "put": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "Settle Bet",
+        "description": "Ручной расчет открытой ставки: исход каждой ноги, счет и закрывающий кэф по\nжеланию. Ставка изменилась после того, как ее открыли (expected_updated_at), — 409,\nкроме повтора того же расчета.",
+        "operationId": "settle_bet_api_bets__bet_id__result_put",
+        "parameters": [
+          {
+            "name": "bet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Bet Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettleIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetItemOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bets/{bet_id}/reverse": {
+      "post": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "Reverse Bet",
+        "description": "Исправить результат: сторно выплаты или возврата, ставка снова открыта.",
+        "operationId": "reverse_bet_api_bets__bet_id__reverse_post",
+        "parameters": [
+          {
+            "name": "bet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Bet Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReverseIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetItemOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bets/{bet_id}/legs/{leg_id}/closing": {
+      "put": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "Set Leg Closing",
+        "description": "Закрывающий кэф ноги (свой исход, обратный — по желанию, чей кэф); null — стереть.",
+        "operationId": "set_leg_closing_api_bets__bet_id__legs__leg_id__closing_put",
+        "parameters": [
+          {
+            "name": "bet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Bet Id"
+            }
+          },
+          {
+            "name": "leg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Leg Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClosingUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetItemOut"
                 }
               }
             }
@@ -2829,6 +3597,202 @@
                   },
                   "type": "array",
                   "title": "Response My Bookmakers Api Me Bookmakers Get"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/bank": {
+      "get": {
+        "tags": [
+          "bank"
+        ],
+        "summary": "My Bank",
+        "description": "Банк по учету: баланс, пик, просадка, стартовый банк, итог 7 дней, адаптации.",
+        "operationId": "my_bank_api_me_bank_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/bank/history": {
+      "get": {
+        "tags": [
+          "bank"
+        ],
+        "summary": "Bank History",
+        "description": "Капитал (баланс + ставки в игре) на конец каждого дня периода по поясу участника.",
+        "operationId": "bank_history_api_me_bank_history_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "30d",
+              "title": "Period"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankHistoryOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/bank/entries": {
+      "get": {
+        "tags": [
+          "bank"
+        ],
+        "summary": "Bank Entries",
+        "description": "Журнал банка, новые сверху, с балансом после каждой строки; flows_only — только\nпополнения, выводы и корректировки.",
+        "operationId": "bank_entries_api_me_bank_entries_get",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 9223372036854775807,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "flows_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Flows Only"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankEntriesOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "bank"
+        ],
+        "summary": "Add Bank Entry",
+        "description": "Пополнение, вывод (не больше баланса) или корректировка. Повтор той же записи\n(двойная отправка) возвращает ее же с кодом 200.",
+        "operationId": "add_bank_entry_api_me_bank_entries_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BankEntryIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankEntryOut"
                 }
               }
             }
@@ -4195,6 +5159,228 @@
         "title": "AuditOut",
         "description": "Запись журнала. actor_id пустой и actor_name \"\" — действие из терминала.\nУдаленный автор или участник — имя «Удаленный пользователь» (имя стерто по Р15).\n\nР14: в details нет сведений о ставках, банке и стратегии участника."
       },
+      "BankEntriesOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BankEntryOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before"
+          },
+          "last_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_before",
+          "last_id"
+        ],
+        "title": "BankEntriesOut",
+        "description": "Страница журнала. last_id — самая новая запись журнала (по id): ее присылает\nPOST /me/bank/entries в expected_last_id."
+      },
+      "BankEntryIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "deposit",
+              "withdrawal",
+              "correction"
+            ],
+            "title": "Kind"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)"
+              }
+            ],
+            "title": "Amount"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "expected_last_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Last Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "amount",
+          "expected_last_id"
+        ],
+        "title": "BankEntryIn",
+        "description": "Пополнение, вывод или корректировка. amount у пополнения и вывода — больше нуля,\nу корректировки — со знаком, не ноль. expected_last_id — последняя строка журнала,\nкоторую видел участник (null — журнал пуст): защита от двойной отправки и гонки."
+      },
+      "BankEntryOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "deposit",
+              "withdrawal",
+              "stake",
+              "payout",
+              "refund",
+              "reversal",
+              "correction"
+            ],
+            "title": "Kind"
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "bet_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bet Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reversed_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reversed By"
+          },
+          "balance_after": {
+            "type": "string",
+            "title": "Balance After"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "at",
+          "kind",
+          "amount",
+          "currency",
+          "bet_id",
+          "note",
+          "reversed_by",
+          "balance_after"
+        ],
+        "title": "BankEntryOut",
+        "description": "Строка журнала банка. amount — со знаком; balance_after — баланс по учету после\nэтой строки (по времени записи); reversed_by — сторно, которое ее отменило."
+      },
+      "BankHistoryOut": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "tz": {
+            "type": "string",
+            "title": "Tz"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "30d",
+              "90d",
+              "all"
+            ],
+            "title": "Period"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/BankPointOut"
+            },
+            "type": "array",
+            "title": "Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currency",
+          "tz",
+          "period",
+          "points"
+        ],
+        "title": "BankHistoryOut"
+      },
       "BankOut": {
         "properties": {
           "currency": {
@@ -4309,6 +5495,26 @@
         "title": "BankOut",
         "description": "Банк по учету: баланс, в игре, капитал, пик и просадка (0..1), стартовый банк\n(пополнения минус выводы), рост к нему, итог 7 дней, винрейт и адаптации."
       },
+      "BankPointOut": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "equity": {
+            "type": "string",
+            "title": "Equity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "equity"
+        ],
+        "title": "BankPointOut",
+        "description": "Капитал (баланс + ставки в игре) на конец дня по поясу участника."
+      },
       "BetBrief": {
         "properties": {
           "id": {
@@ -4404,6 +5610,203 @@
         ],
         "title": "BetIn"
       },
+      "BetItemOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "analysis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Id"
+          },
+          "placed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Placed At"
+          },
+          "bookmaker": {
+            "type": "string",
+            "title": "Bookmaker"
+          },
+          "stake": {
+            "type": "string",
+            "title": "Stake"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "total_odds": {
+            "type": "string",
+            "title": "Total Odds"
+          },
+          "effective_odds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Odds"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "won",
+              "lost",
+              "void"
+            ],
+            "title": "Status"
+          },
+          "profit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit"
+          },
+          "payout": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout"
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled At"
+          },
+          "settled_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "manual",
+                  "auto",
+                  "legacy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled By"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "app",
+              "legacy"
+            ],
+            "title": "Source"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv"
+          },
+          "clv_fair": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv Fair"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "legacy",
+                  "void",
+                  "no_closing",
+                  "edge_confirmed",
+                  "won_against_market",
+                  "variance",
+                  "model_error"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/BetLegItemOut"
+            },
+            "type": "array",
+            "title": "Legs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "analysis_id",
+          "placed_at",
+          "bookmaker",
+          "stake",
+          "currency",
+          "total_odds",
+          "effective_odds",
+          "status",
+          "profit",
+          "payout",
+          "settled_at",
+          "settled_by",
+          "source",
+          "updated_at",
+          "clv",
+          "clv_fair",
+          "verdict",
+          "legs"
+        ],
+        "title": "BetItemOut",
+        "description": "Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если\nзакрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги\nсчитается с кэфом 1.00), payout — выплата (у открытой — возможная). updated_at —\nверсия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,\napp/services/bet_versions.py)."
+      },
       "BetLegBrief": {
         "properties": {
           "prediction_id": {
@@ -4458,6 +5861,206 @@
         ],
         "title": "BetLegIn",
         "description": "Нога ставки: прогноз анализа и кэф, по которому участник поставил."
+      },
+      "BetLegItemOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "match": {
+            "$ref": "#/components/schemas/LegMatchOut"
+          },
+          "market": {
+            "type": "string",
+            "enum": [
+              "ML",
+              "HCP_-1.5",
+              "HCP_+1.5"
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "type": "integer",
+            "title": "Selection"
+          },
+          "odds_taken": {
+            "type": "string",
+            "title": "Odds Taken"
+          },
+          "prediction_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Id"
+          },
+          "p_final": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Final"
+          },
+          "p_base": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Base"
+          },
+          "p_claude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Claude"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "win",
+                  "loss",
+                  "void"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled At"
+          },
+          "result_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "manual",
+                  "auto",
+                  "legacy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Source"
+          },
+          "closing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClosingOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv"
+          },
+          "clv_fair": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv Fair"
+          },
+          "score_outcomes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": [
+                    "win",
+                    "loss",
+                    "void"
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Outcomes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "match",
+          "market",
+          "selection",
+          "odds_taken",
+          "prediction_id",
+          "p_final",
+          "p_base",
+          "p_claude",
+          "result",
+          "score",
+          "settled_at",
+          "result_source",
+          "closing",
+          "clv",
+          "clv_fair",
+          "score_outcomes"
+        ],
+        "title": "BetLegItemOut",
+        "description": "Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда\nрассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),\nвероятности прогноза (p_final; у ставок бота — только p_claude). score_outcomes — у\nоткрытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для\nокна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все\nравно за участником (В16)."
       },
       "BetLegOut": {
         "properties": {
@@ -4591,6 +6194,152 @@
         ],
         "title": "BetOut"
       },
+      "BetPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BetItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_before"
+        ],
+        "title": "BetPageOut",
+        "description": "Страница ставок, новые сверху. next_before — курсор следующей страницы."
+      },
+      "BetsSummaryOut": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "settled": {
+            "type": "integer",
+            "title": "Settled"
+          },
+          "won": {
+            "type": "integer",
+            "title": "Won"
+          },
+          "lost": {
+            "type": "integer",
+            "title": "Lost"
+          },
+          "void": {
+            "type": "integer",
+            "title": "Void"
+          },
+          "winrate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winrate"
+          },
+          "turnover": {
+            "type": "string",
+            "title": "Turnover"
+          },
+          "profit": {
+            "type": "string",
+            "title": "Profit"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "avg_stake": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Stake"
+          },
+          "open": {
+            "type": "integer",
+            "title": "Open"
+          },
+          "open_stake": {
+            "type": "string",
+            "title": "Open Stake"
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv"
+          },
+          "clv_positive": {
+            "type": "integer",
+            "title": "Clv Positive"
+          },
+          "clv_n": {
+            "type": "integer",
+            "title": "Clv N"
+          },
+          "legacy_settled": {
+            "type": "integer",
+            "title": "Legacy Settled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currency",
+          "settled",
+          "won",
+          "lost",
+          "void",
+          "winrate",
+          "turnover",
+          "profit",
+          "roi",
+          "avg_stake",
+          "open",
+          "open_stake",
+          "clv",
+          "clv_positive",
+          "clv_n",
+          "legacy_settled"
+        ],
+        "title": "BetsSummaryOut",
+        "description": "Итоги по фильтрам (решения Т8 и В5): рассчитано — выигрыш, проигрыш и возврат;\nоборот и прибыль — без возвратов; ROI = прибыль / оборот; винрейт — выигрыш / (выигрыш +\nпроигрыш); CLV — средний по рассчитанным ставкам приложения (без ставок бота);\nclv_positive из clv_n — лучше закрытия; legacy_settled — рассчитанных ставок бота."
+      },
       "BudgetIn": {
         "properties": {
           "monthly_usd": {
@@ -4643,6 +6392,160 @@
         ],
         "title": "BudgetIn",
         "description": "Общий бюджет ключа администратора ($1–5000, не меньше потраченного за месяц),\nпорог предупреждения о расходе и (по желанию) бюджет проверочных прогонов."
+      },
+      "ClosingIn": {
+        "properties": {
+          "odds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,7}0*$)\\d{0,3}\\.\\d{0,3}0*$)"
+              }
+            ],
+            "title": "Odds"
+          },
+          "opp_odds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,7}0*$)\\d{0,3}\\.\\d{0,3}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opp Odds"
+          },
+          "by": {
+            "type": "string",
+            "enum": [
+              "pinnacle",
+              "betfair_ex",
+              "avg",
+              "bookmaker"
+            ],
+            "title": "By"
+          },
+          "bookmaker": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bookmaker"
+          }
+        },
+        "type": "object",
+        "required": [
+          "odds",
+          "by"
+        ],
+        "title": "ClosingIn",
+        "description": "Закрывающий кэф ноги (В1): на свой исход обязательно, на обратный — по желанию\n(тогда есть вероятность без маржи и CLV без маржи). by — эталон рынка или свой\nбукмекер (bookmaker; не указан — букмекер ставки). Кэфы 1.01–50 проверяет сервис."
+      },
+      "ClosingOut": {
+        "properties": {
+          "odds": {
+            "type": "string",
+            "title": "Odds"
+          },
+          "opp_odds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opp Odds"
+          },
+          "by": {
+            "type": "string",
+            "enum": [
+              "pinnacle",
+              "betfair_ex",
+              "avg",
+              "bookmaker"
+            ],
+            "title": "By"
+          },
+          "bookmaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bookmaker"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "user",
+              "archive"
+            ],
+            "title": "Source"
+          },
+          "q_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Close"
+          }
+        },
+        "type": "object",
+        "required": [
+          "odds",
+          "opp_odds",
+          "by",
+          "bookmaker",
+          "source",
+          "q_close"
+        ],
+        "title": "ClosingOut",
+        "description": "Закрывающий кэф ноги: на свой исход и обратный, чей он (by; bookmaker — название\nсвоего букмекера), откуда, вероятность своего исхода без маржи при двух сторонах."
+      },
+      "ClosingUpdateIn": {
+        "properties": {
+          "closing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClosingIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "closing"
+        ],
+        "title": "ClosingUpdateIn",
+        "description": "Закрывающий кэф ноги; null — стереть."
       },
       "ComparisonRow": {
         "properties": {
@@ -6136,6 +8039,149 @@
         "title": "KeyModelOut",
         "description": "Модель из настроек агента и доступна ли она ключу."
       },
+      "LegMatchOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "player1": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "player2": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "day": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Day"
+          },
+          "tournament": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tournament"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "hard",
+                  "clay",
+                  "grass",
+                  "carpet"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Surface"
+          },
+          "round": {
+            "type": "string",
+            "title": "Round"
+          },
+          "best_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "player1",
+          "player2",
+          "day",
+          "tournament",
+          "category",
+          "surface",
+          "round",
+          "best_of"
+        ],
+        "title": "LegMatchOut",
+        "description": "Матч ноги. Турнир из ввода участника показывается по его же вводу; покрытие и\nформат — из турнира, иначе из ввода анализа (null — не указано)."
+      },
+      "LegSettleIn": {
+        "properties": {
+          "leg_id": {
+            "type": "integer",
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Leg Id"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "win",
+              "loss",
+              "void"
+            ],
+            "title": "Result"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 7,
+                "minLength": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "closing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClosingIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "leg_id",
+          "result"
+        ],
+        "title": "LegSettleIn",
+        "description": "Исход ноги, счет (необязательно; первым — игрок 1) и закрывающий кэф: поля нет —\nзакрытие не меняется, null — стирается."
+      },
       "LimitDefaultsOut": {
         "properties": {
           "monthly_usd": {
@@ -7577,6 +9623,36 @@
         "title": "PlayerPick",
         "description": "Игрок из текста: matched — найден (сходство ≥ 0,9), check — проверьте\n(0,7–0,9), missing — нет в базе. candidates — до 3 похожих."
       },
+      "PlayerRefOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "name_ru": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Ru"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "name_ru"
+        ],
+        "title": "PlayerRefOut"
+      },
       "PlayerSide": {
         "properties": {
           "id": {
@@ -8322,6 +10398,21 @@
         "title": "ReturnRequestOut",
         "description": "Когда отправлена просьба вернуть ключ администратора."
       },
+      "ReverseIn": {
+        "properties": {
+          "expected_updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expected Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_updated_at"
+        ],
+        "title": "ReverseIn",
+        "description": "Исправление результата: версия ставки, которую видел участник."
+      },
       "RoleChangeIn": {
         "properties": {
           "role": {
@@ -8416,6 +10507,31 @@
         ],
         "title": "SessionOut",
         "description": "Действующий сеанс. device_label пустой — устройство не распознано."
+      },
+      "SettleIn": {
+        "properties": {
+          "expected_updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expected Updated At"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/LegSettleIn"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Legs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_updated_at",
+          "legs"
+        ],
+        "title": "SettleIn",
+        "description": "Ручной расчет: исходы всех ног и версия ставки, которую видел участник."
       },
       "StakeBandOut": {
         "properties": {

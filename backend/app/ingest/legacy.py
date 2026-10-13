@@ -874,6 +874,7 @@ class _Importer:
             status=record.status,
             profit=profit,
             settled_at=record.placed_at if profit is not None else None,
+            settled_by=SOURCE if profit is not None else None,
             source=SOURCE,
             source_ref=record.ref,
         )
@@ -924,6 +925,8 @@ class _Importer:
                     odds_taken=event.odds_taken,
                     prediction_id=prediction.id,
                     result=leg_result,
+                    result_source=SOURCE if leg_result is not None else None,
+                    settled_at=record.placed_at if leg_result is not None else None,
                 )
             )
             report.legs += 1

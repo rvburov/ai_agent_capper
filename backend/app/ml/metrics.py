@@ -8,11 +8,18 @@
 пересэмплирований, перцентили 2,5 и 97,5) с заданным seed: одинаковые данные дают
 одинаковые интервалы. Разницу двух прогнозов на одних и тех же событиях сравниваем
 парно: пересэмплируются события, а не прогнозы по отдельности.
+
+CLV (насколько кэф ставки лучше закрывающего, решение В1, Р24): на экранах — кэф /
+закрытие − 1 (просто, но чуть завышен: 1/закрытие с маржой больше вероятности рынка); при
+двух сторонах закрытия — еще «без маржи» кэф · q_close − 1, где q_close — вероятность
+своего исхода без маржи степенным методом (app/ml/market.py). У экспресса — по всем ногам,
+кроме возвратов, и только если закрытие внесено у каждой: Π кэфов / Π закрытий − 1.
 """
 
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 
 import numpy as np
 import numpy.typing as npt
@@ -280,3 +287,53 @@ def roi_with_ci(
         low=low,
         high=high,
     )
+
+
+# --- CLV ---
+
+OddsLike = Decimal | float | int | str
+
+
+def _odds(value: OddsLike) -> Decimal:
+    """Кэф как Decimal: float — по кратчайшей записи (0.1 + 0.2 не тянет хвост)."""
+    number = Decimal(repr(value)) if isinstance(value, float) else Decimal(str(value))
+    if not number.is_finite() or number <= 0:
+        raise ValueError(t("ml.metrics.bad_odds", odds=value))
+    return number
+
+
+def clv(odds_taken: OddsLike, closing: OddsLike) -> float:
+    """CLV ноги: кэф / закрывающий − 1. Больше 0 — взяли кэф лучше закрытия."""
+    return float(_odds(odds_taken) / _odds(closing) - 1)
+
+
+def clv_fair(odds_taken: OddsLike, q_close: float) -> float:
+    """CLV ноги без маржи: кэф · q_close − 1 (q_close — вероятность своего исхода по
+    закрытию без маржи, обе стороны закрытия)."""
+    if not 0.0 <= q_close <= 1.0:
+        raise ValueError(t("ml.metrics.bad_probability"))
+    return float(_odds(odds_taken)) * q_close - 1.0
+
+
+def clv_parlay(legs: Sequence[tuple[OddsLike, OddsLike | None]]) -> float | None:
+    """CLV экспресса по ногам (кэф, закрывающий) без возвратов: Π кэфов / Π закрытий − 1.
+    Закрытия нет хотя бы у одной ноги или ног нет — None."""
+    if not legs or any(closing is None for _, closing in legs):
+        return None
+    taken = math.prod((_odds(odds) for odds, _ in legs), start=Decimal(1))
+    closed = math.prod(
+        (_odds(closing) for _, closing in legs if closing is not None), start=Decimal(1)
+    )
+    return float(taken / closed - 1)
+
+
+def clv_fair_parlay(legs: Sequence[tuple[OddsLike, float | None]]) -> float | None:
+    """CLV экспресса без маржи: Π кэфов · Π q_close − 1; нет q_close у ноги — None."""
+    if not legs or any(q is None for _, q in legs):
+        return None
+    value = 1.0
+    for odds, q in legs:
+        if q is None or not 0.0 <= q <= 1.0:
+            raise ValueError(t("ml.metrics.bad_probability"))
+        value *= float(_odds(odds)) * q
+    return value - 1.0

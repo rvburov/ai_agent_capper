@@ -27,9 +27,21 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.i18n import has_key, t
 from app.db.base import Base
-from app.db.models import IngestionRun, Match, OddsSnapshot, Player, Tournament
+from app.db.models import (
+    Analysis,
+    Bet,
+    BetLeg,
+    IngestionRun,
+    Match,
+    OddsSnapshot,
+    Player,
+    Prediction,
+    Tournament,
+    User,
+)
 from app.db.session import create_sessionmaker
 from app.ingest import tennis_data as td
+from app.ingest import user_matches
 from app.ingest.fetch import DataSource
 from app.ingest.runs import UPDATE_LOCK_KEY, IngestError, IngestReport
 
@@ -1186,3 +1198,190 @@ async def test_main_error_exit_code(
     (tmp_path / "2024.xlsx").write_bytes(b"<html><body>Just a moment</body></html>")
     assert await run_main("--years", "2024", "--dir", str(tmp_path)) == 1
     assert "веб-страница" in capsys.readouterr().err
+
+
+# --- матч из ввода участника на месте строки (Т14) ---
+
+
+async def _user_match_on_key(
+    db: AsyncSession, archive: Match, *, reverse: bool = False
+) -> tuple[Match, Any]:
+    """Как если бы анализ шел до матча: вместо строки архива — матч из ввода участника с
+    тем же турниром, кругом и игроками (reverse — первым участник ввел проигравшего); на
+    нем прогноз, кэф и нога ставки со счетом 2:0 со стороны выбранного игрока."""
+    key = (archive.tournament_id, archive.round, archive.player1_id, archive.player2_id)
+    await db.delete(archive)
+    await db.flush()
+    user = User(email="t14@example.com")
+    db.add(user)
+    await db.flush()
+    first, second = (key[3], key[2]) if reverse else (key[2], key[3])
+    match = Match(
+        tournament_id=key[0],
+        round=key[1],
+        player1_id=first,
+        player2_id=second,
+        status="scheduled",
+        best_of=3,
+        source="user",
+        source_ref="user:2024-07-22:t14",
+    )
+    analysis = Analysis(user_id=user.id, input_text="", input_kind="form", status="done")
+    db.add_all([match, analysis])
+    await db.flush()
+    prediction = Prediction(
+        user_id=user.id,
+        analysis_id=analysis.id,
+        match_id=match.id,
+        market="ML",
+        selection=1,
+        as_of=datetime(2024, 7, 22, tzinfo=UTC),
+        p_final=0.6,
+    )
+    bet = Bet(
+        user_id=user.id,
+        placed_at=datetime(2024, 7, 22, tzinfo=UTC),
+        bookmaker="Fonbet",
+        stake=Decimal("100"),
+        currency="RUB",
+        total_odds=Decimal("1.80"),
+    )
+    db.add_all(
+        [
+            prediction,
+            bet,
+            OddsSnapshot(
+                match_id=match.id,
+                market="ML",
+                selection=1,
+                bookmaker="Fonbet",
+                odds=Decimal("1.80"),
+                kind="user",
+            ),
+        ]
+    )
+    await db.flush()
+    leg = BetLeg(
+        bet_id=bet.id,
+        match_id=match.id,
+        market="ML",
+        selection=1,
+        odds_taken=Decimal("1.80"),
+        prediction_id=prediction.id,
+        score="2:0",
+    )
+    db.add(leg)
+    await db.commit()
+    return match, leg
+
+
+async def test_user_match_on_row_key_is_merged(
+    db: AsyncSession, factory: Factory, tmp_path: Path
+) -> None:
+    """Матч из ввода участника занял ключ строки (турнир, круг, игроки): строка архива
+    записывается, а матч участника сливается в нее — нога ставки, прогноз и кэф
+    переходят к матчу архива (Т14). Раньше строка отбрасывалась как duplicate_row."""
+    rows = [make_row(70, "Atlanta", d(2024, 7, 22), "Aaa A.", "Bbb B.")]
+    write_year(tmp_path, 2024, rows)
+    await load(tmp_path, factory, [2024])
+    archive = (await own_matches(db))["A. Aaa — B. Bbb"]
+    user_match, leg = await _user_match_on_key(db, archive)
+
+    report = await load(tmp_path, factory, [2024], force=True)
+    db.expunge_all()
+    assert report.counts["matches.user_merged"] == 1
+    assert not report.unmatched
+    assert any(f"матч {user_match.id} из ввода участника" in warning for warning in report.warnings)
+    merged = (await own_matches(db))["A. Aaa — B. Bbb"]
+    assert merged.id != user_match.id and await db.get(Match, user_match.id) is None
+    assert (merged.status, merged.score) == ("finished", "6-4 6-4")
+    moved = await db.get_one(BetLeg, leg.id)
+    assert (moved.match_id, moved.selection) == (merged.id, 1)
+    predictions = list(await db.scalars(select(Prediction.match_id)))
+    assert predictions == [merged.id]
+    assert ("Fonbet", 1) in {
+        (row.bookmaker, row.selection)
+        for row in await db.scalars(select(OddsSnapshot).where(OddsSnapshot.kind == "user"))
+    }
+    assert len(await odds_of(db, merged.id)) == 6
+    # Повтор: все на месте
+    again = await load(tmp_path, factory, [2024], force=True)
+    assert again.counts["matches.user_merged"] == 0 and (again.created, again.updated) == (0, 0)
+
+
+async def test_user_match_kept_when_merge_fails(
+    db: AsyncSession, factory: Factory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Слить не удалось: строка архива все равно записана, матч участника остался с кругом
+    «#<id>» и предупреждением с командой matches-merge."""
+
+    async def refuse(*_: Any) -> bool:
+        return False
+
+    rows = [make_row(70, "Atlanta", d(2024, 7, 22), "Aaa A.", "Bbb B.")]
+    write_year(tmp_path, 2024, rows)
+    await load(tmp_path, factory, [2024])
+    archive = (await own_matches(db))["A. Aaa — B. Bbb"]
+    user_match, _ = await _user_match_on_key(db, archive)
+    monkeypatch.setattr(user_matches, "merge_into_archive", refuse)
+
+    report = await load(tmp_path, factory, [2024], force=True)
+    db.expunge_all()
+    assert report.counts["matches.user_kept"] == 1
+    assert any("matches-merge --from" in warning for warning in report.warnings)
+    kept = await db.get_one(Match, user_match.id)
+    assert kept.source == "user" and kept.round == f"#{user_match.id}"
+    assert "A. Aaa — B. Bbb" in await own_matches(db)
+
+
+async def test_reversed_user_match_is_merged_with_flip(
+    db: AsyncSession, factory: Factory, tmp_path: Path
+) -> None:
+    """Участник ввел игроков в обратном порядке (первым — будущего проигравшего): ключ
+    строки свободен, но это тот же матч — он сливается в строку архива с переворотом
+    стороны исхода; счет ноги (со стороны выбранного игрока) не меняется, у ставки — новая
+    версия (открытое окно расчета устарело)."""
+    rows = [make_row(70, "Atlanta", d(2024, 7, 22), "Aaa A.", "Bbb B.")]
+    write_year(tmp_path, 2024, rows)
+    await load(tmp_path, factory, [2024])
+    archive = (await own_matches(db))["A. Aaa — B. Bbb"]
+    user_match, leg = await _user_match_on_key(db, archive, reverse=True)
+    version = (await db.get_one(Bet, leg.bet_id)).updated_at
+
+    report = await load(tmp_path, factory, [2024], force=True)
+    db.expunge_all()
+    assert report.counts["matches.user_merged"] == 1 and report.counts["matches.created"] == 1
+    assert not report.unmatched
+    assert await db.get(Match, user_match.id) is None
+    merged = (await own_matches(db))["A. Aaa — B. Bbb"]
+    moved = await db.get_one(BetLeg, leg.id)
+    assert (moved.match_id, moved.selection, moved.score) == (merged.id, 2, "2:0")
+    prediction = await db.scalar(select(Prediction))
+    assert prediction is not None and (prediction.match_id, prediction.selection) == (merged.id, 2)
+    assert (await db.get_one(Bet, leg.bet_id)).updated_at > version
+    assert len(list(await db.scalars(select(Match.id)))) == 1
+
+
+async def test_reversed_user_match_kept_when_merge_fails(
+    db: AsyncSession, factory: Factory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Слить матч с обратным порядком игроков не удалось: строка архива записана, матч
+    участника остался с прежним кругом (ключ он не занимал) и предупреждением."""
+
+    async def refuse(*_: Any) -> bool:
+        return False
+
+    rows = [make_row(70, "Atlanta", d(2024, 7, 22), "Aaa A.", "Bbb B.")]
+    write_year(tmp_path, 2024, rows)
+    await load(tmp_path, factory, [2024])
+    archive = (await own_matches(db))["A. Aaa — B. Bbb"]
+    round_name = archive.round
+    user_match, _ = await _user_match_on_key(db, archive, reverse=True)
+    monkeypatch.setattr(user_matches, "merge_into_archive", refuse)
+
+    report = await load(tmp_path, factory, [2024], force=True)
+    db.expunge_all()
+    assert report.counts["matches.user_kept"] == 1
+    assert any("в обратном порядке" in warning for warning in report.warnings)
+    kept = await db.get_one(Match, user_match.id)
+    assert kept.source == "user" and kept.round == round_name

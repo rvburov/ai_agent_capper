@@ -115,6 +115,32 @@ class PlayerRating(Base):
     matches: Mapped[int] = mapped_column(server_default="0")
 
 
+class PlayerEloCurrent(Base):
+    """Текущее Эло игрока для списка игроков и места по Эло без пересчета (этап 4): по
+    покрытиям рейтинг и число матчей, место по общему Эло среди игроков с матчами за 52
+    недели (rank_all), последний матч в базе и число матчей за 52 недели. Пишет шаг elo
+    обновления данных; as_of — день расчета."""
+
+    __tablename__ = "player_elo_current"
+    __table_args__ = (Index("ix_player_elo_current_rank_all", "rank_all"),)
+
+    player_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("players.id", ondelete="CASCADE"), primary_key=True
+    )
+    elo_all: Mapped[float | None]
+    elo_hard: Mapped[float | None]
+    elo_clay: Mapped[float | None]
+    elo_grass: Mapped[float | None]
+    n_all: Mapped[int] = mapped_column(server_default="0")
+    n_hard: Mapped[int] = mapped_column(server_default="0")
+    n_clay: Mapped[int] = mapped_column(server_default="0")
+    n_grass: Mapped[int] = mapped_column(server_default="0")
+    rank_all: Mapped[int | None]
+    last_match: Mapped[date | None]
+    matches_52w: Mapped[int] = mapped_column(server_default="0")
+    as_of: Mapped[date]
+
+
 class PlayerNews(Base):
     """Новость об игроке (травма, снятие, мотивация, свежий результат): общий кэш новостей
     для всех. agent_run_id — вызов Claude, который ее нашел; details — подробности
@@ -226,6 +252,8 @@ class MatchStat(Base):
     """Статистика подачи игрока в матче (из архивов Сакманна и других источников)."""
 
     __tablename__ = "match_stats"
+    # Подача игрока в карточке и досье: без индекса — полный просмотр таблицы
+    __table_args__ = (Index("ix_match_stats_player_id", "player_id"),)
 
     match_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("matches.id", ondelete="CASCADE"), primary_key=True
