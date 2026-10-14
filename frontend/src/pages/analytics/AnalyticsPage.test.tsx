@@ -185,9 +185,11 @@ describe('Аналитика', () => {
         peak: '20350.00',
         best: '20350.00',
         worst: '0.00',
+        // старт периода и ряд без дней до банка — с сервера (SeriesOut.start_*)
+        start_day: '2026-09-23',
+        start_amount: '20000.00',
+        change_share: 0.015,
         points: [
-          { day: '2026-09-13', value: '0.00' },
-          { day: '2026-09-22', value: '0.00' },
           { day: '2026-09-23', value: '20350.00' },
           { day: '2026-10-13', value: '20300.00' },
         ],
@@ -206,7 +208,7 @@ describe('Аналитика', () => {
   it('банк по дням за все время: старт — стартовый банк, а не банк на конец первого дня', async () => {
     const data = analyticsOut({
       kpi: { ...analyticsOut().kpi, profit: '1168.20' },
-      series: seriesOut({ group: 'week', start: '2026-10-13', base: '49168.20', last: '49168.20', peak: '49168.20', points: [{ day: '2026-10-13', value: '49168.20' }] }),
+      series: seriesOut({ group: 'week', start: '2026-10-13', base: '49168.20', start_day: '2026-10-13', start_amount: '48000.00', change_share: 0.0243, last: '49168.20', peak: '49168.20', points: [{ day: '2026-10-13', value: '49168.20' }] }),
     });
     renderAnalytics('/analytics', () => json(data), undefined, bankOut({ equity: '49168.20', invested: '48000.00', growth: '0.0243' }));
     const series = await waitFor(() => card('Банк по дням'));

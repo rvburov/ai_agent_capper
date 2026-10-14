@@ -20,9 +20,12 @@ function betPath(id: number): string {
   return `${paths.bets}?bet=${id}`;
 }
 
-/** Ставки периода на «Ставках»: тот же период фильтром. */
+/**
+ * Рассчитанные ставки периода на «Ставках»: тот же период и status=settled — их число и есть N
+ * в «Все N ставок за период» (kpi.settled).
+ */
 function periodBetsPath(period: Dashboard['period']): string {
-  return period === 'all' ? paths.bets : `${paths.bets}?period=${period}`;
+  return period === 'all' ? `${paths.bets}?status=settled` : `${paths.bets}?period=${period}&status=settled`;
 }
 
 function kindText(bet: RecentBet, t: TFunction): string {
@@ -153,7 +156,7 @@ export function BankDynamics({ data, bank, ctx, mobile, pending }: BankDynamicsP
   const yFormat: ValueFormat = (value, axis) => formatNumber(value, axis ? Math.min(digits, stepDigits(axis.step)) : digits);
   const profit = Number(kpi.profit);
   // Дни до появления банка не рисуем, опорная линия — банк на начало (см. periodStart)
-  const start = periodStart(series, kpi.profit, data.period === 'all', bank);
+  const start = periodStart(series);
   const last = start.points[start.points.length - 1]?.value ?? series.last;
   return (
     <Card

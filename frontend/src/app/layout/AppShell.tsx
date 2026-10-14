@@ -7,6 +7,7 @@ import { useLogout } from '../../features/auth/useLogout';
 import { useRouteMeta } from '../routeMeta';
 import { useDocumentTitle } from '../useDocumentTitle';
 import { PageLoading } from './FullPageState';
+import { ScreenTitleContext } from './screenTitle';
 import { MoreSheet } from './MoreSheet';
 import { Sidebar } from './Sidebar';
 import { TabBar } from './TabBar';
@@ -29,8 +30,10 @@ export function AppShell() {
   // Выход: запрос, переход на /login, очистка кэша и тост — в одном хуке
   const { logout: onLogout } = useLogout();
   const [moreOpen, setMoreOpen] = useState(false);
+  // Заголовок из данных экрана (имя игрока) — только пока на экране он сам, а не переход
+  const [screenTitle, setScreenTitle] = useState<string | null>(null);
 
-  const title = meta ? t(`pages.${meta.title}`) : t('app.name');
+  const title = screenTitle && !pending ? screenTitle : meta ? t(`pages.${meta.title}`) : t('app.name');
   const crumbs = meta?.crumbs ? t(`crumbs.${meta.crumbs}`) : undefined;
   useDocumentTitle(meta ? title : undefined);
 
@@ -60,7 +63,9 @@ export function AppShell() {
           {/* прежний экран при долгом переходе скрыт, но не размонтирован: переход могут отменить */}
           <div className="view-screen" hidden={pending !== null}>
             <Suspense fallback={<PageLoading />}>
-              <Outlet />
+              <ScreenTitleContext.Provider value={setScreenTitle}>
+                <Outlet />
+              </ScreenTitleContext.Provider>
             </Suspense>
           </div>
         </main>

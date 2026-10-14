@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Card, Chip, Icon } from '../../../components';
 import { formatShare } from '../../../features/analysis/markets';
-import { conditionMet, DRAWDOWN_SCALE, GROWTH, param, PROTECTION, ruleActing } from '../../../features/bank/display';
+import { DRAWDOWN_SCALE, GROWTH, param, PROTECTION, ruleActing } from '../../../features/bank/display';
 import type { Adaptation, AdaptationKey, Bank, StrategyParams } from '../../../features/bank/types';
 import { currencyOf } from '../../../features/bets/display';
 import { formatMoney, formatOdds, formatPercent, formatPp } from '../../../lib/format';
@@ -59,7 +59,6 @@ function RuleRow({ rule, bank, params }: { rule: Adaptation; bank: Bank; params:
   const { t } = useTranslation();
   const id = `profile-rule-${rule.key}`;
   const text = ruleText(rule, params, t);
-  const met = conditionMet(rule, bank);
   let chip;
   if (!rule.enabled) {
     chip = (
@@ -67,7 +66,7 @@ function RuleRow({ rule, bank, params }: { rule: Adaptation; bank: Bank; params:
         {t('profile.bank.adapt.off')}
       </Chip>
     );
-  } else if (ruleActing(rule, bank)) {
+  } else if (ruleActing(rule)) {
     chip = (
       <Chip kind="warn" icon="bolt">
         {t('profile.bank.adapt.active')}
@@ -81,7 +80,7 @@ function RuleRow({ rule, bank, params }: { rule: Adaptation; bank: Bank; params:
     );
   }
   const now = nowText(rule.key, bank, t);
-  const tail = rule.enabled ? '' : met ? t('profile.bank.adapt.wouldAct') : t('profile.bank.adapt.wouldNot');
+  const tail = rule.enabled ? '' : rule.met ? t('profile.bank.adapt.wouldAct') : t('profile.bank.adapt.wouldNot');
   return (
     <div className="profile-rule">
       <label className="profile-rule-text" htmlFor={id}>
@@ -122,7 +121,7 @@ export function AdaptCard({ bank, params }: { bank: Bank; params: StrategyParams
     .filter((from): from is number => from !== null);
   const anyActive = bank.adaptations.some((rule) => rule.enabled && rule.active);
   const growthOn = growth.some((rule) => rule.enabled);
-  const growthMet = growth.filter((rule) => !rule.enabled && conditionMet(rule, bank));
+  const growthMet = growth.filter((rule) => !rule.enabled && rule.met);
   const currency = currencyOf(bank.currency);
   const fillPct = Math.min(100, (drawdown / DRAWDOWN_SCALE) * 100);
   const level = drawdown >= (marks[1] ?? 0.2) ? 'bad' : drawdown >= (marks[0] ?? 0.1) ? 'warn' : null;

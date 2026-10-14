@@ -109,6 +109,7 @@ export function betWon(over: Partial<BetItem> = {}): BetItem {
     profit: '1168.20',
     payout: '2488.20',
     effective_odds: '1.885',
+    bank_after: '49168.20',
     settled_at: '2026-10-06T20:00:00Z',
     settled_by: 'manual',
     updated_at: '2026-10-06T20:00:00.5Z',

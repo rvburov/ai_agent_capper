@@ -39,6 +39,9 @@ export const ME_MEMBER = {
   tz: 'Europe/Helsinki',
   totp_enabled: true,
   created_at: '2026-10-01T09:00:00Z',
+  consent_training: false,
+  deletion_requested_at: null,
+  deletion_at: null,
 } as const;
 
 export const ME_ADMIN = { ...ME_MEMBER, id: 1, email: 'owner@example.com', display_name: 'Роман Буров', role: 'admin' } as const;

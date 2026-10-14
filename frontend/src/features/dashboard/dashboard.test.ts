@@ -80,10 +80,12 @@ describe('Главная: дела администратора и расход'
     expect(adminTodo(adminAttention({ return_requests: [], limits: [] }), t)).toEqual([]);
   });
 
-  it('«Дороже всего»: первая задача сервера и ее доля; без расхода — нет', () => {
+  it('«Дороже всего»: первая задача сервера и ее доля с сервера; без расхода или доли — нет', () => {
     expect(topKind(aiUsageOut())).toEqual({ kind: 'analysis', share: 1.43 / 1.93 });
     expect(topKind(aiUsageOut({ kinds: [] }))).toBeNull();
-    expect(topKind(aiUsageOut({ totals: { ...aiUsageOut().totals, cost_usd: 0 } }))).toBeNull();
+    const [top] = aiUsageOut().kinds;
+    expect(topKind(aiUsageOut({ kinds: [{ ...top!, cost_usd: 0, share: 0 }] }))).toBeNull();
+    expect(topKind(aiUsageOut({ kinds: [{ ...top!, share: null }] }))).toBeNull();
   });
 
   it('запись лимита', () => {

@@ -16,6 +16,10 @@ export const ADMIN_TABS = [
 ] as const;
 export type AdminTab = (typeof ADMIN_TABS)[number];
 
+// Вкладки карточки игрока: «Профиль из бота» — только у перенесенных из старого бота (Р24)
+export const PLAYER_TABS = ['overview', 'matches', 'news', 'profile'] as const;
+export type PlayerTab = (typeof PLAYER_TABS)[number];
+
 export const paths = {
   login: '/login',
   register: '/register',
@@ -25,7 +29,8 @@ export const paths = {
   analysis: (id: string | number) => `/analysis/${encodeURIComponent(String(id))}`,
   bets: '/bets',
   players: '/players',
-  player: (id: string | number) => `/players/${encodeURIComponent(String(id))}`,
+  player: (id: string | number, tab?: PlayerTab) =>
+    `/players/${encodeURIComponent(String(id))}${tab && tab !== 'overview' ? `/${tab}` : ''}`,
   analytics: '/analytics',
   learning: '/learning',
   costs: '/costs',

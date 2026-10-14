@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { expect, test } from '@playwright/test';
 
-import { betsApi, collectErrors, dashboardApi, expectTapTargets, horizontalOverflow, ME_ADMIN, ME_MEMBER, mockApi } from './fixtures';
+import { betsApi, collectErrors, dashboardApi, expectTapTargets, horizontalOverflow, ME_ADMIN, ME_MEMBER, mockApi, playersApi } from './fixtures';
 
 // 360 px — самый узкий телефон из PLAN.md, 375 px — из CLAUDE.md
 const VIEWPORTS = [
@@ -19,7 +19,7 @@ for (const vp of VIEWPORTS) {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.emulateMedia({ colorScheme: theme });
       // открывается главная; на компьютере смоук переходит из меню на «Ставки»
-      await mockApi(page, ME_ADMIN, { ...dashboardApi(), ...betsApi() });
+      await mockApi(page, ME_ADMIN, { ...dashboardApi(), ...betsApi(), ...playersApi() });
       await page.goto('/');
 
       await expect(page.getByRole('heading', { level: 1, name: 'Главная' })).toBeVisible();

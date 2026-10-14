@@ -389,6 +389,20 @@ describe('Анализ готов: итог и экспресс', () => {
     expect(decisions).toEqual(['skip', null]);
   });
 
+  it('имена игроков в сравнении — ссылки на их карточки', async () => {
+    mockFetch(routes(analysisDone()));
+    renderAnalysis(1);
+    await screen.findByRole('heading', { level: 2, name: /Экспресс из 2 событий/ });
+    const links = [...document.querySelectorAll<HTMLAnchorElement>('.analysis-vs-name a')];
+    expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      ['Синнер', '/players/1'],
+      ['Руне', '/players/6'],
+      ['Джокович', '/players/3'],
+      ['Рублев', '/players/5'],
+    ]);
+    expect(screen.getByRole('link', { name: 'Синнер' })).toHaveAttribute('title', 'Янник Синнер — карточка игрока');
+  });
+
   it('на телефоне — вкладки разделов матча', async () => {
     const user = userEvent.setup();
     setViewportWidth(375);

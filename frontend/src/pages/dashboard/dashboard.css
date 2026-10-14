@@ -25,6 +25,7 @@
 .dashboard-hero-top { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .dashboard-hero-note { font-size: var(--fs-xs); color: var(--fg-3); font-weight: 400; }
 .dashboard-hero-spark .sparkline { width: 100%; height: auto; }
+.dashboard-hero-one { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
 .dashboard-hero-kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding-top: 14px; border-top: 1px solid var(--line); }
 .dashboard-hero-kv > div { min-width: 0; }
 .dashboard-hero-kv dt { font-size: var(--fs-xs); color: var(--fg-3); }

@@ -1,4 +1,4 @@
-import type { BetFiltersQuery, BetStatus, Market, Period, SourceFilter, SurfaceFilter } from './types';
+import type { BetFiltersQuery, Market, Period, SourceFilter, StatusFilter, SurfaceFilter } from './types';
 
 /*
  * Фильтры «Ставок» живут в адресе (/bets?period=30d&status=won&surface=clay&q=синнер): ссылку
@@ -11,7 +11,7 @@ export interface BetFilters {
   /** Свой диапазон дат (по поясу участника, включительно): если задан, period не действует. */
   from: string | null;
   to: string | null;
-  status: BetStatus | null;
+  status: StatusFilter | null;
   market: Market | null;
   surfaces: SurfaceFilter[];
   source: SourceFilter | null;
@@ -19,7 +19,9 @@ export interface BetFilters {
 }
 
 export const PERIODS: readonly Period[] = ['7d', '30d', '90d', 'all'];
-export const STATUSES: readonly BetStatus[] = ['open', 'won', 'lost', 'void'];
+// «Рассчитанные» (settled) — выигрыш, проигрыш и возврат вместе: так ссылка «Все N ставок за
+// период» с главной открывает ровно те ставки, что посчитаны в показателях периода
+export const STATUSES: readonly StatusFilter[] = ['open', 'settled', 'won', 'lost', 'void'];
 export const MARKETS: readonly Market[] = ['ML', 'HCP_-1.5', 'HCP_+1.5'];
 export const SURFACES: readonly SurfaceFilter[] = ['hard', 'clay', 'grass', 'carpet', 'unknown'];
 export const SOURCES: readonly SourceFilter[] = ['app', 'legacy'];

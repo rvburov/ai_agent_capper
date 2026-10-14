@@ -16,7 +16,7 @@ import {
   SURFACES,
   type BetFilters,
 } from '../../features/bets/filters';
-import type { BetStatus, Market, Period, SourceFilter, SurfaceFilter } from '../../features/bets/types';
+import type { Market, Period, SourceFilter, StatusFilter, SurfaceFilter } from '../../features/bets/types';
 import { formatDateRange } from '../../lib/format';
 import { cx } from '../../lib/cx';
 
@@ -105,7 +105,7 @@ function toggled<T>(list: readonly T[], item: T): T[] {
 
 type All = 'all';
 
-function statusOptions(t: TFunction): DropdownOption<BetStatus | All>[] {
+function statusOptions(t: TFunction): DropdownOption<StatusFilter | All>[] {
   return [{ value: 'all', label: t('bets.filters.statusAll') }, ...STATUSES.map((s) => ({ value: s, label: t(`bets.filters.statuses.${s}`) }))];
 }
 
@@ -283,7 +283,7 @@ function FilterSheet({ filters, onClose, onApply }: { filters: BetFilters; onClo
     >
       <div className="field">
         <div className="field-label">{t('bets.filters.statusShort')}</div>
-        <ChipGroup<BetStatus | All>
+        <ChipGroup<StatusFilter | All>
           label={t('bets.filters.status')}
           options={[{ value: 'all', label: all }, ...STATUSES.map((s) => ({ value: s, label: t(`bets.filters.statuses.${s}`) }))]}
           value={draft.status ?? 'all'}

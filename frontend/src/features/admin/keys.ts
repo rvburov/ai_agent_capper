@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 
+import { dashboardKeys } from '../dashboard/keys';
 import { accountKeys } from '../profile/keys';
 
 // Ключи запросов кабинета администратора: по одному месту на ресурс.
@@ -14,15 +15,20 @@ export const adminKeys = {
   aiKey: ['admin', 'ai', 'key'] as const,
   aiBudget: ['admin', 'ai', 'budget'] as const,
   aiLimits: ['admin', 'ai', 'limits'] as const,
+  // «Обзор» и «Расход ИИ» (этап 4): расход по людям и задачам за месяц, входы и анализы
+  aiUsage: ['admin', 'ai', 'usage', 'current'] as const,
+  activity: (period: string) => ['admin', 'activity', period] as const,
 };
 
 /**
  * После любого действия администратора: перечитать данные раздела (участники, коды, журнал,
- * ключ, бюджет и лимиты) и сводку «Доступ к аккаунту» в личном кабинете администратора.
+ * ключ, бюджет и лимиты), сводку «Доступ к аккаунту» в личном кабинете администратора и главную:
+ * в ней дела администратора (useAdminAttention) — «Обзор», точка у вкладки и пункт меню.
  */
 export function invalidateAdmin(client: QueryClient): Promise<unknown> {
   return Promise.all([
     client.invalidateQueries({ queryKey: adminKeys.all }),
+    client.invalidateQueries({ queryKey: dashboardKeys.all }),
     client.invalidateQueries({ queryKey: accountKeys.adminPeople }),
     client.invalidateQueries({ queryKey: accountKeys.adminInvites }),
   ]);

@@ -30,6 +30,9 @@ const AdminPage = lazyPage(() => import('../pages/admin/AdminPage').then((m) => 
 const BetsPage = lazyPage(() => import('../pages/bets/BetsPage').then((m) => m.BetsPage));
 const DashboardPage = lazyPage(() => import('../pages/dashboard/DashboardPage').then((m) => m.DashboardPage));
 const AnalyticsPage = lazyPage(() => import('../pages/analytics/AnalyticsPage').then((m) => m.AnalyticsPage));
+const PlayersPage = lazyPage(() => import('../pages/players/PlayersPage').then((m) => m.PlayersPage));
+const PlayerPage = lazyPage(() => import('../pages/players/PlayerPage').then((m) => m.PlayerPage));
+const CostsPage = lazyPage(() => import('../pages/costs/CostsPage').then((m) => m.CostsPage));
 
 /** Экран без оболочки (вход, регистрация, сброс): пока грузится — индикатор на весь экран. */
 function bare(page: ReactNode): ReactNode {
@@ -71,13 +74,13 @@ export const routes: RouteObject[] = [
       },
       {
         path: 'players',
-        element: <StubPage screen="players" stage={4} />,
+        element: <PlayersPage />,
         handle: meta({ title: 'players', nav: 'players' }),
       },
       {
-        path: 'players/:id',
-        element: <StubPage screen="player" stage={4} />,
-        handle: meta({ title: 'player', nav: 'players', crumbs: 'players' }),
+        path: 'players/:id/:tab?',
+        element: <PlayerPage />,
+        handle: meta({ title: 'player', nav: 'players', crumbs: 'player' }),
       },
       {
         path: 'analytics',
@@ -91,7 +94,7 @@ export const routes: RouteObject[] = [
       },
       {
         path: 'costs',
-        element: <StubPage screen="costs" stage={4} />,
+        element: <CostsPage />,
         handle: meta({ title: 'costs', nav: 'costs', crumbs: 'costs' }),
       },
       {

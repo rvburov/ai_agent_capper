@@ -128,41 +128,22 @@ describe('Аналитика: вид чисел', () => {
 });
 
 describe('Аналитика: банк на начало периода', () => {
-  const lateBank = seriesOut({
-    start: '2026-09-13',
-    base: '0.00',
-    points: [
-      { day: '2026-09-13', value: '0.00' },
-      { day: '2026-09-22', value: '0.00' },
-      { day: '2026-09-23', value: '20350.00' },
-      { day: '2026-10-13', value: '20300.00' },
-    ],
-  });
-  const started = { invested: '20000.00', growth: '0.0150' };
-
-  it('банк был до периода — банк на конец дня перед ним, процент от него', () => {
-    const start = periodStart(seriesOut(), '2860.00', false, started);
+  it('старт периода — как есть с сервера: день, сумма и изменение долей', () => {
+    const start = periodStart(seriesOut());
     expect(start).toMatchObject({ day: '2026-08-31', amount: '48000.00' });
     expect(start.points).toHaveLength(4);
     expect(start.share).toBeCloseTo(2860 / 48000, 6);
+    // банк появился внутри периода: сервер присылает первый день банка, вложенное и рост
+    const late = seriesOut({ start: '2026-09-13', base: '0.00', start_day: '2026-09-23', start_amount: '20000.00', change_share: 0.015, points: [{ day: '2026-09-23', value: '20350.00' }, { day: '2026-10-13', value: '20300.00' }] });
+    expect(periodStart(late)).toMatchObject({ day: '2026-09-23', amount: '20000.00', share: 0.015 });
+    expect(periodStart(late).points.map((point) => point.day)).toEqual(['2026-09-23', '2026-10-13']);
   });
 
-  it('банк появился внутри периода — без нулевых дней, стартовый банк и рост с сервера', () => {
-    const start = periodStart(lateBank, '300.00', false, started);
-    expect(start).toMatchObject({ day: '2026-09-23', amount: '20000.00', share: 0.015 });
-    expect(start.points.map((point) => point.day)).toEqual(['2026-09-23', '2026-10-13']);
-    // банк еще грузится или выведено больше, чем внесено — первый день банка, без процента
-    expect(periodStart(lateBank, '300.00', false, null)).toMatchObject({ day: '2026-09-23', amount: '20350.00', share: null });
-    expect(periodStart(lateBank, '300.00', false, { invested: '-500.00', growth: null })).toMatchObject({ amount: '20350.00', share: null });
-  });
-
-  it('«все время» — стартовый банк, а не банк на конец первого дня; ряд результата — как есть', () => {
-    const all = seriesOut({ start: '2026-10-13', base: '49168.20', points: [{ day: '2026-10-13', value: '49168.20' }] });
-    expect(periodStart(all, '1168.20', true, { invested: '48000.00', growth: '0.0243' })).toMatchObject({ day: '2026-10-13', amount: '48000.00', share: 0.0243 });
-    const result = seriesOut({ kind: 'result', base: '0.00', points: [{ day: '2026-08-31', value: '0.00' }, { day: '2026-10-13', value: '860.00' }] });
-    const start = periodStart(result, '860.00', true, started);
-    expect(start).toMatchObject({ day: '2026-08-31', amount: '0.00', share: null });
-    expect(start.points).toHaveLength(2);
+  it('ряд результата — с нуля, без процента; без полей старта — start и base, без процента', () => {
+    const result = seriesOut({ kind: 'result', base: '0.00', start_amount: '0.00', change_share: null, points: [{ day: '2026-08-31', value: '0.00' }, { day: '2026-10-13', value: '860.00' }] });
+    expect(periodStart(result)).toMatchObject({ day: '2026-08-31', amount: '0.00', share: null });
+    const bare = seriesOut({ start_day: undefined, start_amount: undefined, change_share: undefined });
+    expect(periodStart(bare)).toMatchObject({ day: '2026-08-31', amount: '48000.00', share: null });
   });
 });
 
@@ -224,40 +205,18 @@ describe('Аналитика: выводы', () => {
 // Тексты выводов: ключи и числа приходят с сервера, тексты — во фронтенде (как у анализа)
 const backend = import.meta.glob<Record<string, unknown>>('../../../../backend/app/locales/ru.json', { eager: true, import: 'default' });
 
-/**
- * Тексты, которые сознательно отличаются от копии сервера: экран собирает подстановки из params
- * со склонениями, как в макете (mockup/js/screens/analytics.js: nBets, onBets, nEv; название
- * среза в заголовке), а сервер их не склоняет («ставок: {bets}»). Каждое отличие записано здесь
- * целиком: новое расхождение с сервером тест не пропустит.
- */
-const DEVIATIONS: Record<string, string> = {
-  'sample.text': 'Под фильтром {{bets}} и {{events}}. На таком объеме ROI и калибровка почти целиком зависят от везения — опирайтесь на них не раньше {{min_events}} событий.',
-  'total_negative.text': 'ROI {{roi}} на {{bets}} ({{profit}}). Ставка по таблице стратегии — {{stake_pct}} банка.',
-  'small_slice.title': '{{slice}}: ROI {{roi}} — пока не закономерность',
-  'small_slice.text': 'Выборка мала: {{n}}. Один следующий проигрыш опустит ROI до {{roi_after_loss}}. Чтобы отличить преимущество от везения, нужно хотя бы {{pattern_n}} событий.',
-};
-
 describe('Аналитика: тексты выводов сервера', () => {
-  it('тексты выводов — копия сервера ({x} → {{x}}), кроме перечисленных отличий макета', () => {
+  it('тексты выводов — копия сервера ({x} → {{x}}) без отличий', () => {
     const files = Object.values(backend);
     expect(files).toHaveLength(1);
     const server = (files[0] as { analytics: { insights: Record<string, Record<string, string>> } }).analytics.insights;
     const client = ru.analytics.insights as unknown as Record<string, Record<string, string>>;
     expect(Object.keys(server).length).toBe(9);
-    const seen: string[] = [];
     for (const [code, texts] of Object.entries(server)) {
       for (const part of ['title', 'text'] as const) {
-        const key = `${code}.${part}`;
         const copy = (texts[part] ?? '').replace(/\{(\w+)\}/g, '{{$1}}');
-        const text = client[code]?.[part];
-        if (key in DEVIATIONS) {
-          seen.push(key);
-          expect(text, key).toBe(DEVIATIONS[key]);
-        } else {
-          expect(text, key).toBe(copy);
-        }
+        expect(client[code]?.[part], `${code}.${part}`).toBe(copy);
       }
     }
-    expect(seen.sort()).toEqual(Object.keys(DEVIATIONS).sort());
   });
 });

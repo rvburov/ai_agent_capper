@@ -46,6 +46,8 @@ function settleFacts(bet: BetItem, t: TFunction): { key: string; label: string; 
     { key: 'odds', label: t('bets.detail.total'), value: <span className="odds">{bet.effective_odds !== null ? formatOddsExact(bet.effective_odds) : formatOdds(bet.total_odds)}</span> },
     { key: 'payout', label: t('bets.detail.payout'), value: money(bet, bet.payout) },
     { key: 'profit', label: t('bets.detail.profit'), value: <Signed value={bet.profit} text={money(bet, bet.profit, true)} /> },
+    // Капитал сразу после расчета этой ставки (сервер, bank_after) — как «Банк после» на главной
+    { key: 'bankAfter', label: t('bets.detail.bankAfter'), value: bet.bank_after !== null ? money(bet, bet.bank_after) : '—' },
     {
       key: 'settled',
       label: t('bets.detail.settledAt'),

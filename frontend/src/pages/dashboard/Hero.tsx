@@ -47,7 +47,7 @@ export function HeroCard({ data, bank, ctx }: HeroProps) {
     );
   }
   const currency = currencyOf(data.currency);
-  const start = periodStart(data.series, data.kpi.profit, data.period === 'all', bank);
+  const start = periodStart(data.series);
   const delta = data.kpi.profit;
   const pct = start.share;
   const trend = trendOf(Number(delta), 2);
@@ -75,6 +75,13 @@ export function HeroCard({ data, bank, ctx }: HeroProps) {
       {values.length > 1 && (
         <div className="dashboard-hero-spark" title={t('dashboard.hero.sparkTitle', { ctx })}>
           <Sparkline values={values} width={320} height={52} color="var(--s1)" />
+        </div>
+      )}
+      {/* Первый день банка: одна точка ряда — точка и подпись вместо пустой полосы */}
+      {values.length === 1 && (
+        <div className="dashboard-hero-spark dashboard-hero-one">
+          <Sparkline values={values} width={320} height={52} color="var(--s1)" />
+          <span className="dashboard-hero-note">{t('dashboard.hero.sparkOne')}</span>
         </div>
       )}
       <dl className="dashboard-hero-kv">

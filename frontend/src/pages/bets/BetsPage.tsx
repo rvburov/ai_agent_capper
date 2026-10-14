@@ -100,13 +100,16 @@ export function BetsPage() {
   const showOpen = filters.status === null || filters.status === 'open';
   const showHistory = filters.status !== 'open';
   const openList = useBetList({ ...query, status: 'open' }, { limit: OPEN_PAGE, enabled: showOpen });
-  const history = useBetList(query, { limit: HISTORY_PAGE, enabled: showHistory });
+  // История без фильтра статуса — только рассчитанные (status=settled: выигрыш, проигрыш, возврат):
+  // открытые показывает «В игре», и страница истории не тратится на них
+  const historyQuery = useMemo(() => (filters.status === null ? { ...query, status: 'settled' as const } : query), [filters.status, query]);
+  const history = useBetList(historyQuery, { limit: HISTORY_PAGE, enabled: showHistory });
 
   const openBets = useMemo(
     () => (openList.data?.pages.flatMap((page) => page.items) ?? []).slice().sort(byFirstMatch),
     [openList.data],
   );
-  // Список истории без фильтра статуса содержит и открытые ставки — их показывает «В игре»
+  // Открытые в историю не попадают (запрос status=settled); фильтр — на случай ответа из кэша
   const settledBets = useMemo(
     () => (history.data?.pages.flatMap((page) => page.items) ?? []).filter((bet) => bet.status !== 'open'),
     [history.data],
@@ -155,9 +158,8 @@ export function BetsPage() {
     [writeParams],
   );
 
-  // История: рассчитанных показываем по страницам из HISTORY_PAGE. Сервер отдает страницы без
-  // фильтра статуса, и в них бывают одни открытые ставки, — тогда дочитываем следующие сами,
-  // пока не наберется страница рассчитанных или они не кончатся (их число — из итогов)
+  // История: рассчитанных показываем по страницам из HISTORY_PAGE; следующая страница дочитывается
+  // сама, пока не наберется нужное число или ставки не кончатся (их число — из итогов)
   const [want, setWant] = useState({ key: queryKey, n: HISTORY_PAGE });
   const wantN = want.key === queryKey ? want.n : HISTORY_PAGE;
   const settledTotal = summary.data && !summary.isPlaceholderData ? summary.data.settled : null;

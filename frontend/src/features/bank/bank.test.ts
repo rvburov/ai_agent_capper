@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { strategyV3 } from '../analysis/testData';
-import { bankOut } from '../analysis/testData';
-import { conditionMet, parseMove, stakeRows, valueRows } from './display';
+import { parseMove, ruleActing, stakeRows, valueRows } from './display';
 import type { Adaptation } from './types';
 
 function rule(over: Partial<Adaptation> & Pick<Adaptation, 'key'>): Adaptation {
@@ -50,22 +49,12 @@ describe('Банк: правила стратегии', () => {
 });
 
 describe('Банк: адаптации', () => {
-  it('включенное правило — как ответил сервер', () => {
-    expect(conditionMet(rule({ key: 'dd10', active: true }), bankOut())).toBe(true);
-    expect(conditionMet(rule({ key: 'dd10', active: false }), bankOut({ drawdown: '0.5000' }))).toBe(false);
-  });
-
-  it('выключенное — сравнение чисел банка с порогом правила', () => {
-    const up15 = rule({ key: 'up15', enabled: false, params: { bank_up: '0.15', min_winrate: '0.60', max_pct: '0.04' } });
-    expect(conditionMet(up15, bankOut({ growth: '0.2000', winrate: '0.6500' }))).toBe(true);
-    expect(conditionMet(up15, bankOut({ growth: '0.2000', winrate: '0.5000' }))).toBe(false);
-    expect(conditionMet(up15, bankOut({ growth: null, winrate: '0.7000' }))).toBe(false);
-    const weekWin = rule({ key: 'week_win', enabled: false, params: { win: '0.10', add: '0.005' } });
-    expect(conditionMet(weekWin, bankOut({ week_change: '0.1000' }))).toBe(true);
-    expect(conditionMet(weekWin, bankOut({ week_change: '0.0999' }))).toBe(false);
-    const dd20 = rule({ key: 'dd20', enabled: false, params: { from: '0.20', max_pct: '0.015' } });
-    expect(conditionMet(dd20, bankOut({ drawdown: '0.2100' }))).toBe(true);
-    const weekLoss = rule({ key: 'week_loss', enabled: false, params: { loss: '-0.05', max_pct: '0.02' } });
-    expect(conditionMet(weekLoss, bankOut({ week_change: '-0.0600' }))).toBe(true);
+  it('действует — по active и met с сервера, браузер числа банка не сравнивает', () => {
+    expect(ruleActing(rule({ key: 'dd10', active: true, met: true }))).toBe(true);
+    // при −25% сервер отмечает active только у −20%, но порог −10% тоже пройден (met)
+    expect(ruleActing(rule({ key: 'dd10', active: false, met: true }))).toBe(true);
+    expect(ruleActing(rule({ key: 'dd10', active: false, met: false }))).toBe(false);
+    // выключенное правило не действует, даже если условие выполнено
+    expect(ruleActing(rule({ key: 'up15', enabled: false, active: false, met: true }))).toBe(false);
   });
 });

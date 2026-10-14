@@ -115,9 +115,11 @@ describe('Главная', () => {
         best: '20350.00',
         worst: '0.00',
         max_drawdown: -0.0025,
+        // старт периода и ряд без дней до банка — с сервера (SeriesOut.start_*)
+        start_day: '2026-09-23',
+        start_amount: '20000.00',
+        change_share: 0.015,
         points: [
-          { day: '2026-09-13', value: '0.00' },
-          { day: '2026-09-22', value: '0.00' },
           { day: '2026-09-23', value: '20350.00' },
           { day: '2026-10-13', value: '20300.00' },
         ],
@@ -148,7 +150,7 @@ describe('Главная', () => {
       change: null,
       prev: null,
       kpi: { ...base.kpi, settled: 1, won: 1, lost: 0, void: 0, profit: '1168.20', turnover: '1320.00' },
-      series: seriesOut({ group: 'week', start: '2026-10-13', base: '49168.20', last: '49168.20', points: [{ day: '2026-10-13', value: '49168.20' }] }),
+      series: seriesOut({ group: 'week', start: '2026-10-13', base: '49168.20', start_day: '2026-10-13', start_amount: '48000.00', change_share: 0.0243, last: '49168.20', points: [{ day: '2026-10-13', value: '49168.20' }] }),
       bank: bankOut({ equity: '49168.20', balance: '49168.20', peak: '49168.20', invested: '48000.00', growth: '0.0243' }),
     });
     window.sessionStorage.setItem('capper.dash.period', 'all');
@@ -156,6 +158,9 @@ describe('Главная', () => {
     const hero = await screen.findByRole('region', { name: 'Банк' });
     expect(within(hero).getByText('+1 168 ₽ · +2,4%')).toBeInTheDocument();
     expect(within(hero).getByText('Старт периода').nextSibling).toHaveTextContent(/^48\s000\s₽13 окт$/);
+    // один день банка — точка с подписью, а не пустая полоса
+    const one = within(hero).getByText('Ряд по дням появится со второго дня').parentElement!;
+    expect(one.querySelector('svg circle')).not.toBeNull();
     expect(screen.getByText('Банк на начало периода · 48 000 ₽')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /^Банк по дням с 13 окт: с 48\s000\s₽ до 49\s168\s₽$/ })).toBeInTheDocument();
   });
@@ -269,6 +274,8 @@ describe('Главная', () => {
                 left_usd: 18.8,
                 forecast_usd: 72.5,
                 members_limits_usd: 30,
+                members_usd: 26.7,
+                budget_share: 0.624,
                 alert_pct: 80,
                 eval_budget_usd: 25,
                 eval_spent_usd: 4.6,
@@ -346,7 +353,7 @@ describe('Главная', () => {
 
   it('расходы ИИ: цвет доли — по порогу уведомления из настроек администратора', async () => {
     const chip = async (spent: number, alert: number) => {
-      const view = renderDashboard({ over: { 'GET /api/ai/budget': () => json(aiBudget({ spent_usd: spent, left_usd: 10 - spent, alert_pct: alert })) } });
+      const view = renderDashboard({ over: { 'GET /api/ai/budget': () => json(aiBudget({ spent_usd: spent, limit_share: spent / 10, left_usd: 10 - spent, alert_pct: alert })) } });
       const costs = (await screen.findByText('Расходы ИИ в октябре')).closest('section')!;
       const pct = `${Math.round(spent * 10)}% лимита`;
       const kind = (await within(costs).findByText(pct)).className;
@@ -406,7 +413,7 @@ describe('Главная', () => {
     const table = await screen.findByRole('table', { name: 'Последние рассчитанные ставки' });
     expect(within(table).getByText('+1 168 ₽')).toBeInTheDocument();
     expect(within(table).getByText('50 860 ₽')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Все 42 ставки за период' })).toHaveAttribute('href', '/bets?period=30d');
+    expect(screen.getByRole('link', { name: 'Все 42 ставки за период' })).toHaveAttribute('href', '/bets?period=30d&status=settled');
     await user.click(within(table).getByText('+1 168 ₽'));
     expect(await screen.findByText('Экран ставок')).toBeInTheDocument();
     expect(router.state.location.search).toBe('?bet=5');
@@ -460,7 +467,7 @@ describe('Главная', () => {
     const data = dashboardOut({
       bank: { ...base.bank, equity: '47848.00', peak: '48000.00', drawdown: '0.0032', invested: '48000.00', growth: '-0.0032' },
       kpi: { ...base.kpi, settled: 2, won: 1, lost: 1, void: 0, profit: '-152.00' },
-      series: { ...base.series, base: '0.00', last: '47848.00', points: [{ day: '2026-09-13', value: '0.00' }, { day: '2026-10-12', value: '48000.00' }, { day: '2026-10-13', value: '47848.00' }] },
+      series: { ...base.series, base: '0.00', start_day: '2026-10-12', start_amount: '48000.00', change_share: -0.0032, last: '47848.00', points: [{ day: '2026-10-12', value: '48000.00' }, { day: '2026-10-13', value: '47848.00' }] },
       small_sample: true,
     });
     renderDashboard({ data });

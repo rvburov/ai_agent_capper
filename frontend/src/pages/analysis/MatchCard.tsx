@@ -1,7 +1,9 @@
 import type { TFunction } from 'i18next';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
 
+import { paths } from '../../app/paths';
 import { Callout, Card, Chip, FormDots, Icon, Segmented, type ChipKind, type IconName } from '../../components';
 import { inlineDateTime, keyText } from '../../features/analysis/codes';
 import { shortName } from '../../features/analysis/draft';
@@ -219,7 +221,11 @@ function Comparison({ match, names }: { match: MatchResult; names: MatchNames })
   const { t } = useTranslation();
   const head = (player: MatchResult['player1'], cls: 'l' | 'r') => (
     <div className={cx('analysis-vs-side', cls)}>
-      <span className="analysis-vs-name">{shortName(names.name(player.id, player.name))}</span>
+      <span className="analysis-vs-name">
+        <Link className="analysis-plink" to={paths.player(player.id)} title={t('bets.playerCard', { name: names.name(player.id, player.name) })}>
+          {shortName(names.name(player.id, player.name))}
+        </Link>
+      </span>
       <span className="analysis-vs-sub">
         {[player.country, player.elo_rank ? t('analysis.compare.rankOf', { rank: player.elo_rank }) : null].filter(Boolean).join(' · ')}
       </span>

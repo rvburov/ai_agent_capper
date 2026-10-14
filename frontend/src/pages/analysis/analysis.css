@@ -62,6 +62,11 @@
 .analysis-vs-side.r { align-items: flex-end; text-align: right; }
 .analysis-vs-side.l { align-items: flex-start; }
 .analysis-vs-name { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-md); }
+/* имя игрока — ссылка на его карточку (plink макета) */
+.analysis-plink { color: var(--fg); text-decoration: none; }
+.analysis-plink:hover { color: var(--accent-ink); text-decoration: underline; }
+/* на телефоне зона нажатия имени — 40px в высоту: отрицательные поля сохраняют высоту строки */
+@media (max-width: 960px) { .analysis-plink { display: inline-flex; align-items: center; min-height: var(--tap); margin: -10px 0; } }
 .analysis-vs-vs { font-size: var(--fs-xs); color: var(--fg-3); text-align: center; text-transform: uppercase; letter-spacing: .08em; }
 .analysis-vs-num { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; margin: 0 -8px; border-radius: 999px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .analysis-vs-num svg { width: 13px; height: 13px; flex: none; stroke-width: 2.4; }

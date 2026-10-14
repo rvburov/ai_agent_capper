@@ -9,6 +9,7 @@ export function aiBudget(over: Partial<AiBudget> = {}): AiBudget {
     month_start: '2026-10-01T00:00:00Z',
     monthly_usd: 10,
     spent_usd: 1.93,
+    limit_share: 0.193,
     reserved_usd: 0,
     left_usd: 8.07,
     daily_analyses: 3,

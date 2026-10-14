@@ -147,6 +147,8 @@ function kind(name: string, cost: number): AiUsage['kinds'][number] {
   return {
     ...sums(cost),
     kind: name,
+    // доля в расходе месяца ($1,93) — с сервера
+    share: cost / 1.93,
     avg_cost_usd: cost / 10,
     avg_prompt_tokens: 10_000,
     avg_output_tokens: 800,

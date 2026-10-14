@@ -2,7 +2,6 @@ import type { TFunction } from 'i18next';
 
 import i18n from '../../i18n';
 import { formatDateRange, formatInterval, formatNumber, formatOdds, formatPercent, formatPercentRange, formatPp } from '../../lib/format';
-import type { Bank } from '../bank/types';
 import type { Ci, Market, Period, Series } from './types';
 
 /*
@@ -110,28 +109,13 @@ export interface PeriodStart {
 }
 
 /**
- * Банк на начало периода. Обычно это банк на конец дня перед периодом (series.base). Если
- * период начался раньше банка (base = 0, банк появился внутри периода) или выбрано «все
- * время» (сервер отдает банк на конец первого дня, уже с его ставками), началом считается
- * стартовый банк bank.invested (пополнения минус выводы) и рост к нему bank.growth — оба с
- * сервера, — а дни до появления банка не рисуются. Так в макете: до начала истории банк равен
- * стартовому (bankAt → S.start), нулей нет. Ряд результата (kind = result) — как есть.
+ * Старт периода — как есть с сервера (SeriesOut.start_day, start_amount, change_share): обычно
+ * банк на конец дня перед периодом и прибыль периода к нему; если банк появился внутри периода
+ * или выбрано «все время» — первый день банка, вложенное и рост капитала к нему. Дни до
+ * появления банка сервер в points не присылает. Ряд результата (kind = result) — с нуля.
  */
-export function periodStart(series: Series, profit: string, allTime: boolean, bank: Pick<Bank, 'invested' | 'growth'> | null): PeriodStart {
-  const base = Number(series.base);
-  const first = series.points.findIndex((point) => Number(point.value) !== 0);
-  const beforeBank = series.kind === 'bank' && first >= 0 && (allTime || base === 0);
-  if (!beforeBank) {
-    // Процент — от банка на начало периода (заявка A: готовое поле в ответе сервера)
-    return { points: series.points, day: series.start, amount: series.base, share: base > 0 ? Number(profit) / base : null };
-  }
-  const points = series.points.slice(first);
-  const day = points[0]?.day ?? series.start;
-  if (bank && Number(bank.invested) > 0) {
-    return { points, day, amount: bank.invested, share: bank.growth === null ? null : Number(bank.growth) };
-  }
-  // Стартового банка нет (выведено больше, чем внесено) или банк еще грузится — первый день банка
-  return { points, day, amount: points[0]?.value ?? series.base, share: null };
+export function periodStart(series: Series): PeriodStart {
+  return { points: series.points, day: series.start_day ?? series.start, amount: series.start_amount ?? series.base, share: series.change_share ?? null };
 }
 
 /** С заглавной буквы: «За 30 дней» в подзаголовке карточки. */

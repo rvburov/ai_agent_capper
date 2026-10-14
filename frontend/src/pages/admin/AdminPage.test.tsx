@@ -598,8 +598,8 @@ describe('Администрирование: журнал и заглушки',
 
   it('вкладки следующих этапов — заглушка с номером этапа', async () => {
     mockFetch(routes());
-    renderAdmin('/admin/usage');
+    renderAdmin('/admin/settings');
     expect(await screen.findByText('Раздел появится на этапе 4')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Расход ИИ' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Настройки' })).toHaveAttribute('aria-selected', 'true');
   });
 });

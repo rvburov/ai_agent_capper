@@ -108,7 +108,7 @@ export function ruleRows(bank: Bank, params: StrategyParams | null, t: TFunction
   return RULE_ORDER.flatMap((key) => {
     const rule = byKey.get(key);
     if (!rule) return [];
-    const status: RuleStatus = !rule.enabled ? 'off' : ruleActing(rule, bank) ? 'acting' : 'waiting';
+    const status: RuleStatus = !rule.enabled ? 'off' : ruleActing(rule) ? 'acting' : 'waiting';
     // met — условие выполнено, по числам сервера (и у выключенного правила: «сработало бы»)
     return [{ key, ...ruleTexts(rule, params, t), status, met: rule.met }];
   });
@@ -165,14 +165,13 @@ export function adminTodo(admin: AdminAttention, t: TFunction): string[] {
 // ---------- расход на ИИ ----------
 
 /**
- * Самая дорогая задача месяца («Дороже всего») и ее доля в расходе: задачи сервер присылает по
- * убыванию цены. Нет расхода — null.
+ * Самая дорогая задача месяца («Дороже всего») и ее доля в расходе (share с сервера): задачи
+ * сервер присылает по убыванию цены. Нет расхода или доли — null.
  */
 export function topKind(usage: AiUsage): { kind: string; share: number } | null {
   const top = usage.kinds[0];
-  const total = usage.totals.cost_usd;
-  if (!top || !(total > 0) || !(top.cost_usd > 0)) return null;
-  return { kind: top.kind, share: top.cost_usd / total };
+  if (!top || !(top.cost_usd > 0) || top.share === null || top.share === undefined) return null;
+  return { kind: top.kind, share: top.share };
 }
 
 /** Лимиты и потолки: «$10», но «$1,50» — как на остальных экранах. */

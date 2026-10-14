@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   adminBudget,
@@ -72,6 +72,16 @@ function renderAdmin(path: string) {
 }
 
 const toast = (text: string | RegExp) => screen.findByText(text, { selector: '.toast span' });
+
+// Даты фикстур — 12–13 октября 2026. «Сегодня», месяц и год в подписях считаются от часов
+// браузера: фиксируем их, иначе завтра (1 ноября, 1 января) тесты станут красными
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-13T12:00:00Z'));
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('Администрирование: ключ и бюджет', () => {
   it('ключ, бюджет с полосой и прогнозом, лимиты участников и правила порогов', async () => {

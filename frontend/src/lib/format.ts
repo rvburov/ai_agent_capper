@@ -410,6 +410,21 @@ export function formatDayMonth(
   return i18n.t('format.date', { day: p.day, month: months[p.month - 1] ?? p.month });
 }
 
+/**
+ * Месяц и год в родительном падеже: «мая 2026» («по данным архива до мая 2026»). День без
+ * времени — календарный, в любом поясе.
+ */
+export function formatMonthYear(
+  value: DateInput | null | undefined,
+  options: Pick<DateFormatOptions, 'timeZone'> = {},
+): string {
+  const date = toDate(value);
+  if (!date || value === null || value === undefined) return DASH;
+  const p = partsIn(date, zoneOf(value, options.timeZone));
+  const months: readonly string[] = i18n.t('format.monthsGenitive', { returnObjects: true });
+  return `${months[p.month - 1] ?? p.month} ${p.year}`;
+}
+
 /** Время в поясе пользователя: «14:05» (начало матча на главной). */
 export function formatTime(
   value: DateInput | null | undefined,

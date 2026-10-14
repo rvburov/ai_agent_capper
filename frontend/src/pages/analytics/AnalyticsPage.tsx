@@ -5,7 +5,6 @@ import { useSearchParams } from 'react-router';
 import { paths } from '../../app/paths';
 import { Button, Callout, Card, EmptyState, Skeleton, useToast } from '../../components';
 import { marketLabel } from '../../features/analysis/markets';
-import { useBank } from '../../features/analysis/api';
 import { apiErrorText } from '../../features/analysis/codes';
 import { useAnalytics, useAnalyticsEver } from '../../features/analytics/api';
 import { capitalize, periodContext, prevContext } from '../../features/analytics/display';
@@ -113,7 +112,6 @@ export function AnalyticsPage() {
   const query = useMemo(() => filtersQuery(filters), [filters]);
   const analytics = useAnalytics(query);
   // Стартовый банк для «Банка по дням» (тот же запрос, что у плашки «Банк» в шапке)
-  const bank = useBank();
   const [explain, setExplain] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -182,7 +180,7 @@ export function AnalyticsPage() {
             onExplain: () => setExplain(true),
           }}
         />
-        <SeriesCard data={data} bank={bank.data ?? null} ctx={ctx} mobile={mobile} pending={pending} />
+        <SeriesCard data={data} ctx={ctx} mobile={mobile} pending={pending} />
         <Section title={t('analytics.sections.slices.title')} text={t('analytics.sections.slices.text')} />
         <ParlaysCard data={data} />
         <div className="analytics-grid">

@@ -6,6 +6,7 @@ import { useMe, type Me } from '../../api/hooks/useMe';
 import { ADMIN_TABS, paths, type AdminTab } from '../../app/paths';
 import { Button, Card, EmptyState, Icon, Skeleton, Tabs, type IconName } from '../../components';
 import { summarize } from '../../features/admin/people';
+import { decisionsCount, useAdminAttention } from '../../features/admin/useAdminAttention';
 import { useAdminUsers } from '../../features/admin/useAdminUsers';
 import { useInvites } from '../../features/admin/useInvites';
 import { AccessTab } from './AccessTab';
@@ -13,6 +14,8 @@ import { AuditTab } from './AuditTab';
 import { InviteModal } from './InviteModal';
 import { InvitesTab } from './InvitesTab';
 import { KeyTab } from './KeyTab';
+import { OverviewTab } from './OverviewTab';
+import { UsageTab } from './UsageTab';
 import { UsersTab } from './UsersTab';
 import './admin.css';
 
@@ -28,11 +31,11 @@ const ICONS: Record<AdminTab, IconName> = {
   message: 'megaphone',
 };
 
-// Вкладки следующих этапов (docs/PLAN.md, раздел 10): обзор с бюджетом, расход ИИ по людям,
-// настройки (валюта) и сообщения в центр уведомлений — этап 4. «Ключ и бюджет» — этап 3
-type StubTab = Exclude<AdminTab, 'users' | 'invites' | 'access' | 'key' | 'audit'>;
-const STAGES: Record<StubTab, number> = { overview: 4, usage: 4, settings: 4, message: 4 };
-const READY: readonly AdminTab[] = ['users', 'invites', 'access', 'key', 'audit'];
+// Вкладки следующей волны этапа 4 (docs/PLAN.md, раздел 10): настройки (валюта) и сообщения
+// в центр уведомлений. «Обзор» и «Расход ИИ» — этап 4, «Ключ и бюджет» — этап 3
+type StubTab = Exclude<AdminTab, 'overview' | 'users' | 'invites' | 'access' | 'key' | 'usage' | 'audit'>;
+const STAGES: Record<StubTab, number> = { settings: 4, message: 4 };
+const READY: readonly AdminTab[] = ['overview', 'users', 'invites', 'access', 'key', 'usage', 'audit'];
 
 function isStubTab(tab: AdminTab): tab is StubTab {
   return !READY.includes(tab);
@@ -52,6 +55,7 @@ export function AdminPage() {
   const { tab } = useParams();
   const { data: me } = useMe();
   const [inviteOpen, setInviteOpen] = useState(false);
+  const decisions = useDecisionsCount();
 
   if (tab !== undefined && (!isAdminTab(tab) || tab === 'overview')) {
     return <Navigate to={paths.admin()} replace />;
@@ -70,7 +74,16 @@ export function AdminPage() {
         className="adm-tabs"
         items={ADMIN_TABS.map((id) => ({
           id,
-          label: t(`admin.tabs.${id}`),
+          label:
+            id === 'overview' && decisions > 0 ? (
+              <>
+                {t('admin.tabs.overview')}
+                <span className="adm-tab-dot" aria-hidden="true" />
+                <span className="sr-only">{t('admin.overview.decisions.tabNote', { count: decisions })}</span>
+              </>
+            ) : (
+              t(`admin.tabs.${id}`)
+            ),
           icon: ICONS[id],
           to: paths.admin(id),
         }))}
@@ -82,10 +95,12 @@ export function AdminPage() {
         tabIndex={-1}
         aria-label={t(`admin.tabs.${active}`)}
       >
+        {active === 'overview' && <OverviewTab me={me} />}
         {active === 'users' && <UsersTab me={me} />}
         {active === 'invites' && <InvitesTab onInvite={openInvite} />}
         {active === 'access' && <AccessTab me={me} />}
         {active === 'key' && <KeyTab me={me} />}
+        {active === 'usage' && <UsageTab me={me} />}
         {active === 'audit' && <AuditTab />}
         {isStubTab(active) && (
           <Card>
@@ -101,6 +116,11 @@ export function AdminPage() {
       <InviteModal open={inviteOpen} onClose={() => setInviteOpen(false)} />
     </>
   );
+}
+
+/** Сколько дел ждет решения — точка у вкладки «Обзор» (drawTabs макета); дела решает сервер. */
+function useDecisionsCount(): number {
+  return decisionsCount(useAdminAttention().data);
 }
 
 /** Шапка раздела (headBlock макета): кто вы, сколько людей и приглашений, «Пригласить». */

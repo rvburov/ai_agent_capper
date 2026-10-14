@@ -25,5 +25,7 @@ export type BetListQuery = NonNullable<operations['list_bets_api_bets_get']['par
 export type BetFiltersQuery = Omit<BetListQuery, 'before' | 'limit'>;
 
 export type Period = NonNullable<BetListQuery['period']>;
+/** Фильтр статуса: статус ставки или settled — все рассчитанные. */
+export type StatusFilter = NonNullable<BetListQuery['status']>;
 export type SurfaceFilter = NonNullable<BetListQuery['surface']>[number];
 export type SourceFilter = NonNullable<BetListQuery['source']>;

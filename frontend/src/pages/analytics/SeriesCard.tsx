@@ -5,7 +5,6 @@ import { Card, Chip, DataTable, type DataColumn } from '../../components';
 import { ChartWithTable, LineChart, type ValueFormat } from '../../components/charts';
 import { capitalize, periodStart, signClass } from '../../features/analytics/display';
 import type { Analytics, SeriesRow } from '../../features/analytics/types';
-import type { Bank } from '../../features/bank/types';
 import { currencyOf } from '../../features/bets/display';
 import { currencySign, formatDate, formatDateLong, formatDateRange, formatMoney, formatNumber, formatPercent, stepDigits } from '../../lib/format';
 import { cx } from '../../lib/cx';
@@ -32,14 +31,12 @@ function rowLabel(row: SeriesRow, group: 'week' | 'month', today: string, t: TFu
 
 interface SeriesCardProps {
   data: Analytics;
-  /** Банк из GET /api/me/bank: стартовый банк и рост к нему (null — еще грузится). */
-  bank: Bank | null;
   ctx: string;
   mobile: boolean;
   pending: boolean;
 }
 
-export function SeriesCard({ data, bank, ctx, mobile, pending }: SeriesCardProps) {
+export function SeriesCard({ data, ctx, mobile, pending }: SeriesCardProps) {
   const { t } = useTranslation();
   const { series, kpi } = data;
   const isBank = series.kind === 'bank';
@@ -50,7 +47,7 @@ export function SeriesCard({ data, bank, ctx, mobile, pending }: SeriesCardProps
   // Подписи без знака валюты — он в подзаголовке; у результата — со знаком
   const yFormat: ValueFormat = (value, axis) =>
     formatNumber(value, axis ? Math.min(digits, stepDigits(axis.step)) : digits, { signed: !isBank });
-  const start = periodStart(series, kpi.profit, data.period === 'all', bank);
+  const start = periodStart(series);
   const values = start.points.map((point) => Number(point.value));
   const last = start.points[start.points.length - 1]?.value ?? series.last;
   const profit = Number(kpi.profit);

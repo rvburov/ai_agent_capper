@@ -1,6 +1,6 @@
 import { parseAmount } from '../analysis/amount';
 import { moneyRules, stakeForShare } from '../analysis/stake';
-import type { Adaptation, AdaptationKey, Bank, MoveKind, StrategyParams } from './types';
+import type { Adaptation, AdaptationKey, MoveKind, StrategyParams } from './types';
 
 /*
  * Вкладка «Банк и стратегия»: разбор суммы движения банка, строки правил стратегии и статус
@@ -102,52 +102,13 @@ export function param(rule: Adaptation, name: string): number | null {
 }
 
 /**
- * Выполнено ли условие правила сейчас — для выключенного правила («с правилом оно бы
- * действовало»): у включенного это уже active из ответа сервера. Сравниваются числа банка
- * из ответа сервера с порогами правила.
- */
-export function conditionMet(rule: Adaptation, bank: Bank): boolean {
-  if (rule.enabled) return rule.active;
-  const drawdown = num(bank.drawdown);
-  const week = num(bank.week_change);
-  const growth = num(bank.growth);
-  const winrate = num(bank.winrate);
-  switch (rule.key) {
-    case 'dd10':
-    case 'dd20': {
-      const from = param(rule, 'from');
-      return drawdown !== null && from !== null && drawdown >= from;
-    }
-    case 'week_loss': {
-      const loss = param(rule, 'loss');
-      return week !== null && loss !== null && week <= loss;
-    }
-    case 'week_win': {
-      const win = param(rule, 'win');
-      return week !== null && win !== null && week >= win;
-    }
-    case 'up15': {
-      const up = param(rule, 'bank_up');
-      const min = param(rule, 'min_winrate');
-      return growth !== null && winrate !== null && up !== null && min !== null && growth >= up && winrate >= min;
-    }
-    default:
-      return false;
-  }
-}
-
-/**
  * Правило сейчас действует — чип «Действует сейчас». Сервер отмечает active только у самого
- * строгого из правил просадки (при −25% — у −20%), но порог −10% при этом тоже пройден: как в
- * макете (adaptCard), действующими показаны оба. Остальное — active из ответа сервера.
+ * строгого из правил просадки (при −25% — у −20%), но порог −10% при этом тоже пройден (met):
+ * как в макете (adaptCard), действующими показаны оба. Условие считает сервер (met), браузер
+ * числа банка с порогами не сравнивает.
  */
-export function ruleActing(rule: Adaptation, bank: Bank): boolean {
-  if (!rule.enabled) return false;
-  if (rule.active) return true;
-  if (rule.key !== 'dd10' && rule.key !== 'dd20') return false;
-  const drawdown = num(bank.drawdown);
-  const from = param(rule, 'from');
-  return drawdown !== null && from !== null && drawdown >= from;
+export function ruleActing(rule: Adaptation): boolean {
+  return rule.enabled && (rule.active || rule.met);
 }
 
 /** Шкала просадки 0–25% с отметками порогов −10% и −20% (как в макете). */

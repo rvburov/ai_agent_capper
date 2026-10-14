@@ -36,8 +36,8 @@ export const NAV_ITEMS: Record<NavId, NavItem> = {
   learning: { id: 'learning', to: paths.learning, icon: 'brain' },
   costs: { id: 'costs', to: paths.costs, icon: 'coins' },
   profile: { id: 'profile', to: paths.profile(), icon: 'user' },
-  // Пока «Обзор» — заглушка (этап 4), пункт меню ведет сразу к работающим «Участникам»
-  admin: { id: 'admin', to: paths.admin('users'), icon: 'admin' },
+  // Пункт меню ведет к «Обзору» раздела (этап 4): дела, бюджет ключа, последние действия
+  admin: { id: 'admin', to: paths.admin(), icon: 'admin' },
 };
 
 export const NAV_GROUPS: NavGroup[] = [

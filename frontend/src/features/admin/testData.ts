@@ -69,6 +69,8 @@ export function adminBudget(over: Partial<AdminBudget> = {}): AdminBudget {
     left_usd: 18.8,
     forecast_usd: 66,
     members_limits_usd: 18,
+    members_usd: 30.4,
+    budget_share: 41.2 / 60,
     alert_pct: 80,
     eval_budget_usd: 25,
     eval_spent_usd: 4.5,

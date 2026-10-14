@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { bankOut } from '../../features/analysis/testData';
 import { betLeg, betLeg2, betLegacy, betLost, betOpen, betPage, betsSummary, betWon } from '../../features/bets/testData';
@@ -7,6 +7,15 @@ import type { BetItem } from '../../features/bets/types';
 import { apiError, json, type Handler } from '../../test/fetchMock';
 import { bodyOf, renderPage } from '../../test/renderPage';
 import { BetsPage } from './BetsPage';
+
+/** Даты фикстур — октябрь 2026; в другом году подписи дат получают год. Часы браузера — на 13 октября. */
+function fixClock(): void {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-13T12:00:00Z'));
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+}
 
 const MONTH = betsSummary({ settled: 2, won: 1, lost: 1, profit: '168.20', turnover: '2320.00', roi: 0.0725 });
 
@@ -67,6 +76,9 @@ describe('Ставки: экран', () => {
     expect(within(legs).getAllByText('эталон · Pinnacle')).toHaveLength(2);
     expect(within(legs).getAllByText('+4,0%').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Перевес подтвержден').length).toBeGreaterThan(0);
+    // «Банк после» — капитал после расчета с сервера (bank_after), браузер его не считает
+    const facts = legs.closest('tr')?.parentElement ?? document.body;
+    expect(within(facts as HTMLElement).getByText('Банк после').nextElementSibling).toHaveTextContent('49 168 ₽');
     // ставка бота — без CLV, с пометкой
     const bot = table.querySelector('tr[data-bet="2"]') as HTMLElement;
     expect(within(bot).getByText('старый бот')).toBeInTheDocument();
@@ -286,6 +298,7 @@ describe('Ставки: экран', () => {
   });
 
   it('телефон: карточки, нижний лист и шторка фильтров с числом ставок', async () => {
+    fixClock();
     const { user, calls } = renderBets('/bets', betsApi(), 375);
     const history = await screen.findByRole('region', { name: 'История ставок' });
     const card = await within(history).findByRole('button', { name: /^Ставка №5, 5 окт, Выигрыш, \+1\s168\s₽/ });
@@ -312,7 +325,7 @@ function manyOpen(count = 20): BetItem[] {
 }
 
 describe('Ставки: история, ссылки и ошибки', () => {
-  it('первая страница — одни открытые ставки: история дочитывает следующую сама', async () => {
+  it('история без фильтра статуса — запрос status=settled: открытые страницу не занимают', async () => {
     const open = manyOpen();
     const { calls } = renderBets(
       '/bets',
@@ -320,7 +333,7 @@ describe('Ставки: история, ссылки и ошибки', () => {
         'GET /api/bets': (request) => {
           const q = query(request);
           if (q.get('status') === 'open') return json(betPage(open));
-          if (q.get('before') === '81') return json(betPage([betWon(), betLost()]));
+          if (q.get('status') === 'settled') return json(betPage([betWon(), betLost()]));
           return json(betPage(open, 81));
         },
         'GET /api/bets/summary': (request) => json(query(request).has('from') ? MONTH : betsSummary({ settled: 2, open: 20 })),
@@ -330,12 +343,25 @@ describe('Ставки: история, ссылки и ошибки', () => {
     expect(within(table).getByText('Октябрь 2026')).toBeInTheDocument();
     expect(table.querySelector('tr[data-bet="5"]')).not.toBeNull();
     expect(table.querySelector('tr[data-bet="4"]')).not.toBeNull();
-    expect(screen.queryByText(/Рассчитанных ставок пока нет/)).toBeNull();
     expect(screen.getByText('Показано 2 из 2')).toBeInTheDocument();
-    // все рассчитанные загружены — «Показать еще» нет, хотя у сервера есть следующая страница
     expect(screen.queryByRole('button', { name: /^Показать еще/ })).toBeNull();
-    const pages = calls.filter((r) => new URL(r.url).pathname === '/api/bets' && !query(r).has('status'));
-    expect(pages.map((r) => query(r).get('before'))).toEqual([null, '81']);
+    const lists = calls.filter((r) => new URL(r.url).pathname === '/api/bets');
+    // «В игре» — status=open, история — status=settled; списка без статуса нет
+    expect(lists.map((r) => query(r).get('status')).sort()).toEqual(['open', 'settled']);
+  });
+
+  it('ссылка «Все N ставок за период» с главной: status=settled в адресе — только история', async () => {
+    const { calls } = renderBets(
+      '/bets?period=30d&status=settled',
+      betsApi({
+        'GET /api/bets': (request) => json(betPage(query(request).get('status') === 'settled' ? [betWon(), betLost()] : [])),
+        'GET /api/bets/summary': (request) => json(query(request).has('from') ? MONTH : betsSummary({ settled: 2, open: 0 })),
+      }),
+    );
+    expect(await screen.findByRole('table', { name: 'Рассчитанные ставки по месяцам' })).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Фильтры ставок' })).getByText('Рассчитанные')).toBeInTheDocument();
+    const lists = calls.filter((r) => new URL(r.url).pathname === '/api/bets');
+    expect(lists.every((r) => query(r).get('status') === 'settled' && query(r).get('period') === '30d')).toBe(true);
   });
 
   it('рассчитанных нет: «пусто» — только когда страниц больше нет', async () => {
@@ -438,6 +464,7 @@ describe('Ставки: история, ссылки и ошибки', () => {
   });
 
   it('одна граница дат — подпись «с …» или «по …», как у метки фильтра', async () => {
+    fixClock();
     renderBets('/bets?from=2026-10-01');
     const summary = await screen.findByRole('region', { name: 'Итоги по ставкам' });
     expect(within(summary).getByText('с 1 окт')).toBeInTheDocument();

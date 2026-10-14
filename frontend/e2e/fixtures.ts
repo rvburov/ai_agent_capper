@@ -2,6 +2,7 @@ import type { Page, Route } from '@playwright/test';
 
 import type { components } from '../src/api/schema';
 import { aiBudget } from '../src/features/ai/testData';
+import { rankingOut } from '../src/features/players/testData';
 // та же стратегия v3, что strategyV3() unit-тестов (Node требует атрибут у JSON)
 import strategy from '../src/features/analysis/fixtures/strategy.json' with { type: 'json' };
 
@@ -27,6 +28,9 @@ export const ME_ADMIN = {
   tz: 'Europe/Helsinki',
   totp_enabled: true,
   created_at: '2026-10-01T09:00:00Z',
+  consent_training: false,
+  deletion_requested_at: null,
+  deletion_at: null,
 } as const satisfies Schemas['MeOut'];
 
 export const ME_MEMBER = {
@@ -116,6 +120,9 @@ export function dashboardOut(over: Partial<Schemas['DashboardOut']> = {}): Schem
       group: 'week',
       start: '2026-09-13',
       base: '48000.00',
+      start_day: '2026-09-13',
+      start_amount: '48000.00',
+      change_share: 0,
       last: '48000.00',
       peak: '48000.00',
       max_drawdown: 0,
@@ -165,6 +172,14 @@ export function dashboardApi(): Record<string, MockReply> {
     'GET /api/strategy/active': strategyV3(),
     'GET /api/ai/budget': aiBudget(),
   };
+}
+
+/**
+ * Ответ «Игроков» (этап 4): первая страница списка. Смоук оболочки на телефоне открывает
+ * /players из шторки «Еще» — без него экран ловил бы 404.
+ */
+export function playersApi(): Record<string, MockReply> {
+  return { 'GET /api/players/ranking': rankingOut() };
 }
 
 /**

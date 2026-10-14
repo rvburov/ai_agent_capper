@@ -2,13 +2,11 @@ import { useTranslation } from 'react-i18next';
 
 import { Card, EmptyState, type IconName } from '../../components';
 
-export type StubScreen = 'players' | 'player' | 'learning' | 'costs';
+// После этапа 4 заглушка осталась только у «Обучения модели» (этап 5)
+export type StubScreen = 'learning';
 
 const ICONS: Record<StubScreen, IconName> = {
-  players: 'users',
-  player: 'user',
   learning: 'brain',
-  costs: 'coins',
 };
 
 /** Заглушка экрана, которого еще нет: на каком этапе появится и что в нем будет (docs/PLAN.md, раздел 10). */

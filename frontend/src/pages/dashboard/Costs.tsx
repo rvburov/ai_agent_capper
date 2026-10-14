@@ -28,6 +28,8 @@ function Howto({ children }: { children: ReactNode }) {
 interface ValueRowProps {
   spent: number;
   max: number;
+  /** Доля spent от max — с сервера (budget_share, limit_share); null — неизвестна. */
+  share: number | null | undefined;
   /** Порог уведомления о расходе, % (настройки администратора): с него — желтый, с 100% — красный. */
   alertPct: number;
   tail?: string;
@@ -38,9 +40,8 @@ interface ValueRowProps {
  * Крупная сумма «из лимита», метка доли и полоса (valueRow макета). Цвет — по порогу из настроек
  * администратора, как у шкалы лимита в «Ключе Claude» и «Администрировании» (spendTone).
  */
-function ValueRow({ spent, max, alertPct, tail, what }: ValueRowProps) {
+function ValueRow({ spent, max, share, alertPct, tail, what }: ValueRowProps) {
   const { t } = useTranslation();
-  const share = max > 0 ? spent / max : 0;
   const tone = spendTone(spent, max, alertPct);
   return (
     <>
@@ -54,7 +55,7 @@ function ValueRow({ spent, max, alertPct, tail, what }: ValueRowProps) {
           </span>
         </div>
         <Chip kind={tone ?? 'good'} icon={tone ? 'alert' : 'check'}>
-          {t('dashboard.costs.share', { pct: formatPercent(share, { digits: 0 }), what })}
+          {t('dashboard.costs.share', { pct: share === null || share === undefined ? '—' : formatPercent(share, { digits: 0 }), what })}
         </Chip>
       </div>
       <Meter
@@ -67,8 +68,6 @@ function ValueRow({ spent, max, alertPct, tail, what }: ValueRowProps) {
     </>
   );
 }
-
-const ROUND_CENT = (value: number) => Math.round(value * 100) / 100;
 
 /** «Из кэша»: доля входных токенов, прочитанных из кэша (формула — PLAN, раздел 8). */
 function cacheText(usage: AiUsage | undefined, t: TFunction): string {
@@ -123,10 +122,9 @@ export function Costs({ budget, usage, me, failed }: CostsProps) {
 
   if (me.role === 'admin' && budget.budget) {
     // Бюджет ключа администратора: «Вы» + «Участники на вашем ключе» + «Общие фоновые задачи» =
-    // все вызовы на ключе за месяц (без проверок). Отдельного поля «участники» сервер пока не
-    // присылает — это остаток той же суммы (заявка на members_usd в AdminBudgetOut — в отчете)
+    // все вызовы на ключе за месяц (без проверок); участники — members_usd с сервера
     const total = budget.budget;
-    const members = Math.max(0, ROUND_CENT(total.spent_usd - budget.spent_usd - total.background_usd));
+    const members = total.members_usd ?? null;
     return (
       <Card
         className="dashboard-card"
@@ -139,11 +137,11 @@ export function Costs({ budget, usage, me, failed }: CostsProps) {
           </Button>
         }
       >
-        <ValueRow spent={total.spent_usd} max={total.budget_usd} alertPct={total.alert_pct} what={t('dashboard.costs.ofBudget')} />
+        <ValueRow spent={total.spent_usd} max={total.budget_usd} share={total.budget_share} alertPct={total.alert_pct} what={t('dashboard.costs.ofBudget')} />
         <KeyValue
           items={[
             { key: 'me', label: t('dashboard.costs.you'), value: formatUsd(budget.spent_usd) },
-            { key: 'members', label: t('dashboard.costs.members'), value: formatUsd(members) },
+            { key: 'members', label: t('dashboard.costs.members'), value: members === null ? '—' : formatUsd(members) },
             { key: 'background', label: t('dashboard.costs.background'), value: formatUsd(total.background_usd) },
             { key: 'forecast', label: t('dashboard.costs.forecast'), value: t('dashboard.costs.approx', { amount: formatUsd(total.forecast_usd) }) },
             {
@@ -199,6 +197,7 @@ export function Costs({ budget, usage, me, failed }: CostsProps) {
         <ValueRow
           spent={budget.spent_usd}
           max={monthly}
+          share={budget.limit_share}
           alertPct={budget.alert_pct}
           tail={left === null ? undefined : t('dashboard.costs.left', { amount: formatUsd(left) })}
           what={t('dashboard.costs.ofLimit')}

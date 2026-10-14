@@ -96,7 +96,10 @@ test('главная: открытая ставка → «Внести резу�
 
   // Исправление результата (сторно и новый расчет: Джокович проиграл) со строки последних ставок
   await navTo(page, false, 'Главная');
-  await page.getByRole('button', { name: 'Показать таблицей' }).click();
+  // экран главной грузится по требованию: пока он не открылся, видна прежняя «Аналитика» со
+  // своими «Показать таблицей» — кнопку берем из карточки «Динамика банка»
+  const dynamics = page.getByRole('heading', { level: 3, name: 'Динамика банка' }).locator('xpath=ancestor::section[1]');
+  await dynamics.getByRole('button', { name: 'Показать таблицей' }).click();
   await table.getByRole('row').filter({ hasText: 'Выигрыш' }).click();
   await expect(page).toHaveURL(/\/bets$/);
   await page.getByRole('button', { name: 'Исправить результат' }).click();
