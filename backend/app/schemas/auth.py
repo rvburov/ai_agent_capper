@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import AfterValidator, BaseModel, StringConstraints, model_validator
 
-from app.db.models import DEFAULT_TZ
 from app.schemas.me import MeOut, PasswordStr, TotpCodeStr
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -124,7 +123,8 @@ class RegisterIn(BaseModel):
     password: PasswordStr
     accept_terms: bool
     consent_training: bool = False
-    tz: TimeZoneStr = DEFAULT_TZ
+    # Не передан — часовой пояс по умолчанию из настроек администратора (app_settings)
+    tz: TimeZoneStr | None = None
 
 
 class ResetIn(BaseModel):

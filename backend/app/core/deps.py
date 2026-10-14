@@ -13,6 +13,11 @@
 - CurrentAuth / CurrentSession / CurrentUser — вошедший пользователь по cookie сеанса,
   иначе 401 errors.auth.not_authenticated.
 - AdminUser — только роль admin, иначе 403 errors.common.forbidden.
+
+Пока участник ждет удаления своего аккаунта (В10, users.deletion_requested_at), вход
+возможен, но открыты только GET /api/me и отмена DELETE /api/me/deletion (выход и вход
+сеанс не спрашивают). Остальные маршруты со входом — 403 account.deletion_pending: это
+проверяется здесь, в одном месте, а не в каждом маршруте.
 """
 
 import ipaddress
@@ -26,10 +31,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.cookies import cookie_name
 from app.core.errors import AppError
-from app.db.models import User, UserSession
+from app.core.timing import route_template
+from app.db.models import ACCOUNT_DELETION_DELAY, User, UserSession
 from app.services import sessions as sessions_service
 
 UNKNOWN_IP = "0.0.0.0"
+# Маршруты, открытые участнику, который ждет удаления аккаунта: метод и полный шаблон
+DELETION_ALLOWED = frozenset({("GET", "/api/me"), ("DELETE", "/api/me/deletion")})
 
 
 async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
@@ -74,6 +82,11 @@ async def current_auth(request: Request, db: DbSession) -> Auth:
     session, user = found
     await sessions_service.touch_session(db, session)
     request.state.session_id = session.id
+    if user.deletion_requested_at is not None:
+        route = (request.method, route_template(request.scope) or "")
+        if route not in DELETION_ALLOWED:
+            delete_at = user.deletion_requested_at + ACCOUNT_DELETION_DELAY
+            raise AppError(403, "account.deletion_pending", delete_at=delete_at.isoformat())
     return Auth(session=session, user=user)
 
 

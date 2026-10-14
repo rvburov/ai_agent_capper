@@ -26,6 +26,7 @@ async def test_notify_uses_locale_text(db: AsyncSession, make_user: UserFactory)
     note = await notify(
         db, user_id=made.id, kind="new_device", device="Chrome · Windows", ip="1.2.3.4"
     )
+    assert note is not None
     await db.commit()
     assert note.title == "Вход с нового устройства"
     assert "Chrome · Windows" in note.body and "1.2.3.4" in note.body
@@ -38,6 +39,7 @@ async def test_notify_variant_text(db: AsyncSession, make_user: UserFactory) -> 
     note = await notify(
         db, user_id=made.id, kind="login_failures", variant="two_factor", ip="1.2.3.4", count=10
     )
+    assert note is not None
     await db.commit()
     assert note.kind == "login_failures"
     assert note.title == t("notifications.login_failures.two_factor.title")

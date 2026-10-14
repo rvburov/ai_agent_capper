@@ -38,6 +38,12 @@ class MeOut(BaseModel):
     tz: str
     totp_enabled: bool
     created_at: datetime
+    # Согласие на обезличенные прогнозы для общей модели (Р15)
+    consent_training: bool
+    # Удаление аккаунта самим участником (В10): когда попросил и когда удалится. Пока
+    # запрос действует, открыт только этот адрес и отмена (DELETE /api/me/deletion)
+    deletion_requested_at: datetime | None
+    deletion_at: datetime | None
 
 
 # Не пояса, а служебные файлы базы: «localtime» — пояс самого сервера (на части систем
@@ -76,13 +82,15 @@ ProfileTimeZoneStr = Annotated[
 
 
 class ProfileUpdateIn(BaseModel):
-    """Правка профиля: имя и часовой пояс. Поле не передано (или null) — не меняется.
-    Остальные поля (email, роль, режим ключа) так не меняются: лишнее поле — 422."""
+    """Правка профиля: имя, часовой пояс и согласие на обезличенные прогнозы (Р15). Поле
+    не передано (или null) — не меняется. Остальные поля (email, роль, режим ключа) так
+    не меняются: лишнее поле — 422."""
 
     model_config = ConfigDict(extra="forbid")
 
     display_name: ProfileNameStr | None = None
     tz: ProfileTimeZoneStr | None = None
+    consent_training: bool | None = None
 
 
 class RecoveryCodesStatusOut(BaseModel):

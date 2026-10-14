@@ -34,6 +34,7 @@ from app.db.models import (
     Notification,
     PlayerRating,
     TrustedDevice,
+    User,
     UserSession,
 )
 from app.db.session import create_sessionmaker
@@ -44,14 +45,19 @@ from app.services.sessions import create_session, get_active_session
 from app.workers import jobs
 from app.workers.jobs import (
     LOGIN_EVENTS_RETENTION,
+    check_ai_alerts,
     cleanup_auth_data,
     cleanup_auth_records,
+    delete_requested_accounts,
     notify_stale_data,
     reap_stuck_analyses,
     run_analysis,
     update_data,
 )
 from app.workers.main import (
+    ACCOUNT_DELETION_HOUR_UTC,
+    ACCOUNT_DELETION_MINUTE,
+    AI_ALERTS_MINUTE,
     ANALYSIS_TIMEOUT_SECONDS,
     CLEANUP_HOUR_UTC,
     CLEANUP_MINUTE,
@@ -61,6 +67,7 @@ from app.workers.main import (
     build_cron_jobs,
     create_queue_pool,
 )
+from tests.claude_mock import seed_prices
 from tests.support import BACKEND_DIR, UserFactory
 from tests.test_ingest_tennis_data import write_year
 from tests.test_ingest_update import FIXTURES, rows_2024
@@ -218,13 +225,41 @@ async def test_cleanup_job_uses_sessionmaker_from_context(
     assert counts == {"sessions": 0, "trusted_devices": 0, "login_events": 1}
 
 
+async def test_cabinet_jobs_use_sessionmaker_from_context(
+    engine: AsyncEngine, db: AsyncSession, make_user: UserFactory
+) -> None:
+    """Задачи этапа 4 берут сеанс базы из ctx воркера: удаление аккаунтов по запросу
+    и сигналы расхода ИИ."""
+    ctx = {"sessionmaker": create_sessionmaker(engine)}
+    waiting = await make_user()
+    due = await make_user()
+    waiting_id, due_id = waiting.id, due.id
+    now = datetime.now(UTC)
+    (await db.get_one(User, waiting_id)).deletion_requested_at = now - timedelta(days=3)
+    (await db.get_one(User, due_id)).deletion_requested_at = now - timedelta(days=8)
+    await db.commit()
+    assert await delete_requested_accounts(ctx) == [due_id]
+    # Цен Opus нет — сигнал no_price; уведомление получает администратор
+    await seed_prices(db, "claude-haiku-5-5", "claude-sonnet-5-5")
+    admin = await make_user(role="admin")
+    admin_id = admin.id
+    assert "no_price" in await check_ai_alerts(ctx)
+    kinds = await db.scalars(select(Notification.kind).where(Notification.user_id == admin_id))
+    assert list(kinds) == ["ai_alert"]
+
+
 def test_worker_settings(settings: Settings) -> None:
     assert WorkerSettings.queue_name == f"{settings.redis_prefix}arq:queue"
-    cleanup_job, update_job, analysis_job, reaper_job, warm_job = WorkerSettings.functions
-    assert (cleanup_job, update_job, reaper_job) == (
+    functions = WorkerSettings.functions
+    cleanup_job, update_job, analysis_job, reaper_job, warm_job, deletion_job, alerts_job = (
+        functions
+    )
+    assert (cleanup_job, update_job, reaper_job, deletion_job, alerts_job) == (
         cleanup_auth_records,
         update_data,
         reap_stuck_analyses,
+        delete_requested_accounts,
+        check_ai_alerts,
     )
     # Прогрев кэша аналитики: без повтора и без хранения результата — иначе задача с тем
     # же id участника не ставилась бы, пока результат не истечет
@@ -239,7 +274,7 @@ def test_worker_settings(settings: Settings) -> None:
     # Свой предел анализа короче: анализ кончается своим failed, а не снятием задачи
     assert analysis_run.RUN_DEADLINE_SECONDS < ANALYSIS_TIMEOUT_SECONDS
     assert WorkerSettings.cron_jobs is not None
-    cleanup, data, reaper = WorkerSettings.cron_jobs
+    cleanup, data, reaper, deletion, alerts = WorkerSettings.cron_jobs
     # Уборщик зависших анализов — каждые 5 минут, не в минуты соседних задач
     assert reaper.coroutine is reap_stuck_analyses and reaper.max_tries == 1
     assert reaper.minute == set(REAP_MINUTES) and len(REAP_MINUTES) == 12
@@ -255,6 +290,18 @@ def test_worker_settings(settings: Settings) -> None:
     )
     assert DATA_UPDATE_MINUTE != 0 and data.max_tries == 1
     assert data.timeout_s is not None and data.timeout_s >= 1800
+    # Удаление аккаунтов по запросу — раз в сутки после очистки; сигналы расхода ИИ — раз
+    # в час. Обе задачи без повтора и не в минуты соседних
+    assert deletion.coroutine is delete_requested_accounts and deletion.max_tries == 1
+    assert (deletion.hour, deletion.minute, deletion.second) == (
+        ACCOUNT_DELETION_HOUR_UTC,
+        ACCOUNT_DELETION_MINUTE,
+        0,
+    )
+    assert alerts.coroutine is check_ai_alerts and alerts.max_tries == 1
+    assert alerts.hour is None and alerts.minute == AI_ALERTS_MINUTE
+    busy = {CLEANUP_MINUTE, DATA_UPDATE_MINUTE, 0} | REAP_MINUTES
+    assert not {ACCOUNT_DELETION_MINUTE, AI_ALERTS_MINUTE} & busy
     assert WorkerSettings.timezone is UTC
     redis_url = settings.redis_url.removeprefix("redis://")
     assert redis_url.startswith(
@@ -266,7 +313,7 @@ def test_worker_cron_can_be_turned_off(settings: Settings) -> None:
     # CAPPER_WORKER_CRON=false (стек сквозных тестов): только задачи из очереди, без
     # ночной загрузки архивов и уборщика
     jobs_on = build_cron_jobs(settings)
-    assert jobs_on is not None and len(jobs_on) == 3
+    assert jobs_on is not None and len(jobs_on) == 5
     assert build_cron_jobs(settings.model_copy(update={"worker_cron": False})) is None
     assert Settings.model_fields["worker_cron"].default is True
 

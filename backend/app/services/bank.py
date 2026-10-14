@@ -55,7 +55,7 @@ from app.schemas.bets import (
     BankPointOut,
     Period,
 )
-from app.services.app_settings import get_app_settings
+from app.services.app_settings import check_currency, get_app_settings
 from app.services.sessions import utcnow
 
 WEEK = timedelta(days=7)
@@ -598,6 +598,7 @@ async def add_entry(db: AsyncSession, user: User, body: BankEntryIn) -> AddedEnt
         raise AppError(422, "bank.amount_positive")
     await lock_member_money(db, user.id)
     settings = await get_app_settings(db)
+    check_currency(settings, body.currency)
     last = await db.scalar(
         select(func.max(BankrollLedger.id)).where(BankrollLedger.user_id == user.id)
     )

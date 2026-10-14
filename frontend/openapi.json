@@ -267,7 +267,7 @@
           "auth"
         ],
         "summary": "Register",
-        "description": "Регистрация по коду приглашения. Следующий шаг — настройка 2FA.",
+        "description": "Регистрация по коду приглашения. Следующий шаг — настройка 2FA. Без tz — часовой\nпояс по умолчанию из «Администрирование → Настройки».",
         "operationId": "register_api_auth_register_post",
         "requestBody": {
           "content": {
@@ -351,6 +351,7 @@
           "me"
         ],
         "summary": "Me",
+        "description": "Вошедший пользователь. deletion_at задан — аккаунт будет удален в этот момент, до\nнего открыта только отмена (DELETE /api/me/deletion).",
         "operationId": "me_api_me_get",
         "responses": {
           "200": {
@@ -380,7 +381,7 @@
           "me"
         ],
         "summary": "Update Me",
-        "description": "Имя и часовой пояс. Пояс — только из базы IANA (zoneinfo), иначе 422.",
+        "description": "Имя, часовой пояс и согласие на обезличенные прогнозы (consent_training, Р15).\nПояс — только из базы IANA (zoneinfo), иначе 422.",
         "operationId": "update_me_api_me_patch",
         "requestBody": {
           "content": {
@@ -856,6 +857,501 @@
               "maximum": 9223372036854775807,
               "minimum": 1,
               "title": "Notification Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/notification-prefs": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Notification Prefs",
+        "description": "Виды уведомлений, которые человек может получать (у администратора — еще архив\nматчей и сигналы расхода ИИ), с «на сайте» и признаком «обязательное». Push — только\nпоказ (этап 6).",
+        "operationId": "notification_prefs_api_me_notification_prefs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPrefsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Update Notification Prefs",
+        "description": "Частичное обновление «на сайте» по видам. Обязательный вид выключить нельзя —\n422 notification.required; вида нет у человека — 422 notification.kind_unavailable.",
+        "operationId": "update_notification_prefs_api_me_notification_prefs_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPrefsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPrefsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/play-limits": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Play Limits",
+        "description": "Лимиты ставок в день (число и сумма), ждущее повышение, пауза и сколько поставлено\nсегодня по поясу участника; blocked — что сейчас не дает поставить и запустить анализ.",
+        "operationId": "play_limits_api_me_play_limits_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayLimitsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Update Play Limits",
+        "description": "Лимиты целиком (null — без лимита): строже — сразу, мягче — через 24 часа (pending).\nЗапрос без смягчений отменяет ждущее повышение. currency формы не валюта программы —\n409 common.currency_changed.",
+        "operationId": "update_play_limits_api_me_play_limits_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayLimitsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayLimitsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/pause": {
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Take Pause",
+        "description": "Пауза на 1, 7, 30 или 90 дней (до полуночи по поясу участника после последнего дня):\nставки и анализы на любом ключе недоступны, досрочно не снимается. Короче действующей —\n409 play.pause_shorter.",
+        "operationId": "take_pause_api_me_pause_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayLimitsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/export": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Export Data",
+        "description": "Все свои данные сразу скачиванием (GDPR): профиль, ставки и события, журнал банка,\nанализы и прогнозы, свои вызовы Claude, уведомления и настройки, букмекеры, лимиты,\nвходы. Без паролей, кодов 2FA и ключей Claude. Файл отдается частями.",
+        "operationId": "export_data_api_me_export_get",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "type": "string",
+              "default": "json",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON — один файл, CSV — архив ZIP по файлу на таблицу",
+            "content": {
+              "application/json": {},
+              "application/zip": {}
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/deletion": {
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Request Deletion",
+        "description": "Удалить свой аккаунт через 7 дней: пароль и код 2FA (лимит попыток — как у входа).\nВсе сеансы завершаются, cookie сеанса стирается: войти снова можно только для отмены.\nЕдинственный администратор удалить себя не может — 409 account.last_admin.",
+        "operationId": "request_deletion_api_me_deletion_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Cancel Deletion",
+        "description": "Отменить удаление (в течение 7 дней). Запроса нет — 409 account.no_deletion.",
+        "operationId": "cancel_deletion_api_me_deletion_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/bookmakers": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Bookmaker Names",
+        "description": "Названия для выбора в формах: не скрытые, частые первыми.",
+        "operationId": "bookmaker_names_api_me_bookmakers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response Bookmaker Names Api Me Bookmakers Get"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Create Bookmaker",
+        "description": "Добавить букмекера. Название занято (без учета регистра, и у скрытого) — 409\nbookmaker.name_taken; «Другой» — 422 bookmaker.reserved.",
+        "operationId": "create_bookmaker_api_me_bookmakers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookmakerCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmakerOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/bookmakers/list": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "List Bookmakers",
+        "description": "Список кабинета: действующие и скрытые, у каждого — число ставок, в игре и сумма.",
+        "operationId": "list_bookmakers_api_me_bookmakers_list_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmakersOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/bookmakers/{bookmaker_id}": {
+      "patch": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Update Bookmaker",
+        "description": "Переименовать (сохраненные ставки остаются с прежним названием) и скрыть или\nвернуть (archived). Скрыть со ставками в игре — 409 bookmaker.open_bets.",
+        "operationId": "update_bookmaker_api_me_bookmakers__bookmaker_id__patch",
+        "parameters": [
+          {
+            "name": "bookmaker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Bookmaker Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookmakerPatchIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmakerOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Delete Bookmaker",
+        "description": "Убрать из списка. Есть ставки в игре с этим названием — 409 bookmaker.open_bets.",
+        "operationId": "delete_bookmaker_api_me_bookmakers__bookmaker_id__delete",
+        "parameters": [
+          {
+            "name": "bookmaker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Bookmaker Id"
             }
           }
         ],
@@ -2549,6 +3045,192 @@
         }
       }
     },
+    "/api/admin/settings": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Settings",
+        "description": "Валюта программы, последняя смена валюты (когда, кто, курс) и часовой пояс по\nумолчанию.",
+        "operationId": "get_settings_api_admin_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSettingsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Settings",
+        "description": "Часовой пояс по умолчанию для новых участников (база IANA, иначе 422).",
+        "operationId": "update_settings_api_admin_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSettingsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSettingsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/settings/currency": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Change Currency",
+        "description": "Смена валюты программы по курсу «1 rate_base = rate второй валюты»: пересчет\nставок, журнала банка, лимитов и банка из ввода анализа у всех участников с\nокруглением каждой суммы до копеек; журнал currency_change; кэш аналитики сбрасывается.\npreview=true — только итоги и примеры «до и после». Без totp_code — 403\nadmin.totp_required; та же валюта — 409 admin.currency_same.",
+        "operationId": "change_currency_api_admin_settings_currency_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurrencyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrencyPreviewOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/messages": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Messages",
+        "description": "Отправленные сообщения, новые сверху (не больше 50): кому, текст, когда, сколько\nполучили, кто отправил.",
+        "operationId": "list_messages_api_admin_messages_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagesOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Send Message",
+        "description": "Сообщение (1–280 знаков) всем активным участникам (user_id = null) или одному —\nв центр уведомлений; запись message в журнал. preview=true — без отправки: кому и\nсколько получат. Получателя нет — 404 admin.message_recipient.",
+        "operationId": "send_message_api_admin_messages_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analyses": {
       "post": {
         "tags": [
@@ -2999,7 +3681,7 @@
           "bets"
         ],
         "summary": "Place Bet",
-        "description": "Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не\nменяется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref\nвозвращает ту же ставку.",
+        "description": "Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не\nменяется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref\nвозвращает ту же ставку. Пауза и лимиты дня ответственной игры — 409 play.paused,\nplay.bets_limit, play.stake_limit (until — до какого момента).",
         "operationId": "place_bet_api_bets_post",
         "requestBody": {
           "required": true,
@@ -3821,42 +4503,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BetItemOut"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "description": "Ошибка: {error: {code, message}}",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/me/bookmakers": {
-      "get": {
-        "tags": [
-          "bets"
-        ],
-        "summary": "My Bookmakers",
-        "description": "Букмекеры участника из ставок и анализов, частые первыми.",
-        "operationId": "my_bookmakers_api_me_bookmakers_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array",
-                  "title": "Response My Bookmakers Api Me Bookmakers Get"
                 }
               }
             }
@@ -5542,6 +6188,28 @@
             "type": "number",
             "title": "Members Limits Usd"
           },
+          "members_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Members Usd"
+          },
+          "budget_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Share"
+          },
           "alert_pct": {
             "type": "integer",
             "title": "Alert Pct"
@@ -5567,12 +6235,14 @@
           "left_usd",
           "forecast_usd",
           "members_limits_usd",
+          "members_usd",
+          "budget_share",
           "alert_pct",
           "eval_budget_usd",
           "eval_spent_usd"
         ],
         "title": "AdminBudgetOut",
-        "description": "Общий бюджет ключа администратора на месяц (UTC).\n\nspent_usd — все вызовы на ключе администратора без проверочных прогонов,\nbackground_usd — из них общие задачи без участника. reserved_usd — резерв\nанализов, которые идут сейчас. forecast_usd — прогноз на конец месяца по темпу.\nmembers_limits_usd — сумма месячных лимитов участников на ключе администратора.\neval_* — отдельный бюджет проверочных прогонов (eval и теневые, Р22)."
+        "description": "Общий бюджет ключа администратора на месяц (UTC).\n\nspent_usd — все вызовы на ключе администратора без проверочных прогонов,\nbackground_usd — из них общие задачи без участника. reserved_usd — резерв\nанализов, которые идут сейчас. forecast_usd — прогноз на конец месяца по темпу.\nmembers_limits_usd — сумма месячных лимитов участников на ключе администратора.\nmembers_usd — из spent_usd вызовы участников (не администраторов). budget_share —\nspent_usd к бюджету (доля; пусто — бюджет 0). eval_* — отдельный бюджет проверочных\nпрогонов (eval и теневые, Р22)."
       },
       "AdminKeyIn": {
         "properties": {
@@ -5664,6 +6334,62 @@
           "members"
         ],
         "title": "AdminLimitsOut"
+      },
+      "AdminSettingsIn": {
+        "properties": {
+          "default_tz": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Default Tz"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "default_tz"
+        ],
+        "title": "AdminSettingsIn"
+      },
+      "AdminSettingsOut": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "Currency"
+          },
+          "default_tz": {
+            "type": "string",
+            "title": "Default Tz"
+          },
+          "currency_changed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurrencyChangeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currency",
+          "default_tz",
+          "currency_changed",
+          "updated_at"
+        ],
+        "title": "AdminSettingsOut",
+        "description": "Настройки программы: валюта (одна на всех, Р17) и часовой пояс новых участников.\nРасходы на Claude всегда в долларах."
       },
       "AdminUserDetailOut": {
         "properties": {
@@ -6021,6 +6747,17 @@
             "type": "number",
             "title": "Spent Usd"
           },
+          "limit_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Share"
+          },
           "reserved_usd": {
             "type": "number",
             "title": "Reserved Usd"
@@ -6143,6 +6880,7 @@
           "month_start",
           "monthly_usd",
           "spent_usd",
+          "limit_share",
           "reserved_usd",
           "left_usd",
           "daily_analyses",
@@ -6161,7 +6899,7 @@
           "budget"
         ],
         "title": "AiBudgetOut",
-        "description": "Лимит и расход участника на ИИ (экраны «Ключ Claude» и «Новый анализ»).\n\nmode — режим участника, key_source — чей ключ платит. Месяц — по UTC с month_start,\n«анализов сегодня» — с полуночи в поясе участника. monthly_usd, left_usd и\ndaily_analyses пустые, если личного лимита нет (свой ключ, администратор).\nspent_usd — расход за месяц на ключе этого режима, reserved_usd — резерв анализов,\nкоторые идут сейчас. per_analysis_usd — потолок одного анализа в этом режиме,\nown_cap_usd — свой потолок на своем ключе. avg_analysis_usd — средняя цена\nзаконченного анализа за месяц на ключе этого режима (пусто — анализов нет).\nreason_code — почему новый анализ сейчас не запустится (ключ errors.<код> и\nreason_params), пусто — запустится. budget — общий бюджет, только администратору."
+        "description": "Лимит и расход участника на ИИ (экраны «Ключ Claude» и «Новый анализ»).\n\nmode — режим участника, key_source — чей ключ платит. Месяц — по UTC с month_start,\n«анализов сегодня» — с полуночи в поясе участника. monthly_usd, left_usd и\ndaily_analyses пустые, если личного лимита нет (свой ключ, администратор).\nspent_usd — расход за месяц на ключе этого режима, reserved_usd — резерв анализов,\nкоторые идут сейчас. per_analysis_usd — потолок одного анализа в этом режиме,\nown_cap_usd — свой потолок на своем ключе. avg_analysis_usd — средняя цена\nзаконченного анализа за месяц на ключе этого режима (пусто — анализов нет).\nreason_code — почему новый анализ сейчас не запустится (ключ errors.<код> и\nreason_params), пусто — запустится. budget — общий бюджет, только администратору.\nlimit_share — spent_usd к месячному лимиту (доля; пусто — личного лимита нет)."
       },
       "AiModeIn": {
         "properties": {
@@ -7538,6 +8276,22 @@
               }
             ],
             "title": "Expected Last Id"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "RUB",
+                  "USD",
+                  "EUR"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
           }
         },
         "type": "object",
@@ -7547,7 +8301,7 @@
           "expected_last_id"
         ],
         "title": "BankEntryIn",
-        "description": "Пополнение, вывод или корректировка. amount у пополнения и вывода — больше нуля,\nу корректировки — со знаком, не ноль. expected_last_id — последняя строка журнала,\nкоторую видел участник (null — журнал пуст): защита от двойной отправки и гонки."
+        "description": "Пополнение, вывод или корректировка. amount у пополнения и вывода — больше нуля,\nу корректировки — со знаком, не ноль. expected_last_id — последняя строка журнала,\nкоторую видел участник (null — журнал пуст): защита от двойной отправки и гонки.\ncurrency — валюта суммы в форме, как у BetIn (409 common.currency_changed)."
       },
       "BankEntryOut": {
         "properties": {
@@ -7888,6 +8642,22 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]{8,64}$",
             "title": "Client Ref"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "RUB",
+                  "USD",
+                  "EUR"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
           }
         },
         "type": "object",
@@ -7898,7 +8668,8 @@
           "legs",
           "client_ref"
         ],
-        "title": "BetIn"
+        "title": "BetIn",
+        "description": "currency — валюта суммы в форме (FormCurrency): сменили валюту, пока форма была\nоткрыта, — 409 common.currency_changed, сумма в старой валюте не запишется."
       },
       "BetItemOut": {
         "properties": {
@@ -8641,6 +9412,135 @@
         ],
         "title": "BetsSummaryOut",
         "description": "Итоги по фильтрам (решения Т8 и В5): рассчитано — выигрыш, проигрыш и возврат;\nоборот и прибыль — без возвратов; ROI = прибыль / оборот; винрейт — выигрыш / (выигрыш +\nпроигрыш); CLV — средний по рассчитанным ставкам приложения (без ставок бота);\nclv_positive из clv_n — лучше закрытия; legacy_settled — рассчитанных ставок бота."
+      },
+      "BookmakerCreateIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "BookmakerCreateIn"
+      },
+      "BookmakerOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "bets": {
+            "type": "integer",
+            "title": "Bets"
+          },
+          "open_bets": {
+            "type": "integer",
+            "title": "Open Bets"
+          },
+          "in_play": {
+            "type": "string",
+            "title": "In Play"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "archived_at",
+          "bets",
+          "open_bets",
+          "in_play"
+        ],
+        "title": "BookmakerOut",
+        "description": "Букмекер из списка участника. bets — все ставки с этим названием, open_bets и\nin_play — ставки в игре и их сумма. archived_at задан — скрыт: в формах не\nпредлагается, история ставок остается."
+      },
+      "BookmakerPatchIn": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "BookmakerPatchIn",
+        "description": "Переименовать (name) и/или скрыть (archived = true) или вернуть (false). Поле не\nпередано — не меняется."
+      },
+      "BookmakersOut": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "Currency"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BookmakerOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currency",
+          "items"
+        ],
+        "title": "BookmakersOut"
       },
       "BrierOut": {
         "properties": {
@@ -9478,11 +10378,27 @@
               }
             ],
             "title": "Bookmaker"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "RUB",
+                  "USD",
+                  "EUR"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
           }
         },
         "type": "object",
         "title": "ConfirmIn",
-        "description": "Подтвержденный ввод для «Перед запуском» и запуска. events null — взять уже\nподтвержденные (повторный запуск после сбоя или отмены)."
+        "description": "Подтвержденный ввод для «Перед запуском» и запуска. events null — взять уже\nподтвержденные (повторный запуск после сбоя или отмены). currency — валюта банка\nв форме (FormCurrency)."
       },
       "ConfirmedEventOut": {
         "properties": {
@@ -9734,6 +10650,233 @@
         "title": "CsrfOut",
         "description": "CSRF-токен: то же значение, что в cookie csrf. Его шлют в заголовке X-CSRF-Token."
       },
+      "CurrencyChangeOut": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "actor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Name"
+          },
+          "from_currency": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "From Currency"
+          },
+          "to_currency": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "To Currency"
+          },
+          "rate": {
+            "type": "string",
+            "title": "Rate"
+          },
+          "rate_base": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "Rate Base"
+          }
+        },
+        "type": "object",
+        "required": [
+          "at",
+          "actor_name",
+          "from_currency",
+          "to_currency",
+          "rate",
+          "rate_base"
+        ],
+        "title": "CurrencyChangeOut",
+        "description": "Последняя смена валюты из журнала: когда, кто, с какой на какую и по какому курсу."
+      },
+      "CurrencyIn": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "Currency"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,19}0*$)\\d{0,10}\\.\\d{0,8}0*$)"
+              }
+            ],
+            "title": "Rate"
+          },
+          "rate_base": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "Rate Base"
+          },
+          "totp_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{6}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totp Code"
+          },
+          "preview": {
+            "type": "boolean",
+            "title": "Preview",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "currency",
+          "rate",
+          "rate_base"
+        ],
+        "title": "CurrencyIn",
+        "description": "Новая валюта программы и курс: 1 rate_base = rate второй валюты (rate_base —\nпрежняя или новая валюта, как в окне смены). preview — только посчитать, что станет;\nбез preview нужен текущий код 2FA."
+      },
+      "CurrencyPreviewOut": {
+        "properties": {
+          "applied": {
+            "type": "boolean",
+            "title": "Applied"
+          },
+          "from_currency": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "From Currency"
+          },
+          "to_currency": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "To Currency"
+          },
+          "rate": {
+            "type": "string",
+            "title": "Rate"
+          },
+          "rate_base": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "Rate Base"
+          },
+          "factor": {
+            "type": "string",
+            "title": "Factor"
+          },
+          "bets": {
+            "type": "integer",
+            "title": "Bets"
+          },
+          "ledger_entries": {
+            "type": "integer",
+            "title": "Ledger Entries"
+          },
+          "play_limits": {
+            "type": "integer",
+            "title": "Play Limits"
+          },
+          "analyses": {
+            "type": "integer",
+            "title": "Analyses"
+          },
+          "members": {
+            "type": "integer",
+            "title": "Members"
+          },
+          "corrections": {
+            "type": "integer",
+            "title": "Corrections"
+          },
+          "own_bank": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyChangeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/MoneyChangeOut"
+            },
+            "type": "array",
+            "title": "Samples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "applied",
+          "from_currency",
+          "to_currency",
+          "rate",
+          "rate_base",
+          "factor",
+          "bets",
+          "ledger_entries",
+          "play_limits",
+          "analyses",
+          "members",
+          "corrections",
+          "own_bank",
+          "samples"
+        ],
+        "title": "CurrencyPreviewOut",
+        "description": "Что станет при смене валюты (или что стало, applied = true): сколько сумм\nпересчитано по всем участникам, банк администратора и примеры до и после. factor —\nмножитель (новая сумма = прежняя × factor до округления каждой суммы до копеек).\nanalyses — анализы с суммами (банк из ввода, рекомендация, предупреждение о банке);\ncorrections — у скольких участников остаток от округления строк журнала уйдет в одну\nкорректировку «Округление при смене валюты» (банк = round(прежний × курс))."
+      },
       "DashboardOut": {
         "properties": {
           "period": {
@@ -9910,6 +11053,50 @@
         "type": "object",
         "title": "DecisionIn",
         "description": "Решение по итогу: skip — не ставить, null — снять решение («Все-таки поставить»).\n«Поставил» записывает сохранение ставки (POST /bets)."
+      },
+      "DeletionIn": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Password"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$",
+            "title": "Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "password",
+          "code"
+        ],
+        "title": "DeletionIn",
+        "description": "Пароль и текущий код 2FA."
+      },
+      "DeletionOut": {
+        "properties": {
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "delete_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Delete At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requested_at",
+          "delete_at"
+        ],
+        "title": "DeletionOut",
+        "description": "Запрос на удаление: когда сделан и когда аккаунт будет удален (через 7 дней)."
       },
       "DraftEventOut": {
         "properties": {
@@ -12679,6 +13866,34 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "consent_training": {
+            "type": "boolean",
+            "title": "Consent Training"
+          },
+          "deletion_requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletion Requested At"
+          },
+          "deletion_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletion At"
           }
         },
         "type": "object",
@@ -12691,7 +13906,10 @@
           "ai_mode",
           "tz",
           "totp_enabled",
-          "created_at"
+          "created_at",
+          "consent_training",
+          "deletion_requested_at",
+          "deletion_at"
         ],
         "title": "MeOut",
         "description": "Вошедший пользователь."
@@ -12809,6 +14027,136 @@
         "title": "MemberLimitOut",
         "description": "Строка таблицы «Лимиты участников». Р14: только расход на ИИ и активность.\n\nlimit — действующий лимит на ключе администратора (у участника на своем ключе он\nвступит в силу при возврате); пусто у администратора: у него нет личного лимита.\nspent_month_usd — расход за месяц на ключе администратора, own_spent_month_usd —\nна своем ключе (вне общего бюджета); без проверочных прогонов. analyses_today — на\nключе администратора с полуночи в поясе участника. return_requested_at — участник\nпросит вернуть ключ администратора (Р12)."
       },
+      "MessageIn": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 280,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Text"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "preview": {
+            "type": "boolean",
+            "title": "Preview",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "MessageIn",
+        "description": "Кому: всем (user_id = null) или одному участнику. preview — без отправки."
+      },
+      "MessageOut": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "sent": {
+            "type": "boolean",
+            "title": "Sent"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "recipient_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient Name"
+          },
+          "recipients": {
+            "type": "integer",
+            "title": "Recipients"
+          },
+          "actor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sent",
+          "at",
+          "text",
+          "user_id",
+          "recipient_name",
+          "recipients",
+          "actor_name"
+        ],
+        "title": "MessageOut",
+        "description": "Отправленное сообщение (или что будет отправлено, sent = false): текст, кому\n(user_id null — всем), имя получателя, сколько получили, когда и кто отправил."
+      },
+      "MessagesOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MessageOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "MessagesOut"
+      },
       "ModeDecisionIn": {
         "properties": {
           "decision": {
@@ -12911,6 +14259,24 @@
         ],
         "title": "ModelPriceOut",
         "description": "Действующая цена модели в долларах за 1 млн токенов и за один веб-поиск (из\nmodel_prices). Вторая ступень: весь вход запроса больше long_input_threshold —\nцены токенов × long_multiplier."
+      },
+      "MoneyChangeOut": {
+        "properties": {
+          "before": {
+            "type": "string",
+            "title": "Before"
+          },
+          "after": {
+            "type": "string",
+            "title": "After"
+          }
+        },
+        "type": "object",
+        "required": [
+          "before",
+          "after"
+        ],
+        "title": "MoneyChangeOut"
       },
       "MyMatchBetOut": {
         "properties": {
@@ -13150,6 +14516,135 @@
           "read_at"
         ],
         "title": "NotificationOut"
+      },
+      "NotificationPrefIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "bet_settled",
+              "data_stale",
+              "limit_80",
+              "limit_100",
+              "new_device",
+              "admin_message",
+              "login_failures",
+              "ai_key_failed",
+              "ai_mode_request",
+              "ai_mode_decision",
+              "budget_80",
+              "budget_100",
+              "ai_alert"
+            ],
+            "title": "Kind"
+          },
+          "on_site": {
+            "type": "boolean",
+            "title": "On Site"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "on_site"
+        ],
+        "title": "NotificationPrefIn"
+      },
+      "NotificationPrefOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "bet_settled",
+              "data_stale",
+              "limit_80",
+              "limit_100",
+              "new_device",
+              "admin_message",
+              "login_failures",
+              "ai_key_failed",
+              "ai_mode_request",
+              "ai_mode_decision",
+              "budget_80",
+              "budget_100",
+              "ai_alert"
+            ],
+            "title": "Kind"
+          },
+          "group": {
+            "type": "string",
+            "title": "Group"
+          },
+          "on_site": {
+            "type": "boolean",
+            "title": "On Site"
+          },
+          "push": {
+            "type": "boolean",
+            "title": "Push"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "admin": {
+            "type": "boolean",
+            "title": "Admin"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "group",
+          "on_site",
+          "push",
+          "required",
+          "admin"
+        ],
+        "title": "NotificationPrefOut",
+        "description": "Вид уведомления в настройках. group — строка экрана (limit_80 и limit_100 — одна\nстрока); required — приходит всегда, выключить нельзя; admin — раздел «Для\nадминистратора»; push — только показ, push появится на этапе 6."
+      },
+      "NotificationPrefsIn": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationPrefIn"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "NotificationPrefsIn",
+        "description": "Частичное обновление: только переданные виды."
+      },
+      "NotificationPrefsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationPrefOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "push_available": {
+            "type": "boolean",
+            "title": "Push Available"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "push_available"
+        ],
+        "title": "NotificationPrefsOut"
       },
       "NotificationsOut": {
         "properties": {
@@ -13936,6 +15431,26 @@
         ],
         "title": "PasswordChangeIn"
       },
+      "PauseIn": {
+        "properties": {
+          "days": {
+            "type": "integer",
+            "enum": [
+              1,
+              7,
+              30,
+              90
+            ],
+            "title": "Days"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "days"
+        ],
+        "title": "PauseIn"
+      },
       "PersonActivityOut": {
         "properties": {
           "user_id": {
@@ -14122,6 +15637,252 @@
         ],
         "title": "PersonUsageOut",
         "description": "Человек в «Расходе ИИ» администратора (Р14: только расход на ИИ и число анализов).\nkey_spent_usd — на ключе администратора, own_spent_usd — на своем (вне бюджета);\nanalyses — анализы на ключе администратора, own_analyses — на своем. limit_usd —\nмесячный лимит (пусто у администратора); budget_share и limit_share — доля бюджета\nи лимита."
+      },
+      "PlayLimitsIn": {
+        "properties": {
+          "bets_per_day": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 20.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bets Per Day"
+          },
+          "stake_per_day": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stake Per Day"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "RUB",
+                  "USD",
+                  "EUR"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "bets_per_day",
+          "stake_per_day"
+        ],
+        "title": "PlayLimitsIn",
+        "description": "Желаемые лимиты целиком: null — без лимита. Строже (ниже или новый лимит) —\nсразу; мягче (выше или снять) — через 24 часа. currency — валюта суммы в форме:\nне валюта программы — 409 common.currency_changed."
+      },
+      "PlayLimitsOut": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "Currency"
+          },
+          "tz": {
+            "type": "string",
+            "title": "Tz"
+          },
+          "bets_per_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bets Per Day"
+          },
+          "stake_per_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stake Per Day"
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlayPendingOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paused_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Until"
+          },
+          "today": {
+            "$ref": "#/components/schemas/PlayTodayOut"
+          },
+          "blocked": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "paused",
+                  "bets_limit",
+                  "stake_limit"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked"
+          },
+          "blocked_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Until"
+          },
+          "pause_days": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Pause Days"
+          },
+          "bets_per_day_max": {
+            "type": "integer",
+            "title": "Bets Per Day Max"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currency",
+          "tz",
+          "bets_per_day",
+          "stake_per_day",
+          "pending",
+          "paused_until",
+          "today",
+          "blocked",
+          "blocked_until",
+          "pause_days",
+          "bets_per_day_max"
+        ],
+        "title": "PlayLimitsOut",
+        "description": "Действующие лимиты, отложенное повышение, пауза и сколько поставлено сегодня.\nblocked — что сейчас не дает сделать ставку и запустить анализ (null — ничего);\nblocked_until — до какого момента. tz — пояс, по которому идут текущие сутки лимитов:\nпояс участника, а сразу после его смены — прежний до конца суток."
+      },
+      "PlayPendingOut": {
+        "properties": {
+          "bets_per_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bets Per Day"
+          },
+          "stake_per_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stake Per Day"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bets_per_day",
+          "stake_per_day",
+          "starts_at"
+        ],
+        "title": "PlayPendingOut",
+        "description": "Запрошенное повышение: какие лимиты будут после starts_at (null — без лимита)."
+      },
+      "PlayTodayOut": {
+        "properties": {
+          "bets": {
+            "type": "integer",
+            "title": "Bets"
+          },
+          "stake": {
+            "type": "string",
+            "title": "Stake"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts At"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ends At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bets",
+          "stake",
+          "starts_at",
+          "ends_at"
+        ],
+        "title": "PlayTodayOut",
+        "description": "Ставки, сделанные сегодня по поясу участника, — и в игре, и рассчитанные."
       },
       "PlayerBrief": {
         "properties": {
@@ -15574,12 +17335,23 @@
               }
             ],
             "title": "Tz"
+          },
+          "consent_training": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Training"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "ProfileUpdateIn",
-        "description": "Правка профиля: имя и часовой пояс. Поле не передано (или null) — не меняется.\nОстальные поля (email, роль, режим ключа) так не меняются: лишнее поле — 422."
+        "description": "Правка профиля: имя, часовой пояс и согласие на обезличенные прогнозы (Р15). Поле\nне передано (или null) — не меняется. Остальные поля (email, роль, режим ключа) так\nне меняются: лишнее поле — 422."
       },
       "ProgressEventOut": {
         "properties": {
@@ -15879,10 +17651,16 @@
             "default": false
           },
           "tz": {
-            "type": "string",
-            "maxLength": 64,
-            "title": "Tz",
-            "default": "Europe/Helsinki"
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tz"
           }
         },
         "type": "object",
@@ -16399,6 +18177,40 @@
             "type": "string",
             "title": "Base"
           },
+          "start_day": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Day"
+          },
+          "start_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Amount"
+          },
+          "change_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Share"
+          },
           "last": {
             "type": "string",
             "title": "Last"
@@ -16440,6 +18252,9 @@
           "group",
           "start",
           "base",
+          "start_day",
+          "start_amount",
+          "change_share",
           "last",
           "peak",
           "max_drawdown",
@@ -16449,7 +18264,7 @@
           "rows"
         ],
         "title": "SeriesOut",
-        "description": "Ряд по дням. kind = bank — капитал (баланс + ставки в игре) на конец дня, когда\nфильтров рынка, покрытия и источника нет; result — прибыль отобранных ставок\nнарастающим итогом по дню расчета (по поясу участника). Первая точка — день перед\nпериодом (start, значение base), у «всего времени» — первый день. peak — наибольшее\nзначение ряда; max_drawdown (доля от −1 до 0, только у bank) — наибольшая просадка от\nпика по правилу Р22: пополнение, вывод и корректировка — не просадка; best и worst —\nлучшая и худшая точка (у result худшая не выше нуля). rows — по неделям (период до 31\nдня) или по месяцам."
+        "description": "Ряд по дням. kind = bank — капитал (баланс + ставки в игре) на конец дня, когда\nфильтров рынка, покрытия и источника нет; result — прибыль отобранных ставок\nнарастающим итогом по дню расчета (по поясу участника). Первая точка — день перед\nпериодом (start, значение base), у «всего времени» — первый день; у ряда банка дни до\nпервой записи журнала в points не входят. peak — наибольшее значение ряда;\nmax_drawdown (доля от −1 до 0, только у bank) — наибольшая просадка от пика по правилу\nР22: пополнение, вывод и корректировка — не просадка; best и worst — лучшая и худшая\nточка (у result худшая не выше нуля). rows — по неделям (период до 31 дня) или по\nмесяцам."
       },
       "SeriesPointOut": {
         "properties": {
@@ -18292,6 +20107,17 @@
             "type": "string",
             "title": "Kind"
           },
+          "share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share"
+          },
           "avg_cost_usd": {
             "anyOf": [
               {
@@ -18353,6 +20179,7 @@
           "web_searches",
           "cache_share",
           "kind",
+          "share",
           "avg_cost_usd",
           "avg_prompt_tokens",
           "avg_output_tokens",
@@ -18360,7 +20187,7 @@
           "efforts"
         ],
         "title": "UsageKindOut",
-        "description": "Вид вызова за месяц. avg_* — в среднем на вызов без ошибки (пусто — таких нет);\nmodels и efforts — какие модели и effort были у вызовов."
+        "description": "Вид вызова за месяц. avg_* — в среднем на вызов без ошибки (пусто — таких нет);\nmodels и efforts — какие модели и effort были у вызовов. share — доля вида в расходе\nмесяца (пусто — расхода нет)."
       },
       "UsageModelOut": {
         "properties": {

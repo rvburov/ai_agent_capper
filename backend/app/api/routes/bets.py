@@ -1,6 +1,6 @@
 """Ставки участника: «Сохранить ставку» по анализу, список «Ставок» с фильтрами и
 курсором, итоги, карточка, ручной расчет, исправление результата (сторно), закрывающий
-кэф ноги, выгрузка CSV; букмекеры. Видит и меняет только сам участник (Р14): чужая ставка —
+кэф ноги, выгрузка CSV. Видит и меняет только сам участник (Р14): чужая ставка —
 404, как несуществующая. После изменения ставки — прогрев кэша аналитики после ответа
 (app/services/analytics_cache.py)."""
 
@@ -39,7 +39,8 @@ async def place_bet(
 ) -> BetOut:
     """Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не
     меняется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref
-    возвращает ту же ставку."""
+    возвращает ту же ставку. Пауза и лимиты дня ответственной игры — 409 play.paused,
+    play.bets_limit, play.stake_limit (until — до какого момента)."""
     placed = await bets_service.place_bet(db, user, body)
     background.add_task(analytics_cache.request_warm, user.id)
     return bets_service.bet_out(placed)
@@ -130,9 +131,3 @@ async def set_leg_closing(
     item = await closing_service.set_leg_closing(db, user, bet_id, leg_id, body.closing)
     background.add_task(analytics_cache.request_warm, user.id)
     return item
-
-
-@router.get("/me/bookmakers")
-async def my_bookmakers(user: CurrentUser, db: DbSession) -> list[str]:
-    """Букмекеры участника из ставок и анализов, частые первыми."""
-    return await bets_service.bookmakers(db, user)

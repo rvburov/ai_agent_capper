@@ -3,6 +3,7 @@
 кодом и их порядок, распределение CLV, просадка без пополнений и выводов, диапазоны
 итогового кэфа."""
 
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -394,3 +395,45 @@ def test_texts_for_every_insight_and_csv_column() -> None:
         for key in (insight.title, insight.text):
             fields = {name for _, name, _, _ in string.Formatter().parse(t(key.key)) if name}
             assert fields <= set(key.params), (insight.code, fields - set(key.params))
+
+
+def test_period_start_from_server() -> None:
+    """Старт периода (заявка волны 3): банк до периода — капитал перед ним и прибыль к нему;
+    банк появился внутри периода или «все время» — первый день банка и вложенное."""
+    rows = [_bet(1, [_leg(1, odds="1.50")], stake="100")]
+    week = _inputs(rows, AnalyticsFiltersIn(period="7d"))
+    first = week.window.first
+    assert first is not None
+    before = first - timedelta(days=1)
+    days = [before + timedelta(days=offset) for offset in range(8)]
+    # Банк был до периода: 10 000, к концу — 10 050
+    equity = [DayCapital(day, D(10000), D(0)) for day in days[:-1]]
+    equity.append(DayCapital(days[-1], D(10050), D(0)))
+    series = analytics.series_block(replace(week, equity=equity), rows)
+    assert (series.start_day, series.start_amount) == (before, D(10000))
+    assert series.change_share == float(week.current.profit / D(10000))
+    assert len(series.points) == 8
+    # Банк появился на третий день периода: 5 000 вложено, к концу — 5 250
+    late = [DayCapital(day, D(0), D(0)) for day in days[:3]]
+    late.append(DayCapital(days[3], D(5000), D(5000)))
+    late += [DayCapital(day, D(5250), D(0)) for day in days[4:]]
+    series = analytics.series_block(replace(week, equity=late), rows)
+    assert (series.start_day, series.start_amount) == (days[3], D(5000))
+    assert series.change_share == 0.05
+    assert [point.day for point in series.points] == days[3:]
+    assert series.start == before and series.base == 0
+    # Все время: первая точка — уже первый день банка
+    whole = _inputs(rows)
+    all_days = [TODAY - timedelta(days=2), TODAY - timedelta(days=1), TODAY]
+    flows = [D(2000), D(1000), D(0)]
+    values = [D(2000), D(3000), D(2700)]
+    capital = [
+        DayCapital(day, value, flow)
+        for day, value, flow in zip(all_days, values, flows, strict=True)
+    ]
+    series = analytics.series_block(replace(whole, equity=capital), rows)
+    assert (series.start_day, series.start_amount) == (all_days[0], D(3000))
+    assert series.change_share == -0.1
+    # Ряд результата — от нуля, без доли
+    result = analytics.series_block(_inputs(rows, AnalyticsFiltersIn(source="app")), rows)
+    assert result.kind == "result" and result.start_amount == 0 and result.change_share is None

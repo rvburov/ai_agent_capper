@@ -840,7 +840,9 @@ async def _send_once(
             note = await notify(db, user_id=recipient, kind="budget_80", link=link, **params)
         else:
             note = await notify(db, user_id=recipient, kind="budget_100", link=link, **params)
-        created.append(note)
+        # None — получатель выключил этот вид в настройках уведомлений
+        if note is not None:
+            created.append(note)
     return created
 
 

@@ -1,7 +1,7 @@
 """Пользователи и вход: учетные записи, сеансы, 2FA, журнал входов, коды доступа,
 уведомления и подписки на push (PLAN.md, разделы 5 и 7)."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -52,6 +52,8 @@ NOTIFICATION_KINDS = (
     "ai_alert",
 )
 DEFAULT_TZ = "Europe/Helsinki"
+# Удаление аккаунта самим участником (В10): через столько дней после запроса
+ACCOUNT_DELETION_DELAY = timedelta(days=7)
 
 
 def _user_fk(ondelete: str = "CASCADE") -> ForeignKey:
@@ -99,6 +101,13 @@ class User(CreatedAtMixin, UpdatedAtMixin, Base):
     # Участник сам попросил удалить аккаунт: удаление через 7 дней, до этого можно
     # отменить (В10, Р24)
     deletion_requested_at: Mapped[datetime | None]
+
+    @property
+    def deletion_at(self) -> datetime | None:
+        """Когда аккаунт удалится по запросу участника (пусто — запроса нет)."""
+        if self.deletion_requested_at is None:
+            return None
+        return self.deletion_requested_at + ACCOUNT_DELETION_DELAY
 
 
 class UserSession(CreatedAtMixin, Base):

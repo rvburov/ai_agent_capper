@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes import admin as admin_routes
 from app.api.routes import admin_ai as admin_ai_routes
+from app.api.routes import admin_messages as admin_messages_routes
+from app.api.routes import admin_settings as admin_settings_routes
 from app.db.models import User
 from app.main import create_app
 from tests.helpers_admin import admin_signed_in, error_code, signed_in
@@ -37,11 +39,16 @@ def _url(path: str) -> str:
 def test_every_admin_router_route_is_in_schema() -> None:
     """Маршрут, скрытый из схемы, не попал бы в параметризованный тест прав."""
     in_schema = set(ADMIN_ROUTES)
-    for route in [*admin_routes.router.routes, *admin_ai_routes.router.routes]:
+    for route in [
+        *admin_routes.router.routes,
+        *admin_ai_routes.router.routes,
+        *admin_settings_routes.router.routes,
+        *admin_messages_routes.router.routes,
+    ]:
         assert isinstance(route, APIRoute)
         for method in route.methods or set():
             assert (method, "/api" + route.path) in in_schema
-    assert len(ADMIN_ROUTES) >= 23
+    assert len(ADMIN_ROUTES) >= 28
 
 
 @pytest.mark.parametrize(("method", "path"), ADMIN_ROUTES, ids=lambda v: str(v))

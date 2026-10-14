@@ -1,6 +1,6 @@
 """Ставки участника: ставка по итогу анализа («Сохранить ставку»), список «Ставок» с
-фильтрами и курсором, итоги по тем же фильтрам, карточка ставки, выгрузка CSV, банк и
-букмекеры. Видит только сам участник (Р14).
+фильтрами и курсором, итоги по тем же фильтрам, карточка ставки, выгрузка CSV, банк.
+Видит только сам участник (Р14). «Мои букмекеры» — app/services/bookmakers.py.
 
 Ставка — рекомендованный экспресс анализа: состав ног менять нельзя, кэфы — можно
 (фактические кэфы при ставке). Итоговый кэф — произведение кэфов ног. Сумма — больше
@@ -8,7 +8,9 @@
 считается под блокировкой денег участника (bank.lock_member_money): две ставки не
 списываются с одного банка параллельно. Пустой журнал и банк из ввода — сначала запись
 deposit «начальный банк», затем ставка и запись stake. Повтор с тем же client_ref
-возвращает ту же ставку. Валюта — валюта программы.
+возвращает ту же ставку. Валюта — валюта программы; форма, открытая до смены валюты
+(BetIn.currency не та), — 409 common.currency_changed. Перед ставкой — пауза и лимиты дня
+ответственной игры (app/services/play_limits.py) под той же блокировкой.
 
 Итоги (решения Т8 и В5): возвраты не входят ни в оборот, ни в прибыль, их число —
 отдельно; ставки старого бота входят в деньги, но не в CLV. Покрытие ноги — из турнира,
@@ -30,6 +32,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
     ColumnElement,
@@ -49,7 +52,6 @@ from sqlalchemy import (
     true,
     tuple_,
     union,
-    union_all,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -88,8 +90,10 @@ from app.schemas.bets import (
     PlayerRefOut,
     Verdict,
 )
+from app.services import bookmakers as bookmakers_service
+from app.services import play_limits
 from app.services.analysis_input import short_odds
-from app.services.app_settings import get_app_settings
+from app.services.app_settings import check_currency, get_app_settings
 from app.services.bank import (
     MONEY_MAX,
     BankState,
@@ -110,7 +114,6 @@ ODDS_MAX = Decimal("50")
 TOTAL_MAX = Decimal("999.999")
 ODDS_STEP = Decimal("0.001")
 CENT = Decimal("0.01")
-BOOKMAKERS_LIMIT = 20
 # Рассчитанная ставка: фильтр «Ставок» status=settled
 SETTLED_STATUSES = ("won", "lost", "void")
 
@@ -196,7 +199,12 @@ async def place_bet(db: AsyncSession, user: User, body: BetIn) -> PlacedBet:
     }
     if set(predictions) != set(given):
         raise AppError(422, "bet.bad_legs")
+    settings = await get_app_settings(db)
+    # Сумма из формы, открытой до смены валюты, в новой валюте не записывается
+    check_currency(settings, body.currency)
     stake_sum = body.stake.quantize(CENT)
+    # Ответственная игра: пауза и лимиты дня — под той же блокировкой, что и сама ставка
+    await play_limits.check(db, user, stake=stake_sum)
     total = Decimal(1)
     for leg in body.legs:
         if not ODDS_MIN <= leg.odds_taken <= ODDS_MAX:
@@ -205,7 +213,6 @@ async def place_bet(db: AsyncSession, user: User, body: BetIn) -> PlacedBet:
     total = total.quantize(ODDS_STEP, rounding=ROUND_HALF_UP)
     if total > TOTAL_MAX:
         raise AppError(422, "bet.odds_range", odds=str(total))
-    settings = await get_app_settings(db)
     state = await bank_state(db, user.id)
     bank = analysis.bank_input if state.empty else state.balance
     if bank is None or stake_sum > bank:
@@ -270,11 +277,13 @@ async def place_bet(db: AsyncSession, user: User, body: BetIn) -> PlacedBet:
         )
     )
     analysis.decision = "bet"
+    # Новое название букмекера — в «Мои букмекеры» (скрытого это не возвращает)
+    await bookmakers_service.remember(db, user.id, [bet.bookmaker])
     await db.commit()
     return PlacedBet(bet, legs, created=True)
 
 
-# --- банк и букмекеры ---
+# --- банк ---
 
 
 def _adaptations(state: BankState, params: StrategyParams) -> list[AdaptationOut]:
@@ -366,24 +375,6 @@ async def bank_out(db: AsyncSession, user: User) -> BankOut:
         drawdown_level=level.key if level is not None else None,  # type: ignore[arg-type]
         adaptations=_adaptations(state, params),
     )
-
-
-async def bookmakers(db: AsyncSession, user: User) -> list[str]:
-    """Букмекеры участника из ставок и анализов, частые первыми."""
-    names = union_all(
-        select(Bet.bookmaker.label("name")).where(Bet.user_id == user.id),
-        select(Analysis.bookmaker.label("name")).where(
-            Analysis.user_id == user.id, Analysis.bookmaker.is_not(None)
-        ),
-    ).subquery()
-    rows = await db.execute(
-        select(names.c.name, func.count().label("uses"))
-        .where(func.length(func.trim(names.c.name)) > literal(0))
-        .group_by(names.c.name)
-        .order_by(func.count().desc(), names.c.name)
-        .limit(BOOKMAKERS_LIMIT)
-    )
-    return [str(name) for name, _ in rows]
 
 
 # --- список, итоги, карточка ---
@@ -617,7 +608,8 @@ def _from_input(row: Match | Tournament | None) -> bool:
 @dataclass(frozen=True)
 class LegContext:
     """Нога с матчем и тем, что о нем известно участнику: формат и покрытие — из архива,
-    иначе из своего подтвержденного ввода (строки из ввода — только свои, Т29)."""
+    иначе из своего подтвержденного ввода (строки из ввода — только свои, Т29). zone —
+    пояс участника: день матча без даты — по нему, как «Мои матчи сегодня» главной."""
 
     leg: BetLeg
     match: Match
@@ -626,6 +618,10 @@ class LegContext:
     p_base: float | None
     p_claude: float | None
     p_final: float | None
+    zone: ZoneInfo | None = None
+
+    def _local(self, moment: datetime) -> date:
+        return moment.astimezone(self.zone).date() if self.zone else moment.date()
 
     @property
     def best_of(self) -> int | None:
@@ -656,9 +652,9 @@ class LegContext:
         if match.match_date is not None:
             return match.match_date
         if match.scheduled_at is not None:
-            return match.scheduled_at.date()
+            return self._local(match.scheduled_at)
         if match.source == "user":
-            return match.created_at.date()
+            return self._local(match.created_at)
         return self.tournament.start_date if self.tournament else None
 
 
@@ -690,12 +686,15 @@ async def leg_contexts(
         )
         confirmed = {analysis_id: _events_by_match(data) for analysis_id, data in found}
     by_bet = {bet.id: bet for bet in bets}
+    zone = user_zone(user.tz)
     out: dict[int, list[LegContext]] = {bet_id: [] for bet_id in ids}
     for leg, match, tournament, p_base, p_claude, p_final in rows:
         analysis_id = by_bet[leg.bet_id].analysis_id
         events = confirmed.get(analysis_id, {}) if analysis_id is not None else {}
         out[leg.bet_id].append(
-            LegContext(leg, match, tournament, events.get(match.id), p_base, p_claude, p_final)
+            LegContext(
+                leg, match, tournament, events.get(match.id), p_base, p_claude, p_final, zone
+            )
         )
     return out
 

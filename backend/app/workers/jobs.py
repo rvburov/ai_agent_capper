@@ -29,6 +29,13 @@ startup в app.workers.main. Логика задачи — отдельной ф
 ставки и движения банка (ставит API, app/services/analytics_cache.py): аналитика без
 фильтров за все время и главная за 30 дней считаются заранее и ложатся в кэш Redis; если
 данные изменились, пока задача считала, она считает еще раз.
+
+Удаление аккаунтов по запросу участников (delete_requested_accounts, раз в сутки):
+аккаунты, у которых запрос на удаление старше 7 дней, удаляются как при удалении
+администратором (app/services/account.py, delete_due_accounts).
+
+Сигналы расхода ИИ (check_ai_alerts, раз в час): правила TOKEN_ECONOMY.md, раздел 6, —
+администраторам уведомление ai_alert, одно на правило в сутки (app/services/ai_alerts.py).
 """
 
 from dataclasses import asdict, dataclass
@@ -45,7 +52,7 @@ from app.core.redis import create_redis
 from app.db.models import LoginEvent, Notification, TrustedDevice, User, UserSession
 from app.ingest.update import run_update
 from app.schemas.analytics import AnalyticsFiltersIn
-from app.services import analysis_run, analytics, analytics_cache, dashboard
+from app.services import account, ai_alerts, analysis_run, analytics, analytics_cache, dashboard
 from app.services.data_status import STALE_AFTER, is_stale, last_ok_loads
 from app.services.notifications import notify
 
@@ -263,3 +270,32 @@ async def warm_analytics(ctx: dict[Any, Any], user_id: int) -> list[str]:
         await redis.aclose()
     log.info("worker.warm_analytics", user_id=user_id, warmed=warmed)
     return warmed
+
+
+# --- удаление аккаунтов и сигналы расхода (этап 4) ---
+
+
+async def delete_requested_accounts(ctx: dict[Any, Any]) -> list[int]:
+    """Задача arq (cron раз в сутки): удалить аккаунты, у которых прошло 7 дней после
+    запроса участника. Возвращает id удаленных."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    redis = create_redis()
+    try:
+        async with sessionmaker() as db:
+            deleted = await account.delete_due_accounts(db, redis)
+    finally:
+        await redis.aclose()
+    if deleted:
+        log.info("worker.delete_requested_accounts", users=deleted)
+    return deleted
+
+
+async def check_ai_alerts(ctx: dict[Any, Any]) -> list[str]:
+    """Задача arq (cron раз в час): проверить правила расхода ИИ и разослать сигналы.
+    Возвращает сработавшие правила."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        fired = await ai_alerts.run_checks(db)
+    if fired:
+        log.warning("worker.ai_alerts", rules=fired)
+    return fired

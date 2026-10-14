@@ -5,6 +5,7 @@ from app.db.models.admin import AUDIT_ACTIONS, BUDGET_ALERT_PCTS, AdminAuditLog,
 from app.db.models.ai import AGENT_RUN_KINDS, KEY_SOURCES, AgentRun, AiLimit, ModelPrice, UserSecret
 from app.db.models.auth import (
     ACCESS_CODE_KINDS,
+    ACCOUNT_DELETION_DELAY,
     AI_MODES,
     DEFAULT_TZ,
     LOGIN_METHODS,
@@ -67,6 +68,7 @@ from app.db.models.tennis import (
 
 __all__ = [
     "ACCESS_CODE_KINDS",
+    "ACCOUNT_DELETION_DELAY",
     "AGENT_RUN_KINDS",
     "AI_MODES",
     "ANALYSIS_ACTIVE_STATUSES",

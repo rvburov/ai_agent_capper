@@ -346,6 +346,7 @@ async def usage(
         kinds=[
             UsageKindOut(
                 kind=kind,
+                share=float(sums.cost / totals.cost) if totals.cost > 0 else None,
                 **sums.out(),
                 avg_cost_usd=sums.avg_cost(),
                 avg_prompt_tokens=round(sums.ok_prompt / sums.ok_runs) if sums.ok_runs else None,

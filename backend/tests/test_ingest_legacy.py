@@ -41,6 +41,7 @@ from app.db.models import (
     BankrollLedger,
     Bet,
     BetLeg,
+    Bookmaker,
     Match,
     OddsSnapshot,
     Player,
@@ -85,6 +86,7 @@ IMPORTED = (
     Match,
     PlayerProfile,
     StrategyVersion,
+    Bookmaker,
 )
 
 
@@ -377,6 +379,15 @@ async def test_rerun_creates_no_duplicates(
     assert "Профили игроков: новых 0, обновлено 0, без изменений 2" in out
     assert "Игроки: создано 0" in out
     assert len(await audit_imports(db)) == 2
+
+
+async def test_bookmakers_of_imported_bets_in_list(db: AsyncSession, owner: MadeUser) -> None:
+    """Букмекеры перенесенных ставок попадают в «Мои букмекеры» (формы ставки берут
+    список оттуда), каждый один раз."""
+    assert await run_fixture() == 0
+    in_bets = set(await db.scalars(select(Bet.bookmaker).where(Bet.user_id == owner.id)))
+    listed = list(await db.scalars(select(Bookmaker.name).where(Bookmaker.user_id == owner.id)))
+    assert in_bets and sorted(listed) == sorted(in_bets)
 
 
 async def test_dry_run_writes_nothing(

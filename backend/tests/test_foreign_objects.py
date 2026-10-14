@@ -24,6 +24,7 @@ from app.db.models import (
     BankrollLedger,
     Bet,
     BetLeg,
+    Bookmaker,
     Notification,
     TrustedDevice,
     UserSession,
@@ -88,6 +89,7 @@ async def _device_alive(db: AsyncSession, row_id: int) -> bool:
 
 async def _notification(env: Env, owner: MadeUser) -> int:
     note = await notify(env.db, user_id=owner.id, kind="new_device", device="Safari", ip="1.2.3.4")
+    assert note is not None
     await env.db.commit()
     return note.id
 
@@ -144,6 +146,18 @@ async def _bet_untouched(db: AsyncSession, row_id: int) -> bool:
     )
 
 
+async def _bookmaker(env: Env, owner: MadeUser) -> int:
+    row = Bookmaker(user_id=owner.id, name="Fonbet", created_at=utcnow())
+    env.db.add(row)
+    await env.db.commit()
+    return row.id
+
+
+async def _bookmaker_untouched(db: AsyncSession, row_id: int) -> bool:
+    row = await db.get(Bookmaker, row_id, populate_existing=True)
+    return row is not None and row.name == "Fonbet" and row.archived_at is None
+
+
 # Годное тело запроса: иначе проверка формы (422) сработала бы раньше проверки прав
 _STAMP = "2026-10-13T10:00:00+00:00"
 BODIES: dict[tuple[str, str], dict[str, Any]] = {
@@ -155,6 +169,7 @@ BODIES: dict[tuple[str, str], dict[str, Any]] = {
     ("PUT", "/api/bets/{bet_id}/legs/{leg_id}/closing"): {
         "closing": {"odds": "1.50", "by": "pinnacle"}
     },
+    ("PATCH", "/api/me/bookmakers/{bookmaker_id}"): {"name": "Чужой", "archived": True},
 }
 
 
@@ -175,6 +190,8 @@ FOREIGN_CASES: dict[tuple[str, str], tuple[Create, Untouched]] = {
     ("PUT", "/api/bets/{bet_id}/result"): (_bet, _bet_untouched),
     ("POST", "/api/bets/{bet_id}/reverse"): (_bet, _bet_untouched),
     ("PUT", "/api/bets/{bet_id}/legs/{leg_id}/closing"): (_bet_leg, _bet_untouched),
+    ("PATCH", "/api/me/bookmakers/{bookmaker_id}"): (_bookmaker, _bookmaker_untouched),
+    ("DELETE", "/api/me/bookmakers/{bookmaker_id}"): (_bookmaker, _bookmaker_untouched),
 }
 
 

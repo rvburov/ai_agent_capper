@@ -223,6 +223,21 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 
 Маршруты: `GET /api/bets` (фильтры `period`, `from`, `to`, `status`, `market`, `surface` — можно несколько, `source`, `q`; курсор `before`, `limit` до 100), `GET /api/bets/summary`, `GET /api/bets/export.csv` (те же фильтры без курсора), `GET /api/bets/{id}`, `PUT /api/bets/{id}/result`, `POST /api/bets/{id}/reverse`, `PUT /api/bets/{id}/legs/{leg_id}/closing`, `GET /api/me/bank/history?period=`, `GET /api/me/bank/entries`, `POST /api/me/bank/entries`, `GET /api/analytics` (фильтры `period`, `from`, `to`, `market`, `selection`, `surface`, `source`), `GET /api/analytics/export.csv?part=`, `GET /api/analytics/export.zip?part=…`, `GET /api/dashboard?period=`, `GET /api/players/ranking`, `GET /api/players/{id}` (и `/matches`, `/news`, `/h2h/{opponent_id}`), `GET /api/ai/usage?month=`, `GET /api/ai/runs`, `GET /api/admin/ai/usage?month=`, `GET /api/admin/activity?period=`. Фильтр `status=settled` — все рассчитанные ставки. Чужая ставка — 404, как несуществующая. Результат, перенесенный импортом старого бота, не пересчитывается (409 `bet.legacy`); открытую ставку бота участник рассчитывает сам.
 
+## Кабинет и администрирование (этап 4)
+
+| Модуль | Что делает |
+|---|---|
+| `services/notification_prefs.py` | что присылать: виды уведомлений человека по роли и режиму ключа, «на сайте», обязательные виды; `notify` не пишет выключенные |
+| `services/bookmakers.py` | «Мои букмекеры»: список, добавить, переименовать, скрыть, удалить; новое название из ставки или анализа — в список само (`remember`) |
+| `services/play_limits.py` | ответственная игра: лимиты дня по поясу участника, повышение через 24 часа, пауза; проверка в `place_bet` (под блокировкой денег) и при запуске анализа |
+| `services/data_export.py` | экспорт своих данных: JSON одним файлом или CSV в ZIP, частями, колонки перечислены явно (без секретов) |
+| `services/account.py` | еще удаление аккаунта самим участником: запрос, отмена, удаление по сроку (`delete_due_accounts`, задача воркера раз в сутки) |
+| `services/app_settings.py` | еще настройки кабинета администратора и смена валюты программы (Т30) |
+| `services/admin_messages.py` | сообщение участникам и отправленные (записи журнала `message`) |
+| `services/ai_alerts.py` | сигналы расхода ИИ (TOKEN_ECONOMY.md, раздел 6): правила, пороги `RULES`, задача воркера раз в час |
+
+Маршруты: `GET` и `PUT /api/me/notification-prefs`, `GET /api/me/bookmakers` (названия для форм) и `/list`, `POST /api/me/bookmakers`, `PATCH` и `DELETE /api/me/bookmakers/{id}`, `GET` и `PUT /api/me/play-limits`, `POST /api/me/pause`, `GET /api/me/export?format=json|csv`, `POST` и `DELETE /api/me/deletion`, `PATCH /api/me` (`consent_training`), `GET` и `PUT /api/admin/settings`, `PUT /api/admin/settings/currency`, `GET` и `POST /api/admin/messages`. Пока участник ждет удаления аккаунта, после входа открыты только `GET /api/me` и отмена (`app/core/deps.py`). Задачи воркера: `delete_requested_accounts` (03:45 UTC), `check_ai_alerts` (каждый час, 41-я минута). Индекс поиска игроков строится при старте API (`app/main.py`).
+
 ## Где что лежит
 
 ```

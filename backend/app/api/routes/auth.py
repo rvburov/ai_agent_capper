@@ -27,6 +27,7 @@ from app.schemas.auth import (
 from app.schemas.me import MeOut
 from app.services import auth as auth_service
 from app.services import registration as registration_service
+from app.services.app_settings import get_app_settings
 from app.services.auth import ClientInfo, LoginOutcome
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -182,7 +183,9 @@ async def register(
     redis: RedisClient,
     client: RequestClient,
 ) -> LoginOut:
-    """Регистрация по коду приглашения. Следующий шаг — настройка 2FA."""
+    """Регистрация по коду приглашения. Следующий шаг — настройка 2FA. Без tz — часовой
+    пояс по умолчанию из «Администрирование → Настройки»."""
+    tz = body.tz or (await get_app_settings(db)).default_tz
     outcome = await registration_service.register(
         db,
         redis,
@@ -192,7 +195,7 @@ async def register(
         password=body.password,
         accept_terms=body.accept_terms,
         consent_training=body.consent_training,
-        tz=body.tz,
+        tz=tz,
         client=client,
     )
     _apply_cookies(response, outcome)

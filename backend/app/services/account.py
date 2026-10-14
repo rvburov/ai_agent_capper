@@ -1,11 +1,16 @@
 """Личный кабинет вошедшего пользователя: смена пароля, сеансы и доверенные устройства,
-журнал входов, резервные коды, уведомления.
+журнал входов, резервные коды, уведомления, удаление аккаунта самим участником (В10).
+
+Удаление: запрос с паролем и кодом 2FA, через 7 дней аккаунт удаляется задачей воркера
+(delete_due_accounts) так же, как удаляет администратор (Р15). Пока запрос действует,
+вход возможен, но открыты только GET /api/me и отмена (app/core/deps.py).
 
 Каждая функция работает только с данными переданного пользователя: чужой id ведет
 себя как несуществующий (404). Функции, которые меняют данные, сами делают commit.
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import NoReturn
 
@@ -24,14 +29,25 @@ from app.core.security.passwords import (
     verify_password_async,
 )
 from app.core.useragent import device_label
-from app.db.models import LoginEvent, Notification, User, UserSession
-from app.services import devices, sessions
+from app.db.models import (
+    ACCOUNT_DELETION_DELAY,
+    Analysis,
+    LoginEvent,
+    Notification,
+    User,
+    UserSession,
+)
+from app.services import analytics_cache, devices, sessions
+from app.services.access_codes import lock_admin_actions
+from app.services.admin_users import erase_account, other_active_admins
+from app.services.audit import write_audit
 from app.services.auth import (
     ClientInfo,
     check_totp,
     issue_recovery_codes,
     notify_failures,
     notify_pair_lock,
+    notify_two_factor_lock,
 )
 
 log = structlog.get_logger(__name__)
@@ -230,3 +246,168 @@ async def mark_all_notifications_read(db: AsyncSession, *, user_id: int) -> None
         .values(read_at=sessions.utcnow())
     )
     await db.commit()
+
+
+# --- удаление аккаунта самим участником (В10) ---
+
+DELETION_DELAY = ACCOUNT_DELETION_DELAY
+
+
+@dataclass(frozen=True)
+class DeletionRequest:
+    requested_at: datetime
+    delete_at: datetime
+
+
+async def _check_password(
+    db: AsyncSession, redis: Redis, user: User, password: str, client: ClientInfo
+) -> None:
+    """Пароль — с тем же лимитом попыток пары (email, IP), что вход и смена пароля."""
+    attempt = await ratelimit.begin_attempt(redis, user.email, client.ip)
+    if attempt.retry_after:
+        raise AppError(429, "common.rate_limited", retry_after=attempt.retry_after)
+    if not await verify_password_async(user.password_hash, password):
+        result = await ratelimit.register_failure(redis, user.email, client.ip, attempt)
+        if result.just_locked:
+            await notify_pair_lock(db, redis, user, client.ip)
+            await db.commit()
+        raise AppError(400, "auth.current_password_invalid")
+    await ratelimit.release_attempt(redis, user.email, client.ip)
+
+
+async def _check_code(
+    db: AsyncSession, redis: Redis, user: User, code: str, client: ClientInfo
+) -> None:
+    """Код 2FA — с тем же лимитом аккаунта, что шаг 2FA при входе (10 неверных за час)."""
+    account = await ratelimit.begin_2fa_attempt(redis, user.email)
+    if account.retry_after:
+        raise AppError(429, "auth.two_factor_locked", retry_after=account.retry_after)
+    if not await check_totp(db, user, code):
+        result = await ratelimit.register_2fa_failure(redis, user.email, account)
+        if result.just_locked:
+            await notify_two_factor_lock(db, redis, user, client.ip)
+        await db.commit()
+        raise AppError(400, "auth.invalid_code")
+    await ratelimit.release_2fa_attempt(redis, user.email)
+
+
+async def request_deletion(
+    db: AsyncSession,
+    redis: Redis,
+    *,
+    user: User,
+    password: str,
+    code: str,
+    client: ClientInfo,
+) -> DeletionRequest:
+    """Запрос на удаление своего аккаунта: пароль и код 2FA, удаление через 7 дней.
+    Все сеансы завершаются (вход снова — только для отмены), черновики и анализы в работе
+    отменяются. Единственный действующий администратор удалить себя не может (409
+    account.last_admin). Делает commit."""
+    if user.deletion_requested_at is not None:
+        raise AppError(409, "account.deletion_pending_already")
+    await lock_admin_actions(db)
+    if user.role == "admin" and not await other_active_admins(db, user.id):
+        raise AppError(409, "account.last_admin")
+    await _check_password(db, redis, user, password, client)
+    await _check_code(db, redis, user, code, client)
+    now = sessions.utcnow()
+    locked = await db.scalar(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked is None or locked.deletion_requested_at is not None:
+        raise AppError(409, "account.deletion_pending_already")
+    locked.deletion_requested_at = now
+    await sessions.revoke_user_sessions(db, user.id, now=now)
+    await db.commit()
+    await _cancel_open_analyses(db, redis, locked)
+    log.info("account.deletion_requested", user_id=user.id)
+    return DeletionRequest(requested_at=now, delete_at=now + DELETION_DELAY)
+
+
+async def _cancel_open_analyses(db: AsyncSession, redis: Redis, user: User) -> None:
+    """Черновики и анализы в работе — отменены, резерв бюджета снят."""
+    from app.services import analyses  # анализы тянут клиент Claude: только по делу
+
+    ids = list(
+        await db.scalars(
+            select(Analysis.id).where(
+                Analysis.user_id == user.id, Analysis.status.in_(analyses.CANCELLABLE)
+            )
+        )
+    )
+    for analysis_id in ids:
+        try:
+            await analyses.cancel(db, redis, user, analysis_id)
+        except AppError:
+            # Анализ успел закончиться сам
+            await db.rollback()
+
+
+async def cancel_deletion(db: AsyncSession, user: User) -> None:
+    """Отмена запроса на удаление (в течение 7 дней). Запроса нет — 409. Делает commit."""
+    locked = await db.scalar(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked is None or locked.deletion_requested_at is None:
+        raise AppError(409, "account.no_deletion")
+    locked.deletion_requested_at = None
+    await db.commit()
+    log.info("account.deletion_cancelled", user_id=user.id)
+
+
+async def delete_due_accounts(
+    db: AsyncSession, redis: Redis, *, now: datetime | None = None
+) -> list[int]:
+    """Удаляет аккаунты, у которых запрос на удаление старше 7 дней (задача воркера раз в
+    сутки): личные данные — как при удалении администратором (Р15), кэш аналитики —
+    тоже. Запись в журнале — без имени и email. Единственный действующий администратор
+    не удаляется (запрос остается, в лог — предупреждение). Возвращает id удаленных."""
+    now = now or sessions.utcnow()
+    due = list(
+        await db.scalars(
+            select(User.id)
+            .where(
+                User.deletion_requested_at.is_not(None),
+                User.deletion_requested_at <= now - DELETION_DELAY,
+                User.status != "deleted",
+            )
+            .order_by(User.id)
+        )
+    )
+    done: list[int] = []
+    for user_id in due:
+        await lock_admin_actions(db)
+        user = await db.scalar(
+            select(User)
+            .where(User.id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if user is None or user.deletion_requested_at is None or user.status == "deleted":
+            await db.rollback()
+            continue
+        active_admin = user.role == "admin" and user.status == "active"
+        if active_admin and not await other_active_admins(db, user.id):
+            await db.rollback()
+            log.warning("account.deletion_last_admin", user_id=user_id)
+            continue
+        await erase_account(db, user, now=now)
+        await write_audit(
+            db,
+            action="delete",
+            actor_id=user_id,
+            target_user_id=user_id,
+            details={"self": True},
+        )
+        await db.commit()
+        await analytics_cache.clear_user(redis, user_id)
+        done.append(user_id)
+        log.info("account.deleted_by_request", user_id=user_id)
+    return done

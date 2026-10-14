@@ -64,7 +64,8 @@ from app.schemas.analyses import (
     RestartOut,
     TextKey,
 )
-from app.services import progress
+from app.services import bookmakers as bookmakers_service
+from app.services import play_limits, progress
 from app.services.ai_access import (
     LIMIT_REFUSALS,
     access_for,
@@ -101,7 +102,8 @@ from app.services.analysis_run import (
     running_claude_steps,
 )
 from app.services.analysis_view import access_out, analysis_out, parse_cost, progress_event
-from app.services.app_settings import get_app_settings
+from app.services.app_settings import check_currency, get_app_settings
+from app.services.bank import CURRENCY_LOCK
 from app.services.claude_key import key_for
 from app.services.progress import publish
 from app.services.sessions import utcnow
@@ -273,12 +275,15 @@ async def _parse_aborted(db: AsyncSession, analysis_id: int) -> None:
 
 async def create_from_text(db: AsyncSession, redis: Redis, user: User, text: str) -> Analysis:
     """Анализ из текста: разбор Claude (Haiku) и статус needs_confirmation. Нет доступа —
-    409 с кодом причины; сбой разбора — анализ failed (шаг parse) и ошибка с кодом."""
+    409 с кодом причины; пауза или лимит дня ответственной игры — 409 play.*; сбой
+    разбора — анализ failed (шаг parse) и ошибка с кодом."""
     cleaned = text.replace("\x00", "").strip()
     if not cleaned:
         raise AppError(422, "analysis.text_empty")
     if len(cleaned) > TEXT_MAX:
         raise AppError(422, "analysis.text_too_long", max=TEXT_MAX)
+    # Разбор — тоже вызов Claude: на паузе и сверх лимита дня ответственной игры не идет
+    await play_limits.check(db, user)
     access = await access_for(db, user, estimate_usd=None)
     if not access.allowed:
         await _limit_refused(db, user.id, access.reason or "", rollback=False)
@@ -690,10 +695,18 @@ async def start_run(
     enqueue: Enqueue,
 ) -> Analysis:
     """Запуск (и повторный запуск после сбоя или отмены): проверка событий, резерв
-    бюджета, матчи и кэфы, статус queued и задача воркера."""
+    бюджета, матчи и кэфы, статус queued и задача воркера. Пауза или достигнутый лимит
+    дня ответственной игры — 409 play.* на любом ключе (app/services/play_limits.py).
+
+    Вся транзакция — под разделяемой CURRENCY_LOCK, как у ставки: банк из ввода
+    (bank_input, confirmed.bank) пишется в валюте, которую видит смена валюты. Банк из
+    формы, открытой до смены (body.currency не та), — 409 common.currency_changed."""
+    # До любых блокировок строк (резерв берет строку настроек): порядок, как у смены валюты
+    await db.execute(select(func.pg_advisory_xact_lock_shared(CURRENCY_LOCK)))
     analysis = await get_owned(db, user, analysis_id)
     if analysis.status not in RUNNABLE:
         raise AppError(409, "analysis.bad_state", status=analysis.status)
+    await play_limits.check(db, user)
     new_events = body is not None and body.events is not None
     if new_events and analysis.confirmed:
         # Подтвержденные события запуска не меняются: другие события — новый анализ
@@ -704,6 +717,8 @@ async def start_run(
     if _call_still_running(analysis, config, now):
         raise AppError(409, "analysis.step_running")
     settings = await get_app_settings(db)
+    if body is not None:
+        check_currency(settings, body.currency)
     if new_events:
         assert body is not None and body.events is not None
         events, problems = await check_events(db, _drafts(body.events), today=today)
@@ -746,6 +761,8 @@ async def start_run(
         analysis.confirmed = confirmed.to_json()
         analysis.bank_input = confirmed.bank
         analysis.bookmaker = confirmed.bookmaker
+        # Новое название букмекера — в «Мои букмекеры»
+        await bookmakers_service.remember(db, user.id, [confirmed.bookmaker])
         parse_tokens, parse_spent = await parse_usage(db, analysis.id)
         steps = plan_steps(
             attached,
@@ -823,6 +840,15 @@ async def restart_state(db: AsyncSession, user: User, analysis: Analysis) -> Res
             reason_code="analysis.step_running",
             reason_params={},
             retry_at=analysis.updated_at + _step_window(config),
+        )
+    # Пауза и лимиты дня ответственной игры: start_run откажет так же
+    blocked = await play_limits.blocked_reason(db, user, now=now)
+    if blocked is not None:
+        return RestartOut(
+            allowed=False,
+            reason_code=blocked.code,
+            reason_params={key: str(value) for key, value in blocked.params.items()},
+            retry_at=None,
         )
     version = await active_version(db, user.id)
     estimate = await estimate_run(

@@ -1,4 +1,5 @@
-"""Профиль вошедшего пользователя: имя и часовой пояс, состояние резервных кодов 2FA.
+"""Профиль вошедшего пользователя: имя, часовой пояс и согласие на обезличенные прогнозы
+(Р15), состояние резервных кодов 2FA.
 
 Email, роль, статус и режим ключа здесь не меняются: email — логин, остальное решает
 администратор. Функции, которые меняют данные, сами делают commit.
@@ -14,14 +15,26 @@ from app.db.models import RecoveryCode, User
 
 
 async def update_profile(
-    db: AsyncSession, user: User, *, display_name: str | None, tz: str | None
+    db: AsyncSession,
+    user: User,
+    *,
+    display_name: str | None,
+    tz: str | None,
+    consent_training: bool | None = None,
 ) -> User:
     """Меняет переданные поля; None — поле не трогаем. Значения уже проверены схемой."""
     changed = False
+    if consent_training is not None and consent_training != user.consent_training:
+        user.consent_training = consent_training
+        changed = True
     if display_name is not None and display_name != user.display_name:
         user.display_name = display_name
         changed = True
     if tz is not None and tz != user.tz:
+        from app.services.play_limits import keep_day
+
+        # Сутки лимитов ответственной игры досчитываются по прежнему поясу
+        await keep_day(db, user)
         user.tz = tz
         changed = True
     if changed:

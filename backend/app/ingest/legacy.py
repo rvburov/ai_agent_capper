@@ -80,8 +80,10 @@ from app.ingest.legacy_markets import (
     short_forms,
     short_name,
 )
+from app.services import bookmakers as bookmakers_service
 from app.services.app_settings import get_app_settings
 from app.services.audit import write_audit
+from app.services.bank import lock_member_money
 
 SOURCE = "legacy"
 STRATEGY_CODE = "legacy"
@@ -1213,6 +1215,8 @@ async def import_history(
     """Переносит историю в базу (flush без commit: фиксирует или откатывает вызывающий)."""
     await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": LOCK_KEY})
     user = await _find_user(db, email)
+    # Как у ставки и движения банка: смена валюты не пройдет посреди переноса сумм
+    await lock_member_money(db, user.id)
     settings = await get_app_settings(db)
     report = ImportReport(
         email=user.email,
@@ -1261,6 +1265,8 @@ async def import_history(
             importer.ledger(reconcile, None)
             report.reconciled = reconcile.amount
             await db.flush()
+    # Букмекеры перенесенных ставок — в «Мои букмекеры», как у новой ставки
+    await bookmakers_service.remember(db, user.id, [record.bookmaker for record in records])
     report.inserted_refs = ledger.inserted
     report.absent_refs = ledger.absent
     if profiles is not None:

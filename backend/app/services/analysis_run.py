@@ -1275,7 +1275,9 @@ class _Runner:
                         events=self.events,
                         entries=entries,
                         params=self.params,
-                        bank_input=self.confirmed.bank,
+                        # Банк — из строки под блокировкой, а не из памяти: смена валюты
+                        # посреди прогона пересчитывает confirmed
+                        bank_input=Confirmed.from_json(analysis.confirmed).bank,
                         bookmaker=self.confirmed.bookmaker,
                         warnings=list(self.checkpoint.get("warnings") or []),
                         # Прогон приемки (acceptance-runs): прогнозы не в статистику участника

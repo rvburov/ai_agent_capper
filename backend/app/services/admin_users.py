@@ -243,17 +243,28 @@ async def _load_target(db: AsyncSession, user_id: int) -> User:
     return user
 
 
+async def other_active_admins(db: AsyncSession, user_id: int) -> int:
+    """Сколько еще активных администраторов, кроме user_id. Тот, кто попросил удалить
+    свой аккаунт (В10), не считается: через 7 дней его не будет."""
+    others = await db.scalar(
+        select(func.count())
+        .select_from(User)
+        .where(
+            User.role == "admin",
+            User.status == "active",
+            User.deletion_requested_at.is_(None),
+            User.id != user_id,
+        )
+    )
+    return int(others or 0)
+
+
 async def _ensure_not_last_admin(db: AsyncSession, target: User) -> None:
     """Действие лишит target роли активного администратора: проверяем, что останется
     другой. Вызывать после lock_admin_actions."""
     if target.role != "admin" or target.status != "active":
         return
-    others = await db.scalar(
-        select(func.count())
-        .select_from(User)
-        .where(User.role == "admin", User.status == "active", User.id != target.id)
-    )
-    if not others:
+    if not await other_active_admins(db, target.id):
         raise AppError(409, "admin.last_admin")
 
 
@@ -534,6 +545,29 @@ async def _erase_personal_data(db: AsyncSession, user: User) -> None:
         await db.execute(stmt)
 
 
+async def erase_account(db: AsyncSession, target: User, *, now: datetime) -> None:
+    """Удаляет личные данные (_erase_personal_data) и обезличивает строку users:
+    status = deleted, email deleted-<id>@deleted.invalid, без имени, пароля и 2FA. Общее
+    у удаления администратором и удаления по запросу самого участника. Только flush."""
+    await _erase_personal_data(db, target)
+    target.status = "deleted"
+    target.deleted_at = now
+    target.email = DELETED_EMAIL.format(id=target.id)
+    target.display_name = ""
+    target.password_hash = None
+    target.totp_enabled = False
+    target.totp_secret_enc = None
+    target.totp_key_version = None
+    target.totp_last_step = None
+    target.role = "member"
+    target.tz = DEFAULT_TZ
+    target.blocked_at = None
+    target.last_login_at = None
+    target.consent_training = False
+    target.deletion_requested_at = None
+    await db.flush()
+
+
 async def delete_user(
     db: AsyncSession,
     user_id: int,
@@ -556,21 +590,7 @@ async def delete_user(
         await check_totp(db, actor, confirm, action="delete", target_user_id=target.id)
     await _ensure_not_last_admin(db, target)
     name, email, consent = target.display_name, target.email, target.consent_training
-    await _erase_personal_data(db, target)
-    now = utcnow()
-    target.status = "deleted"
-    target.deleted_at = now
-    target.email = DELETED_EMAIL.format(id=target.id)
-    target.display_name = ""
-    target.password_hash = None
-    target.totp_enabled = False
-    target.totp_secret_enc = None
-    target.totp_key_version = None
-    target.totp_last_step = None
-    target.role = "member"
-    target.tz = DEFAULT_TZ
-    target.blocked_at = None
-    target.last_login_at = None
+    await erase_account(db, target, now=utcnow())
     # Запись журнала «кто, когда и кого удалил»: имя и email только здесь. Без счетчиков
     # удаленных ставок и записей банка: журнал видят администраторы (Р14)
     await write_audit(

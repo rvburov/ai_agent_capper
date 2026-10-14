@@ -106,7 +106,9 @@ class AdminBudgetOut(BaseModel):
     background_usd — из них общие задачи без участника. reserved_usd — резерв
     анализов, которые идут сейчас. forecast_usd — прогноз на конец месяца по темпу.
     members_limits_usd — сумма месячных лимитов участников на ключе администратора.
-    eval_* — отдельный бюджет проверочных прогонов (eval и теневые, Р22)."""
+    members_usd — из spent_usd вызовы участников (не администраторов). budget_share —
+    spent_usd к бюджету (доля; пусто — бюджет 0). eval_* — отдельный бюджет проверочных
+    прогонов (eval и теневые, Р22)."""
 
     month_start: datetime
     days_in_month: int
@@ -118,6 +120,8 @@ class AdminBudgetOut(BaseModel):
     left_usd: UsdOut
     forecast_usd: UsdOut
     members_limits_usd: UsdOut
+    members_usd: UsdOut | None
+    budget_share: float | None
     alert_pct: int
     eval_budget_usd: UsdOut
     eval_spent_usd: UsdOut
@@ -142,7 +146,8 @@ class AiBudgetOut(BaseModel):
     own_cap_usd — свой потолок на своем ключе. avg_analysis_usd — средняя цена
     законченного анализа за месяц на ключе этого режима (пусто — анализов нет).
     reason_code — почему новый анализ сейчас не запустится (ключ errors.<код> и
-    reason_params), пусто — запустится. budget — общий бюджет, только администратору."""
+    reason_params), пусто — запустится. budget — общий бюджет, только администратору.
+    limit_share — spent_usd к месячному лимиту (доля; пусто — личного лимита нет)."""
 
     mode: AiMode
     key_source: KeySource
@@ -150,6 +155,7 @@ class AiBudgetOut(BaseModel):
     month_start: datetime
     monthly_usd: UsdOut | None
     spent_usd: UsdOut
+    limit_share: float | None
     reserved_usd: UsdOut
     left_usd: UsdOut | None
     daily_analyses: int | None
@@ -324,9 +330,11 @@ class UsageDayOut(UsageSumsOut):
 
 class UsageKindOut(UsageSumsOut):
     """Вид вызова за месяц. avg_* — в среднем на вызов без ошибки (пусто — таких нет);
-    models и efforts — какие модели и effort были у вызовов."""
+    models и efforts — какие модели и effort были у вызовов. share — доля вида в расходе
+    месяца (пусто — расхода нет)."""
 
     kind: str
+    share: float | None
     avg_cost_usd: UsdOut | None
     avg_prompt_tokens: int | None
     avg_output_tokens: int | None

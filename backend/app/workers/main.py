@@ -18,7 +18,9 @@ CAPPER_DATA_UPDATE_HOUR_UTC (по умолчанию 5) и 25 минут: пос
 Европе. Минуты не нулевые: в начале часа запускается больше всего чужих задач.
 Анализ (run_analysis) ставит API, у задачи свой предел 15 минут и нет повтора arq;
 уборщик зависших анализов — каждые 5 минут. Прогрев кэша аналитики (warm_analytics)
-ставит API после изменения ставок и банка, одна задача на участника.
+ставит API после изменения ставок и банка, одна задача на участника. Удаление аккаунтов
+по запросу участников — раз в сутки в 03:45 UTC (после очистки), сигналы расхода ИИ —
+каждый час на 41-й минуте.
 """
 
 import argparse
@@ -45,7 +47,9 @@ from app.core.logging import setup_logging
 from app.db.session import create_engine, create_sessionmaker
 from app.services.data_status import DATA_UPDATE_MINUTE
 from app.workers.jobs import (
+    check_ai_alerts,
     cleanup_auth_records,
+    delete_requested_accounts,
     reap_stuck_analyses,
     run_analysis,
     update_data,
@@ -70,6 +74,11 @@ REAP_TIMEOUT_SECONDS = 60
 # Прогрев кэша аналитики: на 10 тыс. ставок бутстрэп идет секунды. Результат не хранится
 # (keep_result=0): иначе задача с тем же id участника не ставилась бы до его истечения
 WARM_TIMEOUT_SECONDS = 300
+# Удаление аккаунтов по запросу — после ночной очистки (03:15), до утра в Европе
+ACCOUNT_DELETION_HOUR_UTC = 3
+ACCOUNT_DELETION_MINUTE = 45
+# Сигналы расхода ИИ — раз в час, на минуте, которая не совпадает с остальными задачами
+AI_ALERTS_MINUTE = 41
 
 
 # Имена ключей arq. В arq 0.28 они — константы модулей (arq.constants), настройки
@@ -198,6 +207,15 @@ def build_cron_jobs(settings: Settings) -> tuple[CronJob, ...] | None:
             max_tries=1,
             timeout=REAP_TIMEOUT_SECONDS,
         ),
+        cron(
+            delete_requested_accounts,
+            hour=ACCOUNT_DELETION_HOUR_UTC,
+            minute=ACCOUNT_DELETION_MINUTE,
+            # Не удалось — следующей ночью: запрос на удаление остается в базе
+            max_tries=1,
+            timeout=600,
+        ),
+        cron(check_ai_alerts, minute=AI_ALERTS_MINUTE, max_tries=1, timeout=120),
     )
 
 
@@ -210,6 +228,8 @@ class WorkerSettings:
         job_function(run_analysis, timeout=ANALYSIS_TIMEOUT_SECONDS, max_tries=1),
         reap_stuck_analyses,
         job_function(warm_analytics, timeout=WARM_TIMEOUT_SECONDS, max_tries=1, keep_result=0),
+        delete_requested_accounts,
+        check_ai_alerts,
     )
     cron_jobs: Sequence[CronJob] | None = build_cron_jobs(get_settings())
     on_startup: StartupShutdown | None = startup

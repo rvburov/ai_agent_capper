@@ -12,12 +12,15 @@ from fastapi import APIRouter
 from app.api.routes import (
     admin,
     admin_ai,
+    admin_messages,
+    admin_settings,
     ai,
     analyses,
     analytics,
     auth,
     bank,
     bets,
+    bookmakers,
     dashboard,
     health,
     me,
@@ -35,10 +38,13 @@ api_router = APIRouter(responses=ERROR_RESPONSES)
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(me.router)
+api_router.include_router(bookmakers.router)
 api_router.include_router(settings.router)
 api_router.include_router(admin.router)
 api_router.include_router(ai.router)
 api_router.include_router(admin_ai.router)
+api_router.include_router(admin_settings.router)
+api_router.include_router(admin_messages.router)
 api_router.include_router(analyses.router)
 api_router.include_router(bets.router)
 api_router.include_router(bank.router)

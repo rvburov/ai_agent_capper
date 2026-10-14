@@ -109,13 +109,20 @@ class EventIn(BaseModel):
     line_no: int | None = Field(default=None, ge=0, le=100000)
 
 
+# Валюта, в которой участник видел суммы формы. Не валюта программы (ее сменили, пока
+# форма была открыта) — 409 common.currency_changed. Не прислана — не проверяется
+FormCurrency = Literal["RUB", "USD", "EUR"]
+
+
 class ConfirmIn(BaseModel):
     """Подтвержденный ввод для «Перед запуском» и запуска. events null — взять уже
-    подтвержденные (повторный запуск после сбоя или отмены)."""
+    подтвержденные (повторный запуск после сбоя или отмены). currency — валюта банка
+    в форме (FormCurrency)."""
 
     events: list[EventIn] | None = Field(default=None, max_length=20)
     bank: MoneyIn | None = None
     bookmaker: ShortText | None = None
+    currency: FormCurrency | None = None
 
 
 class DecisionIn(BaseModel):

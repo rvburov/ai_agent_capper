@@ -441,7 +441,9 @@ class PlayLimit(Base):
     лимита нет. Снизить лимит можно сразу, повысить или снять — через 24 часа: новое
     значение ждет в pending_* до pending_from (pending_from задан — изменение ждет, даже
     если pending-значение NULL, то есть «без лимита»). Паузу до paused_until досрочно не
-    снять. Сумма — в валюте программы (currency)."""
+    снять. Сумма — в валюте программы (currency). day_tz и day_tz_until — участник сменил
+    часовой пояс: текущие сутки лимитов досчитываются по прежнему поясу до их конца, иначе
+    смена пояса обнуляла бы счетчики дня (миграция 0005)."""
 
     __tablename__ = "play_limits"
     __table_args__ = (
@@ -455,6 +457,7 @@ class PlayLimit(Base):
             name="stake_currency",
         ),
         check_in("currency", CURRENCIES, "currency"),
+        CheckConstraint("(day_tz IS NULL) = (day_tz_until IS NULL)", name="day_tz_pair"),
     )
 
     user_id: Mapped[int] = mapped_column(BigInteger, _user_fk(), primary_key=True)
@@ -465,6 +468,8 @@ class PlayLimit(Base):
     pending_stake_per_day: Mapped[Money | None]
     pending_from: Mapped[datetime | None]
     paused_until: Mapped[datetime | None]
+    day_tz: Mapped[str | None] = mapped_column(String(64))
+    day_tz_until: Mapped[datetime | None]
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 

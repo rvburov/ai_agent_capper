@@ -60,6 +60,9 @@ async def test_me_returns_own_profile(
         "tz": "Europe/Berlin",
         "totp_enabled": True,
         "created_at": body["created_at"],
+        "consent_training": False,
+        "deletion_requested_at": None,
+        "deletion_at": None,
     }
 
 
@@ -82,6 +85,7 @@ async def test_member_sees_only_own_notifications(
     bob_note = await notify(
         db, user_id=bob_user.id, kind="new_device", device="Safari", ip="1.2.3.4"
     )
+    assert bob_note is not None
     await db.commit()
     alice = await login(await make_client(), alice_user)
 

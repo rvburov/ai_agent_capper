@@ -506,20 +506,12 @@ async def report_key_failure(
                 secret.verified_at = None
         variant = None if rejected else "billing"
         if not await _recent_failure(db, user_id, variant, now - KEY_FAILURE_REPEAT):
-            if variant is None:
-                created.append(
-                    await notify(db, user_id=user_id, kind="ai_key_failed", link=KEY_LINK)
-                )
-            else:
-                created.append(
-                    await notify(
-                        db,
-                        user_id=user_id,
-                        kind="ai_key_failed",
-                        variant="billing",
-                        link=KEY_LINK,
-                    )
-                )
+            note = await notify(
+                db, user_id=user_id, kind="ai_key_failed", variant=variant, link=KEY_LINK
+            )
+            # None — участник выключил этот вид уведомлений
+            if note is not None:
+                created.append(note)
     elif key_source == "admin":
         settings = await _settings(db, lock=False)
         if rejected:
@@ -528,11 +520,11 @@ async def report_key_failure(
         for admin_id in await _active_admin_ids(db):
             if await _recent_failure(db, admin_id, variant, now - KEY_FAILURE_REPEAT):
                 continue
-            created.append(
-                await notify(
-                    db, user_id=admin_id, kind="ai_key_failed", variant=variant, link=ADMIN_KEY_LINK
-                )
+            note = await notify(
+                db, user_id=admin_id, kind="ai_key_failed", variant=variant, link=ADMIN_KEY_LINK
             )
+            if note is not None:
+                created.append(note)
     await db.flush()
     return created
 

@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
-from app.schemas.analyses import DecimalOut, Market, Surface
+from app.schemas.analyses import DecimalOut, FormCurrency, Market, Surface
 
 OddsTakenIn = Annotated[Decimal, Field(gt=0, max_digits=6, decimal_places=3)]
 StakeIn = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=2)]
@@ -36,11 +36,15 @@ class BetLegIn(BaseModel):
 
 
 class BetIn(BaseModel):
+    """currency — валюта суммы в форме (FormCurrency): сменили валюту, пока форма была
+    открыта, — 409 common.currency_changed, сумма в старой валюте не запишется."""
+
     analysis_id: int = Field(ge=1, le=2**63 - 1)
     stake: StakeIn
     bookmaker: BookmakerIn
     legs: list[BetLegIn] = Field(min_length=1, max_length=3)
     client_ref: ClientRef
+    currency: FormCurrency | None = None
 
 
 class BetLegOut(BaseModel):
@@ -374,9 +378,11 @@ class BankEntriesOut(BaseModel):
 class BankEntryIn(BaseModel):
     """Пополнение, вывод или корректировка. amount у пополнения и вывода — больше нуля,
     у корректировки — со знаком, не ноль. expected_last_id — последняя строка журнала,
-    которую видел участник (null — журнал пуст): защита от двойной отправки и гонки."""
+    которую видел участник (null — журнал пуст): защита от двойной отправки и гонки.
+    currency — валюта суммы в форме, как у BetIn (409 common.currency_changed)."""
 
     kind: BankMoveKind
     amount: SignedMoneyIn
     note: NoteIn | None = None
     expected_last_id: int | None = Field(ge=1, le=2**63 - 1)
+    currency: FormCurrency | None = None

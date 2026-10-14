@@ -241,10 +241,18 @@ async def test_series_bank_and_result(
     points = {item["day"]: D(item["value"]) for item in series["points"]}
     start = today - timedelta(days=30)
     reference = await reference_sql.equity_by_day(db, member.id, TZ, start, today)
-    assert {day.isoformat(): value for day, value in reference.items()} == points
+    # Банк появился внутри периода: дни до первой записи журнала в ряд не входят
+    assert reference[start] == 0
+    first_day = min(day for day, value in reference.items() if value != 0)
+    shown = {day.isoformat(): value for day, value in reference.items() if day >= first_day}
+    assert shown == points
     assert D(series["base"]) == reference[start] and D(series["last"]) == reference[today]
     bank = (await member.client.get("/api/me/bank")).json()
     assert D(series["last"]) == D(bank["equity"])
+    # Старт периода — первый день банка и вложенное, изменение — рост капитала к нему
+    assert series["start_day"] == first_day.isoformat()
+    assert D(series["start_amount"]) == D(bank["invested"])
+    assert abs(series["change_share"] - float(D(bank["growth"]))) < 1e-4
     assert sum(D(row["profit"]) for row in series["rows"]) == D(data["kpi"]["profit"])
     assert -1 <= series["max_drawdown"] <= 0
 

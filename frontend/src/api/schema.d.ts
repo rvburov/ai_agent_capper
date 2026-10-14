@@ -154,7 +154,8 @@ export interface paths {
         put?: never;
         /**
          * Register
-         * @description Регистрация по коду приглашения. Следующий шаг — настройка 2FA.
+         * @description Регистрация по коду приглашения. Следующий шаг — настройка 2FA. Без tz — часовой
+         *     пояс по умолчанию из «Администрирование → Настройки».
          */
         post: operations["register_api_auth_register_post"];
         delete?: never;
@@ -190,7 +191,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Me */
+        /**
+         * Me
+         * @description Вошедший пользователь. deletion_at задан — аккаунт будет удален в этот момент, до
+         *     него открыта только отмена (DELETE /api/me/deletion).
+         */
         get: operations["me_api_me_get"];
         put?: never;
         post?: never;
@@ -199,7 +204,8 @@ export interface paths {
         head?: never;
         /**
          * Update Me
-         * @description Имя и часовой пояс. Пояс — только из базы IANA (zoneinfo), иначе 422.
+         * @description Имя, часовой пояс и согласие на обезличенные прогнозы (consent_training, Р15).
+         *     Пояс — только из базы IANA (zoneinfo), иначе 422.
          */
         patch: operations["update_me_api_me_patch"];
         trace?: never;
@@ -411,6 +417,200 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/me/notification-prefs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Notification Prefs
+         * @description Виды уведомлений, которые человек может получать (у администратора — еще архив
+         *     матчей и сигналы расхода ИИ), с «на сайте» и признаком «обязательное». Push — только
+         *     показ (этап 6).
+         */
+        get: operations["notification_prefs_api_me_notification_prefs_get"];
+        /**
+         * Update Notification Prefs
+         * @description Частичное обновление «на сайте» по видам. Обязательный вид выключить нельзя —
+         *     422 notification.required; вида нет у человека — 422 notification.kind_unavailable.
+         */
+        put: operations["update_notification_prefs_api_me_notification_prefs_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/play-limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Play Limits
+         * @description Лимиты ставок в день (число и сумма), ждущее повышение, пауза и сколько поставлено
+         *     сегодня по поясу участника; blocked — что сейчас не дает поставить и запустить анализ.
+         */
+        get: operations["play_limits_api_me_play_limits_get"];
+        /**
+         * Update Play Limits
+         * @description Лимиты целиком (null — без лимита): строже — сразу, мягче — через 24 часа (pending).
+         *     Запрос без смягчений отменяет ждущее повышение. currency формы не валюта программы —
+         *     409 common.currency_changed.
+         */
+        put: operations["update_play_limits_api_me_play_limits_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take Pause
+         * @description Пауза на 1, 7, 30 или 90 дней (до полуночи по поясу участника после последнего дня):
+         *     ставки и анализы на любом ключе недоступны, досрочно не снимается. Короче действующей —
+         *     409 play.pause_shorter.
+         */
+        post: operations["take_pause_api_me_pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Data
+         * @description Все свои данные сразу скачиванием (GDPR): профиль, ставки и события, журнал банка,
+         *     анализы и прогнозы, свои вызовы Claude, уведомления и настройки, букмекеры, лимиты,
+         *     входы. Без паролей, кодов 2FA и ключей Claude. Файл отдается частями.
+         */
+        get: operations["export_data_api_me_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/deletion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Deletion
+         * @description Удалить свой аккаунт через 7 дней: пароль и код 2FA (лимит попыток — как у входа).
+         *     Все сеансы завершаются, cookie сеанса стирается: войти снова можно только для отмены.
+         *     Единственный администратор удалить себя не может — 409 account.last_admin.
+         */
+        post: operations["request_deletion_api_me_deletion_post"];
+        /**
+         * Cancel Deletion
+         * @description Отменить удаление (в течение 7 дней). Запроса нет — 409 account.no_deletion.
+         */
+        delete: operations["cancel_deletion_api_me_deletion_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/bookmakers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bookmaker Names
+         * @description Названия для выбора в формах: не скрытые, частые первыми.
+         */
+        get: operations["bookmaker_names_api_me_bookmakers_get"];
+        put?: never;
+        /**
+         * Create Bookmaker
+         * @description Добавить букмекера. Название занято (без учета регистра, и у скрытого) — 409
+         *     bookmaker.name_taken; «Другой» — 422 bookmaker.reserved.
+         */
+        post: operations["create_bookmaker_api_me_bookmakers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/bookmakers/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Bookmakers
+         * @description Список кабинета: действующие и скрытые, у каждого — число ставок, в игре и сумма.
+         */
+        get: operations["list_bookmakers_api_me_bookmakers_list_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/bookmakers/{bookmaker_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Bookmaker
+         * @description Убрать из списка. Есть ставки в игре с этим названием — 409 bookmaker.open_bets.
+         */
+        delete: operations["delete_bookmaker_api_me_bookmakers__bookmaker_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Bookmaker
+         * @description Переименовать (сохраненные ставки остаются с прежним названием) и скрыть или
+         *     вернуть (archived). Скрыть со ставками в игре — 409 bookmaker.open_bets.
+         */
+        patch: operations["update_bookmaker_api_me_bookmakers__bookmaker_id__patch"];
         trace?: never;
     };
     "/api/settings": {
@@ -1029,6 +1229,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Settings
+         * @description Валюта программы, последняя смена валюты (когда, кто, курс) и часовой пояс по
+         *     умолчанию.
+         */
+        get: operations["get_settings_api_admin_settings_get"];
+        /**
+         * Update Settings
+         * @description Часовой пояс по умолчанию для новых участников (база IANA, иначе 422).
+         */
+        put: operations["update_settings_api_admin_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/currency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change Currency
+         * @description Смена валюты программы по курсу «1 rate_base = rate второй валюты»: пересчет
+         *     ставок, журнала банка, лимитов и банка из ввода анализа у всех участников с
+         *     округлением каждой суммы до копеек; журнал currency_change; кэш аналитики сбрасывается.
+         *     preview=true — только итоги и примеры «до и после». Без totp_code — 403
+         *     admin.totp_required; та же валюта — 409 admin.currency_same.
+         */
+        put: operations["change_currency_api_admin_settings_currency_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Messages
+         * @description Отправленные сообщения, новые сверху (не больше 50): кому, текст, когда, сколько
+         *     получили, кто отправил.
+         */
+        get: operations["list_messages_api_admin_messages_get"];
+        put?: never;
+        /**
+         * Send Message
+         * @description Сообщение (1–280 знаков) всем активным участникам (user_id = null) или одному —
+         *     в центр уведомлений; запись message в журнал. preview=true — без отправки: кому и
+         *     сколько получат. Получателя нет — 404 admin.message_recipient.
+         */
+        post: operations["send_message_api_admin_messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analyses": {
         parameters: {
             query?: never;
@@ -1192,7 +1468,8 @@ export interface paths {
          * Place Bet
          * @description Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не
          *     меняется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref
-         *     возвращает ту же ставку.
+         *     возвращает ту же ставку. Пауза и лимиты дня ответственной игры — 409 play.paused,
+         *     play.bets_limit, play.stake_limit (until — до какого момента).
          */
         post: operations["place_bet_api_bets_post"];
         delete?: never;
@@ -1318,26 +1595,6 @@ export interface paths {
          * @description Закрывающий кэф ноги (свой исход, обратный — по желанию, чей кэф); null — стереть.
          */
         put: operations["set_leg_closing_api_bets__bet_id__legs__leg_id__closing_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/me/bookmakers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * My Bookmakers
-         * @description Букмекеры участника из ставок и анализов, частые первыми.
-         */
-        get: operations["my_bookmakers_api_me_bookmakers_get"];
-        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1807,7 +2064,9 @@ export interface components {
          *     background_usd — из них общие задачи без участника. reserved_usd — резерв
          *     анализов, которые идут сейчас. forecast_usd — прогноз на конец месяца по темпу.
          *     members_limits_usd — сумма месячных лимитов участников на ключе администратора.
-         *     eval_* — отдельный бюджет проверочных прогонов (eval и теневые, Р22).
+         *     members_usd — из spent_usd вызовы участников (не администраторов). budget_share —
+         *     spent_usd к бюджету (доля; пусто — бюджет 0). eval_* — отдельный бюджет проверочных
+         *     прогонов (eval и теневые, Р22).
          */
         AdminBudgetOut: {
             /**
@@ -1833,6 +2092,10 @@ export interface components {
             forecast_usd: number;
             /** Members Limits Usd */
             members_limits_usd: number;
+            /** Members Usd */
+            members_usd: number | null;
+            /** Budget Share */
+            budget_share: number | null;
             /** Alert Pct */
             alert_pct: number;
             /** Eval Budget Usd */
@@ -1874,6 +2137,31 @@ export interface components {
             defaults: components["schemas"]["LimitDefaultsOut"];
             /** Members */
             members: components["schemas"]["MemberLimitOut"][];
+        };
+        /** AdminSettingsIn */
+        AdminSettingsIn: {
+            /** Default Tz */
+            default_tz: string;
+        };
+        /**
+         * AdminSettingsOut
+         * @description Настройки программы: валюта (одна на всех, Р17) и часовой пояс новых участников.
+         *     Расходы на Claude всегда в долларах.
+         */
+        AdminSettingsOut: {
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "RUB" | "USD" | "EUR";
+            /** Default Tz */
+            default_tz: string;
+            currency_changed: components["schemas"]["CurrencyChangeOut"] | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * AdminUserDetailOut
@@ -2022,6 +2310,7 @@ export interface components {
          *     законченного анализа за месяц на ключе этого режима (пусто — анализов нет).
          *     reason_code — почему новый анализ сейчас не запустится (ключ errors.<код> и
          *     reason_params), пусто — запустится. budget — общий бюджет, только администратору.
+         *     limit_share — spent_usd к месячному лимиту (доля; пусто — личного лимита нет).
          */
         AiBudgetOut: {
             /**
@@ -2045,6 +2334,8 @@ export interface components {
             monthly_usd: number | null;
             /** Spent Usd */
             spent_usd: number;
+            /** Limit Share */
+            limit_share: number | null;
             /** Reserved Usd */
             reserved_usd: number;
             /** Left Usd */
@@ -2516,6 +2807,7 @@ export interface components {
          * @description Пополнение, вывод или корректировка. amount у пополнения и вывода — больше нуля,
          *     у корректировки — со знаком, не ноль. expected_last_id — последняя строка журнала,
          *     которую видел участник (null — журнал пуст): защита от двойной отправки и гонки.
+         *     currency — валюта суммы в форме, как у BetIn (409 common.currency_changed).
          */
         BankEntryIn: {
             /**
@@ -2529,6 +2821,8 @@ export interface components {
             note?: string | null;
             /** Expected Last Id */
             expected_last_id: number | null;
+            /** Currency */
+            currency?: ("RUB" | "USD" | "EUR") | null;
         };
         /**
          * BankEntryOut
@@ -2642,7 +2936,11 @@ export interface components {
             /** Legs */
             legs: components["schemas"]["BetLegBrief"][];
         };
-        /** BetIn */
+        /**
+         * BetIn
+         * @description currency — валюта суммы в форме (FormCurrency): сменили валюту, пока форма была
+         *     открыта, — 409 common.currency_changed, сумма в старой валюте не запишется.
+         */
         BetIn: {
             /** Analysis Id */
             analysis_id: number;
@@ -2654,6 +2952,8 @@ export interface components {
             legs: components["schemas"]["BetLegIn"][];
             /** Client Ref */
             client_ref: string;
+            /** Currency */
+            currency?: ("RUB" | "USD" | "EUR") | null;
         };
         /**
          * BetItemOut
@@ -2881,6 +3181,57 @@ export interface components {
             clv_n: number;
             /** Legacy Settled */
             legacy_settled: number;
+        };
+        /** BookmakerCreateIn */
+        BookmakerCreateIn: {
+            /** Name */
+            name: string;
+        };
+        /**
+         * BookmakerOut
+         * @description Букмекер из списка участника. bets — все ставки с этим названием, open_bets и
+         *     in_play — ставки в игре и их сумма. archived_at задан — скрыт: в формах не
+         *     предлагается, история ставок остается.
+         */
+        BookmakerOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Archived At */
+            archived_at: string | null;
+            /** Bets */
+            bets: number;
+            /** Open Bets */
+            open_bets: number;
+            /** In Play */
+            in_play: string;
+        };
+        /**
+         * BookmakerPatchIn
+         * @description Переименовать (name) и/или скрыть (archived = true) или вернуть (false). Поле не
+         *     передано — не меняется.
+         */
+        BookmakerPatchIn: {
+            /** Name */
+            name?: string | null;
+            /** Archived */
+            archived?: boolean | null;
+        };
+        /** BookmakersOut */
+        BookmakersOut: {
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "RUB" | "USD" | "EUR";
+            /** Items */
+            items: components["schemas"]["BookmakerOut"][];
         };
         /**
          * BrierOut
@@ -3166,7 +3517,8 @@ export interface components {
         /**
          * ConfirmIn
          * @description Подтвержденный ввод для «Перед запуском» и запуска. events null — взять уже
-         *     подтвержденные (повторный запуск после сбоя или отмены).
+         *     подтвержденные (повторный запуск после сбоя или отмены). currency — валюта банка
+         *     в форме (FormCurrency).
          */
         ConfirmIn: {
             /** Events */
@@ -3175,6 +3527,8 @@ export interface components {
             bank?: number | string | null;
             /** Bookmaker */
             bookmaker?: string | null;
+            /** Currency */
+            currency?: ("RUB" | "USD" | "EUR") | null;
         };
         /**
          * ConfirmedEventOut
@@ -3264,6 +3618,110 @@ export interface components {
             csrf_token: string;
         };
         /**
+         * CurrencyChangeOut
+         * @description Последняя смена валюты из журнала: когда, кто, с какой на какую и по какому курсу.
+         */
+        CurrencyChangeOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Actor Name */
+            actor_name: string | null;
+            /**
+             * From Currency
+             * @enum {string}
+             */
+            from_currency: "RUB" | "USD" | "EUR";
+            /**
+             * To Currency
+             * @enum {string}
+             */
+            to_currency: "RUB" | "USD" | "EUR";
+            /** Rate */
+            rate: string;
+            /**
+             * Rate Base
+             * @enum {string}
+             */
+            rate_base: "RUB" | "USD" | "EUR";
+        };
+        /**
+         * CurrencyIn
+         * @description Новая валюта программы и курс: 1 rate_base = rate второй валюты (rate_base —
+         *     прежняя или новая валюта, как в окне смены). preview — только посчитать, что станет;
+         *     без preview нужен текущий код 2FA.
+         */
+        CurrencyIn: {
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "RUB" | "USD" | "EUR";
+            /** Rate */
+            rate: number | string;
+            /**
+             * Rate Base
+             * @enum {string}
+             */
+            rate_base: "RUB" | "USD" | "EUR";
+            /** Totp Code */
+            totp_code?: string | null;
+            /**
+             * Preview
+             * @default false
+             */
+            preview: boolean;
+        };
+        /**
+         * CurrencyPreviewOut
+         * @description Что станет при смене валюты (или что стало, applied = true): сколько сумм
+         *     пересчитано по всем участникам, банк администратора и примеры до и после. factor —
+         *     множитель (новая сумма = прежняя × factor до округления каждой суммы до копеек).
+         *     analyses — анализы с суммами (банк из ввода, рекомендация, предупреждение о банке);
+         *     corrections — у скольких участников остаток от округления строк журнала уйдет в одну
+         *     корректировку «Округление при смене валюты» (банк = round(прежний × курс)).
+         */
+        CurrencyPreviewOut: {
+            /** Applied */
+            applied: boolean;
+            /**
+             * From Currency
+             * @enum {string}
+             */
+            from_currency: "RUB" | "USD" | "EUR";
+            /**
+             * To Currency
+             * @enum {string}
+             */
+            to_currency: "RUB" | "USD" | "EUR";
+            /** Rate */
+            rate: string;
+            /**
+             * Rate Base
+             * @enum {string}
+             */
+            rate_base: "RUB" | "USD" | "EUR";
+            /** Factor */
+            factor: string;
+            /** Bets */
+            bets: number;
+            /** Ledger Entries */
+            ledger_entries: number;
+            /** Play Limits */
+            play_limits: number;
+            /** Analyses */
+            analyses: number;
+            /** Members */
+            members: number;
+            /** Corrections */
+            corrections: number;
+            own_bank: components["schemas"]["MoneyChangeOut"] | null;
+            /** Samples */
+            samples: components["schemas"]["MoneyChangeOut"][];
+        };
+        /**
          * DashboardOut
          * @description Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,
          *     пик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,
@@ -3325,6 +3783,32 @@ export interface components {
         DecisionIn: {
             /** Decision */
             decision?: "skip" | null;
+        };
+        /**
+         * DeletionIn
+         * @description Пароль и текущий код 2FA.
+         */
+        DeletionIn: {
+            /** Password */
+            password: string;
+            /** Code */
+            code: string;
+        };
+        /**
+         * DeletionOut
+         * @description Запрос на удаление: когда сделан и когда аккаунт будет удален (через 7 дней).
+         */
+        DeletionOut: {
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /**
+             * Delete At
+             * Format: date-time
+             */
+            delete_at: string;
         };
         /** DraftEventOut */
         DraftEventOut: {
@@ -4294,6 +4778,12 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Consent Training */
+            consent_training: boolean;
+            /** Deletion Requested At */
+            deletion_requested_at: string | null;
+            /** Deletion At */
+            deletion_at: string | null;
         };
         /**
          * MemberLimitOut
@@ -4345,6 +4835,52 @@ export interface components {
             return_requested_at: string | null;
         };
         /**
+         * MessageIn
+         * @description Кому: всем (user_id = null) или одному участнику. preview — без отправки.
+         */
+        MessageIn: {
+            /** Text */
+            text: string;
+            /** User Id */
+            user_id?: number | null;
+            /**
+             * Preview
+             * @default false
+             */
+            preview: boolean;
+        };
+        /**
+         * MessageOut
+         * @description Отправленное сообщение (или что будет отправлено, sent = false): текст, кому
+         *     (user_id null — всем), имя получателя, сколько получили, когда и кто отправил.
+         */
+        MessageOut: {
+            /** Id */
+            id: number | null;
+            /** Sent */
+            sent: boolean;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Text */
+            text: string;
+            /** User Id */
+            user_id: number | null;
+            /** Recipient Name */
+            recipient_name: string | null;
+            /** Recipients */
+            recipients: number;
+            /** Actor Name */
+            actor_name: string | null;
+        };
+        /** MessagesOut */
+        MessagesOut: {
+            /** Items */
+            items: components["schemas"]["MessageOut"][];
+        };
+        /**
          * ModeDecisionIn
          * @description Решение по просьбе вернуть ключ администратора. limit — лимит на ключе
          *     администратора при одобрении (не задан — остается прежний).
@@ -4387,6 +4923,13 @@ export interface components {
             long_input_threshold: number | null;
             /** Long Multiplier */
             long_multiplier: number | null;
+        };
+        /** MoneyChangeOut */
+        MoneyChangeOut: {
+            /** Before */
+            before: string;
+            /** After */
+            after: string;
         };
         /**
          * MyMatchBetOut
@@ -4469,6 +5012,54 @@ export interface components {
             created_at: string;
             /** Read At */
             read_at: string | null;
+        };
+        /** NotificationPrefIn */
+        NotificationPrefIn: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert";
+            /** On Site */
+            on_site: boolean;
+        };
+        /**
+         * NotificationPrefOut
+         * @description Вид уведомления в настройках. group — строка экрана (limit_80 и limit_100 — одна
+         *     строка); required — приходит всегда, выключить нельзя; admin — раздел «Для
+         *     администратора»; push — только показ, push появится на этапе 6.
+         */
+        NotificationPrefOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert";
+            /** Group */
+            group: string;
+            /** On Site */
+            on_site: boolean;
+            /** Push */
+            push: boolean;
+            /** Required */
+            required: boolean;
+            /** Admin */
+            admin: boolean;
+        };
+        /**
+         * NotificationPrefsIn
+         * @description Частичное обновление: только переданные виды.
+         */
+        NotificationPrefsIn: {
+            /** Items */
+            items: components["schemas"]["NotificationPrefIn"][];
+        };
+        /** NotificationPrefsOut */
+        NotificationPrefsOut: {
+            /** Items */
+            items: components["schemas"]["NotificationPrefOut"][];
+            /** Push Available */
+            push_available: boolean;
         };
         /** NotificationsOut */
         NotificationsOut: {
@@ -4694,6 +5285,14 @@ export interface components {
             /** New Password */
             new_password: string;
         };
+        /** PauseIn */
+        PauseIn: {
+            /**
+             * Days
+             * @enum {integer}
+             */
+            days: 1 | 7 | 30 | 90;
+        };
         /**
          * PersonActivityOut
          * @description Активность человека за период (Р14: только входы и число анализов). logins —
@@ -4769,6 +5368,87 @@ export interface components {
             budget_share: number | null;
             /** Limit Share */
             limit_share: number | null;
+        };
+        /**
+         * PlayLimitsIn
+         * @description Желаемые лимиты целиком: null — без лимита. Строже (ниже или новый лимит) —
+         *     сразу; мягче (выше или снять) — через 24 часа. currency — валюта суммы в форме:
+         *     не валюта программы — 409 common.currency_changed.
+         */
+        PlayLimitsIn: {
+            /** Bets Per Day */
+            bets_per_day: number | null;
+            /** Stake Per Day */
+            stake_per_day: number | string | null;
+            /** Currency */
+            currency?: ("RUB" | "USD" | "EUR") | null;
+        };
+        /**
+         * PlayLimitsOut
+         * @description Действующие лимиты, отложенное повышение, пауза и сколько поставлено сегодня.
+         *     blocked — что сейчас не дает сделать ставку и запустить анализ (null — ничего);
+         *     blocked_until — до какого момента. tz — пояс, по которому идут текущие сутки лимитов:
+         *     пояс участника, а сразу после его смены — прежний до конца суток.
+         */
+        PlayLimitsOut: {
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "RUB" | "USD" | "EUR";
+            /** Tz */
+            tz: string;
+            /** Bets Per Day */
+            bets_per_day: number | null;
+            /** Stake Per Day */
+            stake_per_day: string | null;
+            pending: components["schemas"]["PlayPendingOut"] | null;
+            /** Paused Until */
+            paused_until: string | null;
+            today: components["schemas"]["PlayTodayOut"];
+            /** Blocked */
+            blocked: ("paused" | "bets_limit" | "stake_limit") | null;
+            /** Blocked Until */
+            blocked_until: string | null;
+            /** Pause Days */
+            pause_days: number[];
+            /** Bets Per Day Max */
+            bets_per_day_max: number;
+        };
+        /**
+         * PlayPendingOut
+         * @description Запрошенное повышение: какие лимиты будут после starts_at (null — без лимита).
+         */
+        PlayPendingOut: {
+            /** Bets Per Day */
+            bets_per_day: number | null;
+            /** Stake Per Day */
+            stake_per_day: string | null;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+        };
+        /**
+         * PlayTodayOut
+         * @description Ставки, сделанные сегодня по поясу участника, — и в игре, и рассчитанные.
+         */
+        PlayTodayOut: {
+            /** Bets */
+            bets: number;
+            /** Stake */
+            stake: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
         };
         /** PlayerBrief */
         PlayerBrief: {
@@ -5215,14 +5895,17 @@ export interface components {
         };
         /**
          * ProfileUpdateIn
-         * @description Правка профиля: имя и часовой пояс. Поле не передано (или null) — не меняется.
-         *     Остальные поля (email, роль, режим ключа) так не меняются: лишнее поле — 422.
+         * @description Правка профиля: имя, часовой пояс и согласие на обезличенные прогнозы (Р15). Поле
+         *     не передано (или null) — не меняется. Остальные поля (email, роль, режим ключа) так
+         *     не меняются: лишнее поле — 422.
          */
         ProfileUpdateIn: {
             /** Display Name */
             display_name?: string | null;
             /** Tz */
             tz?: string | null;
+            /** Consent Training */
+            consent_training?: boolean | null;
         };
         /**
          * ProgressEventOut
@@ -5340,11 +6023,8 @@ export interface components {
              * @default false
              */
             consent_training: boolean;
-            /**
-             * Tz
-             * @default Europe/Helsinki
-             */
-            tz: string;
+            /** Tz */
+            tz?: string | null;
         };
         /**
          * ResetCodeCreatedOut
@@ -5552,11 +6232,12 @@ export interface components {
          * @description Ряд по дням. kind = bank — капитал (баланс + ставки в игре) на конец дня, когда
          *     фильтров рынка, покрытия и источника нет; result — прибыль отобранных ставок
          *     нарастающим итогом по дню расчета (по поясу участника). Первая точка — день перед
-         *     периодом (start, значение base), у «всего времени» — первый день. peak — наибольшее
-         *     значение ряда; max_drawdown (доля от −1 до 0, только у bank) — наибольшая просадка от
-         *     пика по правилу Р22: пополнение, вывод и корректировка — не просадка; best и worst —
-         *     лучшая и худшая точка (у result худшая не выше нуля). rows — по неделям (период до 31
-         *     дня) или по месяцам.
+         *     периодом (start, значение base), у «всего времени» — первый день; у ряда банка дни до
+         *     первой записи журнала в points не входят. peak — наибольшее значение ряда;
+         *     max_drawdown (доля от −1 до 0, только у bank) — наибольшая просадка от пика по правилу
+         *     Р22: пополнение, вывод и корректировка — не просадка; best и worst — лучшая и худшая
+         *     точка (у result худшая не выше нуля). rows — по неделям (период до 31 дня) или по
+         *     месяцам.
          */
         SeriesOut: {
             /**
@@ -5576,6 +6257,12 @@ export interface components {
             start: string;
             /** Base */
             base: string;
+            /** Start Day */
+            start_day: string | null;
+            /** Start Amount */
+            start_amount: string | null;
+            /** Change Share */
+            change_share: number | null;
             /** Last */
             last: string;
             /** Peak */
@@ -6266,7 +6953,8 @@ export interface components {
         /**
          * UsageKindOut
          * @description Вид вызова за месяц. avg_* — в среднем на вызов без ошибки (пусто — таких нет);
-         *     models и efforts — какие модели и effort были у вызовов.
+         *     models и efforts — какие модели и effort были у вызовов. share — доля вида в расходе
+         *     месяца (пусто — расхода нет).
          */
         UsageKindOut: {
             /** Runs */
@@ -6291,6 +6979,8 @@ export interface components {
             cache_share: number | null;
             /** Kind */
             kind: string;
+            /** Share */
+            share: number | null;
             /** Avg Cost Usd */
             avg_cost_usd: number | null;
             /** Avg Prompt Tokens */
@@ -7124,6 +7814,410 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    notification_prefs_api_me_notification_prefs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPrefsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    update_notification_prefs_api_me_notification_prefs_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationPrefsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPrefsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    play_limits_api_me_play_limits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayLimitsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    update_play_limits_api_me_play_limits_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlayLimitsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayLimitsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    take_pause_api_me_pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PauseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayLimitsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    export_data_api_me_export_get: {
+        parameters: {
+            query?: {
+                format?: "json" | "csv";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON — один файл, CSV — архив ZIP по файлу на таблицу */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/zip": unknown;
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    request_deletion_api_me_deletion_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeletionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletionOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    cancel_deletion_api_me_deletion_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    bookmaker_names_api_me_bookmakers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    create_bookmaker_api_me_bookmakers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookmakerCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookmakerOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_bookmakers_api_me_bookmakers_list_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookmakersOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    delete_bookmaker_api_me_bookmakers__bookmaker_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bookmaker_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    update_bookmaker_api_me_bookmakers__bookmaker_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bookmaker_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookmakerPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookmakerOut"];
+                };
             };
             /** @description Ошибка: {error: {code, message}} */
             "4XX": {
@@ -8271,6 +9365,163 @@ export interface operations {
             };
         };
     };
+    get_settings_api_admin_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSettingsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    update_settings_api_admin_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSettingsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    change_currency_api_admin_settings_currency_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurrencyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrencyPreviewOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_messages_api_admin_messages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessagesOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    send_message_api_admin_messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     list_analyses_api_analyses_get: {
         parameters: {
             query?: {
@@ -8810,35 +10061,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BetItemOut"];
-                };
-            };
-            /** @description Ошибка: {error: {code, message}} */
-            "4XX": {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
-        };
-    };
-    my_bookmakers_api_me_bookmakers_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string[];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

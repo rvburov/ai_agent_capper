@@ -854,3 +854,44 @@ async def test_stage4_migration_keeps_stage3_data(settings: Settings) -> None:
                 assert await conn.scalar(text("SELECT count(*) FROM bookmakers")) == 4
         finally:
             await engine.dispose()
+
+
+async def test_play_limits_day_tz_migration(settings: Settings) -> None:
+    """0004 → 0005: лимиты участника не теряются, новые колонки пустые; прежний пояс суток
+    задается только вместе с концом суток. Откат до 0004 и повторный upgrade проходят."""
+    async with _temp_database(settings, "stage4tz") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0004")
+                await conn.execute(text("INSERT INTO users (email) VALUES ('m@example.com')"))
+                await conn.execute(
+                    text(
+                        "INSERT INTO play_limits (user_id, bets_per_day, stake_per_day, currency)"
+                        " VALUES (1, 3, 1000, 'RUB')"
+                    )
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                row = (
+                    await conn.execute(
+                        text(
+                            "SELECT bets_per_day, stake_per_day, day_tz, day_tz_until"
+                            " FROM play_limits"
+                        )
+                    )
+                ).one()
+                assert tuple(row) == (3, 1000, None, None)
+                assert await _refused(conn, "UPDATE play_limits SET day_tz = 'UTC'")
+                assert await _refused(conn, "UPDATE play_limits SET day_tz_until = now()")
+                assert not await _refused(
+                    conn, "UPDATE play_limits SET day_tz = 'UTC', day_tz_until = now()"
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0004")
+            async with engine.begin() as conn:
+                assert await conn.scalar(text("SELECT bets_per_day FROM play_limits")) == 3
+                await conn.run_sync(run_alembic_upgrade, "head")
+        finally:
+            await engine.dispose()

@@ -1176,6 +1176,30 @@ def max_drawdown(points: Sequence[DayCapital]) -> float:
     return worst
 
 
+def _period_start(
+    inputs: Inputs, points: Sequence[tuple[date, Decimal]], kind: str, base: Decimal
+) -> tuple[date, Decimal, float | None]:
+    """Старт периода: день, сумма и изменение за период долей от нее (главная и
+    «Аналитика» показывают их как есть).
+
+    Обычно старт — капитал на конец дня перед периодом (base), изменение — прибыль
+    периода к нему. Если банк появился внутри периода (капитал перед ним — 0) или выбрано
+    «все время», старт — первый день банка, сумма — вложенное (пополнения минус выводы с
+    корректировками), изменение — капитал на конец периода к вложенному. Так в макете: до
+    начала истории банк равен стартовому. У ряда результата (kind = result) старт — ноль."""
+    start = points[0][0]
+    if kind != "bank" or inputs.equity is None:
+        return start, base, None
+    first = next((index for index, (_, value) in enumerate(points) if value != 0), None)
+    if first is not None and (inputs.window.first is None or base == 0):
+        day = points[first][0]
+        invested = sum((point.flows for point in inputs.equity[first:]), _ZERO)
+        if invested > 0:
+            return day, invested, float((points[-1][1] - invested) / invested)
+        return day, points[first][1], None
+    return start, base, float(inputs.current.profit / base) if base > 0 else None
+
+
 def series_block(inputs: Inputs, chosen: Sequence[BetRow]) -> SeriesOut:
     """Банк по дням (без фильтров) или результат отобранных ставок нарастающим итогом;
     таблица по неделям или месяцам."""
@@ -1210,6 +1234,10 @@ def series_block(inputs: Inputs, chosen: Sequence[BetRow]) -> SeriesOut:
     if not points:
         points = [(window.last, _ZERO)]
     start, base = points[0]
+    start_day, start_amount, change_share = _period_start(inputs, points, kind, base)
+    if kind == "bank":
+        # Дни до первой записи журнала (банка еще не было) не рисуются
+        points = [point for point in points if point[0] >= start_day] or points[-1:]
     values = [value for _, value in points]
     rows_from = window.first if window.first is not None else start
     by_day = dict(points)
@@ -1248,6 +1276,9 @@ def series_block(inputs: Inputs, chosen: Sequence[BetRow]) -> SeriesOut:
         group="week" if week_rows else "month",
         start=start,
         base=base,
+        start_day=start_day,
+        start_amount=start_amount,
+        change_share=change_share,
         last=values[-1],
         peak=max(values),
         max_drawdown=drawdown,

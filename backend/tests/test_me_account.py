@@ -189,6 +189,7 @@ async def test_notifications_list_and_read(
     await login(client, member)
     first = await notify(db, user_id=member.id, kind="new_device", device="Chrome", ip="1.1.1.1")
     second = await notify(db, user_id=member.id, kind="login_failures", ip="2.2.2.2")
+    assert first is not None and second is not None
     await db.commit()
 
     listed = (await client.get("/api/me/notifications")).json()

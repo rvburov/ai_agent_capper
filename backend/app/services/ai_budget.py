@@ -253,6 +253,20 @@ async def admin_budget(db: AsyncSession, now: datetime | None = None) -> AdminBu
             AgentRun.kind.not_in(CHECK_RUN_KINDS),
         )
     )
+    # Вызовы участников (не администраторов) на ключе администратора за месяц
+    members = await db.scalar(
+        select(func.sum(AgentRun.cost_usd))
+        .join(User, User.id == AgentRun.user_id)
+        .where(
+            AgentRun.key_source == "admin",
+            AgentRun.created_at >= month_start(now),
+            AgentRun.kind.not_in(CHECK_RUN_KINDS),
+            User.role != "admin",
+        )
+    )
+    budget_share = (
+        float(overview.spent_usd / overview.budget_usd) if overview.budget_usd > 0 else None
+    )
     return AdminBudgetOut(
         month_start=overview.month_start,
         days_in_month=overview.days_in_month,
@@ -264,6 +278,8 @@ async def admin_budget(db: AsyncSession, now: datetime | None = None) -> AdminBu
         left_usd=overview.left_usd,
         forecast_usd=overview.forecast_usd,
         members_limits_usd=overview.members_limits_usd,
+        members_usd=Decimal(members or 0),
+        budget_share=budget_share,
         alert_pct=overview.alert_pct,
         eval_budget_usd=overview.eval_budget_usd,
         eval_spent_usd=overview.eval_spent_usd,
@@ -299,6 +315,11 @@ async def member_budget(db: AsyncSession, user: User) -> AiBudgetOut:
         month_start=start,
         monthly_usd=access.monthly_limit_usd,
         spent_usd=access.spent_month_usd,
+        limit_share=(
+            float(access.spent_month_usd / access.monthly_limit_usd)
+            if access.monthly_limit_usd
+            else None
+        ),
         reserved_usd=access.reserved_usd,
         left_usd=access.left_month_usd,
         daily_analyses=access.daily_limit,
