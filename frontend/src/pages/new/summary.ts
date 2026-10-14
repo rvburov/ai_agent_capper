@@ -59,6 +59,7 @@ export function summarize(
     isAdmin = false,
     previewError = null,
     draftError = null,
+    playBlocked = null,
   }: {
     parsing: boolean;
     t: TFunction;
@@ -68,6 +69,8 @@ export function summarize(
     previewError?: string | null;
     /** Черновик на сервере для событий формы не создался (текст ошибки). */
     draftError?: string | null;
+    /** Пауза или исчерпанный лимит дня (ответственная игра): текст «до какого времени». */
+    playBlocked?: string | null;
   },
 ): LaunchSummary {
   const events = state.events;
@@ -103,9 +106,11 @@ export function summarize(
 
   // Сначала то, что не зависит от событий (как DATA.ai.access(me, 0) в макете), потом ввод,
   // потом цена этого анализа (доступ из «Перед запуском»)
-  const blockedText = access?.reason_code
+  // Пауза и лимит дня закрывают анализ на любом ключе — их первыми
+  const accessText = access?.reason_code
     ? reasonText(access.reason_code, access.reason_params, { isAdmin, fallback: access.reason_code })
     : null;
+  const blockedText = playBlocked ?? accessText;
   let retry: LaunchSummary['retry'] = null;
   const inputReason = (): string | null => {
     if (state.tab === 'text' && parsing) return t('new.reason.parsing');
@@ -142,7 +147,7 @@ export function summarize(
     ? reasonText(costCode, preview?.access.reason_params, { isAdmin, fallback: costCode })
     : null;
   const reason = blockedText ?? inputReason() ?? costReason;
-  const reasonCode = reason === null ? null : reason === blockedText ? access?.reason_code : reason === costReason ? costCode : null;
+  const reasonCode = reason === null ? null : reason === blockedText ? (playBlocked ? null : access?.reason_code) : reason === costReason ? costCode : null;
   const valid =
     events.length > 0 &&
     !preview?.problems.length &&

@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { aiBudget } from '../../../features/ai/testData';
 import { bankOut, strategyV3 } from '../../../features/analysis/testData';
 import type { Adaptation, BankEntry } from '../../../features/bank/types';
+import { playLimitsOut } from '../../../features/bank/testData';
 import { betsSummary } from '../../../features/bets/testData';
+import { bookmakersOut } from '../../../features/bookmakers/testData';
 import { apiError, json, ME_ADMIN, ME_MEMBER, type Handler } from '../../../test/fetchMock';
 import { bodyOf, renderPage } from '../../../test/renderPage';
 import { ProfilePage } from '../ProfilePage';
@@ -53,6 +55,8 @@ function api(over: Record<string, Handler> = {}): Record<string, Handler> {
     'GET /api/me/bank/entries': () => json(ENTRIES),
     'GET /api/bets/summary': () => json(betsSummary()),
     'GET /api/me/bookmakers': () => json(['Fonbet', 'Winline']),
+    'GET /api/me/bookmakers/list': () => json(bookmakersOut()),
+    'GET /api/me/play-limits': () => json(playLimitsOut()),
     'GET /api/ai/budget': () => json(aiBudget()),
     'GET /api/me/login-events': () => json([]),
     ...over,
@@ -138,7 +142,8 @@ describe('Кабинет: банк и стратегия', () => {
     // банк в сообщении — перечитанный после записи, как в макете
     expect(await screen.findByText('Пополнение +5 000 ₽ записано. Банк 48 320 ₽, в прибыль и ROI не входит')).toBeInTheDocument();
     const post = calls.find((r) => r.method === 'POST');
-    expect(await bodyOf(post as Request)).toEqual({ kind: 'deposit', amount: '5000.00', note: null, expected_last_id: 42 });
+    // валюта, в которой форма показывала суммы: сменилась на сервере — 409, а не запись в новой
+    expect(await bodyOf(post as Request)).toEqual({ kind: 'deposit', amount: '5000.00', note: null, expected_last_id: 42, currency: 'RUB' });
   });
 
   it('вывод и корректировка — сообщение в своем роде; двойной клик шлет одну запись', async () => {
@@ -221,17 +226,6 @@ describe('Кабинет: банк и стратегия', () => {
       expect(within(row).getByText('Действует сейчас')).toBeInTheDocument();
       expect(within(row).queryByText('Ждет условия')).toBeNull();
     }
-  });
-
-  it('ответственная игра и букмекеры — разметка, сохранение появится позже', async () => {
-    renderBank();
-    const rg = (await screen.findByRole('heading', { name: 'Ответственная игра' })).closest('section') as HTMLElement;
-    expect(within(rg).getByRole('button', { name: 'Сохранить лимиты' })).toBeDisabled();
-    expect(within(rg).getByRole('button', { name: 'Взять паузу на 7 дней' })).toBeDisabled();
-    const books = (await screen.findByRole('heading', { name: 'Мои букмекеры' })).closest('section') as HTMLElement;
-    expect(await within(books).findByText('Winline')).toBeInTheDocument();
-    expect(within(books).getByRole('button', { name: 'Переименовать Fonbet' })).toBeDisabled();
-    expect(within(books).getByRole('button', { name: 'Добавить букмекера' })).toBeDisabled();
   });
 
   it('банк не загрузился — текст ошибки и «Повторить»', async () => {

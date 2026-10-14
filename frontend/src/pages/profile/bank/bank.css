@@ -58,6 +58,11 @@
 
 /* ответственная игра и движение банка */
 .card.profile-rg { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.profile-usage { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.profile-usage > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: var(--fs-sm); color: var(--fg-2); }
+.profile-usage b { color: var(--fg); font-variant-numeric: tabular-nums; text-align: right; }
+.profile-usage-row { gap: 6px; flex-wrap: wrap; }
+.profile-rg-tz { margin: 0; }
 #profile-moves .segmented, #profile-rg .segmented { align-self: flex-start; }
 
 @media (max-width: 960px) { .profile-panel .switch input { inset: -8px -4px; } }

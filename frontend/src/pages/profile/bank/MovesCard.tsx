@@ -76,7 +76,8 @@ export function MovesCard({ bank }: { bank: Bank }) {
     busy.current = true;
     const started = Date.now();
     try {
-      const entry = await add.mutateAsync({ kind, amount: parsed.amount, note: note.trim() || null, expected_last_id: lastId });
+      // валюта, в которой форма показывала суммы: сменилась на сервере — 409, а не запись в новой
+      const entry = await add.mutateAsync({ kind, amount: parsed.amount, note: note.trim() || null, expected_last_id: lastId, currency });
       setAmount('');
       setNote('');
       setFieldError(null);

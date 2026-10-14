@@ -1,5 +1,7 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from 'react';
 
+import { addTexts, type TextsModule } from '../i18n';
+
 /*
  * Экраны грузятся отдельными файлами сборки, когда их открывают: начальный JS меньше
  * (PLAN.md: < 250 КБ gzip). После выкладки новой версии старых файлов на сервере нет, и
@@ -20,15 +22,20 @@ export function isChunkLoadError(error: unknown): error is ChunkLoadError {
 }
 
 /**
- * Ленивый экран: lazyPage(() => import('../pages/x/XPage').then((m) => m.XPage)).
- * Любой отказ загрузки (нет файла, нет связи, не загрузились стили) — ChunkLoadError.
+ * Ленивый экран вместе с его текстами (src/i18n/sections.ts, SCREEN_TEXTS):
+ *   lazyPage(() => import('../pages/x/XPage').then((m) => m.XPage), () => import('virtual:capper-texts/screen/x/XPage'))
+ * Экран рисуется уже со своими текстами, а не с ключами. Любой отказ загрузки (нет файла, нет
+ * связи, не загрузились стили или тексты) — ChunkLoadError.
  */
 export function lazyPage<P extends object>(
   load: () => Promise<ComponentType<P>>,
+  // Без текстов — только ядро (тесты оболочки); экраны приложения передают свои, это проверяет
+  // i18n.test.ts
+  texts?: () => Promise<TextsModule>,
 ): LazyExoticComponent<ComponentType<P>> {
   return lazy(() =>
-    load().then(
-      (Component) => ({ default: Component }),
+    Promise.all([load(), texts?.().then(addTexts)]).then(
+      ([Component]) => ({ default: Component }),
       (error: unknown) => {
         throw new ChunkLoadError(error);
       },

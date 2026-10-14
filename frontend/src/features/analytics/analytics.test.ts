@@ -139,11 +139,9 @@ describe('Аналитика: банк на начало периода', () => 
     expect(periodStart(late).points.map((point) => point.day)).toEqual(['2026-09-23', '2026-10-13']);
   });
 
-  it('ряд результата — с нуля, без процента; без полей старта — start и base, без процента', () => {
+  it('ряд результата — с нуля, без процента', () => {
     const result = seriesOut({ kind: 'result', base: '0.00', start_amount: '0.00', change_share: null, points: [{ day: '2026-08-31', value: '0.00' }, { day: '2026-10-13', value: '860.00' }] });
     expect(periodStart(result)).toMatchObject({ day: '2026-08-31', amount: '0.00', share: null });
-    const bare = seriesOut({ start_day: undefined, start_amount: undefined, change_share: undefined });
-    expect(periodStart(bare)).toMatchObject({ day: '2026-08-31', amount: '48000.00', share: null });
   });
 });
 

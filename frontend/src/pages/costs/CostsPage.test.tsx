@@ -194,7 +194,7 @@ describe('ИИ и расходы', () => {
   it('администратор: уровень лимита «Кто тратит» — с сервера; 100 — «анализы остановлены» красным', async () => {
     const usage = adminAiUsageOut();
     const member = usage.people.find((p) => p.ai_mode === 'shared' && p.limit_usd !== null && p.key_spent_usd > 0)!;
-    const attention = adminAttention({ return_requests: [], limits: [{ user_id: member.user_id, name: member.display_name, spent_usd: member.key_spent_usd, limit_usd: member.limit_usd!, share: 0.5, level: '100' }] });
+    const attention = adminAttention({ return_requests: [], limits: [{ user_id: member.user_id, name: member.display_name, spent_usd: member.key_spent_usd, limit_usd: member.limit_usd!, share: 0.5, level: '100', runs_out_on: null }] });
     renderCosts({ admin: true, api: { 'GET /api/dashboard': () => json(dashboardOut({ admin: attention })) } });
     const who = (await screen.findByRole('heading', { name: 'Кто тратит бюджет' })).closest('section')!;
     const sub = await within(who).findByText(/анализы остановлены/);

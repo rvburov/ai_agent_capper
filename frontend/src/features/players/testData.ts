@@ -17,6 +17,12 @@ import type {
  * архив загружен сегодня в 04:10 UTC, результаты по 12 октября; Синнер — №1 по Эло.
  */
 
+/** Победы и поражения с долей побед, как ее считает сервер (4 знака; матчей нет — null). */
+export function winLoss(wins: number, losses: number) {
+  const played = wins + losses;
+  return { wins, losses, win_share: played > 0 ? Math.round((wins / played) * 10_000) / 10_000 : null };
+}
+
 export function archiveInfo(over: Partial<ArchiveInfo> = {}): ArchiveInfo {
   return {
     data_to: '2026-10-12',
@@ -90,6 +96,7 @@ export function rankingOut(over: Partial<PlayerRanking> = {}): PlayerRanking {
     rank_days: 364,
     news_ttl_hours: 12,
     archive: archiveInfo(),
+    sackmann: true,
     ...over,
   };
 }
@@ -97,6 +104,9 @@ export function rankingOut(over: Partial<PlayerRanking> = {}): PlayerRanking {
 export function todayMatch(over: Partial<TodayMatch> = {}): TodayMatch {
   return {
     match_id: 900,
+    side: 1,
+    elo: 2180,
+    opponent_elo: 2010,
     opponent: { id: 6, name: 'Holger Rune', name_ru: 'Хольгер Руне' },
     opponent_rank: 12,
     tournament: 'Test Open',
@@ -200,20 +210,32 @@ export function playerCard(over: Partial<PlayerCard> = {}): PlayerCard {
         bp_saved: 0.62,
       },
       tour_players: 50,
+      // игрок минус тур — с сервера
+      diff: {
+        first_in: 0.02,
+        first_won: 0.04,
+        second_won: 0.03,
+        aces_per_match: 1.6,
+        double_faults_per_match: -0.8,
+        first_return_won: 0.03,
+        second_return_won: 0.04,
+        bp_converted: 0.03,
+        bp_saved: 0.045,
+      },
     },
     results: {
       since: '2025-01-01',
       surfaces: [
-        { surface: 'hard', wins: 40, losses: 8 },
-        { surface: 'clay', wins: 12, losses: 4 },
+        { surface: 'hard', ...winLoss(40, 8) },
+        { surface: 'clay', ...winLoss(12, 4) },
       ],
-      total: { wins: 52, losses: 12 },
+      total: winLoss(52, 12),
     },
     key_matches: {
       since: '2025-10-14',
-      top10: { wins: 9, losses: 3 },
-      deciders: { wins: 7, losses: 2 },
-      tiebreaks: { wins: 14, losses: 6 },
+      top10: winLoss(9, 3),
+      deciders: winLoss(7, 2),
+      tiebreaks: winLoss(14, 6),
     },
     news: { checked_at: '2026-10-13T08:00:00Z', fresh: true, ttl_hours: 12, lookback_days: 14, count: 2 },
     archive: archiveInfo(),
@@ -251,7 +273,7 @@ export function matchesOut(over: Partial<PlayerMatches> = {}): PlayerMatches {
     ],
     next_before: null,
     total: 2,
-    summary: { since: '2025-01-01', played: 64, wins: 52, tiebreaks: { wins: 14, losses: 6 }, deciders: { wins: 7, losses: 2 }, best_of_5: 12 },
+    summary: { since: '2025-01-01', played: 64, wins: 52, tiebreaks: winLoss(14, 6), deciders: winLoss(7, 2), best_of_5: 12 },
     ...over,
   };
 }
@@ -277,6 +299,8 @@ export function newsOut(over: Partial<PlayerNews> = {}): PlayerNews {
     fresh: true,
     ttl_hours: 12,
     lookback_days: 14,
+    checked_model: 'claude-sonnet-5-5',
+    checked_analysis_id: 12,
     ...over,
   };
 }
@@ -289,7 +313,7 @@ export function h2hOut(over: Partial<H2H> = {}): H2H {
     opponent_rank: 12,
     player_wins: 3,
     opponent_wins: 1,
-    surfaces: [{ surface: 'hard', wins: 2, losses: 0 }],
+    surfaces: [{ surface: 'hard', ...winLoss(2, 0) }],
     matches: [
       { match_id: 300, day: '2025-10-08', winner_id: 1, score: '6-3 6-4', surface: 'hard', tournament: 'Пекин', category: '500', round: 'SF', best_of: 3 },
       { match_id: 200, day: '2024-06-01', winner_id: 6, score: '6-7(4) 4-6', surface: 'clay', tournament: 'Ролан Гаррос', category: 'grand_slam', round: 'R32', best_of: 5 },

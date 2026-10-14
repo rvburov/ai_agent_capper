@@ -1,6 +1,6 @@
 import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { aiBudget } from '../../features/ai/testData';
 import { clearDraft, loadDraft } from '../../features/analysis/draftStore';
@@ -14,6 +14,7 @@ import {
   strategyV3,
 } from '../../features/analysis/testData';
 import type { Analysis, ConfirmIn } from '../../features/analysis/types';
+import { playLimitsOut } from '../../features/bank/testData';
 import { apiError, json, ME_ADMIN, ME_MEMBER, mockFetch, type Handler } from '../../test/fetchMock';
 import { renderPage } from '../../test/renderPage';
 import { setViewportWidth } from '../../test/setup';
@@ -29,6 +30,7 @@ function routes(extra: Record<string, Handler> = {}): Record<string, Handler> {
     'GET /api/me/bookmakers': () => json(['Fonbet']),
     'GET /api/strategy/active': () => json(strategyV3()),
     'GET /api/ai/budget': () => json(aiBudget()),
+    'GET /api/me/play-limits': () => json(playLimitsOut()),
     'GET /api/analyses': () => json([listItem({ id: 3 })]),
     'POST /api/analyses': () => json(analysisDraft(), 201),
     'POST /api/analyses/6/preview': () => json(previewOut()),
@@ -385,6 +387,38 @@ describe('Новый анализ: черновик и «Изменить соб
     renderNew('/new', ME_MEMBER);
     await waitFor(() => expect(launchReason()).toHaveTextContent('Ключ Claude администратора не задан. Напишите администратору'));
     expect(screen.queryByRole('link', { name: 'Открыть «Ключ и бюджет»' })).not.toBeInTheDocument();
+  });
+
+  it('пауза и лимит дня — «Перед запуском» говорит сразу, запуск неактивен', async () => {
+    // «завтра, 00:00» считается от часов браузера: после 21:00 UTC 14 октября полночь по
+    // Хельсинки уже «сегодня». Фиксируем часы на дне фикстуры
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-14T12:00:00Z'));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const paused = playLimitsOut({ paused_until: '2026-10-21T21:00:00Z', blocked: 'paused', blocked_until: '2026-10-21T21:00:00Z' });
+    const { calls } = mockFetch(
+      routes({ 'GET /api/analyses/6': () => json(analysisDraft()), 'GET /api/me/play-limits': () => json(paused) }),
+    );
+    renderNew('/new?draft=6');
+    // тот же последний день, что в кабинете: «до 21 октября включительно»
+    await waitFor(() =>
+      expect(launchReason()).toHaveTextContent(
+        'Вы взяли паузу до 21 октября включительно: новые ставки и анализы недоступны. Досрочно пауза не снимается',
+      ),
+    );
+    expect(screen.getByRole('button', { name: 'Запустить анализ' })).toBeDisabled();
+    expect(calls.some((r) => r.url.endsWith('/run'))).toBe(false);
+    cleanup();
+
+    const stake = playLimitsOut({ stake_per_day: '3000.00', blocked: 'stake_limit', blocked_until: '2026-10-14T21:00:00Z' });
+    mockFetch(routes({ 'GET /api/analyses/6': () => json(analysisDraft()), 'GET /api/me/play-limits': () => json(stake) }));
+    renderNew('/new?draft=6');
+    await waitFor(() =>
+      expect(launchReason()).toHaveTextContent(/^Лимит суммы ставок в день \(3 000 ₽\) исчерпан\. Новые ставки и анализы будут доступны завтра, 00:00$/),
+    );
+    expect(screen.getByRole('button', { name: 'Запустить анализ' })).toBeDisabled();
   });
 
   it('общего бюджета не хватает на этот анализ: администратору — поднять бюджет', async () => {

@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -28,6 +29,7 @@ import {
 } from '../../features/analysis/draft';
 import { clearDraft, emptyDraft, loadDraft, saveDraft, type DraftState, type InputTab } from '../../features/analysis/draftStore';
 import { isParseFailed, type Analysis } from '../../features/analysis/types';
+import { playBlockedText, playKeys, usePlayLimits } from '../../features/bank/playLimits';
 import { useDebounced } from '../../features/players/api';
 import { usePublicSettings } from '../../features/profile/usePublicSettings';
 import { currencySign, formatAmountInput, formatEstimate, formatUsd, type Currency } from '../../lib/format';
@@ -138,6 +140,8 @@ export function NewAnalysisPage() {
   const bookmakers = useBookmakers();
   const strategy = useStrategy();
   const access = useAiAccess();
+  const playLimits = usePlayLimits();
+  const queryClient = useQueryClient();
   const create = useCreateAnalysis();
   const run = useRunAnalysis();
 
@@ -246,6 +250,7 @@ export function NewAnalysisPage() {
     isAdmin,
     previewError: preview.isError && state.analysisId !== null ? apiErrorText(preview.error) : null,
     draftError,
+    playBlocked: playBlockedText(playLimits.data),
   });
   const corridor = strategy.data ? (strategy.data.params.leg_odds as [string, string]) : null;
   const ledgerBank = bank.data && !bank.data.empty ? formatAmountInput(bank.data.balance, currency) : null;
@@ -383,6 +388,8 @@ export function NewAnalysisPage() {
         events: state.events.map((event) => toEventIn(event, { forRun: true })),
         bank: amountForApi(state.bank),
         bookmaker: state.bookmaker?.trim() || null,
+        // валюта банка в форме: сменилась на сервере — 409 common.currency_changed
+        currency,
       };
       const analysis = await run.mutateAsync({ id, body });
       // Запущенный анализ живет на своем экране: «Новый анализ» откроется пустым, а вернуться к
@@ -394,6 +401,8 @@ export function NewAnalysisPage() {
     } catch (error) {
       const own = adminReasonText(isApiError(error) ? error.code : null, isAdmin);
       toast.show(own ?? apiErrorText(error), { icon: 'alert', duration: 6000 });
+      // Сервер закрыл анализ паузой или лимитом дня — «Перед запуском» покажет это сразу
+      if (isApiError(error) && error.code.startsWith('play.')) void queryClient.invalidateQueries({ queryKey: playKeys.limits });
     } finally {
       setLaunching(false);
     }

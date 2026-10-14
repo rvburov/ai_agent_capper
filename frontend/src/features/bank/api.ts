@@ -4,6 +4,7 @@ import { api, unwrap } from '../../api/client';
 import { isApiError } from '../../api/errors';
 import { analysisKeys } from '../analysis/keys';
 import { ANALYTICS_PREFIX, DASHBOARD_PREFIX } from '../bets/keys';
+import { refreshAfterCurrencyChange } from './currency';
 import type { BankEntryIn } from './types';
 
 // Журнал банка и движение денег (пополнение, вывод, корректировка). Банк (GET /api/me/bank) —
@@ -51,6 +52,7 @@ export function useAddBankEntry() {
     },
     onError: (error) => {
       if (isApiError(error) && error.code === 'bank.changed') void client.invalidateQueries({ queryKey: bankKeys.all });
+      refreshAfterCurrencyChange(client, error);
     },
   });
 }

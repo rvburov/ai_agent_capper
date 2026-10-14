@@ -201,6 +201,18 @@ export function formatPercent(
   );
 }
 
+/**
+ * Доля бюджета или лимита — один формат на главной, «ИИ и расходах» и в администрировании:
+ * меньше 10% — с десятыми («0,5%», «7,3%»), от 10% — целыми («42%»); ненулевая меньше 0,1% —
+ * «< 0,1%», чтобы потраченные центы не выглядели как 0%.
+ */
+export function formatShare(fraction: number | null | undefined): string {
+  const n = toNumber(fraction);
+  if (!Number.isFinite(n)) return DASH;
+  if (n > 0 && n < 0.0005) return i18n.t('format.lessThan', { value: formatPercent(0.001) });
+  return formatPercent(n, { digits: n === 0 || Math.abs(n) >= 0.0995 ? 0 : 1 });
+}
+
 /** Вероятность целыми процентами: «66%» (прогноз модели, 1/кэф, калибровка). */
 export function formatProb(p: number | null | undefined): string {
   return formatPercent(p, { digits: 0 });

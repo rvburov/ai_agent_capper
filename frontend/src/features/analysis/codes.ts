@@ -1,7 +1,8 @@
 import { isApiError } from '../../api/errors';
 import i18n from '../../i18n';
 import { adminReasonText, aiParams } from '../ai/reasons';
-import { formatDate, formatDateTime, formatMoney, type Currency } from '../../lib/format';
+import { currencySign, formatDate, formatDateTime, formatDayMonth, formatMoney, type Currency } from '../../lib/format';
+import { pauseLastDay } from '../bank/pauseDay';
 
 // Тексты по ключам и кодам с сервера (analysis.steps.*, analysis.rules.*, errors.*): сервер
 // присылает ключ и параметры, слова — в ru.json фронтенда. Ключа нет — запасной текст.
@@ -34,7 +35,18 @@ const MONEY_PARAMS: Readonly<Record<string, readonly string[]>> = {
   'errors.bet.payout_overflow': ['payout', 'max'],
   'errors.bank.withdrawal_range': ['balance'],
   'errors.bank.correction_range': ['balance'],
+  // Ответственная игра и «Мои букмекеры» (этап 4): валюта — в параметрах ошибки
+  'errors.play.stake_limit': ['limit', 'left'],
+  'errors.play.stake_used': ['limit'],
+  'errors.bookmaker.open_bets': ['in_play'],
 };
+
+// Конец паузы — момент «полночь после последнего дня». Везде (кабинет, шапка, ошибки)
+// показываем последний день включительно: «до 21 октября включительно», а не «до 22 окт, 00:00»
+const PAUSE_END_PARAMS: ReadonlySet<string> = new Set(['errors.play.paused', 'errors.play.pause_shorter']);
+
+// Код валюты в параметре ошибки — знаком: «теперь €»
+const CURRENCY_SIGN_PARAMS: ReadonlySet<string> = new Set(['errors.common.currency_changed', 'errors.admin.currency_same']);
 
 function moneyCurrency(params: Record<string, unknown>, options: TextOptions): Currency | null {
   if (options.currency) return options.currency;
@@ -48,7 +60,11 @@ function shownParams(key: string, params: Record<string, unknown>, options: Text
   const money = MONEY_PARAMS[key] ?? [];
   const currency = money.length ? moneyCurrency(params, options) : null;
   for (const [name, value] of Object.entries(params)) {
-    if (currency && money.includes(name) && (typeof value === 'string' || typeof value === 'number') && Number.isFinite(Number(value))) {
+    if (name === 'until' && PAUSE_END_PARAMS.has(key) && typeof value === 'string' && ISO_TIME.test(value)) {
+      out[name] = formatDayMonth(pauseLastDay(value));
+    } else if (name === 'currency' && CURRENCY_SIGN_PARAMS.has(key) && typeof value === 'string' && CURRENCIES.has(value)) {
+      out[name] = currencySign(value as Currency);
+    } else if (currency && money.includes(name) && (typeof value === 'string' || typeof value === 'number') && Number.isFinite(Number(value))) {
       out[name] = formatMoney(value, currency);
     } else if (typeof value === 'string' && ISO_TIME.test(value)) out[name] = inlineDateTime(value);
     else if (typeof value === 'string' && ISO_DATE.test(value)) out[name] = formatDate(value);

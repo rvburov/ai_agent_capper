@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { meQueryKey } from '../../api/keys';
 import { aiBudget } from '../../features/ai/testData';
+import { playLimitsOut } from '../../features/bank/testData';
 import { apiError, json, ME_ADMIN, ME_MEMBER, mockFetch, type Handler } from '../../test/fetchMock';
 import { renderPage } from '../../test/renderPage';
 import { setViewportWidth } from '../../test/setup';
@@ -49,6 +50,8 @@ function routes(me: Me, extra: Record<string, Handler> = {}): Record<string, Han
     'GET /api/admin/invites': () => json([{ id: 1 }]),
     // точка у вкладки «Ключ Claude» берется из лимита
     'GET /api/ai/budget': () => json(aiBudget()),
+    // метка «Пауза до …» в сводке
+    'GET /api/me/play-limits': () => json(playLimitsOut()),
     ...extra,
   };
 }
@@ -143,11 +146,14 @@ describe('Личный кабинет: профиль', () => {
     expect(screen.getByRole('link', { name: 'Пригласить участника' })).toHaveAttribute('href', '/admin/invites');
   });
 
-  it('вкладки следующих этапов — заглушки', async () => {
+  it('сводка «Часто нужно»: лимиты и пауза, экспорт данных — работают с этапа 4', async () => {
     mockFetch(routes(ME_MEMBER));
-    renderProfile('/profile/notifications');
-    expect(screen.getByText('Раздел появится на этапе 4')).toBeInTheDocument();
-    expect(screen.getByText(/push на телефон добавится на этапе 6/)).toBeInTheDocument();
+    renderProfile('/profile');
+    const hero = screen.getByRole('region', { name: 'Сводка аккаунта' });
+    expect(within(hero).getByRole('link', { name: 'Лимиты и пауза' })).toHaveAttribute('href', '/profile/bank#profile-rg');
+    expect(within(hero).getByRole('link', { name: 'Экспорт данных' })).toHaveAttribute('href', '/profile/data#profile-export');
+    // заглушек во вкладках кабинета больше нет
+    expect(screen.queryByText(/Раздел появится на этапе/)).toBeNull();
   });
 
   it('«Выйти» в сводке: выход на сервере, страница входа, кэш очищен', async () => {

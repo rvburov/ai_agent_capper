@@ -67,6 +67,10 @@ test('участник не видит «Управление», а по пря�
   await page.goto('/');
   const sidebar = page.getByRole('complementary', { name: 'Основная навигация' });
   await expect(sidebar.getByRole('link', { name: 'Главная' })).toBeVisible();
+  // главная загрузилась и спросила все свое (в том числе /api/ai/usage участника): ошибка ее
+  // запроса после перехода на /admin не должна зависеть от того, успела ли главная
+  await expect(page.getByRole('heading', { name: /^Расходы ИИ/ })).toBeVisible();
+  await page.waitForLoadState('networkidle');
   await expect(sidebar.getByText('Управление')).toHaveCount(0);
   await expect(sidebar.getByRole('link', { name: 'Администрирование' })).toHaveCount(0);
   await page.goto('/admin/users');
@@ -181,6 +185,10 @@ test('долгий переход на экран: шапка и меню — н
   await mockApi(page, ME_ADMIN);
   await page.goto('/');
   await expect(page.getByRole('heading', { level: 1, name: 'Главная' })).toBeVisible();
+  // Главная уже на экране, а не грузится: заголовок в шапке есть сразу, а файл экрана и тексты
+  // экранов (src/i18n/index.ts) еще могут идти. Пока на месте экрана индикатор, переход
+  // показывает индикатор нового экрана сразу — держать на месте нечего
+  await expect(page.getByRole('status', { name: 'Загружаем экран' })).toHaveCount(0);
   // файл экрана «Новый анализ» отдается через 2 с — медленная мобильная сеть
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));

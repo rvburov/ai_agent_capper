@@ -70,7 +70,7 @@ export function adminAttention(over: Partial<AdminAttention> = {}): AdminAttenti
       ],
     },
     return_requests: [{ user_id: 3, name: 'Олег', at: '2026-10-12T10:00:00Z' }],
-    limits: [{ user_id: 2, name: 'Анна', spent_usd: 8.5, limit_usd: 10, share: 0.85, level: '80' }],
+    limits: [{ user_id: 2, name: 'Анна', spent_usd: 8.5, limit_usd: 10, share: 0.85, level: '80', runs_out_on: '2026-10-16' }],
     alert_pct: 80,
     ...over,
   };
@@ -187,6 +187,8 @@ export function aiUsageOut(over: Partial<AiUsage> = {}): AiUsage {
     admin_key_avg_usd: 0.13,
     forecast_usd: 4.5,
     analyses_left: 62,
+    // темп под лимит $10: на 31 день месяца
+    pace_usd: 0.32,
     prices: [],
     settings: {
       parse_model: 'claude-haiku-5-5',

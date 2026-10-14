@@ -1,0 +1,6 @@
+/* Экран «Аккаунт будет удален» — вместо оболочки, пока аккаунт ждет удаления. */
+.deletion-screen .card.deletion-card { width: min(520px, 100%); }
+.deletion-brand { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); text-transform: none; letter-spacing: 0; font-weight: 600; }
+.deletion-brand .brand-mark { width: 24px; height: 24px; }
+.deletion-p { margin: 0; }
+.deletion-title { font-size: var(--fs-lg); }

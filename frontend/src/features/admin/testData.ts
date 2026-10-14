@@ -53,6 +53,7 @@ export function memberLimit(over: Partial<MemberLimit> = {}): MemberLimit {
     analyses_today: 1,
     analyses_month: 11,
     return_requested_at: null,
+    level: null,
     ...over,
   };
 }
@@ -74,6 +75,11 @@ export function adminBudget(over: Partial<AdminBudget> = {}): AdminBudget {
     alert_pct: 80,
     eval_budget_usd: 25,
     eval_spent_usd: 4.5,
+    // темп месяца — с сервера: идет 8-й день из 31, осталось 24 (сегодня включая)
+    forecast_share: 66 / 60,
+    per_day_usd: 5.15,
+    can_per_day_usd: 0.78,
+    alert_usd: 48,
     ...over,
   };
 }

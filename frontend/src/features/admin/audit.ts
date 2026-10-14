@@ -1,6 +1,7 @@
 import i18n from '../../i18n';
-import { formatPercent } from '../../lib/format';
+import { currencySign, formatPercent, type Currency } from '../../lib/format';
 import { formatLimitUsd, limitText } from './limits';
+import { formatRate } from './settings';
 import type { AuditAction, AuditEntry, Role } from './types';
 
 /*
@@ -70,6 +71,10 @@ function limitOf(value: unknown): LimitDetails | null {
     typeof v.daily_analyses === 'number' &&
     (typeof v.per_analysis_usd === 'string' || typeof v.per_analysis_usd === 'number');
   return ok ? (v as unknown as LimitDetails) : null;
+}
+
+function isCurrency(value: unknown): value is Currency {
+  return value === 'RUB' || value === 'USD' || value === 'EUR';
 }
 
 function count(value: unknown): number {
@@ -194,9 +199,23 @@ export function auditDetails(entry: AuditEntry): string {
         tournaments: count(d.tournaments_created),
         matches: count(d.matches_created),
       });
+    case 'currency_change': {
+      // «Валюта программы: рубли → евро, курс 1 € = 95,12 ₽» (курс задан для пары rate_base)
+      if (!isCurrency(d.from) || !isCurrency(d.to) || !isCurrency(d.rate_base) || typeof d.rate !== 'string') return '';
+      const quote = d.rate_base === d.from ? d.to : d.from;
+      return t('admin.audit.details.currency', {
+        from: t(`admin.settings.currency.lower.${d.from}`),
+        to: t(`admin.settings.currency.lower.${d.to}`),
+        base: currencySign(d.rate_base),
+        rate: formatRate(d.rate),
+        quote: currencySign(quote),
+      });
+    }
+    case 'message':
+      return text(d.text) ?? '';
     default:
-      // currency_change, message — появятся на этапе 4 вместе с их экранами; confirm_failed,
-      // player_merge, player_edit (этап 2) и agent_config_change пока без строки подробностей
+      // confirm_failed, player_merge, player_edit (этап 2) и agent_config_change пока без
+      // строки подробностей
       return '';
   }
 }

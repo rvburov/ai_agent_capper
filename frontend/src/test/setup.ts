@@ -3,7 +3,10 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
 
-import '../i18n';
+import { loadAllTexts } from '../i18n';
+
+// Тесты экранов рисуют экран без lazyPage: все тексты — сразу (в приложении их грузит первый экран)
+await loadAllTexts();
 
 // findBy* и waitFor ждут появления на экране до 5 с, а не 1 с по умолчанию: в CI все файлы
 // тестов идут параллельно на 4 ядрах, и ответ формы иногда отрисовывается дольше секунды

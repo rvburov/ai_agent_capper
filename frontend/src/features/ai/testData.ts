@@ -26,6 +26,12 @@ export function aiBudget(over: Partial<AiBudget> = {}): AiBudget {
     reason_code: null,
     reason_params: {},
     budget: null,
+    // темп месяца — с сервера: 13 дней из 31 прошло
+    per_day_usd: 0.15,
+    forecast_usd: 4.5,
+    forecast_share: 0.45,
+    can_per_day_usd: 0.42,
+    alert_usd: 8,
     ...over,
   };
 }

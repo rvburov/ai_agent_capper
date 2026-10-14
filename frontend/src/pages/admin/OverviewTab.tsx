@@ -21,7 +21,7 @@ import { formatLimitUsd } from '../../features/admin/limits';
 import { capitalize } from '../../features/analytics/display';
 import type { AdminAiUsage } from '../../features/costs/types';
 import { usePublicSettings } from '../../features/profile/usePublicSettings';
-import { currencySign, formatDate, formatDateRange, formatPercent, formatUsd } from '../../lib/format';
+import { currencySign, formatDate, formatDateRange, formatPercent, formatShare, formatUsd } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { ApproveModal, LimitModal, RejectDialog } from './LimitDialogs';
 import { ConfirmDialog, HowTo, LoadError } from './parts';
@@ -317,7 +317,7 @@ export function SpendersList({ usage, me, levels, compact = false, t }: { usage:
           <div className="adm-urow-name">{row.name}</div>
           <div className="adm-urow-val">
             <b>{formatUsd(row.value)}</b>
-            {row.share !== null && <small>{t('admin.overview.spenders.ofBudget', { pct: formatPercent(row.share, { digits: 1 }) })}</small>}
+            {row.share !== null && <small>{t('admin.overview.spenders.ofBudget', { pct: formatShare(row.share) })}</small>}
           </div>
           <div className="adm-urow-meta">{row.meta}</div>
           <div className="adm-urow-bar" aria-hidden="true">
@@ -337,7 +337,7 @@ export function TotalRow({ usage, t }: { usage: AdminAiUsage; t: TFunction }) {
       <div className="adm-urow-name">{t('admin.overview.spenders.total')}</div>
       <div className="adm-urow-val">
         <b>{formatUsd(usage.spent_usd)}</b>
-        {usage.budget_share !== null && <small>{t('admin.overview.spenders.ofBudget', { pct: formatPercent(usage.budget_share, { digits: 1 }) })}</small>}
+        {usage.budget_share !== null && <small>{t('admin.overview.spenders.ofBudget', { pct: formatShare(usage.budget_share) })}</small>}
       </div>
       <div className="adm-urow-meta">{t('admin.overview.spenders.period', { period: usagePeriod(usage) })}</div>
     </li>
@@ -372,7 +372,7 @@ function BudgetBody({ budget, t }: { budget: AdminBudget; t: TFunction }) {
         <span className="stat-value">{formatUsd(budget.spent_usd)}</span>
         <span className="adm-of">{t('admin.key.budget.of', { budget: formatLimitUsd(total) })}</span>
         <Chip kind={tone ?? 'good'} icon={tone ? 'alert' : 'check'}>
-          {t('admin.key.budget.share', { pct: budget.budget_share === null || budget.budget_share === undefined ? '—' : formatPercent(budget.budget_share, { digits: 0 }) })}
+          {t('admin.key.budget.share', { pct: budget.budget_share === null || budget.budget_share === undefined ? '—' : formatShare(budget.budget_share) })}
         </Chip>
       </div>
       <BudgetBar

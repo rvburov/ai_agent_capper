@@ -2,6 +2,7 @@ import { aiBudget } from '../features/ai/testData';
 import { bankOut, strategyV3 } from '../features/analysis/testData';
 import { analyticsOut } from '../features/analytics/testData';
 import { dashboardOut } from '../features/dashboard/testData';
+import { memberPrefsOut } from '../features/notifications/testData';
 import { json, ME_ADMIN, ME_MEMBER, type Handler } from './fetchMock';
 
 /*
@@ -38,6 +39,8 @@ export function baseApi(me: Me | null = ME_MEMBER, currency: Currency = 'RUB'): 
       me ? json(me) : json({ error: { code: 'auth.not_authenticated', message: 'Войдите в аккаунт' } }, 401),
     'GET /api/settings': () => json(settingsOut(currency)),
     'GET /api/me/notifications': () => json(notificationsEmpty()),
+    // колокольчик прячет выключенные в кабинете виды: настройки — все включены
+    'GET /api/me/notification-prefs': () => json(memberPrefsOut()),
   };
 }
 

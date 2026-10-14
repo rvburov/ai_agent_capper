@@ -139,7 +139,7 @@ describe('Игроки: список', () => {
     const stale = rankingOut({ archive: archiveInfo({ stale: true, stale_days: 4, data_to: '2026-10-08' }) });
     const view = renderPlayers('/players', () => json(stale));
     expect(await screen.findByText('Архив матчей не обновлялся 4 дня.')).toBeInTheDocument();
-    expect(screen.getByText(/Администратор получил уведомление/)).toBeInTheDocument();
+    expect(screen.getByText(/Архив обновляет администратор/)).toBeInTheDocument();
     expect(screen.getByText(/ · 4 дня без обновления/)).toBeInTheDocument();
     view.unmount();
     renderPlayers('/players', () => json(stale), { admin: true });

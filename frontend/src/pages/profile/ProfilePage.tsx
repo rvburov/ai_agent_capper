@@ -3,13 +3,15 @@ import { Navigate, useParams } from 'react-router';
 
 import { useMe } from '../../api/hooks/useMe';
 import { paths, PROFILE_TABS, type ProfileTab } from '../../app/paths';
-import { Card, EmptyState, Tabs, type IconName } from '../../components';
+import { Tabs, type IconName } from '../../components';
 import { useSuspiciousCandidates } from '../../features/profile/useLoginEvents';
 import { useSuspiciousLogin } from '../../features/profile/useSuspiciousLogin';
 import { useAiBudget } from '../../features/ai/useAiBudget';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 import { BankTab } from './bank/BankTab';
+import { DataTab } from './data/DataTab';
 import { KeyTab, keyNeedsAttention } from './KeyTab';
+import { NotificationsTab } from './notifications/NotificationsTab';
 import { ProfileHero } from './ProfileHero';
 import { ProfileTabPanel } from './ProfileTabPanel';
 import { SecurityTab } from './SecurityTab';
@@ -24,17 +26,8 @@ const ICONS: Record<ProfileTab, IconName> = {
   data: 'database',
 };
 
-// Вкладки следующих этапов (docs/PLAN.md, раздел 10): центр уведомлений и данные — этап 4
-// (волна 5); push-переключатели этап 6 добавит в уже готовую вкладку «Уведомления».
-// «Ключ Claude» — этап 3 (два режима ключа, Р7 и Р12), «Банк и стратегия» — этап 4
-type StubTab = Exclude<ProfileTab, 'profile' | 'security' | 'key' | 'bank'>;
-const STAGES: Record<StubTab, number> = { notifications: 4, data: 4 };
-const READY: readonly ProfileTab[] = ['profile', 'security', 'key', 'bank'];
-
-function isStubTab(tab: ProfileTab): tab is StubTab {
-  return !READY.includes(tab);
-}
-
+// Все вкладки работают с этапа 4; push-переключатели и тихие часы во вкладке «Уведомления»
+// заработают на этапе 6 (сейчас — неактивны с пометкой)
 function isProfileTab(value: string): value is ProfileTab {
   return (PROFILE_TABS as readonly string[]).includes(value);
 }
@@ -99,16 +92,8 @@ export function ProfilePage() {
         )}
         {active === 'key' && <KeyTab me={me} />}
         {active === 'bank' && <BankTab me={me} />}
-        {isStubTab(active) && (
-          <Card>
-            <EmptyState
-              className="profile-stub"
-              icon={ICONS[active]}
-              title={t('stub.stage', { stage: STAGES[active] })}
-              text={t(`profile.stubs.${active}`)}
-            />
-          </Card>
-        )}
+        {active === 'notifications' && <NotificationsTab me={me} />}
+        {active === 'data' && <DataTab me={me} />}
       </div>
     </>
   );

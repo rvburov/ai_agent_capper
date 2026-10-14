@@ -13,3 +13,8 @@ export type BankEntryIn = Schemas['BankEntryIn'];
 export type MoveKind = BankEntryIn['kind'];
 export type Strategy = Schemas['StrategyOut'];
 export type StrategyParams = Schemas['StrategyParamsOut'];
+
+// Ответственная игра (В8)
+export type PlayLimits = Schemas['PlayLimitsOut'];
+export type PlayLimitsIn = Schemas['PlayLimitsIn'];
+export type PlayBlocked = NonNullable<PlayLimits['blocked']>;

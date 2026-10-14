@@ -14,7 +14,7 @@ import { useAdminActivity, useAdminAiUsage } from '../../features/admin/useAdmin
 import { kindLabel, kindSetup } from '../../features/costs/display';
 import { useAiUsage } from '../../features/dashboard/api';
 import type { AdminAiUsage, PersonUsage } from '../../features/costs/types';
-import { formatPercent, formatUsd } from '../../lib/format';
+import { formatPercent, formatShare, formatUsd } from '../../lib/format';
 import { HowTo, LoadError } from './parts';
 import { TotalRow, usagePeriod } from './OverviewTab';
 import './overview.css';
@@ -65,7 +65,7 @@ function Tiles({ usage, t }: { usage: AdminAiUsage; t: TFunction }) {
         value={formatUsd(usage.spent_usd)}
         hint={
           usage.budget_share !== null
-            ? t('admin.usage.tiles.spentHint', { pct: formatPercent(usage.budget_share, { digits: 0 }), budget: formatLimitUsd(usage.budget_usd) })
+            ? t('admin.usage.tiles.spentHint', { pct: formatShare(usage.budget_share), budget: formatLimitUsd(usage.budget_usd) })
             : t('admin.usage.tiles.noBudget')
         }
       />
@@ -114,7 +114,7 @@ function PeopleCard({ usage, me, t }: { usage: AdminAiUsage; me: Me; t: TFunctio
   ];
   const total = segs.reduce((sum, s) => sum + s.value, 0);
   const max = Math.max(...people.map(({ p }) => p.key_spent_usd), usage.shared.cost_usd, 0) || 1;
-  const ofBudget = (share: number | null) => (share !== null ? <small>{t('admin.overview.spenders.ofBudget', { pct: formatPercent(share, { digits: 1 }) })}</small> : null);
+  const ofBudget = (share: number | null) => (share !== null ? <small>{t('admin.overview.spenders.ofBudget', { pct: formatShare(share) })}</small> : null);
   return (
     <Card id="adm-usage-people" title={t('admin.usage.people.title')} subtitle={t('admin.usage.people.subtitle', { period, amount: formatUsd(usage.spent_usd) })}>
       {total > 0 && (

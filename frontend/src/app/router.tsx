@@ -17,22 +17,62 @@ function meta(value: RouteMeta): RouteMeta {
   return value;
 }
 
-// Каждый экран — свой файл сборки: грузится, когда его открывают (src/app/lazyPage.ts).
+// Каждый экран — свой файл сборки: грузится, когда его открывают (src/app/lazyPage.ts),
+// вместе со своими текстами (SCREEN_TEXTS, src/i18n/sections.ts).
 // Экраны в оболочке ждут загрузки внутри AppShell (Suspense вокруг Outlet), вход и
 // регистрация — на весь экран. Заглушки и «Такой страницы нет» — маленькие, в общем файле.
-const LoginPage = lazyPage(() => import('../pages/auth/LoginPage').then((m) => m.LoginPage));
-const RegisterPage = lazyPage(() => import('../pages/auth/RegisterPage').then((m) => m.RegisterPage));
-const ResetPage = lazyPage(() => import('../pages/auth/ResetPage').then((m) => m.ResetPage));
-const NewAnalysisPage = lazyPage(() => import('../pages/new/NewAnalysisPage').then((m) => m.NewAnalysisPage));
-const AnalysisPage = lazyPage(() => import('../pages/analysis/AnalysisPage').then((m) => m.AnalysisPage));
-const ProfilePage = lazyPage(() => import('../pages/profile/ProfilePage').then((m) => m.ProfilePage));
-const AdminPage = lazyPage(() => import('../pages/admin/AdminPage').then((m) => m.AdminPage));
-const BetsPage = lazyPage(() => import('../pages/bets/BetsPage').then((m) => m.BetsPage));
-const DashboardPage = lazyPage(() => import('../pages/dashboard/DashboardPage').then((m) => m.DashboardPage));
-const AnalyticsPage = lazyPage(() => import('../pages/analytics/AnalyticsPage').then((m) => m.AnalyticsPage));
-const PlayersPage = lazyPage(() => import('../pages/players/PlayersPage').then((m) => m.PlayersPage));
-const PlayerPage = lazyPage(() => import('../pages/players/PlayerPage').then((m) => m.PlayerPage));
-const CostsPage = lazyPage(() => import('../pages/costs/CostsPage').then((m) => m.CostsPage));
+const LoginPage = lazyPage(
+  () => import('../pages/auth/LoginPage').then((m) => m.LoginPage),
+  () => import('virtual:capper-texts/screen/auth/LoginPage'),
+);
+const RegisterPage = lazyPage(
+  () => import('../pages/auth/RegisterPage').then((m) => m.RegisterPage),
+  () => import('virtual:capper-texts/screen/auth/RegisterPage'),
+);
+const ResetPage = lazyPage(
+  () => import('../pages/auth/ResetPage').then((m) => m.ResetPage),
+  () => import('virtual:capper-texts/screen/auth/ResetPage'),
+);
+const NewAnalysisPage = lazyPage(
+  () => import('../pages/new/NewAnalysisPage').then((m) => m.NewAnalysisPage),
+  () => import('virtual:capper-texts/screen/new/NewAnalysisPage'),
+);
+const AnalysisPage = lazyPage(
+  () => import('../pages/analysis/AnalysisPage').then((m) => m.AnalysisPage),
+  () => import('virtual:capper-texts/screen/analysis/AnalysisPage'),
+);
+const ProfilePage = lazyPage(
+  () => import('../pages/profile/ProfilePage').then((m) => m.ProfilePage),
+  () => import('virtual:capper-texts/screen/profile/ProfilePage'),
+);
+const AdminPage = lazyPage(
+  () => import('../pages/admin/AdminPage').then((m) => m.AdminPage),
+  () => import('virtual:capper-texts/screen/admin/AdminPage'),
+);
+const BetsPage = lazyPage(
+  () => import('../pages/bets/BetsPage').then((m) => m.BetsPage),
+  () => import('virtual:capper-texts/screen/bets/BetsPage'),
+);
+const DashboardPage = lazyPage(
+  () => import('../pages/dashboard/DashboardPage').then((m) => m.DashboardPage),
+  () => import('virtual:capper-texts/screen/dashboard/DashboardPage'),
+);
+const AnalyticsPage = lazyPage(
+  () => import('../pages/analytics/AnalyticsPage').then((m) => m.AnalyticsPage),
+  () => import('virtual:capper-texts/screen/analytics/AnalyticsPage'),
+);
+const PlayersPage = lazyPage(
+  () => import('../pages/players/PlayersPage').then((m) => m.PlayersPage),
+  () => import('virtual:capper-texts/screen/players/PlayersPage'),
+);
+const PlayerPage = lazyPage(
+  () => import('../pages/players/PlayerPage').then((m) => m.PlayerPage),
+  () => import('virtual:capper-texts/screen/players/PlayerPage'),
+);
+const CostsPage = lazyPage(
+  () => import('../pages/costs/CostsPage').then((m) => m.CostsPage),
+  () => import('virtual:capper-texts/screen/costs/CostsPage'),
+);
 
 /** Экран без оболочки (вход, регистрация, сброс): пока грузится — индикатор на весь экран. */
 function bare(page: ReactNode): ReactNode {

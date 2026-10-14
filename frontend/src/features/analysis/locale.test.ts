@@ -20,6 +20,17 @@ const GROUPS = [
   'analysis.express',
   'analysis.stake',
   'analysis.compare',
+  // кабинет (этап 4): ответственная игра, букмекеры, удаление аккаунта, уведомления, валюта
+  'errors.play',
+  'errors.bookmaker',
+  'errors.account',
+  'errors.notification',
+  'errors.common.currency_changed',
+  'errors.admin.currency_same',
+  'errors.admin.currency_rate_base',
+  'errors.admin.currency_overflow',
+  'errors.admin.message_recipient',
+  'errors.admin.message_no_recipients',
 ];
 
 function get(tree: unknown, path: string): unknown {
@@ -36,6 +47,15 @@ function leaves(node: unknown, path: string): [string, string][] {
   if (typeof node !== 'object' || node === null) return [];
   return Object.entries(node).flatMap(([key, value]) => leaves(value, `${path}.${key}`));
 }
+
+// Параметры, которые сервер присылает сверх своего текста: until — время в UTC (ISO), фронтенд
+// показывает его в поясе и формате пользователя, а сервер пишет готовое until_text
+const EXTRA_PARAMS: Readonly<Record<string, readonly string[]>> = {
+  'errors.play.paused': ['until'],
+  'errors.play.bets_limit': ['until'],
+  'errors.play.stake_limit': ['until'],
+  'errors.play.pause_shorter': ['until'],
+};
 
 /** Имена подстановок: «{cap}» на сервере и «{{cap}}» в i18next. */
 function placeholders(text: string): string[] {
@@ -55,7 +75,7 @@ describe('ключи анализа из API', () => {
     for (const [key, text] of server) {
       const client = get(ru, key) ?? get(ru, `${key}_one`);
       expect(typeof client, key).toBe('string');
-      const allowed = placeholders(text);
+      const allowed = [...placeholders(text), ...(EXTRA_PARAMS[key] ?? [])];
       for (const name of placeholders(client as string)) expect(allowed, `${key}: {{${name}}}`).toContain(name);
     }
   });

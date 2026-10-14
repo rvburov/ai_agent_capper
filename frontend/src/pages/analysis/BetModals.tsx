@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button, Callout, Combobox, Field, KeyValue, Modal, Segmented } from '../../components';
@@ -10,6 +10,7 @@ import { oddInputText, oddNumber, validOdd } from '../../features/analysis/draft
 import { formatShare } from '../../features/analysis/markets';
 import { payout, roundMoney, shareOf, stakeForShare, stakeProblem, totalOdds, type MoneyRules } from '../../features/analysis/stake';
 import { BET_CONFLICTS, newClientRef, usePlaceBet, type Bet } from '../../features/bets/api';
+import { useBookmakerList } from '../../features/bookmakers/api';
 import { currencySign, formatAmountInput, formatMoney, formatOdds, type Currency } from '../../lib/format';
 
 // Окна «Изменить сумму» и «Сохранить ставку» (stakeModal, saveBet, legOddsFields в
@@ -234,6 +235,11 @@ export function StakeModal({
   );
 }
 
+// Названия букмекеров сравниваются без учета регистра (как на сервере)
+function sameBookName(a: string, b: string): boolean {
+  return a.trim().toLocaleLowerCase('ru') === b.trim().toLocaleLowerCase('ru');
+}
+
 /** «Сохранить ставку»: кэф при ставке у каждой ноги, итоговый кэф и выплата; POST /api/bets. */
 export function SaveBetModal({
   open,
@@ -258,8 +264,18 @@ export function SaveBetModal({
   onConflict: (message: string) => void;
 }) {
   const { t } = useTranslation();
+  // Букмекер анализа скрыт в «Моих букмекерах» после запуска: молча ставить на скрытого нельзя
+  // (у скрытого не бывает ставок в игре) — показываем выбор из действующих, пустой
+  const list = useBookmakerList();
+  const hiddenBook =
+    bookmaker !== null &&
+    (list.data?.items ?? []).some((item) => item.archived_at !== null && sameBookName(item.name, bookmaker));
+  const fixedBook = hiddenBook ? null : bookmaker;
   const [odds, setOdds] = useState<string[]>(() => [...taken]);
   const [book, setBook] = useState(bookmaker ?? bookmakers[0] ?? '');
+  useEffect(() => {
+    if (hiddenBook) setBook((value) => (bookmaker !== null && sameBookName(value, bookmaker) ? '' : value));
+  }, [hiddenBook, bookmaker]);
   // Ошибка «Укажите букмекера» — после правки поля или попытки сохранить, а не сразу
   const [bookTouched, setBookTouched] = useState(false);
   const [clientRef] = useState(newClientRef);
@@ -288,6 +304,8 @@ export function SaveBetModal({
         bookmaker: book.trim().slice(0, 64),
         legs: ctx.legs.map((leg, i) => ({ prediction_id: leg.predictionId, odds_taken: String(numbers[i]) })),
         client_ref: clientRef,
+        // валюта суммы в окне: сменилась на сервере — 409 common.currency_changed
+        currency: ctx.currency,
       });
       onSaved(bet, odds);
     } catch (e) {
@@ -316,7 +334,12 @@ export function SaveBetModal({
       }
     >
       <LegOddsFields prefix="analysis-bet" legs={ctx.legs} values={odds} onChange={setOdds} />
-      {!bookmaker && (
+      {hiddenBook && (
+        <Callout kind="warn" icon="eyeOff">
+          {t('analysis.bet.bookmakerHidden', { name: bookmaker })}
+        </Callout>
+      )}
+      {!fixedBook && (
         <div className="field">
           <label className="field-label" htmlFor="analysis-bet-bk">
             {t('analysis.bet.bookmaker')}
@@ -371,7 +394,7 @@ export function SaveBetModal({
                     profit: formatMoney(payout(stake, total, ctx.rules) - stake, ctx.currency, { signed: true }),
                   }),
                 },
-                ...(bookmaker ? [{ key: 'bk', label: t('analysis.bet.bookmaker'), value: bookmaker }] : []),
+                ...(fixedBook ? [{ key: 'bk', label: t('analysis.bet.bookmaker'), value: fixedBook }] : []),
               ]}
             />
             {total > ctx.totalMax && <Callout kind="warn">{t('analysis.bet.overTotal', { max: formatOdds(ctx.totalMax), code: ctx.strategyCode })}</Callout>}

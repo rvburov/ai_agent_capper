@@ -6,12 +6,14 @@ import { paths } from '../../../app/paths';
 import { Callout, Icon, Skeleton, Stat } from '../../../components';
 import { useBank, useStrategy } from '../../../features/analysis/api';
 import { useBankEntries } from '../../../features/bank/api';
+import { usePlayLimits } from '../../../features/bank/playLimits';
 import type { Bank } from '../../../features/bank/types';
 import { useBetSummary } from '../../../features/bets/api';
 import { currencyOf } from '../../../features/bets/display';
 import { formatDateLong, formatMoney, formatPercent, type Currency } from '../../../lib/format';
 import { MOBILE_QUERY, useMediaQuery } from '../../../lib/useMediaQuery';
 import { LoadError } from '../LoadError';
+import { useHashTarget } from '../useHashTarget';
 import { AdaptCard } from './AdaptCard';
 import { BooksCard } from './BooksCard';
 import { MovesCard } from './MovesCard';
@@ -100,6 +102,9 @@ export function BankTab({ me }: { me: Me }) {
   const summary = useBetSummary({});
   const mobile = useMediaQuery(MOBILE_QUERY);
   const { t } = useTranslation();
+  // «Лимиты и пауза» в сводке ведет к #profile-rg: прокрутка, когда карточки над ним загружены
+  const limits = usePlayLimits();
+  useHashTarget(Boolean(bank.data) && !strategy.isPending && !limits.isPending);
 
   if (bank.error) return <LoadError error={bank.error} onRetry={() => void bank.refetch()} />;
   if (!bank.data) {
@@ -116,7 +121,7 @@ export function BankTab({ me }: { me: Me }) {
   const strategyCard = <StrategyCard strategy={strategy.data} error={strategy.error} onRetry={() => void strategy.refetch()} bank={data} />;
   const adaptCard = <AdaptCard bank={data} params={strategy.data?.params ?? null} />;
   const movesCard = <MovesCard bank={data} />;
-  const responsible = <ResponsibleCard currency={currency} />;
+  const responsible = <ResponsibleCard tz={me.tz} />;
   const books = <BooksCard />;
   return (
     <>

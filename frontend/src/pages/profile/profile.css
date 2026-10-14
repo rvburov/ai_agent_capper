@@ -60,6 +60,12 @@
 /* новое: длинное значение пары переносится, а не наезжает на подпись (в макете на 375 px наезжало) */
 .profile-panel .kv { grid-template-columns: minmax(min-content, auto) minmax(0, 1fr); }
 .profile-panel .kv dd { overflow-wrap: anywhere; }
+/* на телефоне длинные подписи («Стратегия и ответственная игра») забирали почти всю ширину, и
+   значение рвалось посреди слов: делим ширину 2 : 3, слово переносится целиком */
+@media (max-width: 720px) {
+  .profile-panel .kv { grid-template-columns: minmax(min-content, 2fr) minmax(0, 3fr); }
+  .profile-panel .kv dd { overflow-wrap: break-word; }
+}
 
 /* ---------- списки: сеансы, способы входа, устройства ---------- */
 .profile-list { display: flex; flex-direction: column; min-width: 0; }
@@ -211,8 +217,7 @@
 .profile-faq dt { font-weight: 600; color: var(--fg); }
 .profile-faq dd { margin: 2px 0 0; color: var(--fg-2); }
 
-/* новое: заглушка вкладки следующего этапа и ошибка загрузки внутри карточки */
-.profile-stub { padding: 8px 0; }
+/* ошибка загрузки внутри карточки */
 .profile-load-error { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 
 @media (max-width: 960px) {

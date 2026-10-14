@@ -162,7 +162,86 @@ export function dashboardOut(over: Partial<Schemas['DashboardOut']> = {}): Schem
 }
 
 /**
- * Ответы главной: показатели периода, банк, стратегия и лимит ИИ — как dashboardApi() в
+ * Свой расход ИИ за октябрь (GET /api/ai/usage) — как aiUsageOut() в
+ * src/features/dashboard/testData.ts ($1,93, из кэша 68%, прогноз $4,50). Здесь своей копией:
+ * тот файл тянет фикстуры JSON без атрибута импорта, а Playwright грузит модули сам.
+ */
+export function aiUsage(): Schemas['AiUsageOut'] {
+  const sums = (cost: number, cacheShare = 0.7): Schemas['AiUsageOut']['totals'] => ({
+    runs: 10,
+    errors: 0,
+    cost_usd: cost,
+    input_tokens: 20_000,
+    cache_write_tokens: 10_000,
+    cache_read_tokens: 70_000,
+    output_tokens: 8_000,
+    prompt_tokens: 100_000,
+    web_searches: 4,
+    cache_share: cacheShare,
+  });
+  const kind = (name: string, cost: number): Schemas['AiUsageOut']['kinds'][number] => ({
+    ...sums(cost),
+    kind: name,
+    share: cost / 1.93,
+    avg_cost_usd: cost / 10,
+    avg_prompt_tokens: 10_000,
+    avg_output_tokens: 800,
+    models: [],
+    efforts: [],
+  });
+  return {
+    month: '2026-10',
+    month_start: '2026-10-01',
+    last_day: '2026-10-31',
+    days_in_month: 31,
+    days_elapsed: 13,
+    current: true,
+    totals: sums(1.93, 0.68),
+    own_usd: 1.93,
+    acceptance_usd: 0,
+    shared_usd: 0,
+    admin_key_usd: 1.93,
+    own_key_usd: 0,
+    search_usd: 0.08,
+    cache_saved_usd: 0.4,
+    days: [],
+    kinds: [kind('analysis', 1.43), kind('news', 0.38), kind('parse', 0.12)],
+    models: [],
+    steps: [],
+    versions: [],
+    analyses: [],
+    avg_analysis_usd: 0.13,
+    admin_key_avg_usd: 0.13,
+    forecast_usd: 4.5,
+    analyses_left: 62,
+    pace_usd: 0.32,
+    prices: [],
+    settings: {
+      parse_model: 'claude-haiku-5-5',
+      parse_effort: 'low',
+      news_enabled: true,
+      news_model: 'claude-sonnet-5-5',
+      news_effort: 'low',
+      news_searches_per_match: 2,
+      news_searches_per_analysis: 6,
+      news_searches_per_day: 40,
+      news_ttl_hours: 12,
+      news_lookback_days: 7,
+      news_domains: [],
+      news_prompt_cache: true,
+      analysis_model: 'claude-opus-5-5',
+      analysis_effort: 'medium',
+      analysis_parallel: 2,
+      assessment_reuse_hours: 6,
+      soft_cap_usd: 0.5,
+      hard_cap_usd: 1.5,
+      default_per_analysis_usd: 0.5,
+    },
+  };
+}
+
+/**
+ * Ответы главной: показатели периода, банк, стратегия, лимит и расход ИИ — как dashboardApi() в
  * src/test/factories.ts (участник на ключе администратора в октябре 2026, банк 48 000 ₽).
  */
 export function dashboardApi(): Record<string, MockReply> {
@@ -171,6 +250,8 @@ export function dashboardApi(): Record<string, MockReply> {
     'GET /api/me/bank': bankOut(),
     'GET /api/strategy/active': strategyV3(),
     'GET /api/ai/budget': aiBudget(),
+    // «Расходы ИИ» участника на главной (прогноз и доля кэша); администратору не запрашивается
+    'GET /api/ai/usage': aiUsage(),
   };
 }
 
@@ -242,6 +323,11 @@ export async function mockApi(page: Page, me: Me | null, api: Record<string, Moc
     // колокольчик в шапке спрашивает уведомления сам
     if (url.pathname === '/api/me/notifications') {
       await route.fulfill({ json: { items: [], unread: 0 } });
+      return;
+    }
+    // и что присылать: выключенные в кабинете виды он прячет (все включены)
+    if (url.pathname === '/api/me/notification-prefs' && me) {
+      await route.fulfill({ json: { items: [], push_available: false } });
       return;
     }
     // плашка «Банк» в шапке — тоже

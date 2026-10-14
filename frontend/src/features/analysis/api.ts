@@ -2,6 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 
 import { api, unwrap } from '../../api/client';
 import { aiKeys } from '../ai/keys';
+import { refreshAfterCurrencyChange } from '../bank/currency';
 import { analysisKeys } from './keys';
 import type { Analysis, ConfirmIn } from './types';
 import { isActive, isSettling } from './types';
@@ -89,6 +90,9 @@ function useAnalysisMutation<V>(fn: (vars: V) => Promise<Analysis>) {
       client.setQueryData(analysisKeys.one(analysis.id), analysis);
       void client.invalidateQueries({ queryKey: analysisKeys.list });
     },
+    // Валюта программы сменилась, пока форма была открыта (409 common.currency_changed):
+    // валюта, банк и анализы перечитываются — форма покажет суммы в новой валюте
+    onError: (error) => refreshAfterCurrencyChange(client, error),
   });
 }
 

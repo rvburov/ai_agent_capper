@@ -11,6 +11,7 @@ import { api, unwrap } from '../../api/client';
 import { isApiError } from '../../api/errors';
 import type { components } from '../../api/schema';
 import { analysisKeys } from '../analysis/keys';
+import { refreshAfterCurrencyChange } from '../bank/currency';
 import { ANALYTICS_PREFIX, betKeys, DASHBOARD_PREFIX } from './keys';
 import type { BetFiltersQuery, BetItem, ClosingIn, LegSettleIn } from './types';
 
@@ -52,6 +53,7 @@ export function usePlaceBet() {
     // Ставка по анализу уже сохранена (ответ на первый запрос потерялся) или анализ сменил
     // состояние: экран должен увидеть это сразу, а не предлагать «Сохранить ставку» снова
     onError: (error, body) => {
+      refreshAfterCurrencyChange(client, error);
       if (!isApiError(error) || !BET_CONFLICTS.has(error.code)) return;
       void client.invalidateQueries({ queryKey: analysisKeys.one(body.analysis_id) });
       void client.invalidateQueries({ queryKey: analysisKeys.list });

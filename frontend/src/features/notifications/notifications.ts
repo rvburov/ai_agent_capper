@@ -3,8 +3,11 @@ import type { QueryKey } from '@tanstack/react-query';
 import { meQueryKey } from '../../api/keys';
 import type { IconName } from '../../components';
 import type { components } from '../../api/schema';
+import { paths } from '../../app/paths';
 import { adminKeys } from '../admin/keys';
 import { aiKeys } from '../ai/keys';
+import { analysisKeys } from '../analysis/keys';
+import { ANALYTICS_PREFIX, betKeys, DASHBOARD_PREFIX } from '../bets/keys';
 
 // Центр уведомлений (колокольчик, Р3): вид уведомления, ссылки и отметка прочитанного в кэше.
 
@@ -42,6 +45,9 @@ export function notificationLook(kind: string): { icon: IconName; tone: Notifica
       return { icon: 'megaphone', tone: 'info' };
     case 'bet_settled':
       return { icon: 'ticket', tone: null };
+    // Этап 4: сигнал расхода ИИ администратору (текст правила с числами — с сервера)
+    case 'ai_alert':
+      return { icon: 'alert', tone: 'warn' };
     default:
       return { icon: 'bell', tone: null };
   }
@@ -69,6 +75,9 @@ export function staleQueriesFor(kind: string): readonly QueryKey[] {
     case 'budget_80':
     case 'budget_100':
       return [...AI_BUDGET, adminKeys.aiBudget, adminKeys.aiLimits];
+    // Ставка рассчитана сама (этап 5): ставки, банк, главная и аналитика
+    case 'bet_settled':
+      return [betKeys.all, analysisKeys.bank, DASHBOARD_PREFIX, ANALYTICS_PREFIX];
     default:
       return [];
   }
@@ -78,6 +87,24 @@ export function staleQueriesFor(kind: string): readonly QueryKey[] {
 export function internalLink(link: string | null | undefined): string | null {
   if (typeof link !== 'string' || !/^\/(?![/\\])/.test(link) || /[\s\\]/.test(link)) return null;
   return link;
+}
+
+/**
+ * Куда ведет уведомление без ссылки с сервера: «Ставка рассчитана» — на «Ставки» (ставку
+ * откроет ссылка /bets?bet=ID, когда сервер ее пришлет), архив матчей — на «Обзор»
+ * администрирования, где видно, когда была последняя загрузка.
+ */
+export function notificationLink(item: Pick<NotificationItem, 'kind' | 'link'>): string | null {
+  const own = internalLink(item.link);
+  if (own) return own;
+  switch (item.kind) {
+    case 'bet_settled':
+      return paths.bets;
+    case 'data_stale':
+      return paths.admin();
+    default:
+      return null;
+  }
 }
 
 /** Счетчик на колокольчике: больше 99 — «99+». */

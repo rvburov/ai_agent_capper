@@ -36,7 +36,7 @@ const MEMBERS: MemberLimit[] = [
 // Дела решает сервер (AdminAttentionOut в GET /api/dashboard): Ольга просит ключ, Мария — у порога
 const ATTENTION = adminAttention({
   return_requests: [{ user_id: 2, name: 'Ольга Лехтинен', at: ago(2) }],
-  limits: [{ user_id: 4, name: 'Мария Виртанен', spent_usd: 8.5, limit_usd: 10, share: 0.85, level: '80' }],
+  limits: [{ user_id: 4, name: 'Мария Виртанен', spent_usd: 8.5, limit_usd: 10, share: 0.85, level: '80', runs_out_on: '2026-10-16' }],
 });
 
 function attentionRoute(attention: AdminAttention): Handler {
@@ -134,8 +134,8 @@ describe('Администрирование: «Обзор»', () => {
       return_requests: [],
       alert_pct: 90,
       limits: [
-        { user_id: 4, name: 'Мария Виртанен', spent_usd: 8.5, limit_usd: 10, share: 0.85, level: '80' },
-        { user_id: 2, name: 'Ольга Лехтинен', spent_usd: 0.88, limit_usd: 1, share: 0.88, level: '100' },
+        { user_id: 4, name: 'Мария Виртанен', spent_usd: 8.5, limit_usd: 10, share: 0.85, level: '80', runs_out_on: '2026-10-16' },
+        { user_id: 2, name: 'Ольга Лехтинен', spent_usd: 0.88, limit_usd: 1, share: 0.88, level: '100', runs_out_on: null },
       ],
     });
     expect(decisionsOf(stopped, MEMBERS).map((item) => (item.kind === 'limit' ? [item.member.id, item.level] : null))).toEqual([
@@ -165,7 +165,7 @@ describe('Администрирование: «Обзор»', () => {
     const stopped = adminAttention({
       return_requests: [],
       alert_pct: 90,
-      limits: [{ user_id: 4, name: 'Мария Виртанен', spent_usd: 8.8, limit_usd: 10, share: 0.88, level: '100' }],
+      limits: [{ user_id: 4, name: 'Мария Виртанен', spent_usd: 8.8, limit_usd: 10, share: 0.88, level: '100', runs_out_on: null }],
     });
     const members = MEMBERS.map((m) => (m.id === 4 ? { ...m, spent_month_usd: 8.8 } : m));
     renderAdmin('/admin', { 'GET /api/dashboard': attentionRoute(stopped), 'GET /api/admin/ai/limits': () => json({ defaults: LIMIT_DEFAULTS, members }) });
@@ -201,7 +201,8 @@ describe('Администрирование: «Обзор»', () => {
   it('бюджет ключа: доля с сервера, «Кто тратит» — только расход на ИИ, итог как «Потрачено»', async () => {
     renderAdmin('/admin');
     const budget = await waitFor(() => card('Бюджет ключа администратора'));
-    expect(await within(budget).findByText('69% бюджета')).toBeInTheDocument();
+    // доля бюджета — один формат в плашке и в итоге «Кто тратит» (formatShare): 68,7% → «69%»
+    expect(await within(budget).findAllByText('69% бюджета')).toHaveLength(2);
     const list = await within(budget).findByRole('list', { name: 'Кто тратит ключ администратора' });
     const rows = within(list).getAllByRole('listitem');
     expect(rows[0]).toHaveTextContent('Роман Буроввы');
@@ -211,6 +212,7 @@ describe('Администрирование: «Обзор»', () => {
     const total = rows[rows.length - 1]!;
     expect(total).toHaveTextContent('Итого с вашего ключа');
     expect(total).toHaveTextContent('$41,20');
+    expect(total).toHaveTextContent('69% бюджета');
     expect(total).toHaveTextContent('за 1–13 октября');
     // участник на своем ключе без расхода на ключе администратора в «Кто тратит» не попадает
     expect(within(list).queryByText(/Дмитрий/)).toBeNull();

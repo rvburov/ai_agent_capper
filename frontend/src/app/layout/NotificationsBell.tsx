@@ -6,10 +6,11 @@ import { Link, useNavigate } from 'react-router';
 import { Button, Icon, Spinner } from '../../components';
 import {
   badgeText,
-  internalLink,
+  notificationLink,
   notificationLook,
   type NotificationItem,
 } from '../../features/notifications/notifications';
+import { hiddenKinds, useNotificationPrefs, visibleNotifications } from '../../features/notifications/prefs';
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -50,8 +51,11 @@ export function NotificationsBell() {
   const popId = useId();
   const titleId = useId();
 
-  const unread = query.data?.unread ?? 0;
-  const items = query.data?.items ?? [];
+  // Выключенные в кабинете виды колокольчик не показывает (как в макете): сервер новые не
+  // присылает, а уже пришедшие до выключения прячутся здесь
+  const prefs = useNotificationPrefs();
+  const hidden = hiddenKinds(prefs.data);
+  const { items, unread } = visibleNotifications(query.data, hidden);
 
   function close(returnFocus: boolean) {
     setOpen(false);
@@ -73,6 +77,8 @@ export function NotificationsBell() {
     setStyle(!asSheet && buttonRef.current ? popPosition(buttonRef.current) : null);
     setOpen(true);
     void query.refetch();
+    // настройки могли смениться в другой вкладке или на другом устройстве
+    void prefs.refetch();
   }
 
   // На компьютере — под кнопкой по правому краю, как в макете; при смене размера окна — заново
@@ -124,7 +130,7 @@ export function NotificationsBell() {
 
   function openItem(item: NotificationItem) {
     if (!item.read_at) markRead.mutate(item.id);
-    const link = internalLink(item.link);
+    const link = notificationLink(item);
     if (link) {
       close(false);
       void navigate(link);
@@ -232,7 +238,7 @@ export function NotificationsBell() {
                   <Icon name="sliders" />
                   {t('notifications.settings')}
                 </Link>
-                <span className="xsmall muted">{t('notifications.channels')}</span>
+                <span className="xsmall muted">{hidden.size ? t('notifications.someHidden') : t('notifications.channels')}</span>
               </div>
             </div>
           </>,

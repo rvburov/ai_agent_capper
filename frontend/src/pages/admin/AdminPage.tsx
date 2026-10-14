@@ -4,7 +4,7 @@ import { Navigate, useParams } from 'react-router';
 
 import { useMe, type Me } from '../../api/hooks/useMe';
 import { ADMIN_TABS, paths, type AdminTab } from '../../app/paths';
-import { Button, Card, EmptyState, Icon, Skeleton, Tabs, type IconName } from '../../components';
+import { Button, Icon, Skeleton, Tabs, type IconName } from '../../components';
 import { summarize } from '../../features/admin/people';
 import { decisionsCount, useAdminAttention } from '../../features/admin/useAdminAttention';
 import { useAdminUsers } from '../../features/admin/useAdminUsers';
@@ -14,7 +14,9 @@ import { AuditTab } from './AuditTab';
 import { InviteModal } from './InviteModal';
 import { InvitesTab } from './InvitesTab';
 import { KeyTab } from './KeyTab';
+import { MessagesTab } from './MessagesTab';
 import { OverviewTab } from './OverviewTab';
+import { SettingsTab } from './SettingsTab';
 import { UsageTab } from './UsageTab';
 import { UsersTab } from './UsersTab';
 import './admin.css';
@@ -30,16 +32,6 @@ const ICONS: Record<AdminTab, IconName> = {
   audit: 'history',
   message: 'megaphone',
 };
-
-// Вкладки следующей волны этапа 4 (docs/PLAN.md, раздел 10): настройки (валюта) и сообщения
-// в центр уведомлений. «Обзор» и «Расход ИИ» — этап 4, «Ключ и бюджет» — этап 3
-type StubTab = Exclude<AdminTab, 'overview' | 'users' | 'invites' | 'access' | 'key' | 'usage' | 'audit'>;
-const STAGES: Record<StubTab, number> = { settings: 4, message: 4 };
-const READY: readonly AdminTab[] = ['overview', 'users', 'invites', 'access', 'key', 'usage', 'audit'];
-
-function isStubTab(tab: AdminTab): tab is StubTab {
-  return !READY.includes(tab);
-}
 
 function isAdminTab(value: string): value is AdminTab {
   return (ADMIN_TABS as readonly string[]).includes(value);
@@ -101,17 +93,9 @@ export function AdminPage() {
         {active === 'access' && <AccessTab me={me} />}
         {active === 'key' && <KeyTab me={me} />}
         {active === 'usage' && <UsageTab me={me} />}
+        {active === 'settings' && <SettingsTab />}
         {active === 'audit' && <AuditTab />}
-        {isStubTab(active) && (
-          <Card>
-            <EmptyState
-              className="adm-stub"
-              icon={ICONS[active]}
-              title={t('stub.stage', { stage: STAGES[active] })}
-              text={t(`admin.stubs.${active}`)}
-            />
-          </Card>
-        )}
+        {active === 'message' && <MessagesTab me={me} />}
       </div>
       <InviteModal open={inviteOpen} onClose={() => setInviteOpen(false)} />
     </>

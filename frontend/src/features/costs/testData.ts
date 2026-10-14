@@ -137,6 +137,8 @@ export function personUsage(over: Partial<PersonUsage> = {}): PersonUsage {
     paused: false,
     budget_share: 8.6 / 60,
     limit_share: 0.86,
+    // доля в расходе ключа за месяц ($41,20) — с сервера
+    spent_share: (over.key_spent_usd ?? 8.6) / 41.2,
     ...over,
   };
 }
@@ -163,7 +165,7 @@ export function adminAiUsageOut(over: Partial<AdminAiUsage> = {}): AdminAiUsage 
       personUsage({ user_id: 3, display_name: 'Игорь Нестеров', status: 'blocked', key_spent_usd: 2.0, analyses: 11, limit_usd: 5, paused: true, budget_share: 2 / 60, limit_share: 0.4 }),
       personUsage({ user_id: 5, display_name: 'Дмитрий Шульц', ai_mode: 'own', key_spent_usd: 0, own_spent_usd: 3.4, analyses: 0, own_analyses: 12, budget_share: 0, limit_share: 0 }),
     ],
-    shared: { runs: 9, cost_usd: 3.1, cache_share: 0.4, budget_share: 3.1 / 60, kinds: ['analysis', 'news'] },
+    shared: { runs: 9, cost_usd: 3.1, cache_share: 0.4, budget_share: 3.1 / 60, kinds: ['analysis', 'news'], spent_share: 3.1 / 41.2 },
     tasks: [
       { kind: 'analysis', runs: 112, cost_usd: 30.2, cache_share: 0.72, budget_share: 30.2 / 60, models: ['claude-opus-5-5'] },
       { kind: 'news', runs: 160, cost_usd: 6.9, cache_share: 0.18, budget_share: 6.9 / 60, models: ['claude-sonnet-5-5'] },
@@ -175,6 +177,10 @@ export function adminAiUsageOut(over: Partial<AdminAiUsage> = {}): AdminAiUsage 
       runs: 2,
       items: [{ eval_run_id: 3, created_at: '2026-10-05T10:00:00Z', name: 'Прогон на истории сентября', eval_set: 'sept-2026', n_events: 120, models: ['claude-opus-5-5'], runs: 120, cost_usd: 4.5 }],
     },
+    // тратили ключ трое (не больше 4): «остальных» одной строкой нет
+    others_ids: [],
+    others_count: 0,
+    others_usd: 0,
     ...over,
   };
 }

@@ -1,0 +1,16 @@
+/* «Администрирование → Сообщение» (PANELS.message и стили макета admin.js): счетчик знаков,
+   колокольчик для предпросмотра (классы notif-* — из центра уведомлений), отправленные. */
+.adm-msg-form { min-width: 0; display: flex; flex-direction: column; }
+.adm-msg-form > .card { flex: 1 1 auto; }
+.adm-count { font-variant-numeric: tabular-nums; color: var(--fg-3); font-weight: 400; }
+.adm-count.warn { color: var(--warn-ink); font-weight: 600; }
+
+.adm-notif { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--dd-bg); overflow: hidden; }
+.adm-notif .notif-head { padding: 10px 14px 8px; }
+.adm-notif .notif-list { padding: 6px; }
+.adm-notif .notif-item { cursor: default; }
+.adm-notif .notif-item:hover { background: none; }
+.adm-notif .notif-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.adm-msg-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+.adm-msg-by { display: block; margin-top: 2px; }

@@ -9,7 +9,7 @@ import { spendMonth } from '../../features/admin/display';
 import type { AiBudget } from '../../features/ai/types';
 import { topKind, usdLimit } from '../../features/dashboard/display';
 import type { AiUsage } from '../../features/dashboard/types';
-import { formatNumber, formatPercent, formatUsd } from '../../lib/format';
+import { formatNumber, formatPercent, formatShare, formatUsd } from '../../lib/format';
 
 // «Расходы ИИ» (costsCard макета) в трех видах: администратор — бюджет ключа администратора,
 // участник на своем ключе — расход с его счета, участник на ключе администратора — свой лимит.
@@ -55,7 +55,7 @@ function ValueRow({ spent, max, share, alertPct, tail, what }: ValueRowProps) {
           </span>
         </div>
         <Chip kind={tone ?? 'good'} icon={tone ? 'alert' : 'check'}>
-          {t('dashboard.costs.share', { pct: share === null || share === undefined ? '—' : formatPercent(share, { digits: 0 }), what })}
+          {t('dashboard.costs.share', { pct: share === null || share === undefined ? '—' : formatShare(share), what })}
         </Chip>
       </div>
       <Meter

@@ -1,0 +1,37 @@
+/* «Администрирование → Настройки» (PANELS.settings и стили макета admin.js): валюта сейчас,
+   выбор новой, окно смены (.adm-preview — в admin.css). */
+.adm-cur-now { display: flex; align-items: center; gap: 14px; }
+.adm-cur-sym {
+  width: 56px; height: 56px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink);
+  display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 1.6rem; flex: none;
+}
+.adm-cur-name { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-xl); }
+
+.adm-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; min-width: 0; }
+.adm-choices.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.adm-choice {
+  position: relative; display: flex; gap: 10px; align-items: flex-start; padding: 12px; min-height: 44px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-md); cursor: pointer; background: var(--surface);
+  color: var(--fg); font: inherit; text-align: left; min-width: 0;
+}
+.adm-choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); cursor: default; }
+.adm-choice:not([aria-pressed="true"]):hover { border-color: var(--fg-3); }
+.adm-choice:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.adm-choice > span:last-child { min-width: 0; }
+.adm-choice b { display: block; font-weight: 600; }
+.adm-choice small { display: block; color: var(--fg-2); font-size: var(--fs-xs); margin-top: 2px; line-height: 1.4; }
+.adm-choice-sym {
+  font-family: var(--font-display); font-weight: 700; font-size: var(--fs-xl); width: 28px; line-height: 1.1;
+  text-align: center; flex: none; color: var(--accent-ink);
+}
+@media (max-width: 720px) { .adm-choices, .adm-choices.three { grid-template-columns: minmax(0, 1fr); } }
+
+/* Подписи и значения в две колонки: длинное значение переносится, а не выталкивает подпись */
+.adm-settings .kv { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+.adm-kv-note { display: block; font-weight: 400; margin-top: 2px; }
+
+.adm-swap {
+  display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 600;
+  font-size: var(--fs-lg); flex-wrap: wrap;
+}
+.adm-swap svg { width: 18px; height: 18px; color: var(--fg-3); }

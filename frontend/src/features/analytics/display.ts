@@ -115,7 +115,7 @@ export interface PeriodStart {
  * появления банка сервер в points не присылает. Ряд результата (kind = result) — с нуля.
  */
 export function periodStart(series: Series): PeriodStart {
-  return { points: series.points, day: series.start_day ?? series.start, amount: series.start_amount ?? series.base, share: series.change_share ?? null };
+  return { points: series.points, day: series.start_day, amount: series.start_amount, share: series.change_share };
 }
 
 /** С заглавной буквы: «За 30 дней» в подзаголовке карточки. */

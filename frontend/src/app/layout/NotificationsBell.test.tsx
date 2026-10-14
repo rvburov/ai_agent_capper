@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '../../api/queryClient';
 import { ToastProvider } from '../../components';
 import { setViewportWidth } from '../../test/setup';
+import { memberPrefsOut } from '../../features/notifications/testData';
 import { json, mockFetch } from '../../test/fetchMock';
 import { NotificationsBell } from './NotificationsBell';
 
@@ -40,9 +41,12 @@ const ITEMS = [
   },
 ];
 
-function setup() {
+type Item = (typeof ITEMS)[number] | { id: number; kind: string; title: string; body: string; link: string | null; created_at: string; read_at: string | null };
+
+function setup({ items = ITEMS as readonly Item[], prefs = memberPrefsOut() }: { items?: readonly Item[]; prefs?: ReturnType<typeof memberPrefsOut> } = {}) {
   document.cookie = 'capper_csrf=tok; path=/';
-  const read = new Set(ITEMS.filter((n) => n.read_at).map((n) => n.id));
+  const ITEMS_ = items;
+  const read = new Set(ITEMS_.filter((n) => n.read_at).map((n) => n.id));
   const markRead = (id: number) => {
     read.add(id);
     return new Response(null, { status: 204 });
@@ -50,13 +54,13 @@ function setup() {
   const { calls } = mockFetch({
     'GET /api/me/notifications': () =>
       json({
-        items: ITEMS.map((n) => (read.has(n.id) ? { ...n, read_at: n.read_at ?? '2026-10-08T12:00:00Z' } : n)),
-        unread: ITEMS.filter((n) => !read.has(n.id)).length,
+        items: ITEMS_.map((n) => (read.has(n.id) ? { ...n, read_at: n.read_at ?? '2026-10-08T12:00:00Z' } : n)),
+        unread: ITEMS_.filter((n) => !read.has(n.id)).length,
       }),
-    'POST /api/me/notifications/7/read': () => markRead(7),
-    'POST /api/me/notifications/6/read': () => markRead(6),
+    'GET /api/me/notification-prefs': () => json(prefs),
+    ...Object.fromEntries(ITEMS_.map((n) => [`POST /api/me/notifications/${n.id}/read`, () => markRead(n.id)])),
     'POST /api/me/notifications/read-all': () => {
-      ITEMS.forEach((n) => read.add(n.id));
+      ITEMS_.forEach((n) => read.add(n.id));
       return new Response(null, { status: 204 });
     },
   });
@@ -64,6 +68,8 @@ function setup() {
     [
       { path: '/', element: <NotificationsBell /> },
       { path: '/profile/:tab', element: <p>Безопасность</p> },
+      { path: '/bets', element: <p>Ставки</p> },
+      { path: '/analysis/:id', element: <p>Анализ</p> },
     ],
     { initialEntries: ['/'] },
   );
@@ -169,5 +175,39 @@ describe('колокольчик', () => {
     await user.click(within(dialog).getByRole('link', { name: 'Что присылать' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/profile/notifications'));
     expect(screen.queryByRole('dialog', { name: 'Уведомления' })).not.toBeInTheDocument();
+  });
+
+  it('выключенные в кабинете виды не показываются и не считаются; внизу — пометка', async () => {
+    const items: Item[] = [
+      ...ITEMS,
+      { id: 8, kind: 'bet_settled', title: 'Ставка №12 рассчитана', body: 'Итог: выигрыш', link: '/bets?bet=12', created_at: '2026-10-08T10:00:00Z', read_at: null },
+    ];
+    setup({ items, prefs: memberPrefsOut(['bet_settled']) });
+    const user = userEvent.setup();
+    // непрочитанных с сервера 3, одно из них — выключенного вида
+    await user.click(await screen.findByRole('button', { name: 'Уведомления: непрочитанных 2' }));
+    const dialog = screen.getByRole('dialog', { name: 'Уведомления' });
+    expect(within(dialog).queryByText('Ставка №12 рассчитана')).toBeNull();
+    expect(within(dialog).getByText('Часть видов выключена в настройках')).toBeInTheDocument();
+  });
+
+  it('ссылки на ставку и на анализ; сигнал расхода ИИ — с текстом правила с сервера', async () => {
+    const items: Item[] = [
+      { id: 9, kind: 'ai_alert', title: 'Доля кэша упала до 31%', body: 'Анализов в проверке: 10. Из кэша прочитано 31%', link: '/analysis/42', created_at: '2026-10-08T11:00:00Z', read_at: null },
+      { id: 8, kind: 'bet_settled', title: 'Ставка №12 рассчитана', body: 'Итог: выигрыш', link: '/bets?bet=12', created_at: '2026-10-08T10:00:00Z', read_at: null },
+    ];
+    const { router } = setup({ items });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Уведомления: непрочитанных 2' }));
+    let dialog = screen.getByRole('dialog', { name: 'Уведомления' });
+    expect(within(dialog).getByText('Анализов в проверке: 10. Из кэша прочитано 31%')).toBeInTheDocument();
+    expect(within(dialog).getByText('На сайте · push появится на этапе 6')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /Ставка №12 рассчитана/ }));
+    await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe('/bets?bet=12'));
+    await router.navigate('/');
+    await user.click(await screen.findByRole('button', { name: /Уведомления: непрочитанных/ }));
+    dialog = screen.getByRole('dialog', { name: 'Уведомления' });
+    await user.click(within(dialog).getByRole('button', { name: /Доля кэша упала до 31%/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/analysis/42'));
   });
 });

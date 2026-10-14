@@ -596,10 +596,11 @@ describe('Администрирование: журнал и заглушки',
     expect(await screen.findByText('Таких действий в журнале нет')).toBeInTheDocument();
   });
 
-  it('вкладки следующих этапов — заглушка с номером этапа', async () => {
-    mockFetch(routes());
-    renderAdmin('/admin/settings');
-    expect(await screen.findByText('Раздел появится на этапе 4')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Настройки' })).toHaveAttribute('aria-selected', 'true');
+  it('заглушек больше нет: «Настройки» и «Сообщение» — свои вкладки (SettingsTab, MessagesTab)', async () => {
+    mockFetch(routes({ 'GET /api/admin/messages': () => json({ items: [] }) }));
+    renderAdmin('/admin/message');
+    expect(await screen.findByRole('heading', { name: 'Сообщение участникам' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Сообщение' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByText(/Раздел появится/)).not.toBeInTheDocument();
   });
 });

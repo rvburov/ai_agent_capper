@@ -15,6 +15,7 @@ import {
 import type { Analysis } from '../../features/analysis/types';
 import { setEventSourceFactory } from '../../features/analysis/useAnalysisEvents';
 import { CLIENT_REF, type BetIn } from '../../features/bets/api';
+import { bookmakerOut, bookmakersOut } from '../../features/bookmakers/testData';
 import { apiError, json, mockFetch, type Handler } from '../../test/fetchMock';
 import { renderPage } from '../../test/renderPage';
 import { setViewportWidth } from '../../test/setup';
@@ -66,6 +67,7 @@ function routes(analysis: Analysis | (() => Analysis), extra: Record<string, Han
     'GET /api/settings': () => json({ currency: 'RUB' }),
     'GET /api/me/bank': () => json(bankOut()),
     'GET /api/me/bookmakers': () => json(['Fonbet']),
+    'GET /api/me/bookmakers/list': () => json(bookmakersOut()),
     'GET /api/strategy/active': () => json(strategyV3()),
     'GET /api/ai/budget': () => json(aiBudget()),
     [`GET /api/analyses/${current().id}`]: () => json(current()),
@@ -180,13 +182,47 @@ describe('Анализ готов: итог и экспресс', () => {
     expect(bodies).toHaveLength(2);
     expect(bodies[0]!.client_ref).toMatch(CLIENT_REF);
     expect(bodies[1]!.client_ref).toBe(bodies[0]!.client_ref);
-    expect(bodies[0]).toMatchObject({ analysis_id: 1, stake: '1320.00', bookmaker: 'Fonbet' });
+    // валюта суммы в окне: сменилась на сервере — 409 common.currency_changed, а не ставка в новой
+    expect(bodies[0]).toMatchObject({ analysis_id: 1, stake: '1320.00', bookmaker: 'Fonbet', currency: 'RUB' });
     expect(bodies[0]!.legs).toEqual([
       { prediction_id: 7, odds_taken: '1.45' },
       { prediction_id: 1, odds_taken: '1.32' },
     ]);
     expect(await within(expressRegion()).findByText('Ставка сохранена')).toBeInTheDocument();
     expect(within(expressRegion()).getByText(/^Ставка №11 в игре: 1\s320\s₽ на экспресс @1\.91\./)).toBeInTheDocument();
+  });
+
+  it('ответственная игра: лимит суммы и пауза — понятный текст «до какого времени» в окне ставки', async () => {
+    const user = userEvent.setup();
+    let posts = 0;
+    mockFetch(
+      routes(analysisDone(), {
+        'POST /api/bets': () => {
+          posts += 1;
+          return posts === 1
+            ? apiError(409, 'play.stake_limit', 'Ставка превысит лимит', {
+                until: '2026-12-20T22:00:00+00:00',
+                until_text: '21.12.2026 00:00',
+                limit: '2000.00',
+                left: '680.00',
+                currency: 'RUB',
+              })
+            : apiError(409, 'play.paused', 'Пауза', { until: '2026-12-27T22:00:00+00:00', until_text: '28.12.2026 00:00', currency: 'RUB' });
+        },
+      }),
+    );
+    renderAnalysis(1);
+    await screen.findByRole('heading', { level: 2, name: /Экспресс из 2 событий/ });
+    await user.click(within(expressRegion()).getByRole('button', { name: 'Сохранить ставку' }));
+    const dialog = screen.getByRole('dialog', { name: 'Сохранить ставку' });
+    await user.click(within(dialog).getByRole('button', { name: 'Сохранить ставку' }));
+    expect(
+      await within(dialog).findByText('Ставка превысит ваш лимит суммы в день: 2 000 ₽, осталось 680 ₽. Новые сутки начнутся 21 дек, 00:00'),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Сохранить ставку' }));
+    expect(
+      await within(dialog).findByText('Вы взяли паузу до 27 декабря включительно: новые ставки и анализы недоступны. Досрочно пауза не снимается'),
+    ).toBeInTheDocument();
   });
 
   it('после перезагрузки — сохраненная ставка (сумма и кэфы), а не рекомендация анализа', async () => {
@@ -266,6 +302,37 @@ describe('Анализ готов: итог и экспресс', () => {
     expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(field).toHaveAccessibleDescription('Укажите букмекера');
     expect(calls.some((r) => r.method === 'POST' && new URL(r.url).pathname === '/api/bets')).toBe(false);
+  });
+
+  it('букмекер анализа скрыт после запуска: предупреждение и выбор из действующих, на скрытого не сохраняем', async () => {
+    const user = userEvent.setup();
+    let sent: { bookmaker?: string } | null = null;
+    mockFetch(
+      routes(analysisDone(), {
+        'GET /api/me/bookmakers': () => json(['Winline']),
+        'GET /api/me/bookmakers/list': () =>
+          json(bookmakersOut({ items: [bookmakerOut({ id: 1, name: 'Fonbet', archived_at: '2026-10-14T09:00:00Z' }), bookmakerOut({ id: 2, name: 'Winline' })] })),
+        'POST /api/bets': async (request) => {
+          sent = (await request.clone().json()) as { bookmaker?: string };
+          return apiError(409, 'bet.analysis_state', 'Анализ не готов');
+        },
+      }),
+    );
+    renderAnalysis(1);
+    await screen.findByRole('heading', { level: 2, name: /Экспресс из 2 событий/ });
+    await user.click(within(expressRegion()).getByRole('button', { name: 'Сохранить ставку' }));
+    const dialog = screen.getByRole('dialog', { name: 'Сохранить ставку' });
+    expect(
+      await within(dialog).findByText('Fonbet скрыт в «Моих букмекерах»: ставку на него не сохранить. Выберите другого букмекера или верните Fonbet в кабинете'),
+    ).toBeInTheDocument();
+    const field = within(dialog).getByRole('combobox', { name: 'Букмекер' });
+    expect(field).toHaveValue('');
+    await user.click(within(dialog).getByRole('button', { name: 'Сохранить ставку' }));
+    expect(within(dialog).getByText('Укажите букмекера')).toBeInTheDocument();
+    expect(sent).toBeNull();
+    await user.type(field, 'Winline');
+    await user.click(within(dialog).getByRole('button', { name: 'Сохранить ставку' }));
+    await waitFor(() => expect(sent).toMatchObject({ bookmaker: 'Winline' }));
   });
 
   it('предупреждения итога: банк — деньгами, вероятность проигрыша — по-русски', async () => {

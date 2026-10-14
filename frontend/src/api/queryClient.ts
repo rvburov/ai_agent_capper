@@ -6,6 +6,14 @@ import { meQueryKey } from './keys';
 import type { components } from './schema';
 
 /**
+ * Ответ значит, что профиль надо перечитать: 401 — сеанс закончился (RequireAuth уведет на
+ * вход), 403 account.deletion_pending — аккаунт ждет удаления (RequireAuth покажет экран отмены).
+ */
+function needsMe(error: unknown): boolean {
+  return isUnauthorized(error) || (error instanceof ApiError && error.code === 'account.deletion_pending');
+}
+
+/**
  * Клиент TanStack Query. Ошибки 4xx не повторяем (повтор ничего не изменит), прочие — до двух раз.
  * Ответ 401 на любой запрос значит, что сеанс закончился: перепроверяем /api/me,
  * и RequireAuth уводит на страницу входа.
@@ -14,14 +22,14 @@ export function createQueryClient(): QueryClient {
   const client: QueryClient = new QueryClient({
     queryCache: new QueryCache({
       onError: (error, query) => {
-        if (isUnauthorized(error) && query.queryKey[0] !== meQueryKey[0]) {
+        if (needsMe(error) && query.queryKey[0] !== meQueryKey[0]) {
           void client.invalidateQueries({ queryKey: meQueryKey });
         }
       },
     }),
     mutationCache: new MutationCache({
       onError: (error) => {
-        if (isUnauthorized(error)) void client.invalidateQueries({ queryKey: meQueryKey });
+        if (needsMe(error)) void client.invalidateQueries({ queryKey: meQueryKey });
       },
     }),
     defaultOptions: {

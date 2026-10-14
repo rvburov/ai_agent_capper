@@ -12,7 +12,8 @@ import type { LoginEvent } from '../../features/profile/types';
 import { useLoginEvents } from '../../features/profile/useLoginEvents';
 import { RECOVERY_CODES_LOW, useRecoveryCodesStatus } from '../../features/profile/useRecoveryCodes';
 import { useSessions } from '../../features/profile/useSessions';
-import { formatDateLong, formatDateTime } from '../../lib/format';
+import { pauseLastDay, usePlayLimits } from '../../features/bank/playLimits';
+import { formatDateLong, formatDateTime, formatDayMonth } from '../../lib/format';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 
 interface Check {
@@ -34,6 +35,8 @@ export function ProfileHero({ me, suspicious }: ProfileHeroProps) {
   const sessions = useSessions();
   const events = useLoginEvents();
   const codes = useRecoveryCodesStatus();
+  // «Пауза до …» рядом с ролью, как в макете: пауза видна на любой вкладке кабинета
+  const pausedUntil = usePlayLimits().data?.paused_until ?? null;
   const unknown = t('profile.unknownDevice');
 
   const days = Math.max(0, Math.floor((Date.now() - Date.parse(me.created_at)) / 86_400_000));
@@ -98,6 +101,11 @@ export function ProfileHero({ me, suspicious }: ProfileHeroProps) {
                   {t('profile.hero.totpOff')}
                 </Chip>
               )}
+              {pausedUntil && (
+                <Chip kind="warn" icon="pause">
+                  {t('profile.hero.pause', { date: formatDayMonth(pauseLastDay(pausedUntil)) })}
+                </Chip>
+              )}
             </div>
           </div>
           {!mobile && <HeroLogout />}
@@ -155,20 +163,11 @@ export function ProfileHero({ me, suspicious }: ProfileHeroProps) {
               <Button size="sm" icon="key" to={paths.profile('key')}>
                 {t('profile.hero.quickKey')}
               </Button>
-              {/* Только то, что уже работает: лимиты ставок и экспорт данных — этап 4 */}
-              <Button
-                size="sm"
-                icon="device"
-                to={{ pathname: paths.profile('security'), hash: '#profile-sessions' }}
-              >
-                {t('profile.hero.quickSessions')}
+              <Button size="sm" icon="pause" to={{ pathname: paths.profile('bank'), hash: '#profile-rg' }}>
+                {t('profile.hero.quickLimits')}
               </Button>
-              <Button
-                size="sm"
-                icon="history"
-                to={{ pathname: paths.profile('security'), hash: '#profile-log' }}
-              >
-                {t('profile.hero.quickLog')}
+              <Button size="sm" icon="download" to={{ pathname: paths.profile('data'), hash: '#profile-export' }}>
+                {t('profile.hero.quickExport')}
               </Button>
             </div>
           </div>

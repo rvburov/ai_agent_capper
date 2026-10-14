@@ -107,6 +107,17 @@ describe('журнал действий', () => {
     expect(d('limit_change', { changes: 'x' })).toBe('');
     expect(d('budget_change', { changes: { unknown_field: { from: 1, to: 2 } } })).toBe('');
     expect(d('role_change', { from: 1 })).toBe('');
-    expect(d('message', { text: 'Привет' })).toBe('');
+    expect(d('currency_change', { from: 'RUB', to: 'EUR', rate: 'x' })).toBe('');
+  });
+
+  it('смена валюты и сообщение участникам', () => {
+    const d = (action: AuditAction, details: Record<string, unknown>) => auditDetails(auditEntry({ action, details }));
+    expect(d('currency_change', { from: 'RUB', to: 'EUR', rate: '95.12', rate_base: 'EUR' })).toBe(
+      'Валюта программы: рубли → евро, курс 1\u00a0€ = 95,12\u00a0₽',
+    );
+    expect(d('currency_change', { from: 'EUR', to: 'USD', rate: '1.08000000', rate_base: 'EUR' })).toBe(
+      'Валюта программы: евро → доллары США, курс 1\u00a0€ = 1,08\u00a0$',
+    );
+    expect(d('message', { text: ' Завтра обновление архива ', to: 'all', recipients: 3 })).toBe('Завтра обновление архива');
   });
 });

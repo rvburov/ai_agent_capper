@@ -10,7 +10,7 @@ import { apiErrorText } from '../../features/analysis/codes';
 import type { AiBudget } from '../../features/ai/types';
 import type { AdminAiUsage, AiUsage, PersonUsage } from '../../features/costs/types';
 import { usdLimit } from '../../features/dashboard/display';
-import { formatDate, formatNumber, formatPercent, formatTime, formatUsd } from '../../lib/format';
+import { formatDate, formatNumber, formatPercent, formatShare, formatTime, formatUsd } from '../../lib/format';
 import { cx } from '../../lib/cx';
 
 // Верх «ИИ и расходов» (memberHero, ownHero, adminHero и боковые карточки макета costs.js):
@@ -74,7 +74,7 @@ function HeroValue({ spent, max, share, alertPct, what, stopped = false }: { spe
       <span className="stat-value hero">{formatUsd(spent)}</span>
       <span className="of">{t('costs.hero.of', { max: usdLimit(max) })}</span>
       <Chip kind={tone ?? 'good'} icon={stopped ? 'pause' : tone ? 'alert' : 'check'}>
-        {t('costs.hero.share', { pct: share === null || share === undefined ? '—' : formatPercent(share, { digits: 0 }), what })}
+        {t('costs.hero.share', { pct: share === null || share === undefined ? '—' : formatShare(share), what })}
       </Chip>
     </div>
   );

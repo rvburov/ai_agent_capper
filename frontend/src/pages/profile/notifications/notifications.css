@@ -1,0 +1,21 @@
+/* Кабинет → «Уведомления» — как в макете (mockup/js/screens/profile.js, CSS вкладки «Уведомления»). */
+
+.profile-notif-head, .profile-notif-row { display: grid; grid-template-columns: minmax(0, 1fr) 76px 76px; gap: 8px; align-items: center; }
+.profile-notif-head { font-size: var(--fs-xs); font-weight: 600; color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.profile-notif-head span:not(:first-child) { text-align: center; }
+.profile-notif-head small { display: block; font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.profile-notif-row { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.profile-notif-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.profile-notif-text { min-width: 0; }
+.profile-notif-t { font-weight: 500; }
+.profile-notif-cell { display: flex; justify-content: center; }
+.profile-notif-lock { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 24px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); }
+.profile-notif-lock svg { width: 14px; height: 14px; }
+.profile-group-label { font-size: var(--fs-xs); font-weight: 600; color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; padding: 14px 0 0; }
+.profile-time { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.profile-quiet-note { margin: 0; }
+
+@media (max-width: 720px) {
+  .profile-notif-head, .profile-notif-row { grid-template-columns: minmax(0, 1fr) 58px 50px; gap: 6px; }
+  .profile-notif-head { letter-spacing: .02em; }
+}

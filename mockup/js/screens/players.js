@@ -660,7 +660,7 @@
     // Архив давно не обновлялся: те же сроки, что у уведомления data_stale администратору
     const stale = ARCHIVE_STALE ? UI.callout('warn', 'database', h('b', null, 'Архив матчей не обновлялся ' + plural(ARCHIVE_DAYS, 'день', 'дня', 'дней') + '. '),
       'В базе нет матчей после ' + fmt.date(ARCHIVE_TO) + ': Эло, форма и последний матч — на эту дату. ',
-      D.user.role === 'admin' ? 'Причина — в журнале загрузок; обновить вручную: bash deploy/local.sh data.' : 'Администратор получил уведомление.') : null;
+      D.user.role === 'admin' ? 'Причина — в журнале загрузок; обновить вручную: bash deploy/local.sh data.' : 'Архив обновляет администратор.') : null;
     UI.append(root, [head, tiles, stale, listCard, sources]);
 
     let fuzzyOnly = false;
