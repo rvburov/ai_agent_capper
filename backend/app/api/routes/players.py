@@ -125,8 +125,9 @@ async def get_player_news(
     before: Cursor = None,
     limit: Annotated[int, Query(ge=1, le=player_card.NEWS_LIMIT_MAX)] = player_card.NEWS_LIMIT,
 ) -> PlayerNewsOut:
-    """Факты из новостей игрока за окно новостей, новые сверху, страницами."""
-    return await player_card.news(db, player_id, before=before, limit=limit)
+    """Факты из новостей игрока за окно новостей, новые сверху, страницами; модель и
+    номер вашего анализа последней проверки."""
+    return await player_card.news(db, player_id, before=before, limit=limit, user=user)
 
 
 @router.get("/{player_id}/h2h/{opponent_id}")

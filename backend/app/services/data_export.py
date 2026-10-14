@@ -21,7 +21,18 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import ColumnElement, Select, or_, select
+from sqlalchemy import (
+    Boolean,
+    ColumnElement,
+    Date,
+    DateTime,
+    Integer,
+    Numeric,
+    Select,
+    String,
+    or_,
+    select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -53,7 +64,7 @@ from app.services.sessions import utcnow
 EXPORT_FORMAT = "ai-capper-export"
 EXPORT_VERSION = 1
 # Строк из базы за один проход курсора и размер части ответа
-_FETCH_ROWS = 500
+_FETCH_ROWS = 1000
 _CHUNK_BYTES = 64 * 1024
 # Запрос таблицы экспорта: колонки у каждой свои
 _Query = Select[*tuple[Any, ...]]
@@ -439,14 +450,16 @@ def _cell(value: Any) -> str:
     return str(value)
 
 
-async def _rows(
+async def _batches(
     db: AsyncSession, table: _Table, uid: int
-) -> AsyncIterator[tuple[Sequence[str], dict[str, Any]]]:
-    """Строки таблицы курсором базы: (имена колонок, строка)."""
+) -> AsyncIterator[tuple[list[str], Sequence[Sequence[Any]]]]:
+    """Строки таблицы курсором базы пачками по _FETCH_ROWS: (имена колонок, строки). Пачка
+    — одно ожидание: построчный обход (переключение на каждую строку) на 80 тыс. строк
+    занимал секунды."""
     result = await db.stream(table.query(uid).execution_options(yield_per=_FETCH_ROWS))
     keys = list(result.keys())
-    async for row in result.mappings():
-        yield keys, dict(row)
+    async for rows in result.partitions(_FETCH_ROWS):
+        yield keys, rows
 
 
 def filename(user: User, fmt: str, now: datetime | None = None) -> str:
@@ -474,8 +487,9 @@ async def json_chunks(db: AsyncSession, user: User) -> AsyncIterator[bytes]:
     """Один JSON-файл частями: {"format", ..., "profile": {...}, "tables": {"bets": [...]}}."""
     header = await _header(db, user)
     profile: dict[str, Any] = {}
-    async for _, row in _rows(db, PROFILE, user.id):
-        profile = {key: _plain(value) for key, value in row.items()}
+    async for keys, rows in _batches(db, PROFILE, user.id):
+        for row in rows:
+            profile = dict(zip(keys, row, strict=True))
     head = _dumps(header)[:-1] + ',"profile":' + _dumps(profile) + ',"tables":{'
     buffer = [head]
     size = len(head)
@@ -484,8 +498,12 @@ async def json_chunks(db: AsyncSession, user: User) -> AsyncIterator[bytes]:
         buffer.append(part)
         size += len(part)
         first = True
-        async for _, row in _rows(db, table, user.id):
-            text = ("" if first else ",") + _dumps({k: _plain(v) for k, v in row.items()})
+        async for keys, rows in _batches(db, table, user.id):
+            # Пачка — один вызов json: деньги и время переводит _plain (default)
+            text = _dumps([dict(zip(keys, row, strict=True)) for row in rows])[1:-1]
+            if not text:
+                continue
+            text = ("" if first else ",") + text
             first = False
             buffer.append(text)
             size += len(text)
@@ -521,9 +539,43 @@ class _Sink(io.RawIOBase):
         return out
 
 
-def _csv_line(values: Sequence[Any]) -> bytes:
+def _iso(value: Any) -> str:
+    return "" if value is None else str(value.isoformat())
+
+
+def _flag(value: Any) -> str:
+    return "" if value is None else "true" if value else "false"
+
+
+def _converter(column_type: Any) -> Callable[[Any], str] | None:
+    """Как писать колонку в CSV. None — значения csv пишет сам как нужно: строки, целые,
+    деньги (Decimal — str), числа с плавающей точкой, пустое — пусто. Время — ISO, да/нет —
+    true/false, остальное (JSON, выражения без типа) — _cell."""
+    if isinstance(column_type, Boolean):
+        return _flag
+    if isinstance(column_type, String | Integer | Numeric):
+        return None
+    if isinstance(column_type, DateTime | Date):
+        return _iso
+    return _cell
+
+
+def _csv_lines(
+    rows: Sequence[Sequence[Any]], convert: Sequence[tuple[int, Callable[[Any], str]]] = ()
+) -> bytes:
+    """Строки CSV; convert — (номер колонки, перевод) для колонок, которые csv сам не
+    напишет как нужно: остальные ячейки не проходят по одной через Python (в выгрузке их
+    миллионы)."""
+    if convert:
+        changed = []
+        for row in rows:
+            values = list(row)
+            for index, to_text in convert:
+                values[index] = to_text(values[index])
+            changed.append(values)
+        rows = changed
     out = io.StringIO()
-    csv.writer(out, lineterminator="\r\n").writerow([_cell(value) for value in values])
+    csv.writer(out, lineterminator="\r\n").writerows(rows)
     return out.getvalue().encode()
 
 
@@ -537,10 +589,15 @@ async def zip_chunks(db: AsyncSession, user: User) -> AsyncIterator[bytes]:
         for table in (PROFILE, *TABLES):
             with archive.open(f"{table.name}.csv", "w") as entry:
                 entry.write("﻿".encode())
-                columns = [column.key for column in table.query(user.id).selected_columns]
-                entry.write(_csv_line(columns))
-                async for keys, row in _rows(db, table, user.id):
-                    entry.write(_csv_line([row[key] for key in keys]))
+                selected = table.query(user.id).selected_columns
+                entry.write(_csv_lines([[column.key for column in selected]]))
+                convert = [
+                    (index, to_text)
+                    for index, column in enumerate(selected)
+                    if (to_text := _converter(column.type)) is not None
+                ]
+                async for _, rows in _batches(db, table, user.id):
+                    entry.write(_csv_lines(rows, convert))
                     if sink.size >= _CHUNK_BYTES:
                         yield sink.drain()
             if sink.size:

@@ -63,6 +63,8 @@ async def test_default_is_active_players_by_elo_rank(
     assert body["rank_days"] == 364
     assert body["as_of"] == today().isoformat()
     assert body["archive"]["data_to"] == (today() - timedelta(days=35)).isoformat()
+    # В базе турниры архива Сакманна — строка авторства на экране
+    assert body["sackmann"] is True
 
     sinner = next(item for item in body["items"] if item["id"] == world.sinner)
     row = rows[world.sinner]
@@ -380,3 +382,12 @@ async def test_today_flag_only_for_own_bets(
     assert mine == {world.sinner: True, world.medvedev: True, world.alcaraz: False}
     theirs = flags((await other.client.get("/api/players/ranking")).json())
     assert set(theirs.values()) == {False}
+
+
+async def test_sackmann_flag_without_archive(
+    db: AsyncSession, make_client: ClientFactory, make_user: UserFactory, login: LoginFn
+) -> None:
+    """Без турниров Сакманна строки авторства нет: sackmann = false."""
+    member = await signed_in(make_client, make_user, login)
+    body = (await member.client.get("/api/players/ranking")).json()
+    assert body["sackmann"] is False

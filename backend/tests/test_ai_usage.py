@@ -11,8 +11,10 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.config import load_agent_config
 from app.agent.runs import Usage, cost_usd
-from app.db.models import AgentRun, Analysis, EvalRun, StrategyVersion
+from app.db.models import AgentRun, AiLimit, Analysis, EvalRun, StrategyVersion
+from app.services.ai_access import call_need_usd
 from app.services.ai_usage import month_of
 from app.services.analysis_run import ACCEPTANCE_MARK
 from tests import reference_sql as ref
@@ -490,6 +492,12 @@ async def test_admin_usage_by_people_tasks_and_eval(
     assert people[own.id]["own_analyses"] == 1 and people[own.id]["key_spent_usd"] == 0
     assert people[admin.id]["limit_usd"] is None
     assert body["people"][0]["user_id"] == member.id
+    # Доля в расходе ключа считает сервер; «остальных» нет — тратил ключ один участник
+    assert people[member.id]["spent_share"] == pytest.approx(
+        float(spent[(member.id, "admin")] / key_total)
+    )
+    assert body["shared"]["spent_share"] == pytest.approx(float(spent[(None, "admin")] / key_total))
+    assert (body["others_ids"], body["others_count"], body["others_usd"]) == ([], 0, 0)
     assert Decimal(str(body["shared"]["cost_usd"])) == spent[(None, "admin")]
     assert body["shared"]["kinds"] == ["news"]
     assert {item["kind"] for item in body["tasks"]} == {"analysis", "news"}
@@ -514,3 +522,81 @@ async def test_admin_usage_by_people_tasks_and_eval(
         return set()
 
     assert not keys(body) & forbidden
+
+
+async def test_admin_usage_others_after_top_three(
+    db: AsyncSession, make_client: ClientFactory, make_user: UserFactory, login: LoginFn
+) -> None:
+    """«Кто тратит»: при больше чем 4 тративших людях первые 3 — строками, остальные —
+    одной строкой: их id по убыванию расхода, число и сумма считает сервер."""
+    admin = await admin_signed_in(make_client, make_user, login)
+    first, _ = moments()
+    ids: list[int] = []
+    for cost in ("0.60", "0.50", "0.40", "0.30", "0.20", "0.10"):
+        user = await make_user()
+        ids.append(user.id)
+        db.add(
+            AgentRun(
+                user_id=user.id,
+                key_source="admin",
+                kind="analysis",
+                model="claude-opus-5-5",
+                cost_usd=Decimal(cost),
+                created_at=first,
+            )
+        )
+    await db.commit()
+    body = (await admin.client.get("/api/admin/ai/usage")).json()
+    assert body["others_ids"] == ids[3:]
+    assert body["others_count"] == 3
+    assert body["others_usd"] == pytest.approx(0.6)
+    shares = {item["user_id"]: item["spent_share"] for item in body["people"]}
+    assert shares[ids[0]] == pytest.approx(0.6 / 2.1)
+    assert shares[admin.id] == 0
+
+
+async def test_pace_under_limit_and_budget(
+    db: AsyncSession, make_client: ClientFactory, make_user: UserFactory, login: LoginFn
+) -> None:
+    """Темп под лимит — лимит участника (у администратора — бюджет ключа) на дни месяца;
+    на своем ключе лимита нет."""
+    admin = await admin_signed_in(make_client, make_user, login)
+    member = await signed_in(make_client, make_user, login)
+    own = await signed_in(make_client, make_user, login, ip="10.0.0.4", ai_mode="own")
+    mine = (await member.client.get("/api/ai/usage")).json()
+    days = mine["days_in_month"]
+    assert mine["pace_usd"] == float((Decimal(10) / days).quantize(Decimal("0.01")))
+    boss = (await admin.client.get("/api/ai/usage")).json()
+    assert boss["pace_usd"] == float((Decimal(60) / days).quantize(Decimal("0.01")))
+    assert (await own.client.get("/api/ai/usage")).json()["pace_usd"] is None
+
+
+async def test_no_analyses_left_when_rest_below_call(
+    prices: None,
+    db: AsyncSession,
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+) -> None:
+    """Остатка лимита меньше самого маленького вызова оценки: по средней цене «хватило
+    бы» на несколько анализов, но ни один не запустится — analyses_left = 0."""
+    member = await signed_in(make_client, make_user, login)
+    first, second = moments()
+    for at in (first, second):
+        analysis_id = await add_analysis(db, member.id, at, cost="0.01")
+        await add_run(db, member.id, at, RunSpec(input=10, output=10), analysis_id=analysis_id)
+    need = await call_need_usd(db, await load_agent_config(db), datetime.now(UTC))
+    assert need > Decimal("0.03")
+    spent = Decimal(str((await member.client.get("/api/ai/budget")).json()["spent_usd"]))
+    db.add(
+        AiLimit(
+            user_id=member.id,
+            monthly_usd=spent + Decimal("0.03"),
+            daily_analyses=3,
+            per_analysis_usd=Decimal("0.03"),
+        )
+    )
+    await db.commit()
+    usage = (await member.client.get("/api/ai/usage")).json()
+    assert usage["admin_key_avg_usd"] == 0.01
+    assert usage["analyses_left"] == 0

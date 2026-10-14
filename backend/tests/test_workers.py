@@ -62,6 +62,7 @@ from app.workers.main import (
     CLEANUP_HOUR_UTC,
     CLEANUP_MINUTE,
     REAP_MINUTES,
+    WARM_NEW_DAY_MINUTE,
     WorkerSettings,
     apply_redis_prefix,
     build_cron_jobs,
@@ -274,7 +275,7 @@ def test_worker_settings(settings: Settings) -> None:
     # Свой предел анализа короче: анализ кончается своим failed, а не снятием задачи
     assert analysis_run.RUN_DEADLINE_SECONDS < ANALYSIS_TIMEOUT_SECONDS
     assert WorkerSettings.cron_jobs is not None
-    cleanup, data, reaper, deletion, alerts = WorkerSettings.cron_jobs
+    cleanup, data, reaper, deletion, alerts, new_day = WorkerSettings.cron_jobs
     # Уборщик зависших анализов — каждые 5 минут, не в минуты соседних задач
     assert reaper.coroutine is reap_stuck_analyses and reaper.max_tries == 1
     assert reaper.minute == set(REAP_MINUTES) and len(REAP_MINUTES) == 12
@@ -302,6 +303,10 @@ def test_worker_settings(settings: Settings) -> None:
     assert alerts.hour is None and alerts.minute == AI_ALERTS_MINUTE
     busy = {CLEANUP_MINUTE, DATA_UPDATE_MINUTE, 0} | REAP_MINUTES
     assert not {ACCOUNT_DELETION_MINUTE, AI_ALERTS_MINUTE} & busy
+    # Ночной прогрев аналитики (у кого по их поясу начались сутки) — каждый час, без повтора
+    assert new_day.coroutine is jobs.warm_new_day and new_day.max_tries == 1
+    assert new_day.hour is None and new_day.minute == WARM_NEW_DAY_MINUTE
+    assert WARM_NEW_DAY_MINUTE not in busy | {ACCOUNT_DELETION_MINUTE, AI_ALERTS_MINUTE}
     assert WorkerSettings.timezone is UTC
     redis_url = settings.redis_url.removeprefix("redis://")
     assert redis_url.startswith(
@@ -313,7 +318,7 @@ def test_worker_cron_can_be_turned_off(settings: Settings) -> None:
     # CAPPER_WORKER_CRON=false (стек сквозных тестов): только задачи из очереди, без
     # ночной загрузки архивов и уборщика
     jobs_on = build_cron_jobs(settings)
-    assert jobs_on is not None and len(jobs_on) == 5
+    assert jobs_on is not None and len(jobs_on) == 6
     assert build_cron_jobs(settings.model_copy(update={"worker_cron": False})) is None
     assert Settings.model_fields["worker_cron"].default is True
 

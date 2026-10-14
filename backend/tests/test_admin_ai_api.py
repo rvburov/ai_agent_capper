@@ -3,8 +3,10 @@
 Права (участник — 403) проверяет tests/test_admin_permissions.py по всем адресам
 /api/admin/*. Ответы Anthropic подменены через транспорт httpx2, сети нет."""
 
+import math
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import ROUND_DOWN
 from decimal import Decimal as D
 
 import pytest
@@ -15,7 +17,8 @@ from app.agent.config import load_agent_config
 from app.core.security import crypto
 from app.db.models import AdminAuditLog, AiLimit, AppSettings, Notification, User
 from app.services import ai_keys
-from app.services.ai_access import access_for
+from app.services.ai_access import access_for, month_days, runs_out_on
+from app.services.sessions import utcnow
 from tests.claude_mock import KEY, OTHER_KEY, ClaudeMock, api_error, installed_mock, seed_prices
 from tests.helpers_admin import admin_signed_in, audit_entries, error_code, signed_in
 from tests.helpers_ai import analysis, key_api, no_key_in, set_admin_key, spend
@@ -214,6 +217,15 @@ async def test_budget_view_and_update(
     assert body["eval_budget_usd"] == 25.0
     assert body["eval_spent_usd"] == 4.5
     assert body["days_left"] >= 0
+    # Темп месяца считает сервер: в среднем в день, можно в день до конца месяца (включая
+    # сегодня), сумма уведомления, прогноз к бюджету
+    day, days = month_days(utcnow())
+    assert body["per_day_usd"] == float((D("3.25") / day).quantize(D("0.01")))
+    assert body["can_per_day_usd"] == float(
+        (D("56.75") / (days - day + 1)).quantize(D("0.01"), rounding=ROUND_DOWN)
+    )
+    assert body["alert_usd"] == 48.0
+    assert body["forecast_share"] == pytest.approx(body["forecast_usd"] / 60)
 
     bad = await admin.client.put("/api/admin/ai/budget", json={"monthly_usd": 80, "alert_pct": 75})
     assert bad.status_code == 422
@@ -822,3 +834,66 @@ async def test_admin_routes_need_csrf(
         assert error_code(response) == "common.csrf"
     assert (await settings_row(db)).monthly_budget_usd == D("60.00")
     assert await audit_entries(db) == []
+
+
+async def test_limits_level_same_as_admin_attention(
+    make_client: ClientFactory, make_user: UserFactory, login: LoginFn, db: AsyncSession
+) -> None:
+    """Уровень лимита в таблице лимитов — по правилу дел администратора; легкий маршрут
+    дел (GET /admin/attention) отдает те же уровни и день, когда кончится лимит."""
+    admin = await admin_signed_in(make_client, make_user, login)
+    calm = await make_user()
+    warm = await make_user()
+    full = await make_user()
+    own = await make_user(ai_mode="own")
+    await spend(db, calm.id, "1")
+    await spend(db, warm.id, "8.5")
+    await spend(db, full.id, "10")
+    await spend(db, own.id, "9.9")
+    await spend(db, admin.id, "30")
+
+    rows = {
+        row["id"]: row["level"]
+        for row in (await admin.client.get("/api/admin/ai/limits")).json()["members"]
+    }
+    assert rows == {calm.id: None, warm.id: "80", full.id: "100", own.id: None, admin.id: None}
+
+    response = await admin.client.get("/api/admin/attention")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    alerts = {item["user_id"]: item for item in body["limits"]}
+    assert {uid: item["level"] for uid, item in alerts.items()} == {warm.id: "80", full.id: "100"}
+    # Тот же ответ, что admin на главной
+    dashboard = (await admin.client.get("/api/dashboard")).json()["admin"]
+    assert body == dashboard
+    # Лимит 10 потрачен на 8,5 за day дней: остаток 1,5 кончится через ceil(1,5 / темп) дней
+    now = utcnow()
+    day, days = month_days(now)
+    ahead = math.ceil(D("1.5") / (D("8.5") / day))
+    expected = (now.date() + timedelta(days=ahead)).isoformat() if day + ahead <= days else None
+    assert alerts[warm.id]["runs_out_on"] == expected
+    assert alerts[full.id]["runs_out_on"] is None
+
+
+async def test_attention_only_for_admin(
+    make_client: ClientFactory, make_user: UserFactory, login: LoginFn
+) -> None:
+    member = await signed_in(make_client, make_user, login)
+    response = await member.client.get("/api/admin/attention")
+    assert response.status_code == 403
+
+
+def test_runs_out_on_by_month_pace() -> None:
+    now = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
+    # 5 за 10 дней — 0,5 в день: остаток 5 кончится через 10 дней
+    assert runs_out_on(D("5"), D("10"), now) == date(2026, 10, 20)
+    # Через 50 дней — уже в следующем месяце: с 1-го числа расход заново
+    assert runs_out_on(D("5"), D("30"), now) is None
+    assert runs_out_on(D("0"), D("10"), now) is None
+    assert runs_out_on(D("10"), D("10"), now) is None
+    # Последний день месяца: остаток на сегодня
+    assert runs_out_on(D("30"), D("31"), datetime(2026, 10, 31, 9, tzinfo=UTC)) is None
+    # 15 за 15 дней — 1 в день: остаток 16 кончится ровно в последний день
+    assert runs_out_on(D("15"), D("31"), datetime(2026, 10, 15, 9, tzinfo=UTC)) == date(
+        2026, 10, 31
+    )

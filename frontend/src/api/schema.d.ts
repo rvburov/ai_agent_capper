@@ -651,6 +651,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/attention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Attention
+         * @description Дела администратора — то же, что admin на главной (архив устарел, просьбы вернуть
+         *     ключ, участники у лимита), без остальной главной: для точки у пункта меню и вкладки
+         *     «Обзор».
+         */
+        get: operations["get_attention_api_admin_attention_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/activity": {
         parameters: {
             query?: never;
@@ -1268,7 +1290,8 @@ export interface paths {
          *     ставок, журнала банка, лимитов и банка из ввода анализа у всех участников с
          *     округлением каждой суммы до копеек; журнал currency_change; кэш аналитики сбрасывается.
          *     preview=true — только итоги и примеры «до и после». Без totp_code — 403
-         *     admin.totp_required; та же валюта — 409 admin.currency_same.
+         *     admin.totp_required; та же валюта — 409 admin.currency_same; from_currency не валюта
+         *     программы (окно открыто до чужой смены) — 409 common.currency_changed, и в предпросмотре.
          */
         put: operations["change_currency_api_admin_settings_currency_put"];
         post?: never;
@@ -1288,7 +1311,7 @@ export interface paths {
         /**
          * List Messages
          * @description Отправленные сообщения, новые сверху (не больше 50): кому, текст, когда, сколько
-         *     получили, кто отправил.
+         *     получили, кто отправил; recipients_all — сколько получит сообщение «всем» сейчас.
          */
         get: operations["list_messages_api_admin_messages_get"];
         put?: never;
@@ -1849,7 +1872,8 @@ export interface paths {
         };
         /**
          * Get Player News
-         * @description Факты из новостей игрока за окно новостей, новые сверху, страницами.
+         * @description Факты из новостей игрока за окно новостей, новые сверху, страницами; модель и
+         *     номер вашего анализа последней проверки.
          */
         get: operations["get_player_news_api_players__player_id__news_get"];
         put?: never;
@@ -2002,6 +2026,9 @@ export interface components {
          *     своих ключах (вне бюджета). analyses — анализы на ключе администратора за месяц,
          *     avg_analysis_usd — средняя цена законченного. cache_share — по всем вызовам ключа
          *     администратора без проверок. Р14: ни анализов, ни ввода, ни ставок участников.
+         *     others_* — «остальные» в «Кто тратит» (тратившие ключ, по убыванию расхода: при
+         *     больше чем 4 таких людях первые 3 показываются строками, прочие — одной строкой):
+         *     их id по порядку, число и сумма на ключе.
          */
         AdminAiUsageOut: {
             /** Month */
@@ -2042,6 +2069,12 @@ export interface components {
             /** Tasks */
             tasks: components["schemas"]["TaskUsageOut"][];
             eval: components["schemas"]["EvalUsageOut"];
+            /** Others Ids */
+            others_ids: number[];
+            /** Others Count */
+            others_count: number;
+            /** Others Usd */
+            others_usd: number;
         };
         /**
          * AdminAttentionOut
@@ -2066,7 +2099,11 @@ export interface components {
          *     members_limits_usd — сумма месячных лимитов участников на ключе администратора.
          *     members_usd — из spent_usd вызовы участников (не администраторов). budget_share —
          *     spent_usd к бюджету (доля; пусто — бюджет 0). eval_* — отдельный бюджет проверочных
-         *     прогонов (eval и теневые, Р22).
+         *     прогонов (eval и теневые, Р22). forecast_share — forecast_usd к бюджету (пусто —
+         *     бюджет 0); per_day_usd — средний расход в день с 1-го числа (UTC, сегодня включая);
+         *     can_per_day_usd — сколько можно тратить в день до конца месяца (включая сегодня),
+         *     чтобы уложиться в остаток; alert_usd — сумма, на которой приходит уведомление
+         *     (бюджет × alert_pct %).
          */
         AdminBudgetOut: {
             /**
@@ -2102,6 +2139,14 @@ export interface components {
             eval_budget_usd: number;
             /** Eval Spent Usd */
             eval_spent_usd: number;
+            /** Forecast Share */
+            forecast_share: number | null;
+            /** Per Day Usd */
+            per_day_usd: number;
+            /** Can Per Day Usd */
+            can_per_day_usd: number;
+            /** Alert Usd */
+            alert_usd: number;
         };
         /**
          * AdminKeyIn
@@ -2311,6 +2356,11 @@ export interface components {
          *     reason_code — почему новый анализ сейчас не запустится (ключ errors.<код> и
          *     reason_params), пусто — запустится. budget — общий бюджет, только администратору.
          *     limit_share — spent_usd к месячному лимиту (доля; пусто — личного лимита нет).
+         *     Темп месяца, как у бюджета администратора: per_day_usd — средний расход в день с
+         *     1-го числа; forecast_usd — прогноз на конец месяца (с личным лимитом — не выше
+         *     лимита, на паузе — потрачено); forecast_share, can_per_day_usd (сколько можно в
+         *     день до конца месяца, включая сегодня) и alert_usd (лимит × alert_pct %) — пустые
+         *     без личного лимита.
          */
         AiBudgetOut: {
             /**
@@ -2368,6 +2418,16 @@ export interface components {
                 [key: string]: unknown;
             };
             budget: components["schemas"]["AdminBudgetOut"] | null;
+            /** Per Day Usd */
+            per_day_usd: number;
+            /** Forecast Usd */
+            forecast_usd: number;
+            /** Forecast Share */
+            forecast_share: number | null;
+            /** Can Per Day Usd */
+            can_per_day_usd: number | null;
+            /** Alert Usd */
+            alert_usd: number | null;
         };
         /**
          * AiModeIn
@@ -2476,7 +2536,10 @@ export interface components {
          *     прогноз на конец месяца по темпу (участник на ключе администратора — не выше лимита,
          *     на паузе — потрачено); у прошедшего месяца — итог. analyses_left — на сколько
          *     анализов по admin_key_avg_usd хватит остатка лимита (left_usd в GET /ai/budget;
-         *     только участник на ключе администратора в текущем месяце).
+         *     только участник на ключе администратора в текущем месяце); 0 — остатка меньше
+         *     самого маленького вызова оценки (анализ не запустится). pace_usd — темп под лимит:
+         *     месячный лимит участника (у администратора — бюджет ключа) на дни месяца; пусто —
+         *     на своем ключе лимита нет. Лимит и бюджет — сегодняшние (истории лимитов нет).
          */
         AiUsageOut: {
             /** Month */
@@ -2532,6 +2595,8 @@ export interface components {
             forecast_usd: number;
             /** Analyses Left */
             analyses_left: number | null;
+            /** Pace Usd */
+            pace_usd: number | null;
             /** Prices */
             prices: components["schemas"]["ModelPriceOut"][];
             settings: components["schemas"]["AgentSettingsOut"];
@@ -3650,10 +3715,16 @@ export interface components {
         /**
          * CurrencyIn
          * @description Новая валюта программы и курс: 1 rate_base = rate второй валюты (rate_base —
-         *     прежняя или новая валюта, как в окне смены). preview — только посчитать, что станет;
-         *     без preview нужен текущий код 2FA.
+         *     прежняя или новая валюта, как в окне смены). from_currency — валюта, от которой
+         *     считает окно: если ее уже сменили, курс относится к другой паре, и смена отклоняется.
+         *     preview — только посчитать, что станет; без preview нужен текущий код 2FA.
          */
         CurrencyIn: {
+            /**
+             * From Currency
+             * @enum {string}
+             */
+            from_currency: "RUB" | "USD" | "EUR";
             /**
              * Currency
              * @enum {string}
@@ -3682,10 +3753,15 @@ export interface components {
          *     analyses — анализы с суммами (банк из ввода, рекомендация, предупреждение о банке);
          *     corrections — у скольких участников остаток от округления строк журнала уйдет в одну
          *     корректировку «Округление при смене валюты» (банк = round(прежний × курс)).
+         *     overflow — какая-то сумма после пересчета не поместится в NUMERIC(12, 2) и смена по
+         *     этому курсу будет отклонена (только да или нет: сумм участников администратор не
+         *     видит, Р14); примеры samples — круглые суммы, а не суммы участников.
          */
         CurrencyPreviewOut: {
             /** Applied */
             applied: boolean;
+            /** Overflow */
+            overflow: boolean;
             /**
              * From Currency
              * @enum {string}
@@ -4497,7 +4573,9 @@ export interface components {
          * LimitAlertOut
          * @description Участник у месячного лимита на ключе администратора: level 80 — дошел до порога
          *     предупреждения (alert_pct), 100 — остатка не хватает на анализ (то же правило, что у
-         *     уведомлений limit_80 и limit_100). Р14: только расход на ИИ.
+         *     уведомлений limit_80 и limit_100). runs_out_on — день (UTC), когда при нынешнем темпе
+         *     месяца лимит кончится (пусто — не в этом месяце или уже кончился). Р14: только
+         *     расход на ИИ.
          */
         LimitAlertOut: {
             /** User Id */
@@ -4515,6 +4593,8 @@ export interface components {
              * @enum {string}
              */
             level: "80" | "100";
+            /** Runs Out On */
+            runs_out_on: string | null;
         };
         /**
          * LimitDefaultsOut
@@ -4794,7 +4874,10 @@ export interface components {
          *     spent_month_usd — расход за месяц на ключе администратора, own_spent_month_usd —
          *     на своем ключе (вне общего бюджета); без проверочных прогонов. analyses_today — на
          *     ключе администратора с полуночи в поясе участника. return_requested_at — участник
-         *     просит вернуть ключ администратора (Р12).
+         *     просит вернуть ключ администратора (Р12). level — пройденный порог лимита на ключе
+         *     администратора по правилу дел администратора (AdminAttentionOut.limits): 80 —
+         *     alert_pct, 100 — остатка не хватает на анализ; пусто — порог не пройден, участник на
+         *     своем ключе или администратор.
          */
         MemberLimitOut: {
             /** Id */
@@ -4833,6 +4916,8 @@ export interface components {
             analyses_month: number;
             /** Return Requested At */
             return_requested_at: string | null;
+            /** Level */
+            level: ("80" | "100") | null;
         };
         /**
          * MessageIn
@@ -4875,10 +4960,16 @@ export interface components {
             /** Actor Name */
             actor_name: string | null;
         };
-        /** MessagesOut */
+        /**
+         * MessagesOut
+         * @description Отправленные сообщения и сколько людей получит сообщение «всем» сейчас (по правилу
+         *     сервера: активные, кроме вас) — число для переключателя «Всем участникам · N».
+         */
         MessagesOut: {
             /** Items */
             items: components["schemas"]["MessageOut"][];
+            /** Recipients All */
+            recipients_all: number;
         };
         /**
          * ModeDecisionIn
@@ -5330,7 +5421,8 @@ export interface components {
          *     key_spent_usd — на ключе администратора, own_spent_usd — на своем (вне бюджета);
          *     analyses — анализы на ключе администратора, own_analyses — на своем. limit_usd —
          *     месячный лимит (пусто у администратора); budget_share и limit_share — доля бюджета
-         *     и лимита.
+         *     и лимита; spent_share — доля в расходе ключа администратора за месяц (spent_usd
+         *     AdminAiUsageOut; пусто — ключ ничего не потратил).
          */
         PersonUsageOut: {
             /** User Id */
@@ -5368,6 +5460,8 @@ export interface components {
             budget_share: number | null;
             /** Limit Share */
             limit_share: number | null;
+            /** Spent Share */
+            spent_share: number | null;
         };
         /**
          * PlayLimitsIn
@@ -5673,6 +5767,9 @@ export interface components {
         /**
          * PlayerNewsOut
          * @description Новости игрока за lookback_days, новые сверху, страницами. next_before — курсор.
+         *     checked_model — модель шага новостей, который проверил новости последним (null —
+         *     не проверялись или запись о вызове не найдена); checked_analysis_id — номер вашего
+         *     анализа, в котором это было (анализ другого участника не называется: null).
          */
         PlayerNewsOut: {
             /** Items */
@@ -5681,6 +5778,10 @@ export interface components {
             next_before: number | null;
             /** Checked At */
             checked_at: string | null;
+            /** Checked Model */
+            checked_model: string | null;
+            /** Checked Analysis Id */
+            checked_analysis_id: number | null;
             /** Fresh */
             fresh: boolean;
             /** Ttl Hours */
@@ -5713,7 +5814,8 @@ export interface components {
          *     news сужает до игроков со свежими новостями); fuzzy — точных совпадений нет, найдено
          *     с учетом опечаток. total — сколько всего по условиям. as_of — день расчета текущего
          *     Эло, rank_days — окно места по Эло, news_ttl_hours — сколько новости считаются
-         *     свежими.
+         *     свежими. sackmann — в базе есть турниры архива Сакманна (на экране — строка авторства
+         *     CC BY-NC-SA, как в карточке).
          */
         PlayerRankingOut: {
             /** Items */
@@ -5751,6 +5853,8 @@ export interface components {
             /** News Ttl Hours */
             news_ttl_hours: number;
             archive: components["schemas"]["ArchiveInfoOut"];
+            /** Sackmann */
+            sackmann: boolean;
         };
         /** PlayerRefOut */
         PlayerRefOut: {
@@ -6257,10 +6361,13 @@ export interface components {
             start: string;
             /** Base */
             base: string;
-            /** Start Day */
-            start_day: string | null;
+            /**
+             * Start Day
+             * Format: date
+             */
+            start_day: string;
             /** Start Amount */
-            start_amount: string | null;
+            start_amount: string;
             /** Change Share */
             change_share: number | null;
             /** Last */
@@ -6314,6 +6421,31 @@ export interface components {
             end: string;
         };
         /**
+         * ServeDiffOut
+         * @description Игрок минус тур по каждой метрике ServeMetricsOut (доли — в долях, 4 знака; эйсы и
+         *     двойные — за матч); null — у игрока или тура этой метрики нет.
+         */
+        ServeDiffOut: {
+            /** First In */
+            first_in: number | null;
+            /** First Won */
+            first_won: number | null;
+            /** Second Won */
+            second_won: number | null;
+            /** Aces Per Match */
+            aces_per_match: number | null;
+            /** Double Faults Per Match */
+            double_faults_per_match: number | null;
+            /** First Return Won */
+            first_return_won: number | null;
+            /** Second Return Won */
+            second_return_won: number | null;
+            /** Bp Converted */
+            bp_converted: number | null;
+            /** Bp Saved */
+            bp_saved: number | null;
+        };
+        /**
          * ServeMetricsOut
          * @description Подача и прием (доли 0…1, null — нет данных): попадание первой, очки на первой и
          *     второй, эйсы и двойные за матч, очки на приеме первой и второй соперника, реализация
@@ -6345,7 +6477,8 @@ export interface components {
          * ServeOut
          * @description Подача и прием за 52 недели до последнего дня со статистикой в архиве (period_to;
          *     статистика есть только в архиве Сакманна) против среднего по туру — игроков из первых
-         *     tour_players по месту по Эло, суммами за то же окно.
+         *     tour_players по месту по Эло, суммами за то же окно. diff — разница с туром по каждой
+         *     метрике (null — нет игрока или тура).
          */
         ServeOut: {
             /**
@@ -6362,6 +6495,7 @@ export interface components {
             tour: components["schemas"]["ServeMetricsOut"] | null;
             /** Tour Players */
             tour_players: number;
+            diff: components["schemas"]["ServeDiffOut"] | null;
         };
         /**
          * SessionOut
@@ -6406,6 +6540,7 @@ export interface components {
         /**
          * SharedUsageOut
          * @description Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke).
+         *     spent_share — доля в расходе ключа за месяц.
          */
         SharedUsageOut: {
             /** Runs */
@@ -6418,6 +6553,8 @@ export interface components {
             budget_share: number | null;
             /** Kinds */
             kinds: string[];
+            /** Spent Share */
+            spent_share: number | null;
         };
         /**
          * SlicesOut
@@ -6618,6 +6755,8 @@ export interface components {
             losses: number;
             /** Surface */
             surface: string;
+            /** Win Share */
+            readonly win_share: number | null;
         };
         /** SurfaceSliceOut */
         SurfaceSliceOut: {
@@ -6731,11 +6870,20 @@ export interface components {
          *     его место по Эло, ноги своих открытых ставок, свои анализы; surface — покрытие
          *     турнира (null — неизвестно); elo_prob — вероятность победы игрока по текущему Эло
          *     (вес покрытия как у модели, без калибровки) — входная точка, не прогноз; h2h — личные
-         *     встречи.
+         *     встречи. side — сторона игрока в матче (1 — первый, 2 — второй, как selection ноги
+         *     ставки: нога на победу игрока — market ML и selection = side). elo и opponent_elo —
+         *     текущее Эло игрока и соперника на покрытии матча (покрытие неизвестно — общее;
+         *     null — нет в таблице текущего Эло).
          */
         TodayOut: {
             /** Match Id */
             match_id: number;
+            /** Side */
+            side: (1 | 2) | null;
+            /** Elo */
+            elo: number | null;
+            /** Opponent Elo */
+            opponent_elo: number | null;
             opponent: components["schemas"]["PlayerRefOut"];
             /** Opponent Rank */
             opponent_rank: number | null;
@@ -7105,12 +7253,17 @@ export interface components {
             /** Win Add */
             win_add: string;
         };
-        /** WinLossOut */
+        /**
+         * WinLossOut
+         * @description Победы и поражения; win_share — доля побед (0…1, 4 знака; null — матчей нет).
+         */
         WinLossOut: {
             /** Wins */
             wins: number;
             /** Losses */
             losses: number;
+            /** Win Share */
+            readonly win_share: number | null;
         };
     };
     responses: never;
@@ -8277,6 +8430,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminUserOut"][];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_attention_api_admin_attention_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAttentionOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

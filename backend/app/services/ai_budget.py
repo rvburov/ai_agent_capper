@@ -52,7 +52,21 @@ from app.services import ai_keys
 from app.services.admin_confirm import TotpConfirm, check_totp
 from app.services.admin_key import save_admin_key
 from app.services.admin_users import CHECK_RUN_KINDS, month_start, month_usage
-from app.services.ai_access import CENT, Limits, access_for, budget_overview, limits_of, usd_text
+from app.services.ai_access import (
+    CENT,
+    Limits,
+    access_for,
+    alert_usd,
+    budget_overview,
+    call_need_usd,
+    can_per_day_usd,
+    limits_of,
+    member_forecast,
+    month_days,
+    per_day_usd,
+    threshold_level,
+    usd_text,
+)
 from app.services.app_settings import SETTINGS_ROW_ID
 from app.services.audit import write_audit
 from app.services.claude_key import SECRET_KIND, KeyCheck, check_anthropic_key, looks_like_key
@@ -267,6 +281,7 @@ async def admin_budget(db: AsyncSession, now: datetime | None = None) -> AdminBu
     budget_share = (
         float(overview.spent_usd / overview.budget_usd) if overview.budget_usd > 0 else None
     )
+    day, days = month_days(now)
     return AdminBudgetOut(
         month_start=overview.month_start,
         days_in_month=overview.days_in_month,
@@ -283,6 +298,12 @@ async def admin_budget(db: AsyncSession, now: datetime | None = None) -> AdminBu
         alert_pct=overview.alert_pct,
         eval_budget_usd=overview.eval_budget_usd,
         eval_spent_usd=overview.eval_spent_usd,
+        forecast_share=(
+            float(overview.forecast_usd / overview.budget_usd) if overview.budget_usd > 0 else None
+        ),
+        per_day_usd=per_day_usd(overview.spent_usd, day),
+        can_per_day_usd=can_per_day_usd(overview.left_usd, day, days),
+        alert_usd=alert_usd(overview.budget_usd, overview.alert_pct),
     )
 
 
@@ -308,6 +329,11 @@ async def member_budget(db: AsyncSession, user: User) -> AiBudgetOut:
             )
         )
     ).one()
+    day, days = month_days(now)
+    monthly = access.monthly_limit_usd
+    forecast = member_forecast(
+        access.spent_month_usd, day, days, limit=monthly, paused=access.paused
+    )
     return AiBudgetOut(
         mode=access.mode,  # type: ignore[arg-type]
         key_source=access.key_source,  # type: ignore[arg-type]
@@ -340,6 +366,15 @@ async def member_budget(db: AsyncSession, user: User) -> AiBudgetOut:
         reason_code=access.reason,
         reason_params=access.reason_params,
         budget=await admin_budget(db, now) if user.role == "admin" else None,
+        per_day_usd=per_day_usd(access.spent_month_usd, day),
+        forecast_usd=forecast,
+        forecast_share=float(forecast / monthly) if monthly else None,
+        can_per_day_usd=(
+            can_per_day_usd(access.left_month_usd, day, days)
+            if monthly and access.left_month_usd is not None
+            else None
+        ),
+        alert_usd=alert_usd(monthly, settings.budget_alert_pct) if monthly else None,
     )
 
 
@@ -494,11 +529,19 @@ async def _member_rows(db: AsyncSession, users: list[User]) -> list[MemberLimitO
     ).all():
         if at is not None:
             started.setdefault(uid, []).append(at)
+    # Порог лимита — по правилу дел администратора (dashboard.admin_attention)
+    shared = [user for user in users if _has_level(user)]
+    need = await call_need_usd(db, await load_agent_config(db), now) if shared else Decimal(0)
     rows: list[MemberLimitOut] = []
     for user in users:
         limits = limits_of(limit_rows.get(user.id), settings)
         day = _day_start(now, user.tz)
         spent, analyses = usage.get(user.id, (Decimal(0), 0))
+        level = (
+            threshold_level(spent, limits.monthly_usd, settings.budget_alert_pct, need)
+            if _has_level(user)
+            else None
+        )
         rows.append(
             MemberLimitOut(
                 id=user.id,
@@ -515,9 +558,15 @@ async def _member_rows(db: AsyncSession, users: list[User]) -> list[MemberLimitO
                 analyses_today=sum(1 for at in started.get(user.id, []) if at >= day),
                 analyses_month=analyses,
                 return_requested_at=limits.return_requested_at,
+                level=level,  # type: ignore[arg-type]
             )
         )
     return rows
+
+
+def _has_level(user: User) -> bool:
+    """Порог лимита есть у активного участника на ключе администратора."""
+    return user.role == "member" and user.status == "active" and user.ai_mode == "shared"
 
 
 async def limits_view(db: AsyncSession) -> AdminLimitsOut:

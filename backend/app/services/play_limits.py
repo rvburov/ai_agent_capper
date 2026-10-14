@@ -212,6 +212,12 @@ def _local_text(moment: datetime, zone: ZoneInfo) -> str:
     return moment.astimezone(zone).strftime("%d.%m.%Y %H:%M")
 
 
+def _last_day_text(until: datetime, zone: ZoneInfo) -> str:
+    """Последний день паузы по поясу участника: «21.10.2026». Пауза длится до полуночи после
+    него, поэтому день — момент конца минус микросекунда (как в кабинете)."""
+    return (until.astimezone(zone) - timedelta(microseconds=1)).strftime("%d.%m.%Y")
+
+
 async def check(
     db: AsyncSession, user: User, *, stake: Decimal | None = None, now: datetime | None = None
 ) -> None:
@@ -225,9 +231,15 @@ async def check(
     if found is None:
         return
     settings = await get_app_settings(db)
+    zone = user_zone(user.tz)
     params: dict[str, Any] = {
         "until": found.until.isoformat(),
-        "until_text": _local_text(found.until, user_zone(user.tz)),
+        # у паузы — последний день включительно, у лимитов дня — момент начала новых суток
+        "until_text": (
+            _last_day_text(found.until, zone)
+            if found.code == "play.paused"
+            else _local_text(found.until, zone)
+        ),
         "currency": settings.currency,
         **found.params,
     }
@@ -383,7 +395,7 @@ async def pause(
             409,
             "play.pause_shorter",
             until=current.isoformat(),
-            until_text=_local_text(current, zone),
+            until_text=_last_day_text(current, zone),
         )
     row.paused_until = until
     await db.commit()

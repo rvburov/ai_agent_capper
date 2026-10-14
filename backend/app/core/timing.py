@@ -4,10 +4,17 @@
 анализа, CSV) не буферизуются. На каждый HTTP-запрос — одна запись http.request: метод,
 шаблон маршрута (/api/bets/{bet_id}, а не адрес с номером: так запросы группируются, и в
 лог не попадают id), статус, ms — до последнего байта ответа, ttfb_ms — до заголовков.
-Запрос мимо маршрутов (404 без маршрута) — route = null.
+Фоновые задачи маршрута (прогрев аналитики после расчета ставки) идут после последнего
+байта и в ms не входят: участник их не ждет. Запрос мимо маршрутов (404 без маршрута) —
+route = null.
+
+observe(callback) — та же запись в функцию (замер p95, app/admin/perf_measure.py): она
+получает запись при любом уровне логов.
 """
 
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 from weakref import WeakKeyDictionary
 
@@ -21,6 +28,17 @@ EVENT = "http.request"
 # Приложение → {id маршрута → полный шаблон}: маршрут подключенного роутера знает только
 # свой путь (/bets/{bet_id}), а префикс /api — у подключения
 _TEMPLATES: "WeakKeyDictionary[Any, dict[int, str]]" = WeakKeyDictionary()
+_OBSERVERS: list[Callable[[dict[str, Any]], None]] = []
+
+
+@contextmanager
+def observe(callback: Callable[[dict[str, Any]], None]) -> Iterator[None]:
+    """Пока открыт контекст, callback получает каждую запись http.request (словарь полей)."""
+    _OBSERVERS.append(callback)
+    try:
+        yield
+    finally:
+        _OBSERVERS.remove(callback)
 
 
 def _templates(app: Any) -> dict[int, str]:
@@ -60,23 +78,28 @@ class TimingMiddleware:
         started = time.perf_counter()
         status = 500
         first_byte: float | None = None
+        last_byte: float | None = None
 
         async def timed_send(message: Message) -> None:
-            nonlocal status, first_byte
+            nonlocal status, first_byte, last_byte
             if message["type"] == "http.response.start":
                 status = int(message["status"])
                 first_byte = time.perf_counter()
             await send(message)
+            if message["type"] == "http.response.body" and not message.get("more_body"):
+                last_byte = time.perf_counter()
 
         try:
             await self.app(scope, receive, timed_send)
         finally:
-            finished = time.perf_counter()
-            log.info(
-                EVENT,
-                method=scope["method"],
-                route=route_template(scope),
-                status=status,
-                ms=round((finished - started) * 1000, 1),
-                ttfb_ms=round(((first_byte or finished) - started) * 1000, 1),
-            )
+            finished = last_byte or time.perf_counter()
+            record = {
+                "method": scope["method"],
+                "route": route_template(scope),
+                "status": status,
+                "ms": round((finished - started) * 1000, 1),
+                "ttfb_ms": round(((first_byte or finished) - started) * 1000, 1),
+            }
+            for callback in tuple(_OBSERVERS):
+                callback(record)
+            log.info(EVENT, **record)

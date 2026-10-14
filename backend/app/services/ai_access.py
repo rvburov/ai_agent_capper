@@ -33,10 +33,11 @@ analyses — один порядок во всех функциях), commit —
 """
 
 import calendar
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
-from decimal import ROUND_UP, Decimal
+from datetime import UTC, date, datetime, timedelta
+from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -913,6 +914,60 @@ async def after_run_notifications(db: AsyncSession, user_id: int | None) -> list
 
 def _pace(value: Decimal, day: int, days: int) -> Decimal:
     return value / day * days
+
+
+# --- темп месяца (числа для экранов расхода: считает сервер) ---
+
+
+def month_days(now: datetime) -> tuple[int, int]:
+    """Какой сегодня день месяца по UTC (с 1) и сколько в месяце дней."""
+    start = month_start(now)
+    return now.astimezone(start.tzinfo).day, calendar.monthrange(start.year, start.month)[1]
+
+
+def per_day_usd(spent: Decimal, day: int) -> Decimal:
+    """Средний расход в день с 1-го числа (сегодня включая)."""
+    return (spent / day).quantize(CENT) if day > 0 else ZERO
+
+
+def can_per_day_usd(left: Decimal, day: int, days: int) -> Decimal:
+    """Сколько можно тратить в день до конца месяца, включая сегодня, чтобы уложиться в
+    остаток (вниз до цента: чтобы не превысить)."""
+    rest_days = max(1, days - day + 1)
+    return (max(ZERO, left) / rest_days).quantize(CENT, rounding=ROUND_DOWN)
+
+
+def alert_usd(total: Decimal, pct: int) -> Decimal:
+    """Сумма, на которой приходит уведомление о расходе: total × pct %."""
+    return (total * pct / 100).quantize(CENT)
+
+
+def member_forecast(
+    spent: Decimal, day: int, days: int, *, limit: Decimal | None, paused: bool
+) -> Decimal:
+    """Прогноз участника на конец месяца по темпу, как в общем прогнозе бюджета: на паузе
+    — потрачено, с личным лимитом — не выше лимита."""
+    if paused:
+        return spent.quantize(CENT)
+    forecast = _pace(spent, day, days) if day > 0 else spent
+    if limit is not None:
+        forecast = min(limit, forecast)
+    return forecast.quantize(CENT, rounding=ROUND_UP)
+
+
+def runs_out_on(spent: Decimal, limit: Decimal, now: datetime) -> date | None:
+    """День (UTC), когда при нынешнем темпе месяца кончится лимит: остаток делится на
+    средний расход в день. Пусто — темпа нет, лимит уже кончился или кончится не в этом
+    месяце (с 1-го числа расход считается заново)."""
+    day, days = month_days(now)
+    pace = spent / day if day > 0 else ZERO
+    rest = limit - spent
+    if pace <= 0 or rest <= 0:
+        return None
+    ahead = math.ceil(rest / pace)
+    if day + ahead > days:
+        return None
+    return now.astimezone(UTC).date() + timedelta(days=ahead)
 
 
 async def budget_overview(db: AsyncSession, now: datetime) -> BudgetOverview:

@@ -18,9 +18,10 @@ CAPPER_DATA_UPDATE_HOUR_UTC (по умолчанию 5) и 25 минут: пос
 Европе. Минуты не нулевые: в начале часа запускается больше всего чужих задач.
 Анализ (run_analysis) ставит API, у задачи свой предел 15 минут и нет повтора arq;
 уборщик зависших анализов — каждые 5 минут. Прогрев кэша аналитики (warm_analytics)
-ставит API после изменения ставок и банка, одна задача на участника. Удаление аккаунтов
-по запросу участников — раз в сутки в 03:45 UTC (после очистки), сигналы расхода ИИ —
-каждый час на 41-й минуте.
+ставит API после изменения ставок и банка, одна задача на участника; тем, у кого по их
+поясу начались новые сутки, — воркер сам, каждый час на 9-й минуте (warm_new_day).
+Удаление аккаунтов по запросу участников — раз в сутки в 03:45 UTC (после очистки),
+сигналы расхода ИИ — каждый час на 41-й минуте.
 """
 
 import argparse
@@ -54,6 +55,7 @@ from app.workers.jobs import (
     run_analysis,
     update_data,
     warm_analytics,
+    warm_new_day,
 )
 
 # Как часто воркер отмечается в Redis (ключ живет на секунду дольше). Healthcheck
@@ -79,6 +81,9 @@ ACCOUNT_DELETION_HOUR_UTC = 3
 ACCOUNT_DELETION_MINUTE = 45
 # Сигналы расхода ИИ — раз в час, на минуте, которая не совпадает с остальными задачами
 AI_ALERTS_MINUTE = 41
+# Прогрев аналитики тем, у кого по их поясу начались новые сутки, — раз в час
+WARM_NEW_DAY_MINUTE = 9
+WARM_NEW_DAY_TIMEOUT_SECONDS = 1800
 
 
 # Имена ключей arq. В arq 0.28 они — константы модулей (arq.constants), настройки
@@ -216,6 +221,12 @@ def build_cron_jobs(settings: Settings) -> tuple[CronJob, ...] | None:
             timeout=600,
         ),
         cron(check_ai_alerts, minute=AI_ALERTS_MINUTE, max_tries=1, timeout=120),
+        cron(
+            warm_new_day,
+            minute=WARM_NEW_DAY_MINUTE,
+            max_tries=1,
+            timeout=WARM_NEW_DAY_TIMEOUT_SECONDS,
+        ),
     )
 
 

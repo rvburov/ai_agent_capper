@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.redis import redis_key
 from app.schemas.analytics import AnalyticsFiltersIn, AnalyticsOut
@@ -420,3 +420,59 @@ async def test_version_ignores_new_analyses_but_not_replacements(
     db.add(Prediction(**fields, selection=old.selection, p_final=0.7, supersedes=old.id))
     await db.commit()
     assert await analytics_cache.data_version(db, user) != before
+
+
+async def test_new_day_warm_picks_users_at_their_midnight(
+    member: Signed,
+    db: AsyncSession,
+    redis: Redis,
+    make_user: UserFactory,
+    make_client: ClientFactory,
+    login: LoginFn,
+) -> None:
+    """Ночной прогрев: участник, у которого по его поясу сейчас первый час суток, — да;
+    в другом поясе, без журнала банка или давно не заходивший — нет."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from app.db.models import User, UserSession
+
+    user = member.user.user
+    # Полночь по Нью-Йорку — 04:30 UTC летом (EDT, UTC−4)
+    moment = datetime(2026, 7, 1, 4, 30, tzinfo=UTC)
+    await db.execute(update(User).where(User.id == user.id).values(tz="America/New_York"))
+    other = await signed_in(make_client, make_user, login)
+    await db.execute(update(User).where(User.id == other.id).values(tz="America/New_York"))
+    # Сеансы заходили за час до замера (время в тесте — летнее, в прошлом)
+    await db.execute(update(UserSession).values(last_seen_at=moment - timedelta(hours=1)))
+    await db.commit()
+    # У второго участника нет журнала банка: прогревать нечего
+    assert await analytics_cache.new_day_users(db, moment) == [member.id]
+    assert await analytics_cache.new_day_users(db, moment + timedelta(hours=1)) == []
+    await db.execute(update(User).where(User.id == user.id).values(tz="Europe/Helsinki"))
+    await db.commit()
+    assert await analytics_cache.new_day_users(db, moment) == []
+    # Полночь по Хельсинки — 21:30 UTC накануне (EEST, UTC+3)
+    helsinki = datetime(2026, 6, 30, 21, 30, tzinfo=UTC)
+    assert await analytics_cache.new_day_users(db, helsinki) == [member.id]
+    # Не заходил дольше NEW_DAY_ACTIVE_DAYS — не прогревается
+    later = helsinki + timedelta(days=analytics_cache.NEW_DAY_ACTIVE_DAYS + 1)
+    assert await analytics_cache.new_day_users(db, later) == []
+    await db.execute(
+        update(UserSession).where(UserSession.user_id == user.id).values(last_seen_at=later)
+    )
+    await db.commit()
+    assert await analytics_cache.new_day_users(db, later) == [member.id]
+
+
+async def test_warm_new_day_job_fills_cache(
+    member: Signed, db: AsyncSession, redis: Redis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def picked(_db: AsyncSession, now: Any = None) -> list[int]:
+        return [member.id]
+
+    monkeypatch.setattr(analytics_cache, "new_day_users", picked)
+    sessionmaker = async_sessionmaker(db.bind, expire_on_commit=False)
+    assert await jobs.warm_new_day({"sessionmaker": sessionmaker}) == [member.id]
+    assert len(await _keys(redis, member.id)) == 2

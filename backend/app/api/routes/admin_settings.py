@@ -49,10 +49,12 @@ async def change_currency(
     ставок, журнала банка, лимитов и банка из ввода анализа у всех участников с
     округлением каждой суммы до копеек; журнал currency_change; кэш аналитики сбрасывается.
     preview=true — только итоги и примеры «до и после». Без totp_code — 403
-    admin.totp_required; та же валюта — 409 admin.currency_same."""
+    admin.totp_required; та же валюта — 409 admin.currency_same; from_currency не валюта
+    программы (окно открыто до чужой смены) — 409 common.currency_changed, и в предпросмотре."""
     return await app_settings.change_currency(
         db,
         redis,
+        from_currency=body.from_currency,
         currency=body.currency,
         rate=body.rate,
         rate_base=body.rate_base,

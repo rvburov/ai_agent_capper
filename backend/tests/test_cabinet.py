@@ -298,7 +298,7 @@ async def test_consent_training_via_patch_me(
         (
             "PUT",
             "/api/admin/settings/currency",
-            {"currency": "EUR", "rate": "95", "rate_base": "EUR"},
+            {"from_currency": "RUB", "currency": "EUR", "rate": "95", "rate_base": "EUR"},
         ),
         ("POST", "/api/admin/messages", {"text": "x"}),
     ],

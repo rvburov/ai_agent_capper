@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.i18n import t
 from app.core.redis import redis_key
 from app.db.models import (
     Analysis,
@@ -34,6 +35,8 @@ from tests.support import ClientFactory, LoginFn, TotpCodeFn, UserFactory
 
 D = Decimal
 CENT = D("0.01")
+# Окно смены считает от рублей — валюты программы в начале каждого теста
+FROM_RUB = {"from_currency": "RUB"}
 
 
 def _half_up(value: Decimal) -> Decimal:
@@ -108,7 +111,8 @@ def _expected(value: Decimal | None, rate: Decimal, multiply: bool) -> Decimal |
 
 
 async def _change(admin: Signed, totp_code: TotpCodeFn, **extra: Any) -> dict[str, Any]:
-    body = {"currency": "EUR", "rate": "95", "rate_base": "EUR", **extra}
+    current = (await admin.client.get("/api/admin/settings")).json()["currency"]
+    body = {"from_currency": current, "currency": "EUR", "rate": "95", "rate_base": "EUR", **extra}
     if not body.get("preview"):
         body.setdefault("totp_code", await totp_code(admin.user))
     response = await admin.client.put("/api/admin/settings/currency", json=body)
@@ -124,7 +128,7 @@ async def test_preview_changes_nothing(
     before = await _snapshot(db)
     preview = await admin.client.put(
         "/api/admin/settings/currency",
-        json={"currency": "EUR", "rate": "95", "rate_base": "EUR", "preview": True},
+        json={**FROM_RUB, "currency": "EUR", "rate": "95", "rate_base": "EUR", "preview": True},
     )
     assert preview.status_code == 200, preview.text
     data = preview.json()
@@ -252,6 +256,37 @@ def test_rate_convert_matches_rounding_rules() -> None:
     assert multiply.convert(D("10.01")) == D("955.96")  # 955,955 → 955,96
 
 
+async def test_change_from_stale_currency_is_rejected(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    db: AsyncSession,
+    totp_code: TotpCodeFn,
+) -> None:
+    """Окно смены открыто до чужой смены (₽ → $ по 90): курс «1 € = 95,12» окно считало от
+    рублей, к долларам он не относится — 409 common.currency_changed и в предпросмотре, и
+    при смене (до кода 2FA: код не тратится), суммы не тронуты."""
+    admin, _ = await _world(make_client, make_user, login, db)
+    await _change(admin, totp_code, currency="USD", rate="90", rate_base="USD")
+    before = await _snapshot(db)
+    url = "/api/admin/settings/currency"
+    stale = {**FROM_RUB, "currency": "EUR", "rate": "95.12", "rate_base": "EUR"}
+    preview = await admin.client.put(url, json={**stale, "preview": True})
+    assert preview.status_code == 409 and error_code(preview) == "common.currency_changed"
+    code = await totp_code(admin.user)
+    applied = await admin.client.put(url, json={**stale, "totp_code": code})
+    assert applied.status_code == 409 and error_code(applied) == "common.currency_changed"
+    assert applied.json()["error"]["message"] == t("errors.common.currency_changed", currency="USD")
+    assert await _snapshot(db) == before
+    settings = (await admin.client.get("/api/admin/settings")).json()
+    assert settings["currency"] == "USD"
+    assert settings["currency_changed"]["from_currency"] == "RUB"
+    # Окно перечитало настройки: тот же код подходит, смена идет от долларов
+    fresh = {**stale, "from_currency": "USD", "rate": "1.0887", "totp_code": code}
+    done = await admin.client.put(url, json=fresh)
+    assert done.status_code == 200 and done.json()["from_currency"] == "USD", done.text
+
+
 async def test_change_needs_valid_2fa_and_values(
     make_client: ClientFactory,
     make_user: UserFactory,
@@ -262,7 +297,7 @@ async def test_change_needs_valid_2fa_and_values(
     admin, _ = await _world(make_client, make_user, login, db)
     before = await _snapshot(db)
     url = "/api/admin/settings/currency"
-    body = {"currency": "EUR", "rate": "95", "rate_base": "EUR"}
+    body = {**FROM_RUB, "currency": "EUR", "rate": "95", "rate_base": "EUR"}
     no_code = await admin.client.put(url, json=body)
     assert no_code.status_code == 403 and error_code(no_code) == "admin.totp_required"
     wrong = await admin.client.put(url, json={**body, "totp_code": "000000"})
@@ -271,7 +306,8 @@ async def test_change_needs_valid_2fa_and_values(
     assert same.status_code == 409 and error_code(same) == "admin.currency_same"
     base = await admin.client.put(url, json={**body, "rate_base": "USD"})
     assert base.status_code == 422 and error_code(base) == "admin.currency_rate_base"
-    for rate in ("0", "-1", "abc"):
+    # Курс 0,001–1 000 (Р14: подбором курса не узнать суммы участников)
+    for rate in ("0", "-1", "abc", "0.0009", "1000.01", "1000000"):
         bad = await admin.client.put(url, json={**body, "rate": rate})
         assert bad.status_code == 422
     assert await _snapshot(db) == before
@@ -286,6 +322,7 @@ async def test_change_needs_valid_2fa_and_values(
     overflow = await admin.client.put(
         url,
         json={
+            **FROM_RUB,
             "currency": "EUR",
             "rate": "2",
             "rate_base": "RUB",
@@ -293,6 +330,37 @@ async def test_change_needs_valid_2fa_and_values(
         },
     )
     assert overflow.status_code == 409 and error_code(overflow) == "admin.currency_overflow"
+
+
+async def test_preview_overflow_is_only_yes_or_no(
+    make_client: ClientFactory, make_user: UserFactory, login: LoginFn, db: AsyncSession
+) -> None:
+    """Р14: предпросмотр не отказывает и не называет сумм участников — только «переполнение
+    есть / нет»; при курсе до 1 000 оно возможно лишь у сумм больше 10 млн. Крайние курсы
+    0,001 и 1 000 принимаются."""
+    admin, _ = await _world(make_client, make_user, login, db)
+    url = "/api/admin/settings/currency"
+    for rate, base in (("1000", "RUB"), ("0.001", "RUB"), ("1000", "EUR")):
+        body = {**FROM_RUB, "currency": "EUR", "rate": rate, "rate_base": base, "preview": True}
+        fine = await admin.client.put(url, json=body)
+        assert fine.status_code == 200, fine.text
+        assert fine.json()["overflow"] is False
+    hidden = "12345678.91"
+    await db.execute(update(Analysis).values(bank_input=D(hidden)))
+    await db.commit()
+    preview = await admin.client.put(
+        url,
+        json={**FROM_RUB, "currency": "EUR", "rate": "1000", "rate_base": "RUB", "preview": True},
+    )
+    assert preview.status_code == 200 and preview.json()["overflow"] is True
+    for value in (hidden, "12345678910", "1234567891"):
+        assert value not in preview.text
+    # Чуть меньший курс — переполнения нет: граница видна только для сумм больше 10 млн
+    smaller = await admin.client.put(
+        url,
+        json={**FROM_RUB, "currency": "EUR", "rate": "100", "rate_base": "RUB", "preview": True},
+    )
+    assert smaller.json()["overflow"] is False
 
 
 async def test_change_races_with_bank_entry(
@@ -310,7 +378,13 @@ async def test_change_races_with_bank_entry(
     change, entry = await asyncio.gather(
         admin.client.put(
             "/api/admin/settings/currency",
-            json={"currency": "EUR", "rate": "95", "rate_base": "EUR", "totp_code": code},
+            json={
+                **FROM_RUB,
+                "currency": "EUR",
+                "rate": "95",
+                "rate_base": "EUR",
+                "totp_code": code,
+            },
         ),
         member.client.post(
             "/api/me/bank/entries",
@@ -378,8 +452,12 @@ async def test_message_to_all_and_one(
         "/api/admin/messages", json={"text": "Лично вам {name}", "user_id": bob.id}
     )
     assert one.status_code == 201 and one.json()["recipient_name"] == "Боб"
-    history = (await admin.client.get("/api/admin/messages")).json()["items"]
+    listed = (await admin.client.get("/api/admin/messages")).json()
+    history = listed["items"]
     assert [(item["user_id"], item["recipients"]) for item in history] == [(bob.id, 1), (None, 2)]
+    # Сколько получит «всем» — число сервера, по тому же правилу, что отправка (без
+    # заблокированных и без себя): экран не считает его сам
+    assert listed["recipients_all"] == preview.json()["recipients"] == 2
     assert history[0]["text"] == "Лично вам {name}"
     entries = await audit_entries(db, "message")
     assert entries[-1].target_user_id == bob.id and entries[-1].details["recipients"] == 1
@@ -452,7 +530,13 @@ async def test_change_races_with_bet(
     change, bet = await asyncio.gather(
         admin.client.put(
             "/api/admin/settings/currency",
-            json={"currency": "EUR", "rate": "95", "rate_base": "EUR", "totp_code": code},
+            json={
+                **FROM_RUB,
+                "currency": "EUR",
+                "rate": "95",
+                "rate_base": "EUR",
+                "totp_code": code,
+            },
         ),
         member.client.post("/api/bets", json=bet_body),
     )

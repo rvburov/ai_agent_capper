@@ -126,7 +126,9 @@ class KeyReturnRequestOut(BaseModel):
 class LimitAlertOut(BaseModel):
     """Участник у месячного лимита на ключе администратора: level 80 — дошел до порога
     предупреждения (alert_pct), 100 — остатка не хватает на анализ (то же правило, что у
-    уведомлений limit_80 и limit_100). Р14: только расход на ИИ."""
+    уведомлений limit_80 и limit_100). runs_out_on — день (UTC), когда при нынешнем темпе
+    месяца лимит кончится (пусто — не в этом месяце или уже кончился). Р14: только
+    расход на ИИ."""
 
     user_id: int
     name: str
@@ -134,6 +136,7 @@ class LimitAlertOut(BaseModel):
     limit_usd: UsdOut
     share: float
     level: Literal["80", "100"]
+    runs_out_on: date | None
 
 
 class AdminAttentionOut(BaseModel):

@@ -228,7 +228,7 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 | Модуль | Что делает |
 |---|---|
 | `services/notification_prefs.py` | что присылать: виды уведомлений человека по роли и режиму ключа, «на сайте», обязательные виды; `notify` не пишет выключенные |
-| `services/bookmakers.py` | «Мои букмекеры»: список, добавить, переименовать, скрыть, удалить; новое название из ставки или анализа — в список само (`remember`) |
+| `services/bookmakers.py` | «Мои букмекеры»: список, добавить, переименовать, скрыть, удалить; новое название из ставки или анализа — в список само (`remember`), скрытый букмекер ставки возвращается в список |
 | `services/play_limits.py` | ответственная игра: лимиты дня по поясу участника, повышение через 24 часа, пауза; проверка в `place_bet` (под блокировкой денег) и при запуске анализа |
 | `services/data_export.py` | экспорт своих данных: JSON одним файлом или CSV в ZIP, частями, колонки перечислены явно (без секретов) |
 | `services/account.py` | еще удаление аккаунта самим участником: запрос, отмена, удаление по сроку (`delete_due_accounts`, задача воркера раз в сутки) |
@@ -236,7 +236,20 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 | `services/admin_messages.py` | сообщение участникам и отправленные (записи журнала `message`) |
 | `services/ai_alerts.py` | сигналы расхода ИИ (TOKEN_ECONOMY.md, раздел 6): правила, пороги `RULES`, задача воркера раз в час |
 
-Маршруты: `GET` и `PUT /api/me/notification-prefs`, `GET /api/me/bookmakers` (названия для форм) и `/list`, `POST /api/me/bookmakers`, `PATCH` и `DELETE /api/me/bookmakers/{id}`, `GET` и `PUT /api/me/play-limits`, `POST /api/me/pause`, `GET /api/me/export?format=json|csv`, `POST` и `DELETE /api/me/deletion`, `PATCH /api/me` (`consent_training`), `GET` и `PUT /api/admin/settings`, `PUT /api/admin/settings/currency`, `GET` и `POST /api/admin/messages`. Пока участник ждет удаления аккаунта, после входа открыты только `GET /api/me` и отмена (`app/core/deps.py`). Задачи воркера: `delete_requested_accounts` (03:45 UTC), `check_ai_alerts` (каждый час, 41-я минута). Индекс поиска игроков строится при старте API (`app/main.py`).
+Маршруты: `GET` и `PUT /api/me/notification-prefs`, `GET /api/me/bookmakers` (названия для форм) и `/list`, `POST /api/me/bookmakers`, `PATCH` и `DELETE /api/me/bookmakers/{id}`, `GET` и `PUT /api/me/play-limits`, `POST /api/me/pause`, `GET /api/me/export?format=json|csv`, `POST` и `DELETE /api/me/deletion`, `PATCH /api/me` (`consent_training`), `GET` и `PUT /api/admin/settings`, `PUT /api/admin/settings/currency` (курс 0,001–1 000; предпросмотр — признак `overflow` без сумм участников, Р14), `GET` и `POST /api/admin/messages`, `GET /api/admin/attention` (дела администратора без остальной главной). Пока участник ждет удаления аккаунта, после входа открыты только `GET /api/me` и отмена (`app/core/deps.py`). Задачи воркера: `delete_requested_accounts` (03:45 UTC), `check_ai_alerts` (каждый час, 41-я минута), `warm_new_day` (каждый час, 9-я минута: прогрев «Аналитики» и главной тем, у кого по их поясу наступила полночь, — активным за 14 дней и с журналом банка). Индекс поиска игроков в памяти строится при старте API (`app/main.py`); в базе поиск находит кандидатов по индексам триграмм форм имени (миграция 0006).
+
+## Скорость API (этап 4)
+
+Время ответа каждого запроса — в логе `http.request` (`core/timing.py`, мс до последнего байта, без фоновых задач маршрута). Замер p95 на синтетике размера живой программы:
+
+```bash
+python -m app.admin.perf run                     # временная база capper_perf_<pid>, сид, замер, отчет; база удаляется
+python -m app.admin.perf run --slack 1.5 --json perf.json --markdown perf.md   # как в CI
+python -m app.admin.perf seed --yes-perf-db      # только сид в базу из CAPPER_DATABASE_URL (имя capper_perf*)
+python -m app.admin.perf measure --yes-perf-db   # только замер на такой базе
+```
+
+`run` создает базу через служебный адрес (`CAPPER_TEST_ADMIN_DATABASE_URL`, как тесты), нужен Redis. Сид (`admin/perf_seed.py`) пишет сам PostgreSQL (`generate_series`), за 20–30 с: 10 тыс. ставок участника за 2 года, журнал банка, 100 тыс. вызовов Claude и «плотный месяц» (14 тыс.), 2 790 игроков с 80 тыс. матчей и текущим Эло. Он детерминированный (тот же день `--today` — те же строки) и кладется только в пустую базу с именем `capper_perf` или `capper_perf_<буквы и цифры>`, с флагом `--yes-perf-db` и не в prod. Замер (`admin/perf_measure.py`) идет в приложение в том же процессе: 20 запросов на маршрут чтения, 10 пар на изменение (данные возвращаются назад), по 3 — холодной «Аналитике», выгрузкам и изменениям с кодом 2FA (запрос удаления аккаунта и отмена, смена валюты туда и обратно по курсу 1; 2FA администратору и участнику сида замер включает сам); печатает таблицу p50, p95, максимум и цель. Цели — `TARGETS` (PLAN.md, раздел 8: 200 мс на чтение, 300 — на изменение, 500 — запрос удаления (пароль), 1 500 и 5 000 — холодная «Аналитика», выгрузки и смена валюты). Код возврата 1 — p95 какого-то маршрута выше цели × `--slack`. В CI задание «Скорость API (p95)» запускает `run --slack 1.5` и кладет таблицу в сводку задания.
 
 ## Где что лежит
 
@@ -261,8 +274,8 @@ backend/
 │   ├── ingest/        загрузчики данных: архив Сакманна, tennis-data.co.uk, история старого бота,
 │   │                  привязка старого бота, команда обновления update.py
 │   ├── workers/       фоновые задачи arq и расписание
-│   ├── admin/         команды терминала (cli.py); логика кабинета администратора — в services/
-│   │                  (admin_users, access_codes, admin_confirm, admin_key)
+│   ├── admin/         команды терминала (cli.py), замер скорости (perf*.py); логика кабинета
+│   │                  администратора — в services/ (admin_users, access_codes, admin_confirm, admin_key)
 │   └── locales/       тексты сервера (ошибки, уведомления, журнал), ru.json
 └── tests/             тесты pytest: conftest.py (фикстуры), support.py (типы и помощники)
 ```

@@ -74,12 +74,13 @@ class Fired:
     params: dict[str, Any]
 
 
+# Числа в тексте уведомления — по-русски, с запятой, как formatUsd и проценты на фронтенде
 def _pct(value: float) -> str:
-    return f"{value * 100:.1f}".rstrip("0").rstrip(".")
+    return f"{value * 100:.1f}".rstrip("0").rstrip(".").replace(".", ",")
 
 
 def _usd(value: Decimal) -> str:
-    return str(value.quantize(Decimal("0.01")))
+    return str(value.quantize(Decimal("0.01"))).replace(".", ",")
 
 
 def _working_runs() -> Any:

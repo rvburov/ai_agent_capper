@@ -251,10 +251,13 @@ async def delete_bookmaker(db: AsyncSession, user: User, bookmaker_id: int) -> N
     await db.commit()
 
 
-async def remember(db: AsyncSession, user_id: int, names: Sequence[str | None]) -> None:
+async def remember(
+    db: AsyncSession, user_id: int, names: Sequence[str | None], *, restore: bool = False
+) -> None:
     """Названия, с которыми участник сохранил ставку или запустил анализ, — в список,
-    если такого еще нет (и скрытого тоже). «Другой» и пустое не добавляются. flush;
-    commit — за вызывающим."""
+    если такого еще нет (и скрытого тоже). restore — скрытого вернуть в список: у
+    букмекера появилась ставка в игре, а скрытым может быть только букмекер без них.
+    «Другой» и пустое не добавляются. flush; commit — за вызывающим."""
     reserved = _key(t("bookmakers.other"))
     seen: set[str] = set()
     for raw in names:
@@ -265,7 +268,13 @@ async def remember(db: AsyncSession, user_id: int, names: Sequence[str | None]) 
         seen.add(key)
         stmt = insert(Bookmaker).values(user_id=user_id, name=name, created_at=utcnow())
         await db.execute(
-            stmt.on_conflict_do_nothing(
+            stmt.on_conflict_do_update(
+                index_elements=[Bookmaker.user_id, func.lower(Bookmaker.name)],
+                set_={"archived_at": None},
+                where=Bookmaker.archived_at.is_not(None),
+            )
+            if restore
+            else stmt.on_conflict_do_nothing(
                 index_elements=[Bookmaker.user_id, func.lower(Bookmaker.name)]
             )
         )

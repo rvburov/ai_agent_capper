@@ -2,7 +2,7 @@
 досье и журнал загрузок (PLAN.md, разделы 5 и 6). Видны всем участникам."""
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import (
     BigInteger,
@@ -12,9 +12,11 @@ from sqlalchemy import (
     Integer,
     SmallInteger,
     String,
+    Table,
     Text,
     UniqueConstraint,
     func,
+    literal_column,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -48,8 +50,33 @@ TOURNAMENT_SOURCES = ("sackmann", "tennis_data", "legacy", "user")
 INGESTION_STATUSES = ("running", "ok", "failed")
 
 
+# Формы имени игрока для поиска (app/services/players.py): как есть, с «е» вместо «е с
+# двумя точками», и упрощенное написание (c, q → k; z → s; w → v; y, j → i). По каждой
+# форме имени и имени по-русски — индекс триграмм (миграция 0006, индексы в конце
+# модуля): поиск находит по нему кандидатов операторами % и <% и считает сходство только
+# для них. Выражение в запросе и в индексе должно быть одним и тем же
+NAME_YO = "\u0451\u0401"
+NAME_YE = "\u0435\u0415"
+SKELETON_FROM = "cqzwyj"
+SKELETON_TO = "kksvii"
+
+
+def plain_name_form(column: str) -> str:
+    return f"translate({column}, '{NAME_YO}', '{NAME_YE}')"
+
+
+def skel_name_form(column: str) -> str:
+    return f"translate(lower({column}), '{SKELETON_FROM}', '{SKELETON_TO}')"
+
+
+def _quoted(value: str) -> Any:
+    return literal_column(f"'{value}'")
+
+
 class Player(CreatedAtMixin, UpdatedAtMixin, Base):
-    """Игрок. Поиск по имени — триграммы pg_trgm (GIN), в том числе по-русски (name_ru)."""
+    """Игрок. Поиск по имени — триграммы pg_trgm (GIN), в том числе по-русски (name_ru),
+    по самим именам и по их формам для поиска (индексы ix_players_name_*_plain_trgm и
+    ix_players_name_*_skel_trgm в конце модуля)."""
 
     __tablename__ = "players"
     __table_args__ = (
@@ -380,3 +407,24 @@ Index(
     PlayerNews.player_id,
     PlayerNews.published_at.desc(),
 )
+
+
+for _column in (Player.name, Player.name_ru):
+    _suffix = "name" if _column is Player.name else "name_ru"
+    for _kind, _form in (
+        ("plain", func.translate(_column, _quoted(NAME_YO), _quoted(NAME_YE))),
+        (
+            "skel",
+            func.translate(func.lower(_column), _quoted(SKELETON_FROM), _quoted(SKELETON_TO)),
+        ),
+    ):
+        _name = f"ix_players_{_suffix}_{_kind}_trgm"
+        # Таблица — явно: по выражению lower(колонки) внутри translate SQLAlchemy ее сам
+        # не находит, и индекс остался бы без таблицы
+        Index(
+            _name,
+            _form.label(_name),
+            postgresql_using="gin",
+            postgresql_ops={_name: "gin_trgm_ops"},
+            _table=cast(Table, Player.__table__),
+        )

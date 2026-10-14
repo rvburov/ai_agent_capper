@@ -4,6 +4,7 @@
 
 import logging
 from collections.abc import Iterator
+from decimal import ROUND_DOWN, ROUND_UP
 from decimal import Decimal as D
 from typing import Any
 
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import crypto
 from app.db.models import AiLimit, Notification, User, UserSecret
 from app.services.admin_users import month_start
+from app.services.ai_access import month_days
 from app.services.claude_key import SECRET_KIND
 from app.services.sessions import utcnow
 from tests.claude_mock import KEY, ClaudeMock, api_error, installed_mock, seed_prices
@@ -99,6 +101,16 @@ async def test_member_budget_on_admin_key(
     assert body["reason_code"] is None
     assert body["budget"] is None
     assert body["month_start"].startswith(month_start(utcnow()).date().isoformat())
+    # Темп месяца: в среднем в день, прогноз (не выше лимита), можно в день, уведомление
+    day, days = month_days(utcnow())
+    assert body["per_day_usd"] == float((D("0.45") / day).quantize(D("0.01")))
+    forecast = min(D(10), D("0.45") / day * days).quantize(D("0.01"), rounding=ROUND_UP)
+    assert body["forecast_usd"] == float(forecast)
+    assert body["forecast_share"] == pytest.approx(float(forecast) / 10)
+    assert body["can_per_day_usd"] == float(
+        (D("9.55") / (days - day + 1)).quantize(D("0.01"), rounding=ROUND_DOWN)
+    )
+    assert body["alert_usd"] == 8.0
 
 
 async def test_member_budget_reason_without_admin_key(
@@ -186,6 +198,12 @@ async def test_admin_budget_includes_overall_budget(
     assert body["monthly_usd"] is None
     assert body["daily_analyses"] is None
     assert body["spent_usd"] == 1.0
+    # Без личного лимита — без доли, «можно в день» и суммы уведомления
+    assert (body["forecast_share"], body["can_per_day_usd"], body["alert_usd"]) == (
+        None,
+        None,
+        None,
+    )
     budget = body["budget"]
     assert budget["budget_usd"] == 60.0
     assert budget["spent_usd"] == 3.5

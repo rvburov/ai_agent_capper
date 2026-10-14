@@ -895,3 +895,63 @@ async def test_play_limits_day_tz_migration(settings: Settings) -> None:
                 await conn.run_sync(run_alembic_upgrade, "head")
         finally:
             await engine.dispose()
+
+
+_NAME_FORM_INDEXES = (
+    "ix_players_name_plain_trgm",
+    "ix_players_name_ru_plain_trgm",
+    "ix_players_name_ru_skel_trgm",
+    "ix_players_name_skel_trgm",
+)
+
+
+async def _player_indexes(conn: AsyncConnection) -> list[str]:
+    rows = await conn.execute(
+        text(
+            "SELECT indexname FROM pg_indexes WHERE tablename = 'players'"
+            " AND indexname LIKE 'ix_players_name%' ORDER BY indexname"
+        )
+    )
+    return [str(name) for (name,) in rows]
+
+
+async def test_player_name_form_indexes_migration(settings: Settings) -> None:
+    """0005 → 0006: индексы триграмм по формам имени (поиск игроков) появляются, игроки не
+    теряются; поиск по-русски с «е с двумя точками» в базе находит игрока через индекс-форму.
+    Откат до 0005 убирает только эти индексы, повторный upgrade проходит."""
+    async with _temp_database(settings, "s4idx") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0005")
+                await conn.execute(
+                    text(
+                        "INSERT INTO players (name, name_ru) VALUES"
+                        " ('Jannik Sinner', 'Янник Синнер'),"
+                        " ('Petr Fedorov', 'Петр Ф\u0451доров')"
+                    )
+                )
+                before = await _player_indexes(conn)
+            assert before == ["ix_players_name_ru_trgm", "ix_players_name_trgm"]
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                assert await _player_indexes(conn) == sorted([*before, *_NAME_FORM_INDEXES])
+                assert await conn.scalar(text("SELECT count(*) FROM players")) == 2
+                # Индексы — по тем же выражениям, что ищет код: «е с двумя точками» → «е»
+                await conn.execute(text("SET LOCAL enable_seqscan = off"))
+                found = await conn.scalar(
+                    text(
+                        "SELECT name FROM players WHERE translate(name_ru,"
+                        " '\u0451\u0401', 'еЕ') % 'федоров'"
+                    )
+                )
+                assert found == "Petr Fedorov"
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0005")
+            async with engine.begin() as conn:
+                assert await _player_indexes(conn) == before
+                await conn.run_sync(run_alembic_upgrade, "head")
+                assert len(await _player_indexes(conn)) == 6
+        finally:
+            await engine.dispose()

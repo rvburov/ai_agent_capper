@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.schemas import ParsedInput
 from app.core.errors import AppError
-from app.db.models import Match, OddsSnapshot, Player, Tournament
+from app.db.models import Match, OddsSnapshot, Player, PlayerEloCurrent, Tournament
 from app.ingest.names import fold
 from app.ingest.rounds import ROUNDS
 from app.ml.elo import RESULT_STATUSES
@@ -133,20 +133,55 @@ SELECT player_id, place FROM ranked WHERE player_id = ANY(CAST(:ids AS bigint[])
 )
 
 
+def _utc_today() -> date:
+    return datetime.now(UTC).date()
+
+
+async def _ranks_by_matches(db: AsyncSession, ids: Sequence[int], day: date) -> dict[int, int]:
+    """Место на начало дня day: матчи и рейтинги строго до него."""
+    rows = await db.execute(
+        _ELO_RANKS_SQL,
+        {"ids": list(ids), "today": day, "since": day - timedelta(days=ELO_RANK_DAYS)},
+    )
+    return {int(pid): int(place) for pid, place in rows}
+
+
+async def _current_ranks(db: AsyncSession, ids: Sequence[int], day: date) -> dict[int, int] | None:
+    """Место из player_elo_current (пишет шаг elo). Таблица на день as_of — место на конец
+    этого дня, то есть _ranks_by_matches на as_of + 1 (окно 52 недель по день расчета
+    включительно, app/ml/elo.py), то же, что в списке «Игроки» и карточке игрока. Годится,
+    если ее посчитали вчера (место на начало сегодня) или сегодня (на конец сегодня: ночное
+    обновление около 05:25 UTC); иначе (шаг elo не шел) — None, и место считается по матчам."""
+    as_of = await db.scalar(select(func.max(PlayerEloCurrent.as_of)))
+    if as_of is None or as_of < day - timedelta(days=1):
+        return None
+    rows = await db.execute(
+        select(PlayerEloCurrent.player_id, PlayerEloCurrent.rank_all).where(
+            PlayerEloCurrent.player_id.in_(ids), PlayerEloCurrent.rank_all.is_not(None)
+        )
+    )
+    return {int(pid): int(place) for pid, place in rows if place is not None}
+
+
 async def elo_ranks(
     db: AsyncSession, player_ids: Iterable[int], *, today: date | None = None
 ) -> dict[int, int]:
     """Место по общему Эло среди игроков с матчами за 52 недели (рейтинга ATP в базе
-    нет). Игрока без матчей за 52 недели в списке нет."""
+    нет). Игрока без матчей за 52 недели в списке нет. На сегодня — из player_elo_current,
+    как в карточке игрока (около 1 мс вместо 120 мс пересчета по матчам): до ночного
+    обновления — место на начало сегодня, после — на конец сегодня (с матчами, сыгранными
+    к обновлению; окно 52 недель сдвигается на день). На прошлый день — по матчам и
+    рейтингам до этого дня, как раньше: история анализов воспроизводима."""
     ids = sorted(set(player_ids))
     if not ids:
         return {}
-    day = today or datetime.now(UTC).date()
-    rows = await db.execute(
-        _ELO_RANKS_SQL,
-        {"ids": ids, "today": day, "since": day - timedelta(days=ELO_RANK_DAYS)},
-    )
-    return {int(pid): int(place) for pid, place in rows}
+    actual = _utc_today()
+    day = today or actual
+    if day == actual:
+        current = await _current_ranks(db, ids, day)
+        if current is not None:
+            return current
+    return await _ranks_by_matches(db, ids, day)
 
 
 @dataclass(frozen=True)

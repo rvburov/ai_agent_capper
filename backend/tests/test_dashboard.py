@@ -182,7 +182,15 @@ async def test_dashboard_admin_attention(
     [limit] = attention["limits"]
     assert limit["user_id"] == spender.id and limit["level"] == "80"
     assert limit["spent_usd"] == 8.5 and limit["limit_usd"] == 10.0
-    assert set(limit) == {"user_id", "name", "spent_usd", "limit_usd", "share", "level"}
+    assert set(limit) == {
+        "user_id",
+        "name",
+        "spent_usd",
+        "limit_usd",
+        "share",
+        "level",
+        "runs_out_on",
+    }
     # Ставок и банка участников у администратора нет
     assert data["kpi"]["settled"] == 0 and data["open_count"] == 0
     member_view = await _dashboard(spender)

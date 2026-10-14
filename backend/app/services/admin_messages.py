@@ -9,7 +9,7 @@ admin_message всем или одному участнику.
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -24,8 +24,13 @@ from app.services.sessions import utcnow
 HISTORY_LIMIT = 50
 
 
+def _recipient_filter(actor: User) -> tuple[ColumnElement[bool], ...]:
+    """Кому уходит сообщение: активные люди программы, кроме отправителя."""
+    return (User.status == "active", User.id != actor.id)
+
+
 async def _recipients(db: AsyncSession, actor: User, user_id: int | None) -> Sequence[User]:
-    stmt = select(User).where(User.status == "active", User.id != actor.id).order_by(User.id)
+    stmt = select(User).where(*_recipient_filter(actor)).order_by(User.id)
     if user_id is not None:
         stmt = stmt.where(User.id == user_id)
     return list(await db.scalars(stmt))
@@ -87,8 +92,9 @@ async def send(
     )
 
 
-async def history(db: AsyncSession, *, limit: int = HISTORY_LIMIT) -> MessagesOut:
-    """Отправленные сообщения, новые сверху (записи message журнала)."""
+async def history(db: AsyncSession, *, sender: User, limit: int = HISTORY_LIMIT) -> MessagesOut:
+    """Отправленные сообщения, новые сверху (записи message журнала), и сколько получит
+    сообщение «всем» от sender сейчас."""
     actor = aliased(User)
     target = aliased(User)
     rows = (
@@ -126,4 +132,5 @@ async def history(db: AsyncSession, *, limit: int = HISTORY_LIMIT) -> MessagesOu
                 actor_name=person_name(entry.actor_id, actor_name, actor_status) or None,
             )
         )
-    return MessagesOut(items=items)
+    everyone = await db.scalar(select(func.count(User.id)).where(*_recipient_filter(sender)))
+    return MessagesOut(items=items, recipients_all=int(everyone or 0))

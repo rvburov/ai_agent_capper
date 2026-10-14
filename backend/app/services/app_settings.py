@@ -229,9 +229,9 @@ async def _max_abs(db: AsyncSession, column: Any) -> Decimal:
     return Decimal(found or 0)
 
 
-async def _check_overflow(db: AsyncSession, rate: Rate) -> None:
-    """Самая большая сумма в новой валюте помещается в NUMERIC(12, 2). Отказ — без самой
-    суммы: это деньги участника, а их администратор не видит (Р14)."""
+async def _overflows(db: AsyncSession, rate: Rate) -> bool:
+    """Самая большая сумма в новой валюте не помещается в NUMERIC(12, 2). Ответ — только да
+    или нет, без самой суммы: это деньги участника, а их администратор не видит (Р14)."""
     for column in (
         Bet.stake,
         Bet.profit,
@@ -242,7 +242,13 @@ async def _check_overflow(db: AsyncSession, rate: Rate) -> None:
     ):
         biggest = await _max_abs(db, column)
         if biggest and rate.convert(biggest) > MONEY_MAX:
-            raise AppError(409, "admin.currency_overflow")
+            return True
+    return False
+
+
+async def _check_overflow(db: AsyncSession, rate: Rate) -> None:
+    if await _overflows(db, rate):
+        raise AppError(409, "admin.currency_overflow")
 
 
 def _stake_currency() -> ColumnElement[Any]:
@@ -348,9 +354,11 @@ def _preview_out(
     own_bank: MoneyChangeOut | None,
     *,
     applied: bool,
+    overflow: bool = False,
 ) -> CurrencyPreviewOut:
     return CurrencyPreviewOut(
         applied=applied,
+        overflow=overflow,
         from_currency=rate.old,  # type: ignore[arg-type]
         to_currency=rate.new,  # type: ignore[arg-type]
         rate=rate.rate,
@@ -580,6 +588,7 @@ async def change_currency(
     db: AsyncSession,
     redis: Redis,
     *,
+    from_currency: str,
     currency: str,
     rate: Decimal,
     rate_base: str,
@@ -589,24 +598,30 @@ async def change_currency(
     ip: str | None,
 ) -> CurrencyPreviewOut:
     """Смена валюты программы (Т30). preview — только итоги «что станет», без записи и
-    без кода 2FA. Иначе: код 2FA администратора (admin_confirm, неверный — 403, действие
-    не выполняется), исключительная блокировка CURRENCY_LOCK, пересчет, журнал
-    currency_change, commit, сброс кэша аналитики. Та же валюта — 409 admin.currency_same,
+    без кода 2FA; сумма, которая не поместится, — признак overflow, а не отказ. Иначе:
+    код 2FA администратора (admin_confirm, неверный — 403, действие не выполняется),
+    исключительная блокировка CURRENCY_LOCK, пересчет, журнал currency_change, commit,
+    сброс кэша аналитики. from_currency (валюта, от которой считало окно) не валюта
+    программы — 409 common.currency_changed до кода 2FA и еще раз под блокировкой: курс
+    чужой пары не применяется. Та же валюта — 409 admin.currency_same,
     курс не к прежней или новой валюте — 422 admin.currency_rate_base, сумма не
     помещается в NUMERIC(12, 2) — 409 admin.currency_overflow (без суммы, Р14)."""
     from app.services.admin_confirm import check_totp
     from app.services.audit import write_audit
     from app.services.bank import CURRENCY_LOCK
 
-    found = _rate(await get_app_settings(db), currency, rate, rate_base)
+    settings = await get_app_settings(db)
+    check_currency(settings, from_currency)
+    found = _rate(settings, currency, rate, rate_base)
     if preview:
-        await _check_overflow(db, found)
+        overflow = await _overflows(db, found)
         corrections = await _corrections(db, found)
         out = _preview_out(
             found,
             await _counts(db, found, corrections=len(corrections)),
             await _own_bank(db, actor.id, found),
             applied=False,
+            overflow=overflow,
         )
         await db.rollback()
         return out
@@ -615,6 +630,7 @@ async def change_currency(
     # разделяемая)
     await db.execute(select(func.pg_advisory_xact_lock(CURRENCY_LOCK)))
     settings = await _locked_settings(db)
+    check_currency(settings, from_currency)
     found = _rate(settings, currency, rate, rate_base)
     await _check_overflow(db, found)
     corrections = await _corrections(db, found)

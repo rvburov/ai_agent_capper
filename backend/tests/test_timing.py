@@ -52,3 +52,33 @@ async def test_request_timing_is_logged(
         assert 0 <= fields["ttfb_ms"] <= fields["ms"]
     # В лог не попадает адрес с номером ставки
     assert all("12345" not in str(fields["route"]) for _, fields in recorder.records)
+
+
+async def test_background_work_is_not_in_response_time() -> None:
+    """ms — до последнего байта ответа: фоновая задача маршрута (прогрев аналитики после
+    расчета) идет после него, участник ее не ждет. observe получает ту же запись."""
+    import asyncio
+
+    from fastapi import BackgroundTasks, FastAPI
+
+    app = FastAPI()
+    app.add_middleware(timing.TimingMiddleware)
+
+    async def slow() -> None:
+        await asyncio.sleep(0.3)
+
+    @app.get("/api/quick")
+    async def quick(background: BackgroundTasks) -> dict[str, bool]:
+        background.add_task(slow)
+        return {"ok": True}
+
+    seen: list[dict[str, Any]] = []
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://capper.test") as client:
+        with timing.observe(seen.append):
+            assert (await client.get("/api/quick")).status_code == 200
+        assert (await client.get("/api/quick")).status_code == 200
+    assert len(seen) == 1
+    record = seen[0]
+    assert (record["method"], record["route"], record["status"]) == ("GET", "/api/quick", 200)
+    assert record["ms"] < 250

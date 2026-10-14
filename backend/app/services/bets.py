@@ -27,7 +27,7 @@ import asyncio
 import csv
 import io
 import re
-from collections.abc import AsyncIterator, Callable, Iterable, Sequence
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -277,8 +277,9 @@ async def place_bet(db: AsyncSession, user: User, body: BetIn) -> PlacedBet:
         )
     )
     analysis.decision = "bet"
-    # Новое название букмекера — в «Мои букмекеры» (скрытого это не возвращает)
-    await bookmakers_service.remember(db, user.id, [bet.bookmaker])
+    # Новое название букмекера — в «Мои букмекеры»; скрытый возвращается в список: у него
+    # теперь ставка в игре (скрыть можно только букмекера без них)
+    await bookmakers_service.remember(db, user.id, [bet.bookmaker], restore=True)
     await db.commit()
     return PlacedBet(bet, legs, created=True)
 
@@ -859,8 +860,15 @@ def bet_item(
     )
 
 
-async def bet_items(db: AsyncSession, user: User, bet_ids: Sequence[int]) -> list[BetItemOut]:
-    """Ставки участника по id в том же порядке (чужие и несуществующие пропускаются)."""
+async def bet_items(
+    db: AsyncSession,
+    user: User,
+    bet_ids: Sequence[int],
+    *,
+    after: Mapping[int, Decimal] | None = None,
+) -> list[BetItemOut]:
+    """Ставки участника по id в том же порядке (чужие и несуществующие пропускаются).
+    after — «банк после» уже посчитан (выгрузка считает его один раз на все ставки)."""
     if not bet_ids:
         return []
     found = {
@@ -884,7 +892,10 @@ async def bet_items(db: AsyncSession, user: User, bet_ids: Sequence[int]) -> lis
         for player in await db.scalars(select(Player).where(Player.id.in_(player_ids)))
     }
     # «Банк после» — капитал сразу после расчета, как в последних ставках главной
-    after = await equity_after_bets(db, user.id, [bet.id for bet in bets if bet.status != "open"])
+    if after is None:
+        after = await equity_after_bets(
+            db, user.id, [bet.id for bet in bets if bet.status != "open"]
+        )
     return [bet_item(bet, contexts[bet.id], players, after.get(bet.id)) for bet in bets]
 
 
@@ -1113,7 +1124,7 @@ def _csv_rows(item: BetItemOut, zone: Any) -> Iterable[list[str]]:
 
 
 # Ставок в одной части выгрузки: между частями цикл событий обслуживает другие запросы
-_CSV_CHUNK = 50
+_CSV_CHUNK = 200
 
 
 def _csv_text(rows: Iterable[list[str]]) -> str:
@@ -1138,8 +1149,10 @@ async def export_csv(
 
     async def chunks() -> AsyncIterator[str]:
         yield "\ufeff" + _csv_text([[t(f"bets.csv.{column}") for column in CSV_COLUMNS]])
+        # «Банк после» — одним запросом на все ставки: он идет по всему журналу
+        after = await equity_after_bets(db, user.id, ids)
         for start in range(0, len(ids), _CSV_CHUNK):
-            items = await bet_items(db, user, ids[start : start + _CSV_CHUNK])
+            items = await bet_items(db, user, ids[start : start + _CSV_CHUNK], after=after)
             yield _csv_text(row for item in items for row in _csv_rows(item, zone))
             await asyncio.sleep(0)
 

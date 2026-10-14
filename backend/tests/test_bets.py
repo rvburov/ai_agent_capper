@@ -10,10 +10,10 @@ from typing import Any
 
 import pytest
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.db.models import Analysis, BankrollLedger, Bet, BetLeg
+from app.db.models import Analysis, BankrollLedger, Bet, BetLeg, Bookmaker
 from tests.analysis_helpers import install, make_analysis, run, seed_world, set_admin_key
 from tests.claude_mock import seed_prices
 from tests.fake_claude import FakeClaude
@@ -97,6 +97,13 @@ async def test_bet_with_initial_bank_and_repeat(
     body = _bet(analysis)
     # Участник поправил кэф первой ноги: итоговый кэф — произведение фактических
     body["legs"][0]["odds_taken"] = "1.28"
+    # Букмекер анализа скрыт до ставки: ставка возвращает его в список (скрытый — без ставок
+    # в игре)
+    await db.execute(
+        update(Bookmaker).where(Bookmaker.user_id == member.id).values(archived_at=func.now())
+    )
+    await db.commit()
+    assert (await member.client.get("/api/me/bookmakers")).json() == []
     response = await member.client.post("/api/bets", json=body)
     assert response.status_code == 201, response.text
     bet = response.json()

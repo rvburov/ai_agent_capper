@@ -10,10 +10,13 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from app.schemas.bets import PlayerRefOut
 from app.schemas.dashboard import ArchiveSourceOut, MyMatchBetOut
+
+# Знаков у долей (как _SHARE_DIGITS карточки игрока)
+SHARE_DIGITS = 4
 
 
 class PlayerHitOut(BaseModel):
@@ -105,7 +108,8 @@ class PlayerRankingOut(BaseModel):
     news сужает до игроков со свежими новостями); fuzzy — точных совпадений нет, найдено
     с учетом опечаток. total — сколько всего по условиям. as_of — день расчета текущего
     Эло, rank_days — окно места по Эло, news_ttl_hours — сколько новости считаются
-    свежими."""
+    свежими. sackmann — в базе есть турниры архива Сакманна (на экране — строка авторства
+    CC BY-NC-SA, как в карточке)."""
 
     items: list[PlayerRowOut]
     total: int
@@ -121,6 +125,7 @@ class PlayerRankingOut(BaseModel):
     rank_days: int
     news_ttl_hours: int
     archive: ArchiveInfoOut
+    sackmann: bool
 
 
 # --- карточка игрока ---
@@ -187,21 +192,47 @@ class ServeMetricsOut(BaseModel):
     bp_saved: float | None
 
 
+class ServeDiffOut(BaseModel):
+    """Игрок минус тур по каждой метрике ServeMetricsOut (доли — в долях, 4 знака; эйсы и
+    двойные — за матч); null — у игрока или тура этой метрики нет."""
+
+    first_in: float | None
+    first_won: float | None
+    second_won: float | None
+    aces_per_match: float | None
+    double_faults_per_match: float | None
+    first_return_won: float | None
+    second_return_won: float | None
+    bp_converted: float | None
+    bp_saved: float | None
+
+
 class ServeOut(BaseModel):
     """Подача и прием за 52 недели до последнего дня со статистикой в архиве (period_to;
     статистика есть только в архиве Сакманна) против среднего по туру — игроков из первых
-    tour_players по месту по Эло, суммами за то же окно."""
+    tour_players по месту по Эло, суммами за то же окно. diff — разница с туром по каждой
+    метрике (null — нет игрока или тура)."""
 
     period_from: date
     period_to: date
     player: ServeMetricsOut | None
     tour: ServeMetricsOut | None
     tour_players: int
+    diff: ServeDiffOut | None
 
 
 class WinLossOut(BaseModel):
+    """Победы и поражения; win_share — доля побед (0…1, 4 знака; null — матчей нет)."""
+
     wins: int
     losses: int
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def win_share(self) -> float | None:
+        # Доля всегда из wins и losses: в ответе есть всегда
+        played = self.wins + self.losses
+        return round(self.wins / played, SHARE_DIGITS) if played > 0 else None
 
 
 class SurfaceResultOut(WinLossOut):
@@ -255,9 +286,15 @@ class TodayOut(BaseModel):
     его место по Эло, ноги своих открытых ставок, свои анализы; surface — покрытие
     турнира (null — неизвестно); elo_prob — вероятность победы игрока по текущему Эло
     (вес покрытия как у модели, без калибровки) — входная точка, не прогноз; h2h — личные
-    встречи."""
+    встречи. side — сторона игрока в матче (1 — первый, 2 — второй, как selection ноги
+    ставки: нога на победу игрока — market ML и selection = side). elo и opponent_elo —
+    текущее Эло игрока и соперника на покрытии матча (покрытие неизвестно — общее;
+    null — нет в таблице текущего Эло)."""
 
     match_id: int
+    side: Literal[1, 2] | None
+    elo: int | None
+    opponent_elo: int | None
     opponent: PlayerRefOut
     opponent_rank: int | None
     tournament: str | None
@@ -364,11 +401,16 @@ class PlayerNewsItemOut(BaseModel):
 
 
 class PlayerNewsOut(BaseModel):
-    """Новости игрока за lookback_days, новые сверху, страницами. next_before — курсор."""
+    """Новости игрока за lookback_days, новые сверху, страницами. next_before — курсор.
+    checked_model — модель шага новостей, который проверил новости последним (null —
+    не проверялись или запись о вызове не найдена); checked_analysis_id — номер вашего
+    анализа, в котором это было (анализ другого участника не называется: null)."""
 
     items: list[PlayerNewsItemOut]
     next_before: int | None
     checked_at: datetime | None
+    checked_model: str | None
+    checked_analysis_id: int | None
     fresh: bool
     ttl_hours: int
     lookback_days: int

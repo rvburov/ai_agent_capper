@@ -108,7 +108,11 @@ class AdminBudgetOut(BaseModel):
     members_limits_usd — сумма месячных лимитов участников на ключе администратора.
     members_usd — из spent_usd вызовы участников (не администраторов). budget_share —
     spent_usd к бюджету (доля; пусто — бюджет 0). eval_* — отдельный бюджет проверочных
-    прогонов (eval и теневые, Р22)."""
+    прогонов (eval и теневые, Р22). forecast_share — forecast_usd к бюджету (пусто —
+    бюджет 0); per_day_usd — средний расход в день с 1-го числа (UTC, сегодня включая);
+    can_per_day_usd — сколько можно тратить в день до конца месяца (включая сегодня),
+    чтобы уложиться в остаток; alert_usd — сумма, на которой приходит уведомление
+    (бюджет × alert_pct %)."""
 
     month_start: datetime
     days_in_month: int
@@ -125,6 +129,10 @@ class AdminBudgetOut(BaseModel):
     alert_pct: int
     eval_budget_usd: UsdOut
     eval_spent_usd: UsdOut
+    forecast_share: float | None
+    per_day_usd: UsdOut
+    can_per_day_usd: UsdOut
+    alert_usd: UsdOut
 
 
 class OwnKeyInfoOut(BaseModel):
@@ -147,7 +155,12 @@ class AiBudgetOut(BaseModel):
     законченного анализа за месяц на ключе этого режима (пусто — анализов нет).
     reason_code — почему новый анализ сейчас не запустится (ключ errors.<код> и
     reason_params), пусто — запустится. budget — общий бюджет, только администратору.
-    limit_share — spent_usd к месячному лимиту (доля; пусто — личного лимита нет)."""
+    limit_share — spent_usd к месячному лимиту (доля; пусто — личного лимита нет).
+    Темп месяца, как у бюджета администратора: per_day_usd — средний расход в день с
+    1-го числа; forecast_usd — прогноз на конец месяца (с личным лимитом — не выше
+    лимита, на паузе — потрачено); forecast_share, can_per_day_usd (сколько можно в
+    день до конца месяца, включая сегодня) и alert_usd (лимит × alert_pct %) — пустые
+    без личного лимита."""
 
     mode: AiMode
     key_source: KeySource
@@ -172,6 +185,11 @@ class AiBudgetOut(BaseModel):
     reason_code: str | None
     reason_params: dict[str, Any]
     budget: AdminBudgetOut | None
+    per_day_usd: UsdOut
+    forecast_usd: UsdOut
+    forecast_share: float | None
+    can_per_day_usd: UsdOut | None
+    alert_usd: UsdOut | None
 
 
 class BudgetIn(BaseModel):
@@ -250,7 +268,10 @@ class MemberLimitOut(BaseModel):
     spent_month_usd — расход за месяц на ключе администратора, own_spent_month_usd —
     на своем ключе (вне общего бюджета); без проверочных прогонов. analyses_today — на
     ключе администратора с полуночи в поясе участника. return_requested_at — участник
-    просит вернуть ключ администратора (Р12)."""
+    просит вернуть ключ администратора (Р12). level — пройденный порог лимита на ключе
+    администратора по правилу дел администратора (AdminAttentionOut.limits): 80 —
+    alert_pct, 100 — остатка не хватает на анализ; пусто — порог не пройден, участник на
+    своем ключе или администратор."""
 
     id: int
     display_name: str
@@ -266,6 +287,7 @@ class MemberLimitOut(BaseModel):
     analyses_today: int
     analyses_month: int
     return_requested_at: datetime | None
+    level: Literal["80", "100"] | None
 
 
 class AdminLimitsOut(BaseModel):
@@ -435,7 +457,10 @@ class AiUsageOut(BaseModel):
     прогноз на конец месяца по темпу (участник на ключе администратора — не выше лимита,
     на паузе — потрачено); у прошедшего месяца — итог. analyses_left — на сколько
     анализов по admin_key_avg_usd хватит остатка лимита (left_usd в GET /ai/budget;
-    только участник на ключе администратора в текущем месяце)."""
+    только участник на ключе администратора в текущем месяце); 0 — остатка меньше
+    самого маленького вызова оценки (анализ не запустится). pace_usd — темп под лимит:
+    месячный лимит участника (у администратора — бюджет ключа) на дни месяца; пусто —
+    на своем ключе лимита нет. Лимит и бюджет — сегодняшние (истории лимитов нет)."""
 
     month: str
     month_start: date
@@ -461,6 +486,7 @@ class AiUsageOut(BaseModel):
     admin_key_avg_usd: UsdOut | None
     forecast_usd: UsdOut
     analyses_left: int | None
+    pace_usd: UsdOut | None
     prices: list[ModelPriceOut]
     settings: AgentSettingsOut
 
@@ -538,7 +564,8 @@ class PersonUsageOut(BaseModel):
     key_spent_usd — на ключе администратора, own_spent_usd — на своем (вне бюджета);
     analyses — анализы на ключе администратора, own_analyses — на своем. limit_usd —
     месячный лимит (пусто у администратора); budget_share и limit_share — доля бюджета
-    и лимита."""
+    и лимита; spent_share — доля в расходе ключа администратора за месяц (spent_usd
+    AdminAiUsageOut; пусто — ключ ничего не потратил)."""
 
     user_id: int
     display_name: str
@@ -553,6 +580,7 @@ class PersonUsageOut(BaseModel):
     paused: bool
     budget_share: float | None
     limit_share: float | None
+    spent_share: float | None
 
 
 class TaskUsageOut(BaseModel):
@@ -567,13 +595,15 @@ class TaskUsageOut(BaseModel):
 
 
 class SharedUsageOut(BaseModel):
-    """Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke)."""
+    """Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke).
+    spent_share — доля в расходе ключа за месяц."""
 
     runs: int
     cost_usd: UsdOut
     cache_share: float | None
     budget_share: float | None
     kinds: list[str]
+    spent_share: float | None
 
 
 class EvalRunUsageOut(BaseModel):
@@ -604,7 +634,10 @@ class AdminAiUsageOut(BaseModel):
     без проверок (как бюджет), из него shared — общие задачи; own_key_usd — участники на
     своих ключах (вне бюджета). analyses — анализы на ключе администратора за месяц,
     avg_analysis_usd — средняя цена законченного. cache_share — по всем вызовам ключа
-    администратора без проверок. Р14: ни анализов, ни ввода, ни ставок участников."""
+    администратора без проверок. Р14: ни анализов, ни ввода, ни ставок участников.
+    others_* — «остальные» в «Кто тратит» (тратившие ключ, по убыванию расхода: при
+    больше чем 4 таких людях первые 3 показываются строками, прочие — одной строкой):
+    их id по порядку, число и сумма на ключе."""
 
     month: str
     month_start: date
@@ -623,3 +656,6 @@ class AdminAiUsageOut(BaseModel):
     shared: SharedUsageOut
     tasks: list[TaskUsageOut]
     eval: EvalUsageOut
+    others_ids: list[int]
+    others_count: int
+    others_usd: UsdOut

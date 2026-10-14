@@ -64,6 +64,14 @@ from app.core.errors import AppError
 from app.core.i18n import has_key, t
 from app.db.base import Base
 from app.db.models import IngestionRun, Match, Player, PlayerEloCurrent, Tournament, User
+from app.db.models.tennis import (
+    NAME_YE,
+    NAME_YO,
+    SKELETON_FROM,
+    SKELETON_TO,
+    plain_name_form,
+    skel_name_form,
+)
 from app.ingest.names import fold, has_cyrillic, translit_ru
 from app.ingest.sackmann import GENERIC_CATEGORY, PROMOTE_AFTER, PROMOTE_BEFORE
 from app.ml.elo import CURRENT_DAYS
@@ -83,8 +91,8 @@ UNMATCHED_SOURCES = ("sackmann", "tennis_data", "players_link")
 UNMATCHED_LIMIT_MAX = 1000
 
 # «е с двумя точками» (строчная и заглавная) → «е» в SQL: translate(value, :yo, :ye)
-_YO = "\u0451\u0401"
-_YE = "еЕ"
+_YO = NAME_YO
+_YE = NAME_YE
 # «Латинская» транслитерация: так пишутся имена сербов, хорватов, португальцев,
 # французов (Djokovic, Cilic, Joao, Aliassime). Сначала сочетания, потом буквы
 _ALT_PAIRS = (("дж", "dj"), ("ья", "ia"), ("ье", "ie"), ("ью", "iu"), ("ьо", "io"))
@@ -94,8 +102,8 @@ _ALT_LETTERS = str.maketrans(
 # Упрощенное написание латиницы: буквы, которые путаются при переводе имени с русского
 # и обратно, сводятся к одной (Алькарас → alkaras ↔ Alcaraz → alkaras; Вавринка ↔
 # Wawrinka; Кобболи ↔ Cobolli). Та же замена — в SQL (translate) для имен из базы
-_SKELETON_FROM = "cqzwyj"
-_SKELETON_TO = "kksvii"
+_SKELETON_FROM = SKELETON_FROM
+_SKELETON_TO = SKELETON_TO
 _SKELETON = str.maketrans(_SKELETON_FROM, _SKELETON_TO)
 # Совпадение только упрощенного написания чуть ниже точного: точное имя — выше
 SKELETON_WEIGHT = 0.99
@@ -176,22 +184,46 @@ class _Score:
         return f"alias: {self.value}" if self.field == "alias" else self.field
 
 
+# Формы имен для сравнения — те же выражения, что у индексов триграмм миграции 0006
+# (app/db/models/tennis.py): по ним находятся кандидаты (операторы % и <%), и сходство
+# считается только для них, а не для всех 2 800 игроков. Константы — в тексте запроса:
+# индекс по выражению подходит только к тому же выражению, с параметром он не совпадет
+def _candidates_sql() -> str:
+    """Игроки, у которых какая-то форма имени похожа на вариант запроса не меньше порога
+    (similarity или word_similarity — пороги pg_trgm ставит _scores), и все игроки с
+    псевдонимами (их единицы)."""
+    parts = []
+    for column in ("name", "name_ru"):
+        field = f"p.{column}"
+        for skel, form in ((False, plain_name_form(field)), (True, skel_name_form(field))):
+            kind = "v.skel" if skel else "NOT v.skel"
+            parts.append(f"SELECT p.id FROM players AS p JOIN v ON {kind} AND {form} % v.q")
+            parts.append(f"SELECT p.id FROM players AS p JOIN v ON {kind} AND v.q <% {form}")
+    parts.append("SELECT id FROM players WHERE cardinality(aliases) > 0")
+    return "\n    UNION\n    ".join(parts)
+
+
 # Лучшее совпадение каждого игрока по всем вариантам запроса и всем его именам: как
 # есть и в упрощенном написании (skel). Сортировка: оценка, сходство строки целиком
 # (точное имя выше вхождения), число матчей
 _SCORES_SQL = text(
-    """
+    f"""
 WITH v AS (
     SELECT q, false AS skel FROM unnest(CAST(:variants AS text[])) AS q
     UNION
     SELECT q, true FROM unnest(CAST(:skeletons AS text[])) AS q
 ),
+cand AS (
+    {_candidates_sql()}
+),
 f AS (
-    SELECT id, 'name' AS field, name AS value FROM players
+    SELECT id, 'name' AS field, name AS value FROM players WHERE id IN (SELECT id FROM cand)
     UNION ALL
-    SELECT id, 'name_ru', name_ru FROM players WHERE name_ru IS NOT NULL
+    SELECT id, 'name_ru', name_ru FROM players
+    WHERE name_ru IS NOT NULL AND id IN (SELECT id FROM cand)
     UNION ALL
     SELECT p.id, 'alias', a.value FROM players AS p CROSS JOIN LATERAL unnest(p.aliases) AS a(value)
+    WHERE p.id IN (SELECT id FROM cand)
 ),
 w AS (
     SELECT f.id, f.field, f.value, v.q, v.skel,
@@ -221,6 +253,12 @@ ORDER BY best.score DESC, best.full_score DESC, matches DESC, best.id
 LIMIT :limit
 """
 )
+# Пороги операторов % и <% (pg_trgm) на время транзакции: не выше порога оценки, чтобы
+# кандидаты включали всех, кто его проходит (у упрощенного написания оценка ниже — вес)
+_THRESHOLDS_SQL = text(
+    "SELECT set_config('pg_trgm.similarity_threshold', :value, true),"
+    " set_config('pg_trgm.word_similarity_threshold', :value, true)"
+)
 
 
 async def _scores(
@@ -228,6 +266,7 @@ async def _scores(
 ) -> list[_Score]:
     if not variants:
         return []
+    await db.execute(_THRESHOLDS_SQL, {"value": str(threshold)})
     rows = await db.execute(
         _SCORES_SQL,
         {
@@ -1593,4 +1632,5 @@ async def ranking(
         rank_days=CURRENT_DAYS,
         news_ttl_hours=config.news_ttl_hours,
         archive=await player_card.archive_info(db, now),
+        sackmann=bool(await db.scalar(select(exists().where(Tournament.source == _SACKMANN)))),
     )

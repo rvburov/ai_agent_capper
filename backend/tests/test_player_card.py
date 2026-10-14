@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.db.models import (
     AdminAuditLog,
+    AgentRun,
     Analysis,
     Bet,
     BetLeg,
@@ -117,14 +118,19 @@ async def test_card_header_and_overview(
         "hard": (2, 1),
         "clay": (1, 0),
     }
-    assert results["total"] == {"wins": 3, "losses": 1}
+    # Доля побед считает сервер (4 знака; без матчей — null)
+    assert results["total"] == {"wins": 3, "losses": 1, "win_share": 0.75}
+    assert {item["surface"]: item["win_share"] for item in results["surfaces"]} == {
+        "hard": round(2 / 3, 4),
+        "clay": 1.0,
+    }
     # 52 недели: против десятки по Эло — все соперники; решающие сеты — полуфинал хард-турнира
     # (3 сета до двух побед) и четвертьфинал грунта (5 до трех); тай-брейки 1–1
     key = body["key_matches"]
     assert key["since"] == ago(363)
-    assert key["top10"] == {"wins": 3, "losses": 1}
-    assert key["deciders"] == {"wins": 2, "losses": 0}
-    assert key["tiebreaks"] == {"wins": 1, "losses": 1}
+    assert key["top10"] == {"wins": 3, "losses": 1, "win_share": 0.75}
+    assert key["deciders"] == {"wins": 2, "losses": 0, "win_share": 1.0}
+    assert key["tiebreaks"] == {"wins": 1, "losses": 1, "win_share": 0.5}
     assert body["news"] == {
         "checked_at": None,
         "fresh": False,
@@ -185,7 +191,7 @@ async def test_card_window_edges(
     assert key["since"] == ago(363)
     # Все соперники — в десятке по Эло: ключевые матчи — все матчи окна
     assert key["top10"]["wins"] + key["top10"]["losses"] == body["matches_52w"]
-    assert key["top10"] == {"wins": 7, "losses": 1}
+    assert key["top10"] == {"wins": 7, "losses": 1, "win_share": 0.875}
     assert (body["form"]["matches_14d"], body["form"]["rest_days"]) == (2, 0)
 
 
@@ -213,8 +219,18 @@ async def test_card_serve_against_tour(
     tour = serve["tour"]
     assert tour["matches"] == 6
     assert tour["first_in"] == round((133 + 128) / (205 + 200), 4)
+    # Разница с туром по каждой метрике — игрок минус тур, без matches
+    diff = serve["diff"]
+    assert set(diff) == set(serve["player"]) - {"matches"}
+    for name, value in diff.items():
+        mine, theirs = serve["player"][name], tour[name]
+        if mine is None or theirs is None:
+            assert value is None
+        else:
+            assert value == round(mine - theirs, 4)
     no_stats = (await member.client.get(f"/api/players/{world.veteran}")).json()["serve"]
     assert no_stats["player"] is None and no_stats["tour"] == tour
+    assert no_stats["diff"] is None
 
 
 async def test_card_today_only_from_own_bets(
@@ -239,6 +255,12 @@ async def test_card_today_only_from_own_bets(
     assert item["analyses"] == [analysis_id]
     assert item["tournament"] == "Мой турнир"
     assert 0 < item["elo_prob"] < 1
+    # Сторона игрока в матче (как selection ноги) и Эло обоих на покрытии матча
+    assert item["side"] == 1
+    assert isinstance(item["elo"], int) and isinstance(item["opponent_elo"], int)
+    [mirror] = (await owner.client.get(f"/api/players/{world.alcaraz}")).json()["today"]
+    assert mirror["side"] == 2
+    assert (mirror["elo"], mirror["opponent_elo"]) == (item["opponent_elo"], item["elo"])
     # Личные встречи: хард-турнир 1–1 и грунт 1–0 в пользу Sinner
     assert item["h2h"] == {
         "wins": 2,
@@ -357,9 +379,11 @@ async def test_card_today_surface_only_from_own_input(
     assert mine["analyses"] == []
     # На харде первый слабее: 1500 против 1700 на покрытии
     assert mine["elo_prob"] < 0.5
+    assert (mine["elo"], mine["opponent_elo"]) == (1500, 1700)
     [hers] = (await alice.client.get(f"/api/players/{first.id}")).json()["today"]
     assert (hers["surface"], hers["tournament"], hers["bets"]) == ("clay", "Турнир Алисы", [])
     assert hers["elo_prob"] > 0.5
+    assert (hers["elo"], hers["opponent_elo"]) == (1800, 1500)
 
 
 async def test_card_legacy_profile_and_missing_player(
@@ -398,8 +422,8 @@ async def test_matches_pages_and_summary(
     assert first["next_before"] == world.matches["hard_sf"]
     summary = first["summary"]
     assert (summary["played"], summary["wins"], summary["best_of_5"]) == (4, 3, 1)
-    assert summary["tiebreaks"] == {"wins": 1, "losses": 1}
-    assert summary["deciders"] == {"wins": 2, "losses": 0}
+    assert summary["tiebreaks"] == {"wins": 1, "losses": 1, "win_share": 0.5}
+    assert summary["deciders"] == {"wins": 2, "losses": 0, "win_share": 1.0}
 
     url = f"/api/players/{world.sinner}/matches?limit=2&before={first['next_before']}"
     second = (await member.client.get(url)).json()
@@ -572,3 +596,73 @@ async def test_tour_average_follows_data_version(
     started = time.monotonic()
     monkeypatch.setattr(player_card, "_clock", lambda: started + player_card.TOUR_CACHE_TTL + 1)
     assert await tour_first_in() == 1.0
+
+
+async def test_news_checked_by_model_and_own_analysis(
+    world: PlayersWorld,
+    db: AsyncSession,
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+) -> None:
+    """Последняя проверка новостей: модель шага новостей и номер анализа — только своего;
+    чужой анализ не называется, вызов вне окна до отметки не считается."""
+    owner = await signed_in(make_client, make_user, login, ip="10.0.0.4")
+    other = await signed_in(make_client, make_user, login, ip="10.0.0.5")
+    before = (await owner.client.get(f"/api/players/{world.sinner}/news")).json()
+    assert (before["checked_model"], before["checked_analysis_id"]) == (None, None)
+
+    event = ConfirmedEvent(
+        position=1,
+        player1_id=world.alcaraz,
+        player2_id=world.sinner,
+        surface="hard",
+        best_of=3,
+        round="",
+        odds={},
+        bookmaker="Fonbet",
+        tournament_name="Новости",
+    )
+    row = Analysis(
+        user_id=owner.id,
+        input_text="",
+        input_kind="form",
+        status="done",
+        confirmed={"bank": None, "bookmaker": "Fonbet", "events": [event.to_json()]},
+    )
+    db.add(row)
+    await db.flush()
+    checked = datetime.now(UTC)
+    db.add_all(
+        [
+            # Старый вызов вне окна — не он
+            AgentRun(
+                user_id=owner.id,
+                key_source="admin",
+                kind="news",
+                model="claude-haiku-old",
+                analysis_id=row.id,
+                created_at=checked - player_card.NEWS_RUN_WINDOW - timedelta(minutes=1),
+            ),
+            AgentRun(
+                user_id=owner.id,
+                key_source="admin",
+                kind="news",
+                model="claude-sonnet-news",
+                analysis_id=row.id,
+                created_at=checked - timedelta(seconds=30),
+            ),
+        ]
+    )
+    await db.execute(
+        update(Player).where(Player.id == world.sinner).values(news_checked_at=checked)
+    )
+    await db.commit()
+
+    mine = (await owner.client.get(f"/api/players/{world.sinner}/news")).json()
+    assert (mine["checked_model"], mine["checked_analysis_id"]) == ("claude-sonnet-news", row.id)
+    theirs = (await other.client.get(f"/api/players/{world.sinner}/news")).json()
+    assert (theirs["checked_model"], theirs["checked_analysis_id"]) == ("claude-sonnet-news", None)
+    # Игрок не из анализа: вызов к нему не относится
+    rival = (await owner.client.get(f"/api/players/{world.veteran}/news")).json()
+    assert rival["checked_model"] is None

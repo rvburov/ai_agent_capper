@@ -14,10 +14,10 @@ router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(requir
 
 
 @router.get("/messages")
-async def list_messages(db: DbSession) -> MessagesOut:
+async def list_messages(db: DbSession, admin: AdminUser) -> MessagesOut:
     """Отправленные сообщения, новые сверху (не больше 50): кому, текст, когда, сколько
-    получили, кто отправил."""
-    return await admin_messages.history(db)
+    получили, кто отправил; recipients_all — сколько получит сообщение «всем» сейчас."""
+    return await admin_messages.history(db, sender=admin)
 
 
 @router.post("/messages", status_code=status.HTTP_201_CREATED)

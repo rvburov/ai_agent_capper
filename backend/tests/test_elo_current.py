@@ -22,6 +22,7 @@ from app.ml.elo import (
     rebuild_ratings,
     refresh_current,
 )
+from app.services import analysis_input
 from app.services.analysis_input import ELO_RANK_DAYS, elo_ranks, last_match_days
 from tests.ml_world import small_world, store_world
 
@@ -204,3 +205,41 @@ async def test_elo_current_command(
     ranked = sum(1 for row in rows if row[9] is not None)
     out = capsys.readouterr().out
     assert t("cli.elo_current_done", players=24, ranked=ranked) in out
+
+
+async def test_ranks_for_today_come_from_current_table(
+    db: AsyncSession, factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Место по Эло на сегодня (подсказки игроков, ввод анализа) — из player_elo_current,
+    если ее посчитали вчера или сегодня: таблица на день as_of — место на конец этого дня,
+    то есть по матчам на as_of + 1. На прошлую дату и при старой таблице — по матчам."""
+    world = small_world()
+    await store_world(db, world)
+    final = max(match.day for match in world.matches)
+    rows = list(await db.scalars(select(Player.id)))
+
+    async def by_matches(day: date) -> dict[int, int]:
+        return await analysis_input._ranks_by_matches(db, rows, day)
+
+    # Ночное обновление шло сегодня (матчи сегодняшнего дня уже в базе): место на конец дня
+    await rebuild_ratings(db_factory=factory, today=final)
+    end_of_final = await by_matches(final + timedelta(days=1))
+    assert end_of_final != await by_matches(final)  # сдвиг на день заметен в этом мире
+    monkeypatch.setattr(analysis_input, "_utc_today", lambda: final)
+    assert await elo_ranks(db, rows) == end_of_final
+    # Обновление шло вчера, сегодня матчей еще нет: место на начало сегодня — как по матчам
+    monkeypatch.setattr(analysis_input, "_utc_today", lambda: final + timedelta(days=1))
+    assert await elo_ranks(db, rows) == end_of_final
+
+    # Читается именно таблица, а на прошлую дату — нет
+    marked = next(iter(end_of_final))
+    await db.execute(
+        update(PlayerEloCurrent).where(PlayerEloCurrent.player_id == marked).values(rank_all=999)
+    )
+    await db.commit()
+    assert (await elo_ranks(db, rows))[marked] == 999
+    assert await elo_ranks(db, rows, today=final) == await by_matches(final)
+    # Таблицу давно не считали — место по матчам
+    await db.execute(update(PlayerEloCurrent).values(as_of=final - timedelta(days=2)))
+    await db.commit()
+    assert await elo_ranks(db, rows) == end_of_final

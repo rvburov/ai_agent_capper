@@ -272,6 +272,25 @@ async def warm_analytics(ctx: dict[Any, Any], user_id: int) -> list[str]:
     return warmed
 
 
+async def warm_new_day(ctx: dict[Any, Any]) -> list[int]:
+    """Задача arq (cron раз в час): прогреть «Аналитику» и главную тем, у кого по их поясу
+    начались новые сутки (analytics_cache.new_day_users): первое открытие за день не ждет
+    расчета. По одному участнику подряд — расчет занимает процессор. Возвращает id."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        users = await analytics_cache.new_day_users(db)
+    redis = create_redis()
+    try:
+        for user_id in users:
+            async with sessionmaker() as db:
+                await warm_user_analytics(db, redis, user_id)
+    finally:
+        await redis.aclose()
+    if users:
+        log.info("worker.warm_new_day", users=users)
+    return users
+
+
 # --- удаление аккаунтов и сигналы расхода (этап 4) ---
 
 

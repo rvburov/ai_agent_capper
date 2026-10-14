@@ -41,8 +41,10 @@ from app.schemas.admin import (
     TotpConfirmIn,
     UserDeleteIn,
 )
-from app.services import access_codes, admin_activity, admin_users, analytics_cache
+from app.schemas.dashboard import AdminAttentionOut
+from app.services import access_codes, admin_activity, admin_users, analytics_cache, dashboard
 from app.services.admin_confirm import TotpConfirm
+from app.services.sessions import utcnow
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -67,6 +69,14 @@ async def list_users(db: DbSession, include_deleted: bool = False) -> list[Admin
     """Участники: учетная запись, расход на ИИ за месяц и лимит. Удаленные —
     только с include_deleted=true."""
     return await admin_users.list_users(db, include_deleted=include_deleted)
+
+
+@router.get("/attention")
+async def get_attention(db: DbSession) -> AdminAttentionOut:
+    """Дела администратора — то же, что admin на главной (архив устарел, просьбы вернуть
+    ключ, участники у лимита), без остальной главной: для точки у пункта меню и вкладки
+    «Обзор»."""
+    return await dashboard.admin_attention(db, utcnow())
 
 
 @router.get("/activity")

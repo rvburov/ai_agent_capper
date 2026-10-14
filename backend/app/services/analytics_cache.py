@@ -26,6 +26,12 @@
 ждет в очереди или идет, не ставится (тот же id задачи, отложена на WARM_DELAY); если
 данные изменились, пока задача считала, она считает еще раз (app/workers/jobs.py).
 Прогрев — только ускорение: если Redis или очередь недоступны, экран посчитает сам.
+
+Новые сутки по поясу участника тоже дают новый ключ (периоды считаются от сегодня), и
+первое открытие «Аналитики» за день считало бы ее с нуля. Поэтому воркер раз в час
+прогревает тех, у кого по их поясу только что наступила полночь (new_day_users): активных
+(сеанс за NEW_DAY_ACTIVE_DAYS дней) и с журналом банка. Цена — один расчет на участника в
+сутки, около 0,1–0,5 с на сотни ставок и 3 с на 10 тыс.
 """
 
 import asyncio
@@ -59,6 +65,7 @@ from app.db.models import (
     Prediction,
     StrategyVersion,
     User,
+    UserSession,
 )
 from app.services.app_settings import get_app_settings
 from app.services.bank import local_today, user_zone
@@ -82,6 +89,8 @@ LOCK_POLL_SECONDS = 0.1
 LOCK_WAIT_SECONDS = 30.0
 # Метка удаленного участника: ответы, посчитанные после удаления, не записываются
 GONE_TTL = timedelta(days=1)
+# Ночной прогрев: только тех, кто заходил за столько дней
+NEW_DAY_ACTIVE_DAYS = 14
 
 # Модули, от кода которых зависят числа и форма ответа: их исходники входят в версию
 _CODE_MODULES = (
@@ -329,6 +338,12 @@ async def clear_user(redis: Redis, user_id: int) -> int:
     """Удалить все ответы участника (удаление аккаунта). Сначала метка удаления: расчет,
     который идет сейчас, свой ответ уже не запишет. Возвращает число ключей."""
     await redis.set(_gone_key(user_id), "1", ex=GONE_TTL)
+    return await forget_user(redis, user_id)
+
+
+async def forget_user(redis: Redis, user_id: int) -> int:
+    """Удалить ответы участника из кэша без метки удаления: следующий запрос посчитает
+    заново и запишет (замер холодного кэша, app/admin/perf_measure.py)."""
     removed = 0
     batch: list[str] = []
     async for key in redis.scan_iter(match=f"{_prefix(user_id)}:*", count=_SCAN_COUNT):
@@ -360,3 +375,24 @@ async def request_warm(user_id: int) -> None:
         await asyncio.wait_for(enqueue(), timeout=WARM_TIMEOUT_SECONDS)
     except (TimeoutError, OSError, RedisError) as exc:
         log.warning("analytics.warm_enqueue_failed", user_id=user_id, error=str(exc))
+
+
+async def new_day_users(db: AsyncSession, now: datetime | None = None) -> list[int]:
+    """Участники, у которых по их поясу сейчас первый час новых суток: активные (сеанс
+    за NEW_DAY_ACTIVE_DAYS дней) и с журналом банка — им ночной прогрев (задача воркера
+    warm_new_day раз в час)."""
+    moment = now or utcnow()
+    seen = (
+        select(UserSession.id)
+        .where(
+            UserSession.user_id == User.id,
+            UserSession.revoked_at.is_(None),
+            UserSession.last_seen_at >= moment - timedelta(days=NEW_DAY_ACTIVE_DAYS),
+        )
+        .exists()
+    )
+    has_bank = select(BankrollLedger.id).where(BankrollLedger.user_id == User.id).exists()
+    rows = await db.execute(
+        select(User.id, User.tz).where(User.status == "active", seen, has_bank).order_by(User.id)
+    )
+    return [int(user_id) for user_id, tz in rows if moment.astimezone(user_zone(tz)).hour == 0]

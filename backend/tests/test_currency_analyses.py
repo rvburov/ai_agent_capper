@@ -38,6 +38,8 @@ from tests.support import ClientFactory, LoginFn, TotpCodeFn, UserFactory
 
 D = Decimal
 URL = "/api/admin/settings/currency"
+# Окно смены считает от рублей — валюты программы в начале каждого теста
+FROM_RUB = {"from_currency": "RUB"}
 
 
 @pytest.fixture
@@ -69,7 +71,9 @@ def step_gate() -> Iterator[_StepGate]:
 async def _change(
     admin: Signed, totp_code: TotpCodeFn, currency: str = "EUR", base: str = "EUR"
 ) -> dict[str, Any]:
+    current = (await admin.client.get("/api/admin/settings")).json()["currency"]
     body = {
+        "from_currency": current,
         "currency": currency,
         "rate": "95",
         "rate_base": base,
@@ -266,7 +270,7 @@ async def test_bank_warning_amounts_converted(
     )
     assert await run(engine, redis, analysis_id) == "done"
     preview = await admin.client.put(
-        URL, json={"currency": "EUR", "rate": "95", "rate_base": "EUR", "preview": True}
+        URL, json={**FROM_RUB, "currency": "EUR", "rate": "95", "rate_base": "EUR", "preview": True}
     )
     # Анализ с суммами один: банк из ввода, рекомендация и предупреждение — в нем
     assert preview.json()["analyses"] == 1
@@ -308,7 +312,7 @@ async def test_rounding_correction_keeps_bank(
     )
     await db.commit()
     preview = await admin.client.put(
-        URL, json={"currency": "EUR", "rate": "95", "rate_base": "EUR", "preview": True}
+        URL, json={**FROM_RUB, "currency": "EUR", "rate": "95", "rate_base": "EUR", "preview": True}
     )
     assert preview.status_code == 200 and preview.json()["corrections"] == 2
     result = await _change(admin, totp_code)
@@ -342,21 +346,29 @@ async def test_rounding_correction_keeps_bank(
 
 
 async def test_overflow_refusal_hides_member_amount(
-    make_client: ClientFactory, make_user: UserFactory, login: LoginFn, db: AsyncSession
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    db: AsyncSession,
+    totp_code: TotpCodeFn,
 ) -> None:
-    """Р14: отказ «не поместится» не раскрывает сумму участника, в том числе в
-    предпросмотре без 2FA."""
+    """Р14: сумма участника не видна ни в предпросмотре без 2FA (только признак overflow),
+    ни в отказе смены; курс выше 1 000 не принимается: подбором курса сумму не узнать."""
     admin = await admin_signed_in(make_client, make_user, login)
     member = await make_user()
-    db.add(BankrollLedger(user_id=member.id, kind="deposit", amount=D("734512.37"), currency="RUB"))
+    hidden = D("12345678.37")
+    db.add(BankrollLedger(user_id=member.id, kind="deposit", amount=hidden, currency="RUB"))
     await db.commit()
-    response = await admin.client.put(
-        URL,
-        json={"currency": "USD", "rate": "1000000", "rate_base": "RUB", "preview": True},
-    )
+    body = {**FROM_RUB, "currency": "USD", "rate": "1000", "rate_base": "RUB"}
+    huge = await admin.client.put(URL, json={**body, "rate": "1000000", "preview": True})
+    assert huge.status_code == 422
+    preview = await admin.client.put(URL, json={**body, "preview": True})
+    assert preview.status_code == 200 and preview.json()["overflow"] is True
+    response = await admin.client.put(URL, json={**body, "totp_code": await totp_code(admin.user)})
     assert response.status_code == 409 and error_code(response) == "admin.currency_overflow"
-    assert "734512" not in response.text
     assert set(response.json()["error"]) == {"code", "message"}
+    for text in (preview.text, response.text):
+        assert "12345678" not in text and "1234567837" not in text
 
 
 async def test_forms_opened_before_change_refused(

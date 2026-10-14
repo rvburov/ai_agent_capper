@@ -25,12 +25,13 @@ from dataclasses import dataclass, fields
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import exists, func, select, text, tuple_
+from sqlalchemy import exists, func, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.config import load_agent_config
 from app.core.errors import AppError
 from app.db.models import (
+    AgentRun,
     Analysis,
     Bet,
     Match,
@@ -72,6 +73,7 @@ from app.schemas.players import (
     PlayerNewsItemOut,
     PlayerNewsOut,
     ResultsOut,
+    ServeDiffOut,
     ServeMetricsOut,
     ServeOut,
     SurfaceEloOut,
@@ -347,6 +349,14 @@ async def _today_surfaces(
     return surfaces
 
 
+def _court_elo(row: PlayerEloCurrent | None, court: str | None) -> int | None:
+    """Текущее Эло на покрытии матча для показа (покрытие неизвестно — общее)."""
+    if row is None:
+        return None
+    value = getattr(row, f"elo_{court}") if court is not None else row.elo_all
+    return elo_int(value)
+
+
 def _elo_rating(row: PlayerEloCurrent | None, court: str | None, params: EloParams) -> float:
     """Рейтинг для прогноза по текущему Эло (как EloSnapshot.rating): без рейтинга —
     начальный, без матчей на покрытии — начальный рейтинг покрытия."""
@@ -399,6 +409,9 @@ async def _today(db: AsyncSession, user: User, player: Player, now: datetime) ->
         out.append(
             TodayOut(
                 match_id=item.match_id,
+                side=1 if item.player1.id == player.id else 2,
+                elo=_court_elo(current.get(player.id), court),
+                opponent_elo=_court_elo(current.get(opponent.id), court),
                 opponent=opponent,
                 opponent_rank=current[opponent.id].rank_all if opponent.id in current else None,
                 tournament=item.tournament,
@@ -667,13 +680,29 @@ async def _serve(db: AsyncSession, player_id: int) -> ServeOut | None:
         return None
     sums = await dossier.serve_sums(db, [player_id], last + timedelta(days=1), cutoff=False)
     own = sums.get(player_id)
+    player = _serve_metrics(own) if own is not None else None
+    tour = await _tour_metrics(db, last)
     return ServeOut(
         period_from=last - timedelta(days=dossier.SERVE_DAYS - 1),
         period_to=last,
-        player=_serve_metrics(own) if own is not None else None,
-        tour=await _tour_metrics(db, last),
+        player=player,
+        tour=tour,
+        diff=serve_diff(player, tour),
         tour_players=TOUR_TOP,
     )
+
+
+def serve_diff(player: ServeMetricsOut | None, tour: ServeMetricsOut | None) -> ServeDiffOut | None:
+    """Игрок минус тур по каждой метрике: считает сервер, экран только показывает."""
+    if player is None or tour is None:
+        return None
+    values: dict[str, float | None] = {}
+    for name in ServeDiffOut.model_fields:
+        mine, theirs = getattr(player, name), getattr(tour, name)
+        values[name] = (
+            round(mine - theirs, _SHARE_DIGITS) if mine is not None and theirs is not None else None
+        )
+    return ServeDiffOut(**values)
 
 
 # --- карточка ---
@@ -952,6 +981,43 @@ def _news_details(kind: str, details: Any) -> dict[str, Any] | None:
     return {names[key]: value for key, value in short.items()}
 
 
+# Вызов шага новостей записывается в agent_runs до отметки «новости проверены» у игроков
+# (Player.news_checked_at): ищем его в этом окне до отметки
+NEWS_RUN_WINDOW = timedelta(minutes=15)
+
+
+async def news_check(
+    db: AsyncSession, player_id: int, checked_at: datetime | None, user: User | None
+) -> tuple[str | None, int | None]:
+    """Модель и анализ последней проверки новостей игрока: вызов шага новостей (kind
+    news) не позже отметки и не раньше NEWS_RUN_WINDOW до нее, в анализе с этим игроком.
+    Номер анализа — только если анализ ваш: чужие анализы участник не видит."""
+    if checked_at is None:
+        return None, None
+    events = Analysis.confirmed["events"]
+    row = (
+        await db.execute(
+            select(AgentRun.model, Analysis.id, Analysis.user_id)
+            .join(Analysis, Analysis.id == AgentRun.analysis_id)
+            .where(
+                AgentRun.kind == "news",
+                AgentRun.created_at <= checked_at,
+                AgentRun.created_at >= checked_at - NEWS_RUN_WINDOW,
+                or_(
+                    events.contains([{"player1_id": player_id}]),
+                    events.contains([{"player2_id": player_id}]),
+                ),
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        return None, None
+    model, analysis_id, owner = row
+    return str(model), int(analysis_id) if user is not None and owner == user.id else None
+
+
 async def news(
     db: AsyncSession,
     player_id: int,
@@ -959,9 +1025,11 @@ async def news(
     before: int | None = None,
     limit: int = NEWS_LIMIT,
     now: datetime | None = None,
+    user: User | None = None,
 ) -> PlayerNewsOut:
     """Новости игрока за окно новостей (news_lookback_days), новые сверху. before — id
-    последней новости прошлой страницы (новость этого игрока, иначе 422)."""
+    последней новости прошлой страницы (новость этого игрока, иначе 422). user — кто
+    смотрит: номер анализа последней проверки — только его собственного."""
     now = now or utcnow()
     player = await player_or_404(db, player_id)
     config = await load_agent_config(db)
@@ -991,6 +1059,7 @@ async def news(
     )
     shown = rows[:limit]
     checked = player.news_checked_at
+    checked_model, checked_analysis_id = await news_check(db, player.id, checked, user)
     return PlayerNewsOut(
         items=[
             PlayerNewsItemOut(
@@ -1006,6 +1075,8 @@ async def news(
         ],
         next_before=shown[-1].id if len(rows) > limit else None,
         checked_at=checked,
+        checked_model=checked_model,
+        checked_analysis_id=checked_analysis_id,
         fresh=checked is not None and checked >= now - timedelta(hours=config.news_ttl_hours),
         ttl_hours=config.news_ttl_hours,
         lookback_days=config.news_lookback_days,

@@ -248,8 +248,8 @@ class SeriesOut(BaseModel):
     # Старт периода для экрана: день, сумма и изменение за период долей от нее. Банк
     # появился внутри периода или выбрано «все время» — первый день банка, вложенное и
     # рост капитала к вложенному; иначе — start, base и прибыль периода к base
-    start_day: date | None
-    start_amount: DecimalOut | None
+    start_day: date
+    start_amount: DecimalOut
     change_share: float | None
     last: DecimalOut
     peak: DecimalOut

@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.config import DEFAULT_CONFIG
-from app.core.i18n import has_key
+from app.core.i18n import has_key, t
 from app.db.models import (
     AgentRun,
     Analysis,
@@ -87,6 +87,9 @@ async def test_cache_rule(make_user: UserFactory, db: AsyncSession) -> None:
     await db.commit()
     fired = {item.rule: item for item in await ai_alerts.evaluate(db)}
     assert fired["cache"].params == {"share": "40", "min": "50", "analyses": 10}
+    assert t("notifications.ai_alert.cache.title", **fired["cache"].params) == (
+        "Доля кэша упала до 40%"
+    )
     # 9 анализов — мало для вывода
     await db.execute(
         update(AgentRun).where(AgentRun.analysis_id == analyses[0].id).values(kind="parse")
@@ -107,7 +110,12 @@ async def test_cost_rule(make_user: UserFactory, db: AsyncSession) -> None:
     await _analysis(db, member.id, cost_usd=D("0.45"), finished_at=now - timedelta(hours=2))
     await db.commit()
     fired = {item.rule: item for item in await ai_alerts.evaluate(db, now=now)}
-    assert fired["cost"].params["cost"] == "0.45" and fired["cost"].params["median"] == "0.20"
+    assert fired["cost"].params["cost"] == "0,45" and fired["cost"].params["median"] == "0,20"
+    # Числа в тексте — с запятой, как на экране
+    title = t("notifications.ai_alert.cost.title", **fired["cost"].params)
+    assert title == "Анализ стоил $0,45 — больше 2 медиан"
+    body = t("notifications.ai_alert.cost.body", **fired["cost"].params)
+    assert "— $0,20 (анализов: 6)" in body
     # Ровно две медианы — еще не сигнал
     await db.execute(
         update(Analysis).where(Analysis.cost_usd == D("0.45")).values(cost_usd=D("0.40"))
@@ -130,7 +138,10 @@ async def test_stops_rule(make_user: UserFactory, db: AsyncSession) -> None:
     db.add(_run(stop_reason="refusal"))
     await db.commit()
     fired = {item.rule: item for item in await ai_alerts.evaluate(db, now=now)}
-    assert fired["stops"].params == {"share": "3.9", "max": "2", "stopped": 2, "runs": 51}
+    assert fired["stops"].params == {"share": "3,9", "max": "2", "stopped": 2, "runs": 51}
+    assert t("notifications.ai_alert.stops.title", **fired["stops"].params) == (
+        "Обрезанных ответов и отказов 3,9%"
+    )
 
 
 async def test_searches_rule_uses_agent_setting(make_user: UserFactory, db: AsyncSession) -> None:

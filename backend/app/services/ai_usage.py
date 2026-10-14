@@ -32,7 +32,7 @@ from sqlalchemy import ColumnElement, Numeric, and_, case, func, literal, or_, s
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.config import load_agent_config
+from app.agent.config import AgentConfig, load_agent_config
 from app.agent.runs import MTOK, USD_STEP
 from app.core.errors import AppError
 from app.db.models import AgentRun, AiLimit, Analysis, EvalRun, ModelPrice, User
@@ -60,7 +60,7 @@ from app.schemas.ai import (
     UsageVersionOut,
 )
 from app.services.admin_users import CHECK_RUN_KINDS
-from app.services.ai_access import access_for, limits_of
+from app.services.ai_access import access_for, call_need_usd, limits_of
 from app.services.ai_budget import AVG_STEP
 from app.services.analysis_run import ACCEPTANCE_MARK
 from app.services.app_settings import get_app_settings
@@ -250,40 +250,43 @@ async def usage(
     span = month_of(month, now)
     day = func.date(func.timezone("UTC", AgentRun.created_at)).label("day")
     shared = AgentRun.user_id.is_(None).label("shared")
-    acceptance = _acceptance().label("acceptance")
-    price = _price_at_run()
-    rows = (
-        await db.execute(
-            select(
-                day,
-                AgentRun.kind,
-                AgentRun.model,
-                AgentRun.effort,
-                AgentRun.step,
-                AgentRun.prompt_version,
-                AgentRun.key_source,
-                shared,
-                acceptance,
-                *_sum_columns(),
-                *_priced_columns(price),
-            )
-            .select_from(AgentRun)
-            .outerjoin(Analysis, Analysis.id == AgentRun.analysis_id)
-            .outerjoin(price, literal(True))
-            .where(personal_runs(user), _in_month(span))
-            .group_by(
-                day,
-                AgentRun.kind,
-                AgentRun.model,
-                AgentRun.effort,
-                AgentRun.step,
-                AgentRun.prompt_version,
-                AgentRun.key_source,
-                shared,
-                acceptance,
-            )
+    # Прогоны приемки бывают только у администратора: участнику соединение с анализами
+    # не нужно (на плотном месяце оно занимало треть запроса)
+    admin = user.role == "admin"
+    acceptance = (_acceptance() if admin else literal(False)).label("acceptance")
+    price = _price_ranges()
+    stmt = (
+        select(
+            day,
+            AgentRun.kind,
+            AgentRun.model,
+            AgentRun.effort,
+            AgentRun.step,
+            AgentRun.prompt_version,
+            AgentRun.key_source,
+            shared,
+            acceptance,
+            *_sum_columns(),
+            *_priced_columns(price),
         )
-    ).all()
+        .select_from(AgentRun)
+        .outerjoin(price, _price_of_run(price))
+        .where(personal_runs(user), _in_month(span))
+        .group_by(
+            day,
+            AgentRun.kind,
+            AgentRun.model,
+            AgentRun.effort,
+            AgentRun.step,
+            AgentRun.prompt_version,
+            AgentRun.key_source,
+            shared,
+            acceptance,
+        )
+    )
+    if admin:
+        stmt = stmt.outerjoin(Analysis, Analysis.id == AgentRun.analysis_id)
+    rows = (await db.execute(stmt)).all()
     totals = _Sums()
     by_day: dict[date, _Sums] = defaultdict(_Sums)
     day_kinds: dict[date, dict[str, _Sums]] = defaultdict(lambda: defaultdict(_Sums))
@@ -314,9 +317,11 @@ async def usage(
     # Средняя на ключе администратора — как в GET /ai/budget (тот же шаг): по ней
     # «хватит на N анализов» остатка лимита, который тратится только на этом ключе
     admin_avg = _avg([item.cost_usd for item in finished if item.key_source == "admin"], AVG_STEP)
-    forecast, left = await _forecast(db, user, span, totals.cost, keys["admin"], admin_avg)
     settings = await get_app_settings(db)
     config = await load_agent_config(db)
+    forecast, left, pace_usd = await _forecast(
+        db, user, span, totals.cost, keys["admin"], admin_avg, config, settings.monthly_budget_usd
+    )
     return AiUsageOut(
         month=span.key,
         month_start=span.first,
@@ -381,6 +386,7 @@ async def usage(
         admin_key_avg_usd=admin_avg,
         forecast_usd=forecast,
         analyses_left=left,
+        pace_usd=pace_usd,
         prices=await current_prices(db, now),
         settings=AgentSettingsOut(
             parse_model=config.parse_model,
@@ -406,21 +412,30 @@ async def usage(
     )
 
 
-def _price_at_run() -> Any:
-    """Цена модели вызова на момент вызова (последняя строка model_prices не позже
-    created_at): подзапрос LATERAL к agent_runs."""
-    return (
-        select(
-            ModelPrice.input,
-            ModelPrice.cache_read,
-            ModelPrice.search_price,
-            ModelPrice.long_input_threshold,
-            ModelPrice.long_multiplier,
-        )
-        .where(ModelPrice.model == AgentRun.model, ModelPrice.valid_from <= AgentRun.created_at)
-        .order_by(ModelPrice.valid_from.desc())
-        .limit(1)
-        .lateral("price")
+def _price_ranges() -> Any:
+    """Цены моделей с периодом действия [valid_from, valid_to): valid_to — начало
+    следующей цены той же модели (у последней — NULL). Соединение с вызовами по модели и
+    периоду дает цену на момент вызова (последнюю строку model_prices не позже
+    created_at) одним хеш-соединением, а не подзапросом на каждый вызов."""
+    return select(
+        ModelPrice.model,
+        ModelPrice.valid_from,
+        func.lead(ModelPrice.valid_from)
+        .over(partition_by=ModelPrice.model, order_by=ModelPrice.valid_from)
+        .label("valid_to"),
+        ModelPrice.input,
+        ModelPrice.cache_read,
+        ModelPrice.search_price,
+        ModelPrice.long_input_threshold,
+        ModelPrice.long_multiplier,
+    ).subquery("price")
+
+
+def _price_of_run(price: Any) -> ColumnElement[bool]:
+    return and_(
+        price.c.model == AgentRun.model,
+        price.c.valid_from <= AgentRun.created_at,
+        or_(price.c.valid_to.is_(None), AgentRun.created_at < price.c.valid_to),
     )
 
 
@@ -497,26 +512,42 @@ async def _forecast(
     total: Decimal,
     admin_key: Decimal,
     admin_avg: Decimal | None,
-) -> tuple[Decimal, int | None]:
-    """Прогноз на конец месяца и «хватит на N анализов» по средней цене анализа на ключе
-    администратора (см. AiUsageOut). Лимиты и остаток — из access_for, как в GET
-    /ai/budget: одно и то же число на обоих экранах."""
+    config: AgentConfig,
+    budget: Decimal,
+) -> tuple[Decimal, int | None, Decimal | None]:
+    """Прогноз на конец месяца, «хватит на N анализов» по средней цене анализа на ключе
+    администратора и темп под лимит (см. AiUsageOut). Лимиты и остаток — из access_for,
+    как в GET /ai/budget: одно и то же число на обоих экранах."""
+
+    def per_day(value: Decimal) -> Decimal:
+        return (value / span.days_in_month).quantize(CENT)
+
+    pace_usd: Decimal | None = None
+    access = None
+    if user.role == "admin":
+        pace_usd = per_day(budget)
+    elif user.ai_mode != "own":
+        access = await access_for(db, user, estimate_usd=None)
+        if access.monthly_limit_usd is not None:
+            pace_usd = per_day(access.monthly_limit_usd)
     if not span.current:
-        return total, None
+        return total, None, pace_usd
 
     def pace(value: Decimal) -> Decimal:
         return (value / span.days_elapsed * span.days_in_month).quantize(CENT)
 
-    if user.role == "admin" or user.ai_mode == "own":
-        return pace(total), None
-    access = await access_for(db, user, estimate_usd=None)
+    if access is None:
+        return pace(total), None, pace_usd
     if access.paused or access.monthly_limit_usd is None:
-        return admin_key.quantize(CENT), None
+        return admin_key.quantize(CENT), None, pace_usd
     forecast = min(access.monthly_limit_usd, pace(admin_key))
     left: int | None = None
     if admin_avg is not None and admin_avg > 0 and access.left_month_usd is not None:
         left = int(access.left_month_usd // admin_avg)
-    return forecast, left
+        # Остатка меньше самого маленького вызова оценки — анализ не запустится
+        if access.left_month_usd < await call_need_usd(db, config, utcnow()):
+            left = 0
+    return forecast, left, pace_usd
 
 
 async def current_prices(db: AsyncSession, now: datetime | None = None) -> list[ModelPriceOut]:
@@ -791,6 +822,7 @@ async def admin_usage(
             select(AiLimit).where(AiLimit.user_id.in_([user.id for user in users]))
         )
     }
+    key_spent_total = sum((cost for (_, source), cost in spent.items() if source == "admin"), ZERO)
     people: list[PersonUsageOut] = []
     for user in users:
         key_spent = spent.get((user.id, "admin"), ZERO)
@@ -810,11 +842,11 @@ async def admin_usage(
                 paused=limits.paused if limits is not None else False,
                 budget_share=_ratio(key_spent, budget),
                 limit_share=_ratio(key_spent, limits.monthly_usd) if limits else None,
+                spent_share=_ratio(key_spent, key_spent_total),
             )
         )
     people.sort(key=lambda item: (-item.key_spent_usd, -item.own_spent_usd, item.user_id))
-
-    key_spent_total = sum((cost for (_, source), cost in spent.items() if source == "admin"), ZERO)
+    others = _others([item for item in people if item.key_spent_usd > 0])
     shared_cost = sum((item[1] for item in shared_kinds.values()), ZERO)
     shared_read = sum(item[2] for item in shared_kinds.values())
     shared_prompt = sum(item[3] for item in shared_kinds.values())
@@ -840,6 +872,7 @@ async def admin_usage(
             cost_usd=shared_cost,
             cache_share=_share(shared_read, shared_prompt),
             budget_share=_ratio(shared_cost, budget),
+            spent_share=_ratio(shared_cost, key_spent_total),
             kinds=sorted(shared_kinds),
         ),
         tasks=[
@@ -854,7 +887,21 @@ async def admin_usage(
             for kind, item in sorted(tasks.items(), key=lambda pair: (-pair[1][1], pair[0]))
         ],
         eval=await _eval_usage(db, span, Decimal(settings.eval_budget_usd)),
+        others_ids=[item.user_id for item in others],
+        others_count=len(others),
+        others_usd=sum((item.key_spent_usd for item in others), ZERO),
     )
+
+
+# «Кто тратит» ключ администратора: при больше чем OTHERS_AFTER тративших людях первые
+# TOP_SPENDERS идут строками, остальные — одной строкой «остальные»
+TOP_SPENDERS = 3
+OTHERS_AFTER = 4
+
+
+def _others(spenders: list[PersonUsageOut]) -> list[PersonUsageOut]:
+    """«Остальные» из тративших ключ (список уже по убыванию расхода)."""
+    return spenders[TOP_SPENDERS:] if len(spenders) > OTHERS_AFTER else []
 
 
 async def _eval_usage(db: AsyncSession, span: Month, budget: Decimal) -> EvalUsageOut:

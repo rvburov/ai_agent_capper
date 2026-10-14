@@ -164,6 +164,9 @@ async def test_pause_until_local_midnight_and_only_longer(
     )
     shorter = await member.client.post("/api/me/pause", json={"days": 1})
     assert shorter.status_code == 409 and error_code(shorter) == "play.pause_shorter"
+    # В тексте — последний день паузы включительно (как в кабинете), а не полночь после него
+    assert shorter.json()["error"]["until_text"] == "21.10.2026"
+    assert "до 21.10.2026 включительно" in shorter.json()["error"]["message"]
     wrong = await member.client.post("/api/me/pause", json={"days": 3})
     assert wrong.status_code == 422
     # После конца паузы — ничего не блокирует

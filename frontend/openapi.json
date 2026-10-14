@@ -1451,6 +1451,38 @@
         }
       }
     },
+    "/api/admin/attention": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Attention",
+        "description": "Дела администратора — то же, что admin на главной (архив устарел, просьбы вернуть\nключ, участники у лимита), без остальной главной: для точки у пункта меню и вкладки\n«Обзор».",
+        "operationId": "get_attention_api_admin_attention_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAttentionOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/activity": {
       "get": {
         "tags": [
@@ -3123,7 +3155,7 @@
           "admin"
         ],
         "summary": "Change Currency",
-        "description": "Смена валюты программы по курсу «1 rate_base = rate второй валюты»: пересчет\nставок, журнала банка, лимитов и банка из ввода анализа у всех участников с\nокруглением каждой суммы до копеек; журнал currency_change; кэш аналитики сбрасывается.\npreview=true — только итоги и примеры «до и после». Без totp_code — 403\nadmin.totp_required; та же валюта — 409 admin.currency_same.",
+        "description": "Смена валюты программы по курсу «1 rate_base = rate второй валюты»: пересчет\nставок, журнала банка, лимитов и банка из ввода анализа у всех участников с\nокруглением каждой суммы до копеек; журнал currency_change; кэш аналитики сбрасывается.\npreview=true — только итоги и примеры «до и после». Без totp_code — 403\nadmin.totp_required; та же валюта — 409 admin.currency_same; from_currency не валюта\nпрограммы (окно открыто до чужой смены) — 409 common.currency_changed, и в предпросмотре.",
         "operationId": "change_currency_api_admin_settings_currency_put",
         "requestBody": {
           "content": {
@@ -3165,7 +3197,7 @@
           "admin"
         ],
         "summary": "List Messages",
-        "description": "Отправленные сообщения, новые сверху (не больше 50): кому, текст, когда, сколько\nполучили, кто отправил.",
+        "description": "Отправленные сообщения, новые сверху (не больше 50): кому, текст, когда, сколько\nполучили, кто отправил; recipients_all — сколько получит сообщение «всем» сейчас.",
         "operationId": "list_messages_api_admin_messages_get",
         "responses": {
           "200": {
@@ -5591,7 +5623,7 @@
           "players"
         ],
         "summary": "Get Player News",
-        "description": "Факты из новостей игрока за окно новостей, новые сверху, страницами.",
+        "description": "Факты из новостей игрока за окно новостей, новые сверху, страницами; модель и\nномер вашего анализа последней проверки.",
         "operationId": "get_player_news_api_players__player_id__news_get",
         "parameters": [
           {
@@ -6079,6 +6111,21 @@
           },
           "eval": {
             "$ref": "#/components/schemas/EvalUsageOut"
+          },
+          "others_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Others Ids"
+          },
+          "others_count": {
+            "type": "integer",
+            "title": "Others Count"
+          },
+          "others_usd": {
+            "type": "number",
+            "title": "Others Usd"
           }
         },
         "type": "object",
@@ -6099,10 +6146,13 @@
           "people",
           "shared",
           "tasks",
-          "eval"
+          "eval",
+          "others_ids",
+          "others_count",
+          "others_usd"
         ],
         "title": "AdminAiUsageOut",
-        "description": "«Администрирование → Расход ИИ» за месяц (UTC). spent_usd — ключ администратора\nбез проверок (как бюджет), из него shared — общие задачи; own_key_usd — участники на\nсвоих ключах (вне бюджета). analyses — анализы на ключе администратора за месяц,\navg_analysis_usd — средняя цена законченного. cache_share — по всем вызовам ключа\nадминистратора без проверок. Р14: ни анализов, ни ввода, ни ставок участников."
+        "description": "«Администрирование → Расход ИИ» за месяц (UTC). spent_usd — ключ администратора\nбез проверок (как бюджет), из него shared — общие задачи; own_key_usd — участники на\nсвоих ключах (вне бюджета). analyses — анализы на ключе администратора за месяц,\navg_analysis_usd — средняя цена законченного. cache_share — по всем вызовам ключа\nадминистратора без проверок. Р14: ни анализов, ни ввода, ни ставок участников.\nothers_* — «остальные» в «Кто тратит» (тратившие ключ, по убыванию расхода: при\nбольше чем 4 таких людях первые 3 показываются строками, прочие — одной строкой):\nих id по порядку, число и сумма на ключе."
       },
       "AdminAttentionOut": {
         "properties": {
@@ -6221,6 +6271,29 @@
           "eval_spent_usd": {
             "type": "number",
             "title": "Eval Spent Usd"
+          },
+          "forecast_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forecast Share"
+          },
+          "per_day_usd": {
+            "type": "number",
+            "title": "Per Day Usd"
+          },
+          "can_per_day_usd": {
+            "type": "number",
+            "title": "Can Per Day Usd"
+          },
+          "alert_usd": {
+            "type": "number",
+            "title": "Alert Usd"
           }
         },
         "type": "object",
@@ -6239,10 +6312,14 @@
           "budget_share",
           "alert_pct",
           "eval_budget_usd",
-          "eval_spent_usd"
+          "eval_spent_usd",
+          "forecast_share",
+          "per_day_usd",
+          "can_per_day_usd",
+          "alert_usd"
         ],
         "title": "AdminBudgetOut",
-        "description": "Общий бюджет ключа администратора на месяц (UTC).\n\nspent_usd — все вызовы на ключе администратора без проверочных прогонов,\nbackground_usd — из них общие задачи без участника. reserved_usd — резерв\nанализов, которые идут сейчас. forecast_usd — прогноз на конец месяца по темпу.\nmembers_limits_usd — сумма месячных лимитов участников на ключе администратора.\nmembers_usd — из spent_usd вызовы участников (не администраторов). budget_share —\nspent_usd к бюджету (доля; пусто — бюджет 0). eval_* — отдельный бюджет проверочных\nпрогонов (eval и теневые, Р22)."
+        "description": "Общий бюджет ключа администратора на месяц (UTC).\n\nspent_usd — все вызовы на ключе администратора без проверочных прогонов,\nbackground_usd — из них общие задачи без участника. reserved_usd — резерв\nанализов, которые идут сейчас. forecast_usd — прогноз на конец месяца по темпу.\nmembers_limits_usd — сумма месячных лимитов участников на ключе администратора.\nmembers_usd — из spent_usd вызовы участников (не администраторов). budget_share —\nspent_usd к бюджету (доля; пусто — бюджет 0). eval_* — отдельный бюджет проверочных\nпрогонов (eval и теневые, Р22). forecast_share — forecast_usd к бюджету (пусто —\nбюджет 0); per_day_usd — средний расход в день с 1-го числа (UTC, сегодня включая);\ncan_per_day_usd — сколько можно тратить в день до конца месяца (включая сегодня),\nчтобы уложиться в остаток; alert_usd — сумма, на которой приходит уведомление\n(бюджет × alert_pct %)."
       },
       "AdminKeyIn": {
         "properties": {
@@ -6870,6 +6947,47 @@
                 "type": "null"
               }
             ]
+          },
+          "per_day_usd": {
+            "type": "number",
+            "title": "Per Day Usd"
+          },
+          "forecast_usd": {
+            "type": "number",
+            "title": "Forecast Usd"
+          },
+          "forecast_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forecast Share"
+          },
+          "can_per_day_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Can Per Day Usd"
+          },
+          "alert_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Usd"
           }
         },
         "type": "object",
@@ -6896,10 +7014,15 @@
           "return_requested_at",
           "reason_code",
           "reason_params",
-          "budget"
+          "budget",
+          "per_day_usd",
+          "forecast_usd",
+          "forecast_share",
+          "can_per_day_usd",
+          "alert_usd"
         ],
         "title": "AiBudgetOut",
-        "description": "Лимит и расход участника на ИИ (экраны «Ключ Claude» и «Новый анализ»).\n\nmode — режим участника, key_source — чей ключ платит. Месяц — по UTC с month_start,\n«анализов сегодня» — с полуночи в поясе участника. monthly_usd, left_usd и\ndaily_analyses пустые, если личного лимита нет (свой ключ, администратор).\nspent_usd — расход за месяц на ключе этого режима, reserved_usd — резерв анализов,\nкоторые идут сейчас. per_analysis_usd — потолок одного анализа в этом режиме,\nown_cap_usd — свой потолок на своем ключе. avg_analysis_usd — средняя цена\nзаконченного анализа за месяц на ключе этого режима (пусто — анализов нет).\nreason_code — почему новый анализ сейчас не запустится (ключ errors.<код> и\nreason_params), пусто — запустится. budget — общий бюджет, только администратору.\nlimit_share — spent_usd к месячному лимиту (доля; пусто — личного лимита нет)."
+        "description": "Лимит и расход участника на ИИ (экраны «Ключ Claude» и «Новый анализ»).\n\nmode — режим участника, key_source — чей ключ платит. Месяц — по UTC с month_start,\n«анализов сегодня» — с полуночи в поясе участника. monthly_usd, left_usd и\ndaily_analyses пустые, если личного лимита нет (свой ключ, администратор).\nspent_usd — расход за месяц на ключе этого режима, reserved_usd — резерв анализов,\nкоторые идут сейчас. per_analysis_usd — потолок одного анализа в этом режиме,\nown_cap_usd — свой потолок на своем ключе. avg_analysis_usd — средняя цена\nзаконченного анализа за месяц на ключе этого режима (пусто — анализов нет).\nreason_code — почему новый анализ сейчас не запустится (ключ errors.<код> и\nreason_params), пусто — запустится. budget — общий бюджет, только администратору.\nlimit_share — spent_usd к месячному лимиту (доля; пусто — личного лимита нет).\nТемп месяца, как у бюджета администратора: per_day_usd — средний расход в день с\n1-го числа; forecast_usd — прогноз на конец месяца (с личным лимитом — не выше\nлимита, на паузе — потрачено); forecast_share, can_per_day_usd (сколько можно в\nдень до конца месяца, включая сегодня) и alert_usd (лимит × alert_pct %) — пустые\nбез личного лимита."
       },
       "AiModeIn": {
         "properties": {
@@ -7297,6 +7420,17 @@
             ],
             "title": "Analyses Left"
           },
+          "pace_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pace Usd"
+          },
           "prices": {
             "items": {
               "$ref": "#/components/schemas/ModelPriceOut"
@@ -7334,11 +7468,12 @@
           "admin_key_avg_usd",
           "forecast_usd",
           "analyses_left",
+          "pace_usd",
           "prices",
           "settings"
         ],
         "title": "AiUsageOut",
-        "description": "Свой расход на Claude за месяц (UTC) по вызовам agent_runs, без проверок (eval).\nУ администратора — свои вызовы и общие задачи без участника (shared_usd), прогоны\nприемки — отдельно (acceptance_usd); own_usd — свои остальные вызовы.\n\ndays — с 1-го числа по last_day (сегодня, если месяц текущий). admin_key_usd и\nown_key_usd — чей ключ платил. search_usd — цена поисков, cache_saved_usd — сколько\nсэкономило чтение кэша против обычного входа (по model_prices на момент вызова).\navg_analysis_usd — средняя цена своего законченного анализа месяца без прогонов\nприемки (на обоих ключах). admin_key_avg_usd — то же только на ключе администратора\n(шаг $0,0001): у участника на ключе администратора — то же число, что\navg_analysis_usd в GET /ai/budget; ее показывать рядом с лимитом. forecast_usd —\nпрогноз на конец месяца по темпу (участник на ключе администратора — не выше лимита,\nна паузе — потрачено); у прошедшего месяца — итог. analyses_left — на сколько\nанализов по admin_key_avg_usd хватит остатка лимита (left_usd в GET /ai/budget;\nтолько участник на ключе администратора в текущем месяце)."
+        "description": "Свой расход на Claude за месяц (UTC) по вызовам agent_runs, без проверок (eval).\nУ администратора — свои вызовы и общие задачи без участника (shared_usd), прогоны\nприемки — отдельно (acceptance_usd); own_usd — свои остальные вызовы.\n\ndays — с 1-го числа по last_day (сегодня, если месяц текущий). admin_key_usd и\nown_key_usd — чей ключ платил. search_usd — цена поисков, cache_saved_usd — сколько\nсэкономило чтение кэша против обычного входа (по model_prices на момент вызова).\navg_analysis_usd — средняя цена своего законченного анализа месяца без прогонов\nприемки (на обоих ключах). admin_key_avg_usd — то же только на ключе администратора\n(шаг $0,0001): у участника на ключе администратора — то же число, что\navg_analysis_usd в GET /ai/budget; ее показывать рядом с лимитом. forecast_usd —\nпрогноз на конец месяца по темпу (участник на ключе администратора — не выше лимита,\nна паузе — потрачено); у прошедшего месяца — итог. analyses_left — на сколько\nанализов по admin_key_avg_usd хватит остатка лимита (left_usd в GET /ai/budget;\nтолько участник на ключе администратора в текущем месяце); 0 — остатка меньше\nсамого маленького вызова оценки (анализ не запустится). pace_usd — темп под лимит:\nмесячный лимит участника (у администратора — бюджет ключа) на дни месяца; пусто —\nна своем ключе лимита нет. Лимит и бюджет — сегодняшние (истории лимитов нет)."
       },
       "AnalysisCostOut": {
         "properties": {
@@ -10714,6 +10849,15 @@
       },
       "CurrencyIn": {
         "properties": {
+          "from_currency": {
+            "type": "string",
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR"
+            ],
+            "title": "From Currency"
+          },
           "currency": {
             "type": "string",
             "enum": [
@@ -10727,8 +10871,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 1000000.0,
-                "exclusiveMinimum": 0.0
+                "maximum": 1000.0,
+                "minimum": 0.001
               },
               {
                 "type": "string",
@@ -10767,18 +10911,23 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "from_currency",
           "currency",
           "rate",
           "rate_base"
         ],
         "title": "CurrencyIn",
-        "description": "Новая валюта программы и курс: 1 rate_base = rate второй валюты (rate_base —\nпрежняя или новая валюта, как в окне смены). preview — только посчитать, что станет;\nбез preview нужен текущий код 2FA."
+        "description": "Новая валюта программы и курс: 1 rate_base = rate второй валюты (rate_base —\nпрежняя или новая валюта, как в окне смены). from_currency — валюта, от которой\nсчитает окно: если ее уже сменили, курс относится к другой паре, и смена отклоняется.\npreview — только посчитать, что станет; без preview нужен текущий код 2FA."
       },
       "CurrencyPreviewOut": {
         "properties": {
           "applied": {
             "type": "boolean",
             "title": "Applied"
+          },
+          "overflow": {
+            "type": "boolean",
+            "title": "Overflow"
           },
           "from_currency": {
             "type": "string",
@@ -10860,6 +11009,7 @@
         "type": "object",
         "required": [
           "applied",
+          "overflow",
           "from_currency",
           "to_currency",
           "rate",
@@ -10875,7 +11025,7 @@
           "samples"
         ],
         "title": "CurrencyPreviewOut",
-        "description": "Что станет при смене валюты (или что стало, applied = true): сколько сумм\nпересчитано по всем участникам, банк администратора и примеры до и после. factor —\nмножитель (новая сумма = прежняя × factor до округления каждой суммы до копеек).\nanalyses — анализы с суммами (банк из ввода, рекомендация, предупреждение о банке);\ncorrections — у скольких участников остаток от округления строк журнала уйдет в одну\nкорректировку «Округление при смене валюты» (банк = round(прежний × курс))."
+        "description": "Что станет при смене валюты (или что стало, applied = true): сколько сумм\nпересчитано по всем участникам, банк администратора и примеры до и после. factor —\nмножитель (новая сумма = прежняя × factor до округления каждой суммы до копеек).\nanalyses — анализы с суммами (банк из ввода, рекомендация, предупреждение о банке);\ncorrections — у скольких участников остаток от округления строк журнала уйдет в одну\nкорректировку «Округление при смене валюты» (банк = round(прежний × курс)).\noverflow — какая-то сумма после пересчета не поместится в NUMERIC(12, 2) и смена по\nэтому курсу будет отклонена (только да или нет: сумм участников администратор не\nвидит, Р14); примеры samples — круглые суммы, а не суммы участников."
       },
       "DashboardOut": {
         "properties": {
@@ -13161,6 +13311,18 @@
               "100"
             ],
             "title": "Level"
+          },
+          "runs_out_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runs Out On"
           }
         },
         "type": "object",
@@ -13170,10 +13332,11 @@
           "spent_usd",
           "limit_usd",
           "share",
-          "level"
+          "level",
+          "runs_out_on"
         ],
         "title": "LimitAlertOut",
-        "description": "Участник у месячного лимита на ключе администратора: level 80 — дошел до порога\nпредупреждения (alert_pct), 100 — остатка не хватает на анализ (то же правило, что у\nуведомлений limit_80 и limit_100). Р14: только расход на ИИ."
+        "description": "Участник у месячного лимита на ключе администратора: level 80 — дошел до порога\nпредупреждения (alert_pct), 100 — остатка не хватает на анализ (то же правило, что у\nуведомлений limit_80 и limit_100). runs_out_on — день (UTC), когда при нынешнем темпе\nмесяца лимит кончится (пусто — не в этом месяце или уже кончился). Р14: только\nрасход на ИИ."
       },
       "LimitDefaultsOut": {
         "properties": {
@@ -14005,6 +14168,21 @@
               }
             ],
             "title": "Return Requested At"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "80",
+                  "100"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
           }
         },
         "type": "object",
@@ -14022,10 +14200,11 @@
           "own_spent_month_usd",
           "analyses_today",
           "analyses_month",
-          "return_requested_at"
+          "return_requested_at",
+          "level"
         ],
         "title": "MemberLimitOut",
-        "description": "Строка таблицы «Лимиты участников». Р14: только расход на ИИ и активность.\n\nlimit — действующий лимит на ключе администратора (у участника на своем ключе он\nвступит в силу при возврате); пусто у администратора: у него нет личного лимита.\nspent_month_usd — расход за месяц на ключе администратора, own_spent_month_usd —\nна своем ключе (вне общего бюджета); без проверочных прогонов. analyses_today — на\nключе администратора с полуночи в поясе участника. return_requested_at — участник\nпросит вернуть ключ администратора (Р12)."
+        "description": "Строка таблицы «Лимиты участников». Р14: только расход на ИИ и активность.\n\nlimit — действующий лимит на ключе администратора (у участника на своем ключе он\nвступит в силу при возврате); пусто у администратора: у него нет личного лимита.\nspent_month_usd — расход за месяц на ключе администратора, own_spent_month_usd —\nна своем ключе (вне общего бюджета); без проверочных прогонов. analyses_today — на\nключе администратора с полуночи в поясе участника. return_requested_at — участник\nпросит вернуть ключ администратора (Р12). level — пройденный порог лимита на ключе\nадминистратора по правилу дел администратора (AdminAttentionOut.limits): 80 —\nalert_pct, 100 — остатка не хватает на анализ; пусто — порог не пройден, участник на\nсвоем ключе или администратор."
       },
       "MessageIn": {
         "properties": {
@@ -14149,13 +14328,19 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "recipients_all": {
+            "type": "integer",
+            "title": "Recipients All"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "recipients_all"
         ],
-        "title": "MessagesOut"
+        "title": "MessagesOut",
+        "description": "Отправленные сообщения и сколько людей получит сообщение «всем» сейчас (по правилу\nсервера: активные, кроме вас) — число для переключателя «Всем участникам · N»."
       },
       "ModeDecisionIn": {
         "properties": {
@@ -15617,6 +15802,17 @@
               }
             ],
             "title": "Limit Share"
+          },
+          "spent_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spent Share"
           }
         },
         "type": "object",
@@ -15633,10 +15829,11 @@
           "limit_usd",
           "paused",
           "budget_share",
-          "limit_share"
+          "limit_share",
+          "spent_share"
         ],
         "title": "PersonUsageOut",
-        "description": "Человек в «Расходе ИИ» администратора (Р14: только расход на ИИ и число анализов).\nkey_spent_usd — на ключе администратора, own_spent_usd — на своем (вне бюджета);\nanalyses — анализы на ключе администратора, own_analyses — на своем. limit_usd —\nмесячный лимит (пусто у администратора); budget_share и limit_share — доля бюджета\nи лимита."
+        "description": "Человек в «Расходе ИИ» администратора (Р14: только расход на ИИ и число анализов).\nkey_spent_usd — на ключе администратора, own_spent_usd — на своем (вне бюджета);\nanalyses — анализы на ключе администратора, own_analyses — на своем. limit_usd —\nмесячный лимит (пусто у администратора); budget_share и limit_share — доля бюджета\nи лимита; spent_share — доля в расходе ключа администратора за месяц (spent_usd\nAdminAiUsageOut; пусто — ключ ничего не потратил)."
       },
       "PlayLimitsIn": {
         "properties": {
@@ -16614,6 +16811,28 @@
             ],
             "title": "Checked At"
           },
+          "checked_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked Model"
+          },
+          "checked_analysis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked Analysis Id"
+          },
           "fresh": {
             "type": "boolean",
             "title": "Fresh"
@@ -16632,12 +16851,14 @@
           "items",
           "next_before",
           "checked_at",
+          "checked_model",
+          "checked_analysis_id",
           "fresh",
           "ttl_hours",
           "lookback_days"
         ],
         "title": "PlayerNewsOut",
-        "description": "Новости игрока за lookback_days, новые сверху, страницами. next_before — курсор."
+        "description": "Новости игрока за lookback_days, новые сверху, страницами. next_before — курсор.\nchecked_model — модель шага новостей, который проверил новости последним (null —\nне проверялись или запись о вызове не найдена); checked_analysis_id — номер вашего\nанализа, в котором это было (анализ другого участника не называется: null)."
       },
       "PlayerPick": {
         "properties": {
@@ -16782,6 +17003,10 @@
           },
           "archive": {
             "$ref": "#/components/schemas/ArchiveInfoOut"
+          },
+          "sackmann": {
+            "type": "boolean",
+            "title": "Sackmann"
           }
         },
         "type": "object",
@@ -16799,10 +17024,11 @@
           "as_of",
           "rank_days",
           "news_ttl_hours",
-          "archive"
+          "archive",
+          "sackmann"
         ],
         "title": "PlayerRankingOut",
-        "description": "Страница списка «Игроки». Без поиска — набор по data, с поиском — вся база (data =\nnews сужает до игроков со свежими новостями); fuzzy — точных совпадений нет, найдено\nс учетом опечаток. total — сколько всего по условиям. as_of — день расчета текущего\nЭло, rank_days — окно места по Эло, news_ttl_hours — сколько новости считаются\nсвежими."
+        "description": "Страница списка «Игроки». Без поиска — набор по data, с поиском — вся база (data =\nnews сужает до игроков со свежими новостями); fuzzy — точных совпадений нет, найдено\nс учетом опечаток. total — сколько всего по условиям. as_of — день расчета текущего\nЭло, rank_days — окно места по Эло, news_ttl_hours — сколько новости считаются\nсвежими. sackmann — в базе есть турниры архива Сакманна (на экране — строка авторства\nCC BY-NC-SA, как в карточке)."
       },
       "PlayerRefOut": {
         "properties": {
@@ -18178,26 +18404,12 @@
             "title": "Base"
           },
           "start_day": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "format": "date",
             "title": "Start Day"
           },
           "start_amount": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Start Amount"
           },
           "change_share": {
@@ -18332,6 +18544,123 @@
         ],
         "title": "SeriesRowOut",
         "description": "Строка таблицы под графиком: неделя или месяц (date_from–date_to), ставки,\nрассчитанные в эти дни, их прибыль и ROI, значение ряда на конец строки."
+      },
+      "ServeDiffOut": {
+        "properties": {
+          "first_in": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First In"
+          },
+          "first_won": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Won"
+          },
+          "second_won": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Second Won"
+          },
+          "aces_per_match": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aces Per Match"
+          },
+          "double_faults_per_match": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Double Faults Per Match"
+          },
+          "first_return_won": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Return Won"
+          },
+          "second_return_won": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Second Return Won"
+          },
+          "bp_converted": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bp Converted"
+          },
+          "bp_saved": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bp Saved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "first_in",
+          "first_won",
+          "second_won",
+          "aces_per_match",
+          "double_faults_per_match",
+          "first_return_won",
+          "second_return_won",
+          "bp_converted",
+          "bp_saved"
+        ],
+        "title": "ServeDiffOut",
+        "description": "Игрок минус тур по каждой метрике ServeMetricsOut (доли — в долях, 4 знака; эйсы и\nдвойные — за матч); null — у игрока или тура этой метрики нет."
       },
       "ServeMetricsOut": {
         "properties": {
@@ -18490,6 +18819,16 @@
           "tour_players": {
             "type": "integer",
             "title": "Tour Players"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServeDiffOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -18498,10 +18837,11 @@
           "period_to",
           "player",
           "tour",
-          "tour_players"
+          "tour_players",
+          "diff"
         ],
         "title": "ServeOut",
-        "description": "Подача и прием за 52 недели до последнего дня со статистикой в архиве (period_to;\nстатистика есть только в архиве Сакманна) против среднего по туру — игроков из первых\ntour_players по месту по Эло, суммами за то же окно."
+        "description": "Подача и прием за 52 недели до последнего дня со статистикой в архиве (period_to;\nстатистика есть только в архиве Сакманна) против среднего по туру — игроков из первых\ntour_players по месту по Эло, суммами за то же окно. diff — разница с туром по каждой\nметрике (null — нет игрока или тура)."
       },
       "SessionOut": {
         "properties": {
@@ -18614,6 +18954,17 @@
             },
             "type": "array",
             "title": "Kinds"
+          },
+          "spent_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spent Share"
           }
         },
         "type": "object",
@@ -18622,10 +18973,11 @@
           "cost_usd",
           "cache_share",
           "budget_share",
-          "kinds"
+          "kinds",
+          "spent_share"
         ],
         "title": "SharedUsageOut",
-        "description": "Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke)."
+        "description": "Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke).\nspent_share — доля в расходе ключа за месяц."
       },
       "SlicesOut": {
         "properties": {
@@ -19189,13 +19541,26 @@
           "surface": {
             "type": "string",
             "title": "Surface"
+          },
+          "win_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Share",
+            "readOnly": true
           }
         },
         "type": "object",
         "required": [
           "wins",
           "losses",
-          "surface"
+          "surface",
+          "win_share"
         ],
         "title": "SurfaceResultOut"
       },
@@ -19450,6 +19815,43 @@
             "type": "integer",
             "title": "Match Id"
           },
+          "side": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Side"
+          },
+          "elo": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elo"
+          },
+          "opponent_elo": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Elo"
+          },
           "opponent": {
             "$ref": "#/components/schemas/PlayerRefOut"
           },
@@ -19541,6 +19943,9 @@
         "type": "object",
         "required": [
           "match_id",
+          "side",
+          "elo",
+          "opponent_elo",
           "opponent",
           "opponent_rank",
           "tournament",
@@ -19553,7 +19958,7 @@
           "h2h"
         ],
         "title": "TodayOut",
-        "description": "Мой матч сегодня с этим игроком (только из своих ставок и анализов): соперник и\nего место по Эло, ноги своих открытых ставок, свои анализы; surface — покрытие\nтурнира (null — неизвестно); elo_prob — вероятность победы игрока по текущему Эло\n(вес покрытия как у модели, без калибровки) — входная точка, не прогноз; h2h — личные\nвстречи."
+        "description": "Мой матч сегодня с этим игроком (только из своих ставок и анализов): соперник и\nего место по Эло, ноги своих открытых ставок, свои анализы; surface — покрытие\nтурнира (null — неизвестно); elo_prob — вероятность победы игрока по текущему Эло\n(вес покрытия как у модели, без калибровки) — входная точка, не прогноз; h2h — личные\nвстречи. side — сторона игрока в матче (1 — первый, 2 — второй, как selection ноги\nставки: нога на победу игрока — market ML и selection = side). elo и opponent_elo —\nтекущее Эло игрока и соперника на покрытии матча (покрытие неизвестно — общее;\nnull — нет в таблице текущего Эло)."
       },
       "TotalSliceOut": {
         "properties": {
@@ -20486,14 +20891,28 @@
           "losses": {
             "type": "integer",
             "title": "Losses"
+          },
+          "win_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Share",
+            "readOnly": true
           }
         },
         "type": "object",
         "required": [
           "wins",
-          "losses"
+          "losses",
+          "win_share"
         ],
-        "title": "WinLossOut"
+        "title": "WinLossOut",
+        "description": "Победы и поражения; win_share — доля побед (0…1, 4 знака; null — матчей нет)."
       }
     }
   }
