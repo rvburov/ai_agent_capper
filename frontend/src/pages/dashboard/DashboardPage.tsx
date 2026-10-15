@@ -9,6 +9,7 @@ import { useBank, useStrategy } from '../../features/analysis/api';
 import { useAiBudget } from '../../features/ai/useAiBudget';
 import { capitalize } from '../../features/analytics/display';
 import { useAiUsage, useDashboard } from '../../features/dashboard/api';
+import { learningSnapshot } from '../../features/dashboard/learning';
 import { PERIODS, readPeriod, savePeriod } from '../../features/dashboard/display';
 import type { Dashboard, DashboardPeriod } from '../../features/dashboard/types';
 import { formatDate, formatDayMonth, formatWeekday } from '../../lib/format';
@@ -16,8 +17,9 @@ import { cx } from '../../lib/cx';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 import { Attention } from './Attention';
 import { BankDynamics } from './BankDynamics';
-import { Costs, Learning } from './Costs';
+import { Costs } from './Costs';
 import { HeroCard, Tiles } from './Hero';
+import { LearningCard } from './LearningCard';
 import { MyMatches } from './MyMatches';
 import { OpenBets } from './OpenBets';
 import './dashboard.css';
@@ -141,8 +143,19 @@ export function DashboardPage() {
   const chart = <BankDynamics data={data} bank={bank} ctx={ctx} mobile={mobile} pending={pending} />;
   const open = <OpenBets data={data} />;
   const matches = <MyMatches data={data} />;
-  const attention = <Attention bank={bank} params={strategy.data?.params ?? null} admin={data.admin} />;
-  const learning = <Learning />;
+  const admin = me.role === 'admin';
+  const learningNow = learningSnapshot(data.learning);
+  const awaitingBet = data.open_bets.find((bet) => bet.awaiting_result) ?? null;
+  const attention = (
+    <Attention
+      bank={bank}
+      params={strategy.data?.params ?? null}
+      admin={data.admin}
+      awaiting={{ count: data.awaiting_count, bet: awaitingBet }}
+      learning={admin ? { candidate: learningNow.candidate, ready: learningNow.readyCodes, quickPrice: learningNow.quickPrice } : null}
+    />
+  );
+  const learning = <LearningCard snapshot={learningNow} admin={admin} />;
   const costs = <Costs budget={budget.data} usage={usage.data} me={me} failed={budget.isError} />;
 
   if (mobile) {

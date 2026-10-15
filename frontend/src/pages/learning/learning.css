@@ -22,7 +22,8 @@
 .learning-tile-hint { font-size: var(--fs-xs); color: var(--fg-3); }
 @media (max-width: 720px) { .learning-tile { padding: 14px; } .learning-tile-value { font-size: var(--fs-xl); } }
 
-/* цикл обучения: 6 шагов в ряд, на планшете — по 3, на телефоне — столбиком с линией */
+/* цикл обучения: 6 шагов в ряд, на планшете — по 3, на телефоне — столбиком с линией. С 1300 px
+   шаг 3 шире остальных: его чип «Sonnet 5.5 · Batch · ≈ $0,01» — в одну строку, как в макете */
 .learning-cycle { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 28px; }
 .learning-step { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .learning-step-mark { display: flex; align-items: center; gap: 8px; color: var(--fg-3); }
@@ -32,12 +33,18 @@
 .learning-step h4 { font-size: var(--fs-sm); line-height: 1.3; }
 .learning-step p { font-size: var(--fs-xs); color: var(--fg-2); line-height: 1.45; }
 .learning-step .chip { align-self: flex-start; margin-top: 4px; height: auto; min-height: 22px; white-space: normal; }
+.learning-step.is-review .chip { white-space: nowrap; }
+@media (min-width: 1181px) and (max-width: 1299px) { .learning-step.is-review .chip { white-space: normal; } }
 .learning-step-arrow { position: absolute; top: 4px; right: -25px; width: 20px; height: 20px; color: var(--fg-3); }
 .learning-step-arrow svg { width: 20px; height: 20px; }
 .learning-loop { position: relative; height: 24px; margin: 4px calc((100% - 140px) / 6 - 15px) 14px 13px; border: 2px dashed var(--line-strong); border-top: 0; border-radius: 0 0 14px 14px; }
 .learning-loop::before { content: ""; position: absolute; left: -8px; top: -9px; border: 7px solid transparent; border-top: 0; border-bottom: 9px solid var(--line-strong); }
 .learning-loop-label { position: absolute; left: 50%; bottom: 0; transform: translate(-50%, 50%); background: var(--surface); padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--fg-2); white-space: nowrap; }
 .learning-loop-label svg { width: 14px; height: 14px; flex: none; }
+@media (min-width: 1300px) {
+  .learning-cycle { grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(0, 1.35fr) repeat(3, minmax(0, 1fr)); }
+  .learning-loop { margin-right: calc((100% - 140px) / 6.35 - 15px); }
+}
 @media (max-width: 1180px) {
   .learning-cycle { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 24px; }
   .learning-step-arrow { display: none; }
@@ -86,3 +93,60 @@
 .learning-row:first-child { border-top: 0; padding-top: 0; }
 .learning-ver-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .learning-ver-name b { font-family: var(--font-mono); font-weight: 600; }
+
+/* уроки: карточка — текст и числа слева, решение справа; на телефоне — столбиком */
+.learning-card > .card-head > .row { flex-wrap: wrap; }
+.learning-lessons { display: flex; flex-direction: column; gap: 10px; }
+.learning-lesson { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 12px 24px; padding: 14px 16px; border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--r-md); background: var(--surface); min-width: 0; }
+.learning-lesson.is-confirmed { border-left-color: var(--good); }
+.learning-lesson.is-hypothesis { border-left-color: var(--info-ink); }
+.learning-lesson.is-rejected { border-left-color: var(--line-strong); }
+.learning-lesson.is-rejected .learning-lesson-text, .learning-lesson.is-off .learning-lesson-text { color: var(--fg-2); }
+.learning-lesson-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.learning-lesson-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.learning-lesson-head .mono { font-family: var(--font-mono); }
+.learning-lesson-head .learning-date { margin-left: auto; font-size: var(--fs-xs); color: var(--fg-3); white-space: nowrap; }
+.learning-lesson-text { font-size: var(--fs-md); line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
+.learning-kind { font-size: var(--fs-xs); color: var(--fg-3); }
+.learning-cond { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.learning-cond .chip { height: auto; min-height: 22px; white-space: normal; text-align: left; }
+.learning-meta { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; font-size: var(--fs-sm); }
+.learning-meta > div { display: flex; gap: 6px; min-width: 0; }
+.learning-meta dt { color: var(--fg-3); white-space: nowrap; }
+.learning-meta dd { margin: 0; font-weight: 500; min-width: 0; }
+.learning-lesson-side { display: flex; flex-direction: column; justify-content: center; gap: 10px; min-width: 0; padding-left: 20px; border-left: 1px solid var(--line); }
+.learning-lesson-side .btn, .learning-lesson-side .chip { align-self: flex-start; }
+.learning-lesson-side .chip { height: auto; min-height: 22px; white-space: normal; }
+.learning-lesson-side .btn.ghost.learning-more { margin-left: -12px; }
+.learning-side-text { margin: 0; }
+.learning-progress { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); }
+@media (max-width: 960px) {
+  .learning-lesson { grid-template-columns: minmax(0, 1fr); padding: 12px 14px; }
+  .learning-lesson-side { padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+}
+
+/* окна урока: факты, цитата, условие, ход быстрой проверки, форма */
+.learning-modal .modal-body { display: flex; flex-direction: column; gap: 14px; }
+.learning-facts { display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: var(--fs-sm); }
+.learning-facts > div { display: contents; }
+.learning-facts dt { color: var(--fg-3); }
+.learning-facts dd { margin: 0; font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 720px) { .learning-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; } .learning-facts dd { margin-bottom: 8px; } }
+.learning-quote { margin: 0; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: var(--r-sm); font-size: var(--fs-md); line-height: 1.5; overflow-wrap: anywhere; }
+.learning-cond-box { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.learning-code { margin: 0; padding: 12px 14px; font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.65; color: var(--fg-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.learning-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.learning-steps li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; align-items: start; font-size: var(--fs-sm); }
+.learning-steps li svg { width: 18px; height: 18px; color: var(--fg-3); margin-top: 1px; }
+.learning-steps li.done svg { color: var(--good-ink); }
+.learning-steps li.run svg { color: var(--accent-ink); }
+.learning-steps li.fail svg { color: var(--bad-ink); }
+.learning-steps-box { display: flex; flex-direction: column; gap: 8px; }
+.learning-steps-box.is-running li.run svg { animation: learning-spin 1.2s linear infinite; }
+@keyframes learning-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .learning-steps-box.is-running li.run svg { animation: none; } }
+.learning-steps-note { margin: 0; }
+.learning-form { gap: 14px; }
+.learning-form-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.learning-form-op { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; min-width: 0; }
+@media (max-width: 720px) { .learning-form-2 { grid-template-columns: minmax(0, 1fr); } }

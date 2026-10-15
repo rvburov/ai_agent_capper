@@ -114,6 +114,13 @@ export function dashboardOut(over: Partial<Schemas['DashboardOut']> = {}): Schem
       points: [],
       windows: 0,
       better: 0,
+      closing_diff: null,
+      closing_diff_ci: null,
+      closing_noise: null,
+      closing_points: [],
+      closing_windows: 0,
+      closing_better: 0,
+      main: 'pred',
     },
     series: {
       kind: 'bank',
@@ -160,7 +167,48 @@ export function dashboardOut(over: Partial<Schemas['DashboardOut']> = {}): Schem
     open_stake: '0.00',
     my_matches: [],
     admin: null,
+    learning: learningOut(),
     ...over,
+  };
+}
+
+/** «Модель учится» (этап 5): ставок и уроков нет, инструкции v3, пороги и цены по умолчанию. */
+function learningOut(): Schemas['LearningOut'] {
+  return {
+    settled: 0,
+    settled_auto: 0,
+    settled_legs: 0,
+    awaiting: 0,
+    events_with_outcome: 0,
+    lessons: { in_prompt: 0, max_active: 15, total: 0, hypotheses: 0, ready: 0, confirmed: 0, rejected: 0, retired: 0, ready_codes: [], last: null },
+    versions: {
+      active: { id: 1, code: 'v3', name: 'v3', status: 'active', activated_at: '2026-10-01T09:00:00Z', checked: false, passed: null, rule: null },
+      candidate: null,
+      rules_active: null,
+      rules_candidate: null,
+    },
+    model: null,
+    eval_set: null,
+    thresholds: {
+      lessons_max: 15,
+      lesson_min_cases: 20,
+      lesson_min_process: 10,
+      shrink_k: 200,
+      claude_min_events: 300,
+      quick_check_events: 40,
+      eval_set_size: 250,
+      eval_batch_size: 100,
+      eval_hard_share: 0.175,
+      eval_min_answered: 0.9,
+    },
+    prices: {
+      postmortem_usd: 0.01,
+      quick_check_usd: 0.6,
+      eval_event_worst_usd: 0.11,
+      budget: { budget_usd: 30, spent_usd: 0, reserved_usd: 0, left_usd: 30, first_month: true, next_usd: 25 },
+    },
+    next_report: '2026-10-19',
+    last_report: null,
   };
 }
 

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { paths } from '../../app/paths';
 import { Button, Callout, Card, Chip, Skeleton } from '../../components';
 import { useStrategy } from '../../features/analysis/api';
-import type { LearningOverview } from '../../features/learning/overview';
+import type { LearningSummary } from '../../features/learning/types';
 
 // Вкладка «Версии стратегии» (versionsPanel макета): инструкции анализа — общая линия версий,
 // ее ведет администратор (В5); как принимается новая версия; свои правила суммы ставки.
@@ -69,14 +69,15 @@ function StakeRulesCard() {
   );
 }
 
-export function VersionsTab({ overview: o, admin }: { overview: LearningOverview; admin: boolean }) {
+export function VersionsTab({ summary, admin }: { summary: LearningSummary | null; admin: boolean }) {
   const { t } = useTranslation();
+  const activeVersion = summary?.versions.active?.code ?? null;
   return (
     <div className="learning-panel">
       <Card
         className="learning-card"
         title={t('learning.versions.title')}
-        subtitle={o.activeVersion ? t('learning.versions.subtitleOne', { version: o.activeVersion }) : t('learning.versions.subtitle')}
+        subtitle={activeVersion ? t('learning.versions.subtitleOne', { version: activeVersion }) : t('learning.versions.subtitle')}
         actions={
           admin ? (
             <Button kind="secondary" size="sm" icon="play" disabled>

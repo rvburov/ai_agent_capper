@@ -6,6 +6,7 @@ import { paths } from '../../app/paths';
 import { Button, Callout, Card, EmptyState, Skeleton, useToast } from '../../components';
 import { marketLabel } from '../../features/analysis/markets';
 import { apiErrorText } from '../../features/analysis/codes';
+import { readSample, saveSample, type CalibrationSample } from '../../features/analytics/accuracy';
 import { useAnalytics, useAnalyticsEver } from '../../features/analytics/api';
 import { capitalize, periodContext, prevContext } from '../../features/analytics/display';
 import {
@@ -111,6 +112,12 @@ export function AnalyticsPage() {
   const filters = useMemo(() => filtersFromSearch(params), [params]);
   const query = useMemo(() => filtersQuery(filters), [filters]);
   const analytics = useAnalytics(query);
+  // Выборка калибровки (этап 5): «Все мои прогнозы» или только ноги ставок — оба блока в ответе
+  const [sample, setSample] = useState<CalibrationSample>(readSample);
+  const chooseSample = useCallback((next: CalibrationSample) => {
+    saveSample(next);
+    setSample(next);
+  }, []);
   // Стартовый банк для «Банка по дням» (тот же запрос, что у плашки «Банк» в шапке)
   const [explain, setExplain] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -191,7 +198,7 @@ export function AnalyticsPage() {
         </div>
         <Section title={t('analytics.sections.accuracy.title')} text={t('analytics.sections.accuracy.text')} />
         <div className="analytics-grid">
-          <CalibrationCard data={data} mobile={mobile} pending={pending} />
+          <CalibrationCard data={data} mobile={mobile} pending={pending} sample={sample} onSample={chooseSample} />
           <BrierCard data={data} mobile={mobile} pending={pending} onExplain={() => setExplain(true)} />
         </div>
         <Section title={t('analytics.sections.price.title')} text={t('analytics.sections.price.text')} />

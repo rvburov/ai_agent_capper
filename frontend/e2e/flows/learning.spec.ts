@@ -33,7 +33,9 @@ test('«Обучение модели»: плитки, цикл и вкладк�
   await expect(tiles).toHaveCount(4);
   await expect(tiles.nth(1)).toContainText(/v\d+активна/);
   await expect(page.getByRole('list', { name: 'Цикл обучения, 6 шагов' }).getByRole('listitem')).toHaveCount(6);
-  await expect(page.getByText(/^Уроков пока нет/)).toBeVisible();
+  // уроки общие для всего стека: другие сценарии могли их уже добавить — пусто или карточки
+  const lessons = page.getByRole('tabpanel', { name: 'Уроки' });
+  await expect(lessons.getByText(/^Уроков пока нет/).or(lessons.getByRole('article').first())).toBeVisible();
   await layoutBothThemes(page);
 
   // вкладки — адреса: «Версии стратегии», «Базовая модель», «Отчеты»

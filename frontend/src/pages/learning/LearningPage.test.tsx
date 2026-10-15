@@ -1,7 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { betsSummary } from '../../features/bets/testData';
+import { learningSummary, lessonsList } from '../../features/learning/testData';
+import type { LearningSummary } from '../../features/learning/types';
 import { strategyV3 } from '../../test/factories';
 import { json, ME_ADMIN, ME_MEMBER, type Handler } from '../../test/fetchMock';
 import { renderPage } from '../../test/renderPage';
@@ -23,20 +24,21 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function api(settled = 0, extra: Record<string, Handler> = {}): Record<string, Handler> {
+function api(summary: Partial<LearningSummary> = {}, extra: Record<string, Handler> = {}): Record<string, Handler> {
   return {
-    'GET /api/bets/summary': () => json(betsSummary({ settled })),
+    'GET /api/learning': () => json(learningSummary(summary)),
     'GET /api/strategy/active': () => json(strategyV3()),
+    'GET /api/lessons': () => json(lessonsList()),
     ...extra,
   };
 }
 
-function renderLearning(url = '/learning', options: { me?: typeof ME_MEMBER | typeof ME_ADMIN; settled?: number; width?: number } = {}) {
+function renderLearning(url = '/learning', options: { me?: typeof ME_MEMBER | typeof ME_ADMIN; summary?: Partial<LearningSummary>; width?: number } = {}) {
   return renderPage(<LearningPage />, {
     path: '/learning/:tab?',
     url,
     me: options.me ?? ME_MEMBER,
-    api: api(options.settled ?? 0),
+    api: api(options.summary ?? {}),
     stubs: { '/profile/:tab?': 'Личный кабинет' },
     ...(options.width ? { width: options.width } : {}),
   });
@@ -46,17 +48,14 @@ const tiles = () => within(screen.getByRole('group', { name: 'Что учитс�
 
 describe('Обучение модели: каркас и пустые состояния', () => {
   it('шапка, четыре плитки, цикл из шести шагов, вкладка «Уроки» — пусто', async () => {
-    const { calls } = renderLearning();
+    renderLearning();
     expect(screen.getByRole('heading', { level: 2, name: 'Как модель учится на ставках' })).toBeInTheDocument();
     expect(await screen.findByText(/^Рассчитанных ставок пока нет/)).toBeInTheDocument();
-    // итоги — только ставки приложения за все время
-    const summary = calls.find((request) => new URL(request.url).pathname === '/api/bets/summary');
-    expect(new URL(summary!.url).searchParams.get('source')).toBe('app');
-    expect(new URL(summary!.url).searchParams.get('period')).toBe('all');
 
     const [lessons, versions, model, report] = tiles();
     expect(tiles()).toHaveLength(4);
-    expect(lessons).toHaveTextContent('Уроки в анализе0из 15гипотез пока нет');
+    // уроки в анализе, предел, версия, отчет — сводка сервера (GET /api/learning)
+    await waitFor(() => expect(lessons).toHaveTextContent('Уроки в анализе0из 15гипотез пока нет'));
     expect(lessons).toHaveAttribute('aria-current', 'true');
     expect(lessons).toHaveAttribute('href', '/learning');
     await waitFor(() => expect(versions).toHaveTextContent('Инструкции анализаv3активнакандидатов нет'));
@@ -68,14 +67,16 @@ describe('Обучение модели: каркас и пустые состо
     expect(within(cycle).getAllByRole('listitem')).toHaveLength(6);
     expect(within(cycle).getByRole('heading', { name: /^Шаг 3\.\s?Разбор ставки$/ })).toBeInTheDocument();
     expect(within(cycle).getByText('Sonnet 5.5 · Batch · ≈ $0,01')).toBeInTheDocument();
-    expect(within(cycle).getByText(/^С 20 своих случаев/)).toBeInTheDocument();
+    expect(await within(cycle).findByText(/^С 20 своих случаев/)).toBeInTheDocument();
+    // пороги и цены — из настроек сервера
+    expect(within(cycle).getByText('Быстрая проверка на 40 матчах (≈ $0,60) и решение. Раз в месяц — перепроверка')).toBeInTheDocument();
     expect(screen.getByText(/после 300 событий с исходами/)).toBeInTheDocument();
 
     const tablist = screen.getByRole('tablist', { name: 'Разделы обучения' });
     expect(within(tablist).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Уроки', 'Версии стратегии', 'Базовая модель', 'Отчеты']);
     expect(within(tablist).getByRole('tab', { name: 'Уроки' })).toHaveAttribute('aria-selected', 'true');
     const panel = screen.getByRole('tabpanel', { name: 'Уроки' });
-    expect(within(panel).getByText(/^Уроков пока нет\. .* с 20 своих случаев/)).toBeInTheDocument();
+    expect(await within(panel).findByText(/^Уроков пока нет\. .* с 20 своих случаев/)).toBeInTheDocument();
     expect(within(panel).getByText('Общие для всех участников, ведет администратор. В анализ попадают только подтвержденные — не больше 15, сейчас 0.')).toBeInTheDocument();
     // участник уроки не ведет
     expect(within(panel).getByText('Ведет администратор')).toBeInTheDocument();
@@ -85,18 +86,60 @@ describe('Обучение модели: каркас и пустые состо
     expect(screen.queryByText(/появится на этапе/i)).toBeNull();
   });
 
-  it('рассчитанные ставки — число в шапке с правильным склонением', async () => {
-    renderLearning('/learning', { settled: 3 });
-    expect(await screen.findByText(/^Рассчитано 3 ставки приложения\./)).toBeInTheDocument();
+  it('рассчитанные ставки — сколько, событий, сколько по архиву; плитки модели, кандидата и отчета', async () => {
+    renderLearning('/learning', {
+      summary: {
+        settled: 12,
+        settled_auto: 9,
+        settled_legs: 21,
+        lessons: { in_prompt: 2, max_active: 15, total: 6, hypotheses: 3, ready: 1, confirmed: 2, rejected: 0, retired: 0, ready_codes: ['L-004'], last: null },
+        versions: {
+          ...learningSummary().versions,
+          candidate: { id: 2, code: 'v4', name: 'v4', status: 'candidate', activated_at: null, checked: true, passed: true, rule: 'non_inferior' },
+        },
+        model: { id: 'cal-2026-10-12', brier: 0.2114, log_loss: 0.61, activated_at: '2026-10-12T06:00:00Z', auto: true, recalibrated_at: '2026-10-12T06:00:00Z' },
+        last_report: '2026-10-05',
+      },
+    });
+    expect(
+      await screen.findByText(/^Рассчитано ставок приложения: 12 \(21 событие\), из них по архиву tennis-data — 9, остальные — вами\./),
+    ).toBeInTheDocument();
+    const [lessons, versions, model, report] = tiles();
+    expect(lessons).toHaveTextContent('Уроки в анализе2из 151 ждет решения · 3 гипотезы');
+    expect(versions).toHaveTextContent('Инструкции анализаv3активнакандидат v4 ждет решения');
+    expect(model).toHaveTextContent('Базовая модель0,211Brierперекалибрована сама 12 окт');
+    expect(report).toHaveTextContent('Отчет недели5 октследующий — пн 19 окт, 07:00');
+  });
+
+  it('плитка модели: «перекалибрована сама» — только у версии перекалибровки; elo-v1 — «включена»', async () => {
+    renderLearning('/learning', {
+      summary: {
+        // перекалибровок еще не было: «сама» не пишем, даже если сервер пометил auto
+        model: { id: 'elo-v1', brier: 0.2114, log_loss: 0.61, activated_at: '2026-10-12T06:00:00Z', auto: true, recalibrated_at: null },
+      },
+    });
+    await waitFor(() => expect(tiles()[2]).toHaveTextContent('Базовая модель0,211Brierвключена 12 окт'));
+  });
+
+  it('плитка модели: перекалибровка позже, но не лучше — ее дата рядом', async () => {
+    renderLearning('/learning', {
+      summary: {
+        model: { id: 'elo-v1', brier: 0.2114, log_loss: 0.61, activated_at: '2026-10-05T06:00:00Z', auto: false, recalibrated_at: '2026-10-12T06:00:00Z' },
+      },
+    });
+    await waitFor(() => expect(tiles()[2]).toHaveTextContent('включена 5 окт · перекалибровка 12 окт не лучше'));
   });
 
   it('итоги не загрузились — шапка без чисел', async () => {
     renderPage(<LearningPage />, {
       path: '/learning/:tab?',
       url: '/learning',
-      api: api(0, { 'GET /api/bets/summary': () => json({ error: { code: 'x', message: 'x' } }, 500) }),
+      api: api({}, { 'GET /api/learning': () => json({ error: { code: 'x', message: 'x' } }, 500) }),
     });
     expect(await screen.findByText(/^Каждая рассчитанная ставка получает разбор ИИ/)).toBeInTheDocument();
+    // пороги и цены не пришли — тексты без чисел
+    expect(screen.getByText('Sonnet 5.5 · Batch')).toBeInTheDocument();
+    expect(screen.getByText(/^С порога своих случаев/)).toBeInTheDocument();
   });
 
   it('плитка ведет на свою вкладку: адрес, выбранная вкладка и плитка', async () => {
@@ -147,7 +190,7 @@ describe('Обучение модели: каркас и пустые состо
       path: '/learning/:tab?',
       url: '/learning/model',
       me: ME_MEMBER,
-      api: api(0, { 'GET /api/strategy/active': () => json(strategy) }),
+      api: api({}, { 'GET /api/strategy/active': () => json(strategy) }),
     });
     expect(await screen.findByText(/предел поправки Claude \(сейчас ±7,5 п\.п\.\)/)).toBeInTheDocument();
   });
@@ -157,17 +200,17 @@ describe('Обучение модели: каркас и пустые состо
       path: '/learning/:tab?',
       url: '/learning/model',
       me: ME_MEMBER,
-      api: api(0, { 'GET /api/strategy/active': () => json({ detail: 'error' }, 500) }),
+      api: api({}, { 'GET /api/strategy/active': () => json({ detail: 'error' }, 500) }),
     });
     expect(await screen.findByText(/предел поправки Claude — только решением администратора/)).toBeInTheDocument();
     expect(screen.queryByText(/±10/)).toBeNull();
   });
 
-  it('«Отчеты»: понедельник, 07:00 по времени Хельсинки, первый — 19 окт', () => {
-    renderLearning('/learning/reports');
+  it('«Отчеты»: понедельник, 07:00 по времени Хельсинки, первый — день с сервера', async () => {
+    renderLearning('/learning/reports', { summary: { next_report: '2026-10-26' } });
     const panel = screen.getByRole('tabpanel', { name: 'Отчеты' });
     expect(within(panel).getByText('Понедельник, 07:00 по времени Хельсинки · в центре уведомлений')).toBeInTheDocument();
-    expect(within(panel).getByText(/^Отчетов пока нет\. Первый придет в понедельник 19 окт в 07:00/)).toBeInTheDocument();
+    expect(await within(panel).findByText(/^Отчетов пока нет\. Первый придет в понедельник 26 окт в 07:00/)).toBeInTheDocument();
   });
 
   it('неизвестная вкладка и «уроки» в адресе — на /learning', async () => {

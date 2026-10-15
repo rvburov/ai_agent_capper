@@ -2,6 +2,7 @@ import { bankOut } from '../analysis/testData';
 import { brierOut, kpiOut, seriesOut, thresholdsOut } from '../analytics/testData';
 import type { Adaptation } from '../bank/types';
 import { betOpen } from '../bets/testData';
+import { learningSummary } from '../learning/testData';
 import type { AdminAttention, AiUsage, Dashboard, MyMatch, OpenBet, RecentBet } from './types';
 
 // Данные для тестов главной: участник, 13 октября 2026 (вторник), период 30 дней.
@@ -135,6 +136,7 @@ export function dashboardOut(over: Partial<Dashboard> = {}): Dashboard {
     open_stake: '1320.00',
     my_matches: [myMatch()],
     admin: null,
+    learning: learningSummary(),
     ...over,
   };
 }

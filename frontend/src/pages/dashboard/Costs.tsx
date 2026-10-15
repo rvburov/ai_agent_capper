@@ -232,27 +232,3 @@ export function Costs({ budget, usage, me, failed }: CostsProps) {
     </Card>
   );
 }
-
-/** «Модель учится» — разбор ставок, уроки и версии стратегии появятся на этапе 5. */
-export function Learning() {
-  const { t } = useTranslation();
-  return (
-    <Card
-      className="dashboard-card"
-      title={t('dashboard.learning.title')}
-      subtitle={t('dashboard.learning.subtitle')}
-      foot={
-        <Button kind="ghost" size="sm" icon="chart" iconRight="chevronRight" to={paths.analytics}>
-          {t('dashboard.learning.link')}
-        </Button>
-      }
-    >
-      <div className="dashboard-soon">
-        <span className="dashboard-soon-ic" aria-hidden="true">
-          <Icon name="brain" />
-        </span>
-        <p>{t('dashboard.learning.text')}</p>
-      </div>
-    </Card>
-  );
-}

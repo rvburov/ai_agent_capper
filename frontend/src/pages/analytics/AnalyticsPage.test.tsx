@@ -319,13 +319,15 @@ describe('Аналитика', () => {
       /^Диапазон 70–75%: прогноз 72%, сбылось 62% \(14 событий\)\. Модель переоценивает фаворитов на 10 п\.п\.$/,
     );
     expect(within(calib).getByText('Меньше 60 событий: точки калибровки сильно скачут, выводы преждевременны.')).toBeInTheDocument();
-    expect(within(calib).getByRole('button', { name: 'Все прогнозы · этап 5' })).toBeDisabled();
+    // блока «Все мои прогнозы» в ответе нет — только ноги ставок
+    expect(within(calib).queryByRole('button', { name: /^Все мои прогнозы/ })).toBeNull();
 
     const brier = card('Brier: модель против рынка');
     // окон 12, точек на графике 3 — считаются окна
     expect(within(brier).getByText('Точнее рынка: 8 из 12')).toBeInTheDocument();
     expect(within(brier).getByText(/в пределах шума на 64 событиях\.$/)).toBeInTheDocument();
-    expect(within(brier).getByText('модель 0,205 · 12 событий с двумя сторонами')).toBeInTheDocument();
+    expect(within(brier).getByText('модель 0,205 · 12 событий · станет главным, когда закрытий будет больше')).toBeInTheDocument();
+    expect(within(brier).getByText('Рынок при прогнозе · главный ряд')).toBeInTheDocument();
   });
 
   it('калибровка: с обратным диапазоном — одна точка перед «А в диапазоне»; в норме — «4 п.п.»', async () => {

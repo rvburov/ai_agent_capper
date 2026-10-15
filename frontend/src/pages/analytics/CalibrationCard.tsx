@@ -1,8 +1,9 @@
 import { useTranslation } from 'react-i18next';
 
-import { Callout, Card, Chip, EmptyState, type DataColumn } from '../../components';
+import { Callout, Card, Chip, EmptyState, Segmented, type DataColumn } from '../../components';
 import { CalibrationChart, ChartWithTable } from '../../components/charts';
-import type { Analytics, CalibrationBinOut, CalibrationFlag } from '../../features/analytics/types';
+import { calibrationAll, type CalibrationSample } from '../../features/analytics/accuracy';
+import type { Analytics, Calibration, CalibrationBinOut, CalibrationFlag } from '../../features/analytics/types';
 import { formatNumber, formatPp, formatProb, formatProbRange } from '../../lib/format';
 import { FitTable, FootNote, Howto } from './parts';
 
@@ -29,9 +30,8 @@ function FlagText({ flag }: { flag: CalibrationFlag }) {
   );
 }
 
-function Verdict({ data }: { data: Analytics }) {
+function Verdict({ calibration, thresholds }: { calibration: Calibration; thresholds: Analytics['thresholds'] }) {
   const { t } = useTranslation();
-  const { calibration, thresholds } = data;
   const gap = formatPp(thresholds.calibration_gap, PP0);
   if (calibration.status === 'few') {
     return <Callout kind="neutral" icon="info">{t('analytics.calibration.few', { n: thresholds.calibration_min_n })}</Callout>;
@@ -60,41 +60,86 @@ function Verdict({ data }: { data: Analytics }) {
   );
 }
 
-export function CalibrationCard({ data, mobile, pending }: { data: Analytics; mobile: boolean; pending: boolean }) {
+interface CalibrationCardProps {
+  data: Analytics;
+  mobile: boolean;
+  pending: boolean;
+  /** Выборка, выбранная участником (этап 5): все прогнозы или только ноги ставок. */
+  sample: CalibrationSample;
+  onSample: (sample: CalibrationSample) => void;
+}
+
+export function CalibrationCard({ data, mobile, pending, sample: chosen, onSample }: CalibrationCardProps) {
   const { t } = useTranslation();
-  const { calibration, thresholds } = data;
-  const bot = calibration.kind === 'claude';
-  const sample = (
-    <div className="segmented analytics-sample" role="group" aria-label={t('analytics.calibration.sampleLabel')}>
-      <button type="button" aria-pressed="true">
-        {t('analytics.calibration.sampleLegs')}
-      </button>
-      <button type="button" aria-pressed="false" disabled title={t('analytics.calibration.sampleAllTitle')}>
-        {t('analytics.calibration.sampleAll')}
-      </button>
-    </div>
-  );
+  const { thresholds } = data;
+  const bot = data.calibration.kind === 'claude';
+  // «Все мои прогнозы» — отдельный блок ответа (calibration_all); под фильтром бота его нет —
+  // тогда одна выборка «Ноги ставок», как в макете
+  const allBlock = bot ? null : calibrationAll(data);
+  const supported = allBlock !== null;
+  const sample: CalibrationSample = supported ? chosen : 'legs';
+  const all = supported && sample === 'all';
+  const calibration = all && allBlock ? allBlock : data.calibration;
+  let sampleSwitch;
+  if (supported) {
+    sampleSwitch = (
+      <Segmented<CalibrationSample>
+        className="analytics-sample"
+        label={t('analytics.calibration.sampleLabel')}
+        value={sample}
+        onChange={onSample}
+        items={[
+          {
+            value: 'all',
+            label: t('analytics.calibration.sampleAllCount', { n: allBlock?.events ?? 0 }),
+          },
+          { value: 'legs', label: t('analytics.calibration.sampleOnlyLegs') },
+        ]}
+      />
+    );
+  } else {
+    sampleSwitch = (
+      <div className="segmented analytics-sample" role="group" aria-label={t('analytics.calibration.sampleLabel')}>
+        <button type="button" aria-pressed="true">
+          {t('analytics.calibration.sampleLegs')}
+        </button>
+      </div>
+    );
+  }
   const head = {
     className: 'analytics-card',
     id: 'analytics-calib',
     title: t('analytics.calibration.title'),
-    subtitle: bot ? t('analytics.calibration.subtitleBot') : t('analytics.calibration.subtitle'),
+    subtitle: bot
+      ? t('analytics.calibration.subtitleBot')
+      : all
+        ? t('analytics.calibration.subtitleAll')
+        : t('analytics.calibration.subtitle'),
     actions: <Chip kind="outline">{t('analytics.count.events', { count: calibration.events })}</Chip>,
   };
   // у бота по событиям считаются только ординары; на паре событий график ничего не говорит
   if (bot && calibration.events < thresholds.small_sample) {
     return (
       <Card {...head}>
-        {sample}
+        {sampleSwitch}
         <EmptyState>{t('analytics.calibration.botFew', { n: calibration.events, min: thresholds.small_sample })}</EmptyState>
       </Card>
     );
   }
+  // События вне корзин 50–95% (outside с сервера): у «Всех прогнозов» вероятность стороны
+  // прогноза не ниже 50% — вне графика только 95%+; у ног ставок — и ниже 50% (ставка на
+  // аутсайдера). Чип считает все события — пояснение, почему на графике их меньше
+  const outsideKind = all ? 'High' : 'Any';
+  const outsideEvents = t('analytics.count.events', { count: calibration.outside });
   if (calibration.status === 'empty' || !calibration.bins.length) {
     return (
       <Card {...head}>
-        {sample}
-        <EmptyState>{t('analytics.calibration.empty')}</EmptyState>
+        {sampleSwitch}
+        <EmptyState>
+          {calibration.outside > 0
+            ? t(`analytics.calibration.emptyOutside${outsideKind}`, { events: outsideEvents })
+            : t('analytics.calibration.empty')}
+        </EmptyState>
       </Card>
     );
   }
@@ -126,7 +171,7 @@ export function CalibrationCard({ data, mobile, pending }: { data: Analytics; mo
   ];
   return (
     <Card {...head}>
-      {sample}
+      {sampleSwitch}
       <ChartWithTable
         pending={pending}
         legend={[
@@ -143,7 +188,8 @@ export function CalibrationCard({ data, mobile, pending }: { data: Analytics; mo
           height={mobile ? 250 : 280}
         />
       </ChartWithTable>
-      <Verdict data={data} />
+      <Verdict calibration={calibration} thresholds={thresholds} />
+      {calibration.outside > 0 && <FootNote plain>{t(`analytics.calibration.outside${outsideKind}`, { events: outsideEvents })}</FootNote>}
       {calibration.events < thresholds.calibration_few && <FootNote>{t('analytics.calibration.fewNote', { n: thresholds.calibration_few })}</FootNote>}
       <Howto>{bot ? t('analytics.calibration.howtoBot') : t('analytics.calibration.howto')}</Howto>
     </Card>

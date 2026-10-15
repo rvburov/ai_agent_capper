@@ -118,6 +118,7 @@
 .dashboard-alert-ic.bad { background: var(--bad-soft); color: var(--bad-ink); }
 .dashboard-alert-ic.warn { background: var(--warn-soft); color: var(--warn-ink); }
 .dashboard-alert-ic.info { background: var(--info-soft); color: var(--info-ink); }
+.dashboard-alert-ic.accent { background: var(--accent-soft); color: var(--accent-ink); }
 .dashboard-alert-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .dashboard-alert-title { font-weight: 600; line-height: 1.3; }
 .dashboard-alert-text { font-size: var(--fs-sm); color: var(--fg-2); min-width: 0; width: 100%; }
@@ -139,10 +140,16 @@
 .dashboard-code { font-family: var(--font-mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 
 /* ---------- «Модель учится» до этапа 5 ---------- */
-.dashboard-soon { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; align-items: start; }
-.dashboard-soon-ic { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-3); }
-.dashboard-soon-ic svg { width: 20px; height: 20px; }
-.dashboard-soon p { font-size: var(--fs-sm); color: var(--fg-2); }
+/* «Модель учится»: строки-ссылки на вкладки «Обучения модели» */
+.dashboard-learn { display: flex; flex-direction: column; margin: -4px 0; }
+.dashboard-learn-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 16px; gap: 10px; align-items: center; padding: 8px 0; min-height: 44px; color: var(--fg); text-decoration: none; border-top: 1px solid var(--line); }
+.dashboard-learn-row:first-child { border-top: 0; }
+.dashboard-learn-row:hover b { color: var(--accent-ink); }
+.dashboard-learn-row > svg { width: 16px; height: 16px; color: var(--fg-3); }
+.dashboard-learn-row b { display: block; font-weight: 600; font-size: var(--fs-sm); }
+.dashboard-learn-row small { display: block; font-size: var(--fs-xs); color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-learn-ic { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+.dashboard-learn-ic svg { width: 16px; height: 16px; }
 
 /* ---------- расходы ИИ ---------- */
 .dashboard-cost-row { align-items: flex-end; }

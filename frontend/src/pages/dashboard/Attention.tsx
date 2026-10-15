@@ -7,8 +7,9 @@ import { Button, Card, Chip, Icon, KeyValue, Modal, type IconName } from '../../
 import type { StrategyParams } from '../../features/bank/types';
 import type { Bank } from '../../features/bank/types';
 import { actingNowText, adminTodo, bankStateText, RULE_CHIP, ruleRows, type RuleRow } from '../../features/dashboard/display';
-import type { AdminAttention, ArchiveStale } from '../../features/dashboard/types';
-import { formatDate, formatDateLong, formatTime } from '../../lib/format';
+import { missingInArchive } from '../../features/bets/display';
+import type { AdminAttention, ArchiveStale, OpenBet } from '../../features/dashboard/types';
+import { formatDate, formatDateLong, formatTime, formatUsd } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { DATA_UPDATE_CLI } from '../../lib/terminal';
 
@@ -17,7 +18,7 @@ import { DATA_UPDATE_CLI } from '../../lib/terminal';
 
 interface Item {
   key: string;
-  tone: 'warn' | 'info';
+  tone: 'warn' | 'info' | 'accent';
   icon: IconName;
   /** Для читалки экрана: «Предупреждение», «Нужно решение». */
   sr: string;
@@ -121,16 +122,80 @@ function RulesText({ bank, rows }: { bank: Bank; rows: RuleRow[] }) {
   );
 }
 
+/**
+ * Ставки ждут результата (этап 5, В1): матчи сыграны, а исхода в архиве tennis-data еще нет.
+ * Даты архива и следующего файла — у первой такой ставки из открытых (сервер, по поясу
+ * участника); архив уже дальше дня матча, а исхода нет — ставка сама не рассчитается.
+ */
+function awaitingText(bet: OpenBet | null, t: TFunction): string {
+  if (bet && missingInArchive(bet)) return t('dashboard.attention.awaiting.textMissing', { to: formatDate(bet.archive_matches_to) });
+  if (bet?.archive_matches_to && bet.next_upload) {
+    return t('dashboard.attention.awaiting.text', { to: formatDate(bet.archive_matches_to), next: formatDate(bet.next_upload) });
+  }
+  if (bet?.archive_matches_to) return t('dashboard.attention.awaiting.textNoNext', { to: formatDate(bet.archive_matches_to) });
+  return t('dashboard.attention.awaiting.textPlain');
+}
+
+/** Решения администратора по обучению: кандидат инструкций и уроки, готовые к проверке. */
+export interface LearningDecisions {
+  /** Код кандидата инструкций, который ждет решения («v4»). */
+  candidate: string | null;
+  /** Коды уроков, готовых к быстрой проверке и решению. */
+  ready: readonly string[];
+  /** Цена быстрой проверки (≈ $), с сервера; нет — текст без цены. */
+  quickPrice?: number | null;
+}
+
+function learningTitle(decisions: LearningDecisions, t: TFunction): string {
+  const parts: string[] = [];
+  if (decisions.candidate) parts.push(t('dashboard.attention.learning.candidate', { code: decisions.candidate }));
+  if (decisions.ready.length) parts.push(t('dashboard.attention.learning.ready', { count: decisions.ready.length, codes: decisions.ready.join(', ') }));
+  return t('dashboard.attention.learning.title', { what: parts.join(', ') });
+}
+
+function learningText(decisions: LearningDecisions, t: TFunction): string {
+  const parts: string[] = [];
+  if (decisions.candidate) parts.push(t('dashboard.attention.learning.candidateText', { code: decisions.candidate }));
+  if (decisions.ready.length) {
+    const price = decisions.quickPrice;
+    parts.push(
+      price === null || price === undefined
+        ? t('dashboard.attention.learning.readyText')
+        : t('dashboard.attention.learning.readyTextPrice', { price: formatUsd(price) }),
+    );
+  }
+  return parts.join(' ');
+}
+
 interface AttentionProps {
   bank: Bank;
   params: StrategyParams | null;
   admin: AdminAttention | null;
+  /** Сколько открытых ставок ждут результата (GET /api/dashboard) и первая из них. */
+  awaiting: { count: number; bet: OpenBet | null };
+  /** Решения по обучению — только администратору (В5); null — ждать нечего. */
+  learning: LearningDecisions | null;
 }
 
-export function Attention({ bank, params, admin }: AttentionProps) {
+export function Attention({ bank, params, admin, awaiting, learning }: AttentionProps) {
   const { t } = useTranslation();
   const [archiveOpen, setArchiveOpen] = useState(false);
   const items: Item[] = [];
+  if (awaiting.count > 0) {
+    items.push({
+      key: 'awaiting',
+      tone: 'warn',
+      icon: 'clock',
+      sr: t('dashboard.attention.srAwaiting'),
+      title: t('dashboard.attention.awaiting.title', { count: awaiting.count }),
+      text: awaitingText(awaiting.bet, t),
+      action: (
+        <Button size="sm" icon="edit" to={awaiting.bet ? `${paths.bets}?bet=${awaiting.bet.id}` : `${paths.bets}?status=open`}>
+          {t('dashboard.attention.awaiting.settle')}
+        </Button>
+      ),
+    });
+  }
   const archive = admin?.archive ?? null;
   if (archive) {
     items.push({
@@ -143,6 +208,21 @@ export function Attention({ bank, params, admin }: AttentionProps) {
       action: (
         <Button size="sm" icon="info" onClick={() => setArchiveOpen(true)}>
           {t('dashboard.archive.what')}
+        </Button>
+      ),
+    });
+  }
+  if (learning && (learning.candidate || learning.ready.length)) {
+    items.push({
+      key: 'learning',
+      tone: 'accent',
+      icon: 'brain',
+      sr: t('dashboard.attention.srDecision'),
+      title: learningTitle(learning, t),
+      text: learningText(learning, t),
+      action: (
+        <Button size="sm" iconRight="chevronRight" to={paths.learning(learning.candidate ? 'versions' : 'lessons')}>
+          {t('dashboard.attention.learning.open')}
         </Button>
       ),
     });
@@ -185,7 +265,11 @@ export function Attention({ bank, params, admin }: AttentionProps) {
       title={t('dashboard.attention.title')}
       subtitle={t('dashboard.attention.subtitle', {
         count: items.length,
-        what: admin ? t('dashboard.attention.whatAdmin') : t('dashboard.attention.whatMember'),
+        what: admin
+          ? t('dashboard.attention.whatAdmin')
+          : awaiting.count > 0
+            ? t('dashboard.attention.whatMemberBets')
+            : t('dashboard.attention.whatMember'),
       })}
     >
       <ul className="dashboard-alerts">

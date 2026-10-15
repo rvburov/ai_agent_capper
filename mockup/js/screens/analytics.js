@@ -896,7 +896,8 @@
     // Главный ряд — рынок закрытия, когда событий с закрытием больше, чем с рынком при прогнозе (В2 этапа 4)
     const ev = s.evLegs;
     const nClose = withMarket(ev, 'close').length, nPred = withMarket(ev, 'pred').length;
-    const ref = brierRef || (nClose > nPred ? 'close' : 'pred');
+    const main = nClose > nPred ? 'close' : 'pred';
+    const ref = brierRef || main;
     const refName = ref === 'close' ? 'Рынок закрытия' : 'Рынок при прогнозе';
     const pts = rolling(ev, ref);
     const refSeg = UI.segmented({ label: 'С каким рынком сравнивать', items: [{ id: 'pred', label: 'При прогнозе · ' + nPred }, { id: 'close', label: 'Закрытие · ' + nClose }], active: ref,
@@ -937,9 +938,11 @@
           ], rows: pts.slice().reverse(),
         }))),
         verdict,
+        // «главный ряд» — у ряда по правилу В2 (main), а не у выбранного переключателем;
+        // закрытию, пока оно не главное, — «станет главным, когда закрытий будет больше»
         h('dl', { class: 'analytics-strip analytics-strip-2' },
-          h('div', null, h('dt', null, refName + ' · главный ряд'), h('dd', null, fmt.dec(b.market, 3), h('small', null, 'модель ' + fmt.dec(b.model, 3) + ' · ' + nEv(b.n)))),
-          h('div', null, h('dt', null, ref === 'close' ? 'Рынок при прогнозе' : 'Рынок закрытия'), h('dd', null, ob.market == null ? '—' : fmt.dec(ob.market, 3), h('small', null, ob.n ? 'модель ' + fmt.dec(ob.model, 3) + ' · ' + nEv(ob.n) + (ref === 'pred' ? ' · станет главным, когда закрытий будет больше' : '') : 'нет событий')))),
+          h('div', null, h('dt', null, refName + (ref === main ? ' · главный ряд' : '')), h('dd', null, fmt.dec(b.market, 3), h('small', null, 'модель ' + fmt.dec(b.model, 3) + ' · ' + nEv(b.n) + (ref === 'close' && main !== 'close' ? ' · станет главным, когда закрытий будет больше' : '')))),
+          h('div', null, h('dt', null, (other === 'close' ? 'Рынок закрытия' : 'Рынок при прогнозе') + (other === main ? ' · главный ряд' : '')), h('dd', null, ob.market == null ? '—' : fmt.dec(ob.market, 3), h('small', null, ob.n ? 'модель ' + fmt.dec(ob.model, 3) + ' · ' + nEv(ob.n) + (other === 'close' && main !== 'close' ? ' · станет главным, когда закрытий будет больше' : '') : 'нет событий')))),
         howto(h('b', null, 'Как читать: '), 'Brier — средняя квадратичная ошибка прогноза: 0 — идеально, 0,25 — как всегда ставить 50%. Рынок — вероятность по кэфам обеих сторон у вашего букмекера в момент прогноза, маржа снята степенным методом. Каждая точка — последние 30 событий. Ставки старого бота не входят.'),
         button('Brier и CLV простыми словами', { kind: 'ghost', size: 'sm', icon: 'book', onClick: explainModal, attrs: { class: 'btn ghost sm', style: 'align-self:flex-start' } }),
       ],

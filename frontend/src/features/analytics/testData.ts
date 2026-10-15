@@ -56,6 +56,13 @@ export function brierOut(over: Partial<Brier> = {}): Brier {
     ],
     windows: 12,
     better: 8,
+    closing_diff: -0.006,
+    closing_diff_ci: { low: -0.02, high: 0.008 },
+    closing_noise: true,
+    closing_points: [],
+    closing_windows: 0,
+    closing_better: 0,
+    main: 'pred',
     ...over,
   };
 }
@@ -239,6 +246,8 @@ export function analyticsOut(over: Partial<Analytics> = {}): Analytics {
       worst: { low: 0.7, high: 0.75, n: 14, p: 0.72, actual: 0.62, gap: 0.1, direction: 'over' },
       opposite: null,
     },
+    // «Все мои прогнозы» (этап 5): по умолчанию нет — как под фильтром «старый бот»
+    calibration_all: null,
     clv: {
       n: 34,
       positive: 24,

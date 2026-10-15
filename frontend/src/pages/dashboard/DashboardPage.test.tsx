@@ -5,7 +5,9 @@ import { aiBudget } from '../../features/ai/testData';
 import { bankOut, strategyV3 } from '../../features/analysis/testData';
 import { seriesOut, seriesWithFlows } from '../../features/analytics/testData';
 import type { Dashboard } from '../../features/dashboard/types';
+import { betAwaiting } from '../../features/bets/testData';
 import { adminAttention, aiUsageOut, dashboardOut, myMatch, openBetOut } from '../../features/dashboard/testData';
+import { learningSummary } from '../../features/learning/testData';
 import { fixClock } from '../../test/clock';
 import { json, ME_ADMIN, type Handler } from '../../test/fetchMock';
 import type { Me } from '../../test/factories';
@@ -21,6 +23,7 @@ const STUBS = {
   '/admin/:tab?': 'Администрирование',
   '/costs': 'ИИ и расходы',
   '/analytics': 'Аналитика',
+  '/learning/:tab?': 'Обучение модели',
 };
 
 function query(request: Request): URLSearchParams {
@@ -560,10 +563,97 @@ describe('Главная', () => {
     }
   });
 
-  it('«Модель учится» — пустое состояние этапа 5 со ссылкой на «Аналитику»', async () => {
+  it('«Модель учится»: уроки в анализе, гипотезы, готовый к проверке, последний урок, кандидат, отчет', async () => {
+    const learning = learningSummary({
+      settled: 12,
+      settled_auto: 9,
+      lessons: {
+        in_prompt: 1,
+        max_active: 15,
+        total: 5,
+        hypotheses: 2,
+        ready: 1,
+        confirmed: 1,
+        rejected: 1,
+        retired: 0,
+        ready_codes: ['L-002'],
+        last: { id: 4, code: 'L-004', text: 'Аутсайдер на траве после пяти сетов', status: 'hypothesis', created_at: '2026-10-12T09:00:00Z' },
+      },
+      versions: {
+        ...learningSummary().versions,
+        candidate: { id: 2, code: 'v4', name: 'v4', status: 'candidate', activated_at: null, checked: true, passed: true, rule: 'non_inferior' },
+      },
+    });
+    renderDashboard({ data: dashboardOut({ learning }) });
+    const card = (await screen.findByRole('heading', { name: 'Модель учится' })).closest('section')!;
+    expect(within(card).getByText('Рассчитано 12 ставок приложения, 9 — по архиву')).toBeInTheDocument();
+    const rows = within(card).getAllByRole('link');
+    expect(rows.map((row) => row.textContent)).toEqual([
+      'В анализе 1 урок из 152 гипотезы копят случаи · L-002 готов к проверке',
+      'Последний: L-004Аутсайдер на траве после пяти сетов',
+      'Инструкции v3 · кандидат v4ждет решения администратора: не хуже v3 по правилу',
+      'Отчет неделипервый — пн 19 окт, 07:00',
+      'Обучение модели',
+    ]);
+    expect(rows.map((row) => row.getAttribute('href'))).toEqual(['/learning', '/learning', '/learning/versions', '/learning/reports', '/learning']);
+    // участнику решений по обучению в «Требует внимания» нет
+    expect(screen.queryByText(/^Обучение модели:/)).toBeNull();
+    expect(screen.queryByText(/появится на этапе/i)).toBeNull();
+  });
+
+  it('«Модель учится» без уроков и рассчитанных ставок — пустые строки и пояснение', async () => {
     renderDashboard();
-    expect(await screen.findByText('Появится на этапе 5')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Аналитика' })).toHaveAttribute('href', '/analytics');
+    const card = (await screen.findByRole('heading', { name: 'Модель учится' })).closest('section')!;
+    expect(await within(card).findByText('В анализе 0 уроков из 15')).toBeInTheDocument();
+    expect(within(card).getByText('гипотез пока нет')).toBeInTheDocument();
+    expect(within(card).getByText(/^Рассчитанных ставок пока нет: разборы, гипотезы и уроки появятся/)).toBeInTheDocument();
+    expect(within(card).queryByText(/^Последний:/)).toBeNull();
+  });
+
+  it('«Требует внимания»: ставки ждут результата — даты архива и следующего файла, «Внести результат»', async () => {
+    const waiting = openBetOut({ ...betAwaiting({ id: 8, archive_matches_to: '2026-10-04', next_upload: '2026-10-19' }), implied: [0.77] });
+    const { user, router } = renderDashboard({ data: dashboardOut({ open_bets: [openBetOut(), waiting], open_count: 2, awaiting_count: 2 }) });
+    expect(await screen.findByText('2 ставки ждут результата')).toBeInTheDocument();
+    expect(
+      screen.getByText('В архиве tennis-data матчи по 4 окт, следующий файл ≈ 19 окт — тогда расчет пройдет сам. Можно внести результат и раньше: окно подскажет исход, если его нашли новости.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/^\d+ пункт.* · ставки и стратегия$/)).toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: 'Внести результат' }));
+    await waitFor(() => expect(router.state.location.search).toBe('?bet=8'));
+  });
+
+  it('«Требует внимания»: архив уже дальше дня матча, а исхода нет — внести самому', async () => {
+    const waiting = openBetOut({ ...betAwaiting({ id: 8, archive_matches_to: '2026-10-11', next_upload: '2026-10-19' }), implied: [0.77] });
+    renderDashboard({ data: dashboardOut({ open_bets: [waiting], open_count: 1, awaiting_count: 1 }) });
+    expect(await screen.findByText('1 ставка ждет результата')).toBeInTheDocument();
+    expect(screen.getByText('В архиве tennis-data матчи уже по 11 окт, а исхода там нет: сам расчет не пройдет. Внесите результат на «Ставках».')).toBeInTheDocument();
+  });
+
+  it('«Требует внимания»: ждущей ставки нет среди показанных открытых — общий текст и ссылка на открытые', async () => {
+    renderDashboard({ data: dashboardOut({ awaiting_count: 3 }) });
+    expect(await screen.findByText('3 ставки ждут результата')).toBeInTheDocument();
+    expect(screen.getByText(/^Расчет пройдет сам, когда исход появится в архиве tennis-data/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Внести результат' })).toHaveAttribute('href', '/bets?status=open');
+  });
+
+  it('у администратора «Требует внимания»: кандидат ждет решения, уроки готовы к проверке — «Обучение модели»', async () => {
+    const base = learningSummary();
+    const learning = learningSummary({
+      lessons: { ...base.lessons, ready: 2, ready_codes: ['L-002', 'L-007'] },
+      versions: {
+        ...base.versions,
+        candidate: { id: 2, code: 'v4', name: 'v4', status: 'candidate', activated_at: null, checked: true, passed: true, rule: 'non_inferior' },
+      },
+    });
+    renderDashboard({ me: ME_ADMIN, data: dashboardOut({ admin: adminAttention(), learning }) });
+    const title = await screen.findByText('Обучение модели: кандидат v4 ждет решения, уроки L-002, L-007 готовы к проверке');
+    const item = title.closest('li')!;
+    expect(within(item).getByText(/^Кандидат v4 проверен на наборе/)).toBeInTheDocument();
+    // цена быстрой проверки — с сервера (prices.quick_check_usd), как в макете
+    expect(within(item).getByText(/Урок подтвержден на истории; в анализ — после быстрой проверки ≈ \$0,60 и вашего «да»\.$/)).toBeInTheDocument();
+    expect(within(item).getByRole('link', { name: 'Обучение модели' })).toHaveAttribute('href', '/learning/versions');
+    // в «Модели учится» администратору — «ждет вашего решения»
+    expect(screen.getByText('ждет вашего решения: не хуже v3 по правилу')).toBeInTheDocument();
   });
 
   it('телефон: одна колонка, подпись показателей, последние ставки списком', async () => {
