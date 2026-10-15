@@ -49,7 +49,7 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from redis.asyncio import Redis
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, case, func, null, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.csv_safe import csv_cell
@@ -69,6 +69,7 @@ from app.ml.metrics import (
     rolling_means,
     wilson_interval,
 )
+from app.ml.sets import leg_result, set_count_from_score
 from app.ml.strategy import StakeBand, StrategyParams
 from app.schemas.analyses import TextKey
 from app.schemas.analytics import (
@@ -547,6 +548,8 @@ class Inputs:
     bootstrap: int = BOOTSTRAP_SAMPLES
     # Пополнения, выводы и корректировки по дням и видам (ряд банка, В7)
     flows: tuple[DayFlow, ...] = ()
+    # «Все мои прогнозы» (В3 этапа 4): прогнозы анализов с исходом, по паре исходов
+    predictions: tuple["PredEvent", ...] = ()
 
 
 async def gather_inputs(
@@ -582,6 +585,9 @@ async def gather_inputs(
         equity = await daily_capital(db, user, anchor, window.last)
         flows = tuple(await daily_flows(db, user))
     params: StrategyParams = params_of(await active_version(db, user.id))
+    predictions: tuple[PredEvent, ...] = ()
+    if filters.source != "legacy":
+        predictions = tuple(await prediction_events(db, user, window, zone))
     return Inputs(
         filters=filters,
         window=window,
@@ -596,6 +602,134 @@ async def gather_inputs(
         double_max=params.double_total[1],
         with_ci=with_ci,
         flows=flows,
+        predictions=predictions,
+    )
+
+
+# --- «Все мои прогнозы» (В3 этапа 4) ---
+
+
+@dataclass(frozen=True, slots=True)
+class PredEvent:
+    """Прогноз анализа с исходом: итоговая вероятность p (той стороны пары исходов, что
+    не ниже 50%), исход y, p_base и p_claude (таблица калибровки), рынок и сторона."""
+
+    p: float
+    y: int
+    p_base: float | None
+    p_claude: float | None
+    market: str
+    selection: int
+    day: date
+    surface: str | None = None
+
+
+def _pred_pair(market: str, selection: int) -> tuple[str, int]:
+    """Пара дополняющих исходов: П1/П2; Ф1(−1.5) с Ф2(+1.5); Ф2(−1.5) с Ф1(+1.5)."""
+    if market == "ML":
+        return "ML", 0
+    return "HCP", selection if market == "HCP_-1.5" else 3 - selection
+
+
+def _pred_outcome(row: Any) -> int | None:
+    """Исход прогноза: по архиву (победитель и счет матча) или по своей ноге."""
+    if row.winner_id is not None and row.status in ("finished", "retired"):
+        winner_is_first = row.winner_id == row.player1_id
+        if row.market == "ML":
+            return int((row.selection == 1) == winner_is_first)
+        count = set_count_from_score(row.score, winner_is_first=winner_is_first)
+        result = leg_result(row.market, row.selection, count, int(row.best_of or 3))
+        if result is not None:
+            return int(result == "win")
+    if row.leg_result in ("win", "loss"):
+        return int(row.leg_result == "win")
+    return None
+
+
+async def prediction_events(
+    db: AsyncSession, user: User, window: Window, zone: ZoneInfo
+) -> list[PredEvent]:
+    """Последние прогнозы своих анализов (не проверки, не замененные) по матчу и исходу с
+    исходом по архиву или своей ноге; на пару исходов — сторона с p_final ≥ 50%. Период —
+    по дню прогноза в поясе участника."""
+    replaced = select(Prediction.supersedes).where(Prediction.supersedes.is_not(None))
+    leg = (
+        select(BetLeg.result)
+        .where(BetLeg.prediction_id == Prediction.id, BetLeg.result.in_(("win", "loss")))
+        .limit(1)
+        .correlate(Prediction)
+        .scalar_subquery()
+    )
+    rows = await db.execute(
+        select(
+            Prediction.id,
+            Prediction.match_id,
+            Prediction.market,
+            Prediction.selection,
+            Prediction.p_final,
+            Prediction.p_base,
+            Prediction.p_claude,
+            Prediction.as_of,
+            Match.winner_id,
+            Match.player1_id,
+            Match.status,
+            Match.score,
+            func.coalesce(Match.best_of, Tournament.best_of, 3).label("best_of"),
+            leg.label("leg_result"),
+            # Покрытие прогноза — как у ноги (leg_surface_sql): турнир архива, иначе
+            # подтвержденный ввод анализа (досье, features.surface)
+            func.coalesce(
+                case((Tournament.source == "user", null()), else_=Tournament.surface),
+                Prediction.features["surface"].astext,
+            ).label("surface"),
+        )
+        .join(Match, Match.id == Prediction.match_id)
+        .outerjoin(Tournament, Tournament.id == Match.tournament_id)
+        .where(
+            Prediction.user_id == user.id,
+            Prediction.is_eval.is_(False),
+            Prediction.p_final.is_not(None),
+            Prediction.id.not_in(replaced),
+        )
+        .order_by(Prediction.as_of, Prediction.id)
+    )
+    latest: dict[tuple[int, str, int], Any] = {}
+    for row in rows:
+        latest[(row.match_id, row.market, row.selection)] = row
+    pairs: dict[tuple[int, str, int], Any] = {}
+    for (match_id, market, selection), row in latest.items():
+        if float(row.p_final) < 0.5 or (float(row.p_final) == 0.5 and selection != 1):
+            continue
+        pairs.setdefault((match_id, *_pred_pair(market, selection)), row)
+    found: list[PredEvent] = []
+    for row in pairs.values():
+        day = row.as_of.astimezone(zone).date()
+        if (window.first is not None and day < window.first) or day > window.last:
+            continue
+        outcome = _pred_outcome(row)
+        if outcome is None:
+            continue
+        found.append(
+            PredEvent(
+                p=float(row.p_final),
+                y=outcome,
+                p_base=float(row.p_base) if row.p_base is not None else None,
+                p_claude=float(row.p_claude) if row.p_claude is not None else None,
+                market=row.market,
+                selection=row.selection,
+                day=day,
+                surface=row.surface,
+            )
+        )
+    return sorted(found, key=lambda event: event.day)
+
+
+def _pred_ok(event: PredEvent, filters: AnalyticsFiltersIn) -> bool:
+    """Прогноз под фильтрами рынка и покрытия (как ноги: _market_ok, _surface_ok)."""
+    if filters.surface and (event.surface or "unknown") not in filters.surface:
+        return False
+    return filters.market is None or (
+        event.market == filters.market and filters.selection in (None, event.selection)
     )
 
 
@@ -792,23 +926,60 @@ def change_block(current: Totals, prev: PrevOut | None) -> ChangeOut | None:
     )
 
 
+def _closing_part(inputs: Inputs, closing: Sequence[Event]) -> dict[str, Any]:
+    """Ряд закрытия (В2 этапа 4): Brier модели против рынка закрытия без маржи, разница с
+    ДИ и скользящее окно — как у ряда при прогнозе."""
+    if not closing:
+        return {
+            "closing_model": None,
+            "closing_market": None,
+            "closing_diff": None,
+            "closing_diff_ci": None,
+            "closing_noise": None,
+            "closing_points": [],
+            "closing_windows": 0,
+            "closing_better": 0,
+        }
+    model = [(event.p - event.y) ** 2 for event in closing]
+    market = [(float(event.leg.q_close or 0) - event.y) ** 2 for event in closing]
+    model_mean, market_mean = sum(model) / len(model), sum(market) / len(market)
+    diff_ci = None
+    if inputs.with_ci and len(closing) >= 2:
+        diff_ci = _ci(bootstrap_diff_ci(model, market, n=inputs.bootstrap, seed=SEED))
+    windows = rolling_means(
+        model, market, window=THRESHOLDS.rolling_window, step=THRESHOLDS.rolling_step
+    )
+    return {
+        "closing_model": model_mean,
+        "closing_market": market_mean,
+        "closing_diff": model_mean - market_mean,
+        "closing_diff_ci": diff_ci,
+        "closing_noise": _noise(diff_ci),
+        "closing_points": [
+            BrierPointOut(
+                day=_local_day(closing[end].bet.placed_at, inputs.zone), model=a, market=b
+            )
+            for end, a, b in thin(windows, BRIER_POINTS_MAX)
+        ],
+        "closing_windows": len(windows),
+        "closing_better": sum(1 for _, a, b in windows if a < b),
+    }
+
+
 def brier_block(inputs: Inputs, events: Sequence[Event]) -> BrierOut:
     """Brier модели против рынка при прогнозе (В2) и закрытия; скользящее окно. Ряд
     закрытия — по всем событиям с двумя сторонами закрытия, в том числе без рынка при
-    прогнозе (в анализе введен кэф только своей стороны)."""
+    прогнозе (в анализе введен кэф только своей стороны). main — главный ряд: закрытие,
+    когда событий с закрытием больше, чем с рынком при прогнозе (В2 этапа 4)."""
     closing = [event for event in events if event.leg.q_close is not None]
-    closing_model = closing_market = None
-    if closing:
-        closing_model = sum((event.p - event.y) ** 2 for event in closing) / len(closing)
-        closing_market = sum(
-            (float(event.leg.q_close or 0) - event.y) ** 2 for event in closing
-        ) / len(closing)
+    closing_part = _closing_part(inputs, closing)
     rows = [event for event in events if event.leg.q_market is not None]
+    main: Literal["pred", "closing"] = "closing" if len(closing) > len(rows) else "pred"
     if not rows:
         return BrierOut(
             n=0, model=None, market=None, diff=None, diff_ci=None, noise=None,
-            closing_n=len(closing), closing_model=closing_model, closing_market=closing_market,
-            points=[], windows=0, better=0,
+            closing_n=len(closing), points=[], windows=0, better=0, main=main,
+            **closing_part,
         )  # fmt: skip
     model = [(event.p - event.y) ** 2 for event in rows]
     market = [(float(event.leg.q_market or 0) - event.y) ** 2 for event in rows]
@@ -831,11 +1002,11 @@ def brier_block(inputs: Inputs, events: Sequence[Event]) -> BrierOut:
         diff_ci=diff_ci,
         noise=_noise(diff_ci),
         closing_n=len(closing),
-        closing_model=closing_model,
-        closing_market=closing_market,
         points=points,
         windows=len(windows),
         better=sum(1 for _, a, b in windows if a < b),
+        main=main,
+        **closing_part,
     )
 
 
@@ -1047,23 +1218,33 @@ def parlays_block(inputs: Inputs, chosen: Sequence[BetRow]) -> ParlaysOut | None
     )
 
 
-def _calibration_bin(index: int, events: Sequence[Event], kind: str) -> CalibrationBinOut:
+def _p_base(event: "Event | PredEvent") -> float | None:
+    return event.leg.p_base if isinstance(event, Event) else event.p_base
+
+
+def _p_claude(event: "Event | PredEvent") -> float | None:
+    return event.leg.p_claude if isinstance(event, Event) else event.p_claude
+
+
+def _calibration_bin(
+    index: int, events: Sequence["Event | PredEvent"], kind: str
+) -> CalibrationBinOut:
     def mean(values: Sequence[float]) -> float | None:
         return sum(values) / len(values) if values else None
 
     n = len(events)
     wins = sum(event.y for event in events)
     ci_low, ci_high = wilson_interval(wins, n)
-    final = kind == "final"
+    final = kind in ("final", "all")
+    bases = [value for value in map(_p_base, events) if value is not None]
+    claudes = [value for value in map(_p_claude, events) if value is not None]
     return CalibrationBinOut(
         low=round(index * CALIB_WIDTH, 10),
         high=round((index + 1) * CALIB_WIDTH, 10),
         n=n,
         p=sum(event.p for event in events) / n,
-        p_base=mean([e.leg.p_base for e in events if e.leg.p_base is not None]) if final else None,
-        p_claude=(
-            mean([e.leg.p_claude for e in events if e.leg.p_claude is not None]) if final else None
-        ),
+        p_base=mean(bases) if final else None,
+        p_claude=mean(claudes) if final else None,
         actual=wins / n,
         ci_low=ci_low,
         ci_high=ci_high,
@@ -1082,9 +1263,11 @@ def _flag(item: CalibrationBinOut) -> CalibrationFlagOut:
     )
 
 
-def calibration_block(events: Sequence[Event], kind: Literal["final", "claude"]) -> CalibrationOut:
+def calibration_block(
+    events: Sequence["Event | PredEvent"], kind: Literal["final", "claude", "all"]
+) -> CalibrationOut:
     """Корзины 5 п.п. от 50 до 95%, интервал Уилсона; худший диапазон и противоположный."""
-    grouped: dict[int, list[Event]] = defaultdict(list)
+    grouped: dict[int, list[Event | PredEvent]] = defaultdict(list)
     outside = 0
     for event in events:
         index = math.floor(event.p / CALIB_WIDTH + 1e-9)
@@ -1540,6 +1723,14 @@ def build_analytics(inputs: Inputs) -> AnalyticsOut:
         brier_job = pool.submit(brier_block, inputs, brier_events)
         parlays_job = pool.submit(parlays_block, inputs, parts.chosen)
         calibration = calibration_block(parts.events, parts.kind)
+        calibration_all = (
+            calibration_block(
+                [event for event in inputs.predictions if _pred_ok(event, inputs.filters)],
+                "all",
+            )
+            if parts.kind == "final"
+            else None
+        )
         series = series_block(inputs, parts.chosen)
         clv_out = clv_block(parts.clvs, parts.legs)
         # Срезы по событиям — в этом потоке, пока остальные блоки считаются в пуле
@@ -1565,6 +1756,7 @@ def build_analytics(inputs: Inputs) -> AnalyticsOut:
         slices=slices,
         parlays=parlays,
         calibration=calibration,
+        calibration_all=calibration_all,
         clv=clv_out,
     )
 

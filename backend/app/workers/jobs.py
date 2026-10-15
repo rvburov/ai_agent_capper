@@ -86,9 +86,11 @@ from app.services import (
     auto_settlement,
     dashboard,
     data_uploads,
+    eval_runs,
     lesson_quick,
     lessons,
     postmortems,
+    recalibration,
 )
 from app.services.bank import user_zone
 from app.services.claude_key import key_for
@@ -464,10 +466,18 @@ async def submit_postmortems(ctx: dict[Any, Any]) -> dict[str, Any]:
     return summary
 
 
+def _eval_kind(job: BatchJob) -> str:
+    """Чей пакет вида eval: прогон версии на наборе (eval) или быстрая проверка урока."""
+    return str((job.params or {}).get("eval_kind") or "quick")
+
+
 async def _release(db: AsyncSession, job: BatchJob, reason: str) -> None:
-    """Пакет не ушел или потерян: разборы — снова в очередь, проверка урока — failed."""
+    """Пакет не ушел или потерян: разборы — снова в очередь, проверка урока — failed,
+    пакет прогона версии — отправить снова (не ушел) или прогон failed (потерян)."""
     if job.kind == "postmortem":
         await postmortems.requeue_job(db, job.id)
+    elif job.kind == "eval" and _eval_kind(job) == eval_runs.KIND:
+        await eval_runs.mark_lost(db, job, reason)
     elif job.kind == "eval":
         await lesson_quick.mark_lost(db, job, reason)
 
@@ -528,6 +538,8 @@ async def collect_all(db: AsyncSession) -> dict[str, Any]:
             if job.kind == "postmortem":
                 collected, lessons_touched = await postmortems.collect(db, client, job)
                 touched |= lessons_touched
+            elif job.kind == "eval" and _eval_kind(job) == eval_runs.KIND:
+                collected = await eval_runs.collect(db, client, job)
             elif job.kind == "eval":
                 collected = await lesson_quick.collect(db, client, job)
             else:
@@ -550,6 +562,11 @@ async def collect_all(db: AsyncSession) -> dict[str, Any]:
     return summary
 
 
+async def advance_eval_runs(db: AsyncSession) -> list[tuple[int, str]]:
+    """Следующие пакеты прогонов версий на наборе (после сбора предыдущих)."""
+    return await eval_runs.advance_all(db)
+
+
 async def _skip_item(db: AsyncSession, item: batches.BatchItem, run: Any) -> None:
     return None
 
@@ -559,8 +576,37 @@ async def collect_batches(ctx: dict[Any, Any]) -> dict[str, Any]:
     sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
     async with sessionmaker() as db:
         summary = await collect_all(db)
+    async with sessionmaker() as db:
+        advanced = await advance_eval_runs(db)
+    if advanced:
+        summary["eval_runs"] = advanced
     if summary.get("collected") or summary.get("lost") or summary.get("failed_sends"):
         log.info("worker.collect_batches", **summary)
+    return summary
+
+
+async def run_eval(ctx: dict[Any, Any], eval_run_id: int) -> str:
+    """Задача arq (ставит API при запуске прогона): отправить очередной пакет прогона
+    версии на наборе (досье, худший случай, бюджет проверок, пакет)."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        status = await eval_runs.advance(db, eval_run_id)
+    log.info("worker.run_eval", eval_run_id=eval_run_id, status=status)
+    return status
+
+
+async def recalibrate_model(ctx: dict[Any, Any]) -> dict[str, Any]:
+    """Задача arq (cron по понедельникам после ночного обновления данных): перекалибровка
+    базовой модели; включается сама, если не хуже прежней (В6)."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        result = await recalibration.recalibrate(db)
+    summary = {
+        "decision": result.decision,
+        "reason": result.reason,
+        "model": result.version.id if result.version is not None else None,
+    }
+    log.info("worker.recalibrate_model", **summary)
     return summary
 
 

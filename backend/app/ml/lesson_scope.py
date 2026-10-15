@@ -251,6 +251,29 @@ def scope_key(scope: Scope) -> str:
     return "|".join(parts)
 
 
+_OP_SIGNS = {"eq": "=", "in": "∈", "lt": "<", "le": "≤", "gt": ">", "ge": "≥"}
+
+
+def describe(scope: Scope) -> str:
+    """Условие урока строкой из признаков словаря (для блока уроков в system анализа):
+    «role = favorite; elo_gap < 120; surface ∈ hard, clay». Собирается только кодом из
+    проверенного условия — без свободного текста (m7 волны 3)."""
+    parts: list[str] = []
+    for item in scope.conditions:
+        feature = FEATURES[item.feature]
+        sign = _OP_SIGNS[item.op]
+        if feature.kind == "enum":
+            values = ", ".join(item.values)
+            if item.op == "in" and len(item.values) == 1:
+                sign = "="
+            parts.append(f"{item.feature} {sign} {values}")
+            continue
+        value = float(item.value if item.value is not None else 0.0)
+        shown = str(int(value)) if feature.step >= 1 and value.is_integer() else f"{value:g}"
+        parts.append(f"{item.feature} {sign} {shown}")
+    return "; ".join(parts) if parts else f"market = {MARKET_ML}"
+
+
 def dictionary() -> list[dict[str, Any]]:
     """Словарь для формы «Предложить урок» и промпта разбора."""
     return [
@@ -598,3 +621,56 @@ def cases_select(
         .where(*where)
         .order_by(inner.c.day, inner.c.match_id, inner.c.side)
     )
+
+
+def ratings_select(
+    *,
+    model: EloModel,
+    since: date,
+    until: date,
+    levels: Sequence[str] | None = None,
+) -> Select[*tuple[Any, ...]]:
+    """Сыгранные матчи архива с днем в [since, until) и рейтинги модели сторон до дня
+    матча (r1 — игрок 1, r2 — игрок 2, с весом покрытия): для замороженного eval-набора и
+    перекалибровки базовой модели. levels — уровни турниров (основной тур); None — все."""
+    day = func.coalesce(Match.match_date, Tournament.start_date)
+    where: list[ColumnElement[bool]] = [
+        Match.status == "finished",
+        Match.winner_id.is_not(None),
+        Match.source.in_(ARCHIVE_SOURCES),
+        day >= since,
+        day < until,
+    ]
+    if levels is not None:
+        where.append(Tournament.category.in_(list(levels)))
+    sides = (
+        select(
+            Match.id.label("match_id"),
+            day.label("day"),
+            Match.winner_id.label("winner_id"),
+            Match.player1_id.label("p1"),
+            Match.player2_id.label("p2"),
+            _surface(Tournament.surface).label("surface"),
+            Match.round.label("round"),
+            func.coalesce(Match.best_of, Tournament.best_of, 3).label("best_of"),
+        )
+        .join(Tournament, Tournament.id == Match.tournament_id)
+        .where(*where)
+        .subquery("sides")
+    )
+    weight = literal(model.weight, Float)
+    initial = literal(model.initial, Float)
+
+    def blended(player: Any) -> Any:
+        overall = func.coalesce(_rating(sides, player, "all"), initial)
+        on_surface = func.coalesce(_rating(sides, player, sides.c.surface), initial)
+        return case(
+            (sides.c.surface.is_(None), overall),
+            else_=(1.0 - weight) * overall + weight * on_surface,
+        )
+
+    return select(
+        sides,
+        blended(sides.c.p1).label("r1"),
+        blended(sides.c.p2).label("r2"),
+    ).order_by(sides.c.day, sides.c.match_id)

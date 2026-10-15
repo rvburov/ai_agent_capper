@@ -1,7 +1,9 @@
 """Общее для команд приемки этапа 3 (acceptance-runs, smoke-eval, parse-eval):
 администратор, на чьем ключе идут вызовы, и бюджет проверок.
 
-Бюджет проверок (Р22) — app_settings.eval_budget_usd на месяц по UTC. Проверки — вызовы
+Бюджет проверок (Р22) — app_settings.eval_budget_usd на месяц по UTC; в месяц первого
+замороженного eval-набора — не меньше agent_config.eval_first_month_usd (Р25: $30 в первый
+месяц, дальше $25). Проверки — вызовы
 Claude с kind из CHECK_RUN_KINDS (eval, shadow): smoke-eval через Batch и разбор
 эталонных сообщений parse-eval. В расход участника и общий бюджет ключа администратора
 они не входят. Anthropic списывает деньги за запросы пакета, когда они выполнены, а
@@ -35,7 +37,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.batches import reserved_usd
-from app.db.models import AgentRun, AppSettings, EvalRun, User
+from app.agent.config import load_agent_config
+from app.db.models import AgentRun, AppSettings, EvalRun, EvalSet, User
 from app.services.admin_users import CHECK_RUN_KINDS, find_user_by_email, month_start
 from app.services.app_settings import SETTINGS_ROW_ID
 from app.services.sessions import utcnow
@@ -77,11 +80,15 @@ async def pick_admin(db: AsyncSession, email: str | None) -> User | None:
 
 @dataclass(frozen=True)
 class EvalBudget:
-    """Бюджет проверок на месяц: всего, потрачено, в резерве за незабранными пакетами."""
+    """Бюджет проверок на месяц: всего, потрачено, в резерве за незабранными пакетами.
+    first_month — месяц первого замороженного набора (бюджет не меньше суммы первого
+    месяца, Р25), next_usd — бюджет со следующего месяца (настройка)."""
 
     budget_usd: Decimal
     spent_usd: Decimal
     reserved_usd: Decimal
+    first_month: bool = False
+    next_usd: Decimal = ZERO
 
     @property
     def left_usd(self) -> Decimal:
@@ -94,9 +101,20 @@ async def eval_budget(
     """Бюджет проверок месяца. exclude_run_id — без резерва до отправки этого прогона (его
     пакет сейчас уходит, худший случай считается заново)."""
     moment = now or utcnow()
-    budget = await db.scalar(
-        select(AppSettings.eval_budget_usd).where(AppSettings.id == SETTINGS_ROW_ID)
+    setting = Decimal(
+        await db.scalar(
+            select(AppSettings.eval_budget_usd).where(AppSettings.id == SETTINGS_ROW_ID)
+        )
+        or 0
     )
+    first_set = await db.scalar(
+        select(func.min(EvalSet.frozen_at)).where(EvalSet.frozen_at.is_not(None))
+    )
+    first_month = first_set is not None and month_start(first_set) == month_start(moment)
+    budget = setting
+    if first_month:
+        config = await load_agent_config(db)
+        budget = max(setting, Decimal(config.eval_first_month_usd))
     spent = await db.scalar(
         select(func.sum(AgentRun.cost_usd)).where(
             AgentRun.kind.in_(CHECK_RUN_KINDS), AgentRun.created_at >= month_start(moment)
@@ -132,7 +150,11 @@ async def eval_budget(
             continue
     reserved += await reserved_usd(db, CHECK_RUN_KINDS, moment)
     return EvalBudget(
-        budget_usd=Decimal(budget or 0), spent_usd=Decimal(spent or 0), reserved_usd=reserved
+        budget_usd=budget,
+        spent_usd=Decimal(spent or 0),
+        reserved_usd=reserved,
+        first_month=first_month,
+        next_usd=setting,
     )
 
 

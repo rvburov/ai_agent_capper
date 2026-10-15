@@ -39,7 +39,7 @@ from app.db.models import (
 )
 from app.db.session import create_sessionmaker
 from app.ingest import update
-from app.services import analysis_run, data_uploads, lesson_quick
+from app.services import analysis_run, data_uploads, eval_runs, lesson_quick
 from app.services.data_status import DATA_UPDATE_MINUTE, STALE_AFTER
 from app.services.sessions import create_session, get_active_session
 from app.workers import jobs
@@ -62,11 +62,15 @@ from app.workers.main import (
     CLEANUP_HOUR_UTC,
     CLEANUP_MINUTE,
     COLLECT_MINUTES,
+    EVAL_RUN_TIMEOUT_SECONDS,
     LESSONS_HOUR_UTC,
     LESSONS_MINUTE,
     POSTMORTEM_MINUTES,
     QUICK_CHECK_TIMEOUT_SECONDS,
     REAP_MINUTES,
+    RECALIBRATE_HOUR_UTC,
+    RECALIBRATE_MINUTE,
+    RECALIBRATE_WEEKDAY,
     RECHECK_DAY,
     RECHECK_MINUTE,
     REMIND_MINUTE,
@@ -275,6 +279,8 @@ def test_worker_settings(settings: Settings) -> None:
         quick_job,
         lessons_job,
         recheck_job,
+        eval_job,
+        recalibrate_job,
     ) = functions
     assert (cleanup_job, update_job, reaper_job, deletion_job, alerts_job) == (
         cleanup_auth_records,
@@ -312,6 +318,11 @@ def test_worker_settings(settings: Settings) -> None:
     assert quick_job.coroutine is jobs.run_quick_check
     assert quick_job.name == "run_quick_check" == lesson_quick.QUICK_JOB
     assert quick_job.timeout_s == QUICK_CHECK_TIMEOUT_SECONDS and quick_job.max_tries == 1
+    # Волна 3: прогон версии на наборе (ставит API), перекалибровка базовой модели
+    assert isinstance(eval_job, arq.worker.Function)
+    assert eval_job.coroutine is jobs.run_eval and eval_job.name == "run_eval" == eval_runs.RUN_JOB
+    assert eval_job.timeout_s == EVAL_RUN_TIMEOUT_SECONDS and eval_job.max_tries == 1
+    assert recalibrate_job is jobs.recalibrate_model
     assert WorkerSettings.cron_jobs is not None
     (
         cleanup,
@@ -325,7 +336,23 @@ def test_worker_settings(settings: Settings) -> None:
         collect,
         lessons_cron,
         recheck,
+        recalibrate,
     ) = WorkerSettings.cron_jobs
+    # Перекалибровка — по понедельникам после ночного обновления, до проверки уроков
+    assert recalibrate.coroutine is jobs.recalibrate_model and recalibrate.max_tries == 1
+    assert (recalibrate.weekday, recalibrate.hour, recalibrate.minute) == (
+        RECALIBRATE_WEEKDAY,
+        RECALIBRATE_HOUR_UTC,
+        RECALIBRATE_MINUTE,
+    )
+    assert (
+        (settings.data_update_hour_utc, DATA_UPDATE_MINUTE)
+        < (
+            RECALIBRATE_HOUR_UTC,
+            RECALIBRATE_MINUTE,
+        )
+        < (LESSONS_HOUR_UTC, LESSONS_MINUTE)
+    )
     # Разборы и пакеты — каждые 15 минут, не в минуты соседних задач
     hourly = {
         CLEANUP_MINUTE,
@@ -401,7 +428,7 @@ def test_worker_cron_can_be_turned_off(settings: Settings) -> None:
     # CAPPER_WORKER_CRON=false (стек сквозных тестов): только задачи из очереди, без
     # ночной загрузки архивов и уборщика
     jobs_on = build_cron_jobs(settings)
-    assert jobs_on is not None and len(jobs_on) == 11
+    assert jobs_on is not None and len(jobs_on) == 12
     assert build_cron_jobs(settings.model_copy(update={"worker_cron": False})) is None
     assert Settings.model_fields["worker_cron"].default is True
 

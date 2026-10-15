@@ -101,7 +101,8 @@ class LessonEstimateOut(BaseModel):
 class LessonHistoryOut(BaseModel):
     """Проверка на архиве кодом: случаи истории и отложенной части (с holdout_since);
     bias — средний остаток y − p модели в условии (доля, −0,05 = модель завышает на
-    5 п.п.); shift — поправка с усадкой; лог-лосс без урока и с поправкой; gain — выигрыш
+    5 п.п.); shift — поправка с усадкой bias · n_shrink / (n_shrink + k), n_shrink — случаев
+    истории архива (одно и то же для всех); лог-лосс без урока и с поправкой; gain — выигрыш
     лог-лосса на истории (без − с, больше нуля — урок помогает), holdout_gain — на
     отложенной части; seed бутстрэпа."""
 
@@ -112,6 +113,7 @@ class LessonHistoryOut(BaseModel):
     n_hist: int
     n_history: int
     n_holdout: int
+    n_shrink: int
     holdout_since: date | None
     bias: LessonEstimateOut | None
     shift: float | None
@@ -145,8 +147,10 @@ class LessonQuickOut(BaseModel):
 
 
 class LessonOut(BaseModel):
-    """Урок. n_cases — своих случаев (матчей ставок под условием; участник видит только
-    матчи своих ставок, администратор — всех), need_cases — порог проверки; effect,
+    """Урок. n_cases — случаев урока по ставкам всех участников (матчей под условием):
+    администратору — всегда, участнику — только с 5 (иначе null и n_cases_few = true:
+    «меньше 5»; по малому числу вычислялась бы чужая ставка); own_cases — сколько из них
+    — матчи ставок смотрящего; need_cases — порог проверки (по общему числу); effect,
     effect_ci, effect_shrunk, holdout_* — как в lessons (доли);
     own_bets — ваши ставки в основании урока (только ваши, Т21); watching — вы просили
     сообщить, когда урок проверят; scope_ok — условие из словаря (его можно проверить на
@@ -163,7 +167,9 @@ class LessonOut(BaseModel):
     scope_ok: bool
     in_prompt: bool
     created_at: datetime
-    n_cases: int
+    n_cases: int | None
+    n_cases_few: bool
+    own_cases: int
     need_cases: int
     n_hist: int
     effect: float | None

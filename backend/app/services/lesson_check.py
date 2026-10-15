@@ -8,7 +8,8 @@
 Свои случаи — ноги рассчитанных ставок приложения под условием (считаются матчи). Проверка
 на истории начинается с lesson_min_cases своих случаев (решает app/services/lessons.py).
 
-История — сыгранные матчи архива за HISTORY_YEARS лет до сегодня. Вероятность случая —
+История — сыгранные матчи архива за HISTORY_YEARS лет до сегодня, кроме матчей
+замороженных eval-наборов (на них сравниваются версии инструкций). Вероятность случая —
 прогноз базовой модели до матча (out-of-sample по времени: рейтинги Эло из player_ratings
 строго до дня матча, вес покрытия и калибровка Платта — из ml_models, как в досье),
 для фор — модель сетов. Случаи по дням делятся на историю и отложенную часть (последние
@@ -16,8 +17,9 @@ HOLDOUT_SHARE).
 
 На истории:
 - остаток y − p и его 95% ДИ (бутстрэп с seed) — смещение модели в условии (effect);
-- поправка с усадкой shift = effect · n / (n + k), n — случаев истории и своих, k —
-  lesson_shrink_k (effect_shrunk);
+- поправка с усадкой shift = effect · n / (n + k), n — случаев истории архива (n_shrink;
+  свои случаи в формулу не входят: основание проверки одно для всех и не выдает, сколько
+  ставок у других участников), k — lesson_shrink_k (effect_shrunk);
 - лог-лосс без урока и с поправкой и парный бутстрэп-ДИ выигрыша
   (без − с; больше нуля — урок помогает).
 На отложенной части — выигрыш лог-лосса от той же поправки (holdout_effect, ДИ).
@@ -38,7 +40,7 @@ from sqlalchemy import RowMapping, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
-from app.db.models import BetLeg
+from app.db.models import BetLeg, EvalSet, EvalSetItem
 from app.ml.backtest import PlattScaling
 from app.ml.elo import EloParams, win_probability
 from app.ml.lesson_scope import EloModel, Scope, cases_select
@@ -91,7 +93,11 @@ async def read_only(db: AsyncSession, stmt: Select[*tuple[Any, ...]]) -> list[Ro
 
 async def elo_model(db: AsyncSession) -> tuple[EloModel, PlattScaling | None]:
     """Вес покрытия, начальный рейтинг и калибровка базовой модели (как в досье)."""
-    params = await model_params(db)
+    return elo_model_of(await model_params(db))
+
+
+def elo_model_of(params: dict[str, Any]) -> tuple[EloModel, PlattScaling | None]:
+    """То же по готовым параметрам (снимок модели, закрепленный за набором)."""
     weight = float(params.get("surface_weight", EloParams.surface_weight))
     initial = float(params.get("initial", EloParams.initial))
     platt: PlattScaling | None = None
@@ -158,11 +164,26 @@ def archive_cases(
     return found
 
 
+async def frozen_match_ids(db: AsyncSession) -> set[int]:
+    """Матчи всех замороженных eval-наборов: на них сравниваются версии инструкций."""
+    return set(
+        await db.scalars(
+            select(EvalSetItem.match_id)
+            .join(EvalSet, EvalSet.id == EvalSetItem.eval_set_id)
+            .where(EvalSet.frozen_at.is_not(None))
+        )
+    )
+
+
 async def history_cases(db: AsyncSession, scope: Scope, *, today: date) -> list[Case]:
+    """Случаи истории урока без матчей замороженных наборов (M1 волны 3): поправка урока
+    подбирается и отбирается не на тех матчах, на которых потом сравнивается кандидат
+    инструкций с этим уроком, — исходы набора не протекают в инструкции."""
     model, platt = await elo_model(db)
     since = today - timedelta(days=365 * HISTORY_YEARS)
     rows = await read_only(db, cases_select(scope, model=model, since=since, until=today))
-    return archive_cases(rows, scope, platt)
+    frozen = await frozen_match_ids(db)
+    return archive_cases([row for row in rows if int(row["match_id"]) not in frozen], scope, platt)
 
 
 @dataclass(frozen=True)
@@ -291,6 +312,7 @@ class HistoryCheck:
     n_hist: int
     n_history: int = 0
     n_holdout: int = 0
+    n_shrink: int = 0
     holdout_since: date | None = None
     bias: Estimate | None = None
     shift: float | None = None
@@ -310,6 +332,7 @@ class HistoryCheck:
             "n_hist": self.n_hist,
             "n_history": self.n_history,
             "n_holdout": self.n_holdout,
+            "n_shrink": self.n_shrink,
             "holdout_since": self.holdout_since.isoformat() if self.holdout_since else None,
             "bias": _estimate(self.bias),
             "shift": self.shift,
@@ -332,7 +355,6 @@ def evaluate(
     cases: Sequence[Case],
     scope: Scope,
     *,
-    n_own: int,
     shrink_k: int,
     seed: int = SEED,
     samples: int = BOOTSTRAP_SAMPLES,
@@ -360,7 +382,7 @@ def evaluate(
     p_h = np.array([item.p for item in history])
     y_h = np.array([item.y for item in history], dtype=np.float64)
     bias = bootstrap_mean_ci(y_h - p_h, n=samples, seed=seed)
-    shift = shrink(bias.value, len(history) + n_own, shrink_k)
+    shift = shrink(bias.value, len(history), shrink_k)
     without_h = log_losses(p_h, y_h)
     with_h = log_losses(_shifted(p_h, shift), y_h)
     gain = bootstrap_diff_ci(without_h, with_h, n=samples, seed=seed)
@@ -386,6 +408,7 @@ def evaluate(
         total,
         n_history=len(history),
         n_holdout=len(holdout),
+        n_shrink=len(history),
         holdout_since=holdout_since,
         bias=bias,
         shift=shift,
@@ -399,8 +422,8 @@ def evaluate(
 
 
 async def check_history(
-    db: AsyncSession, scope: Scope, *, today: date, n_own: int, shrink_k: int
+    db: AsyncSession, scope: Scope, *, today: date, shrink_k: int
 ) -> HistoryCheck:
     """Проверка урока на архиве (запрос только для чтения и evaluate)."""
     cases = await history_cases(db, scope, today=today)
-    return evaluate(cases, scope, n_own=n_own, shrink_k=shrink_k)
+    return evaluate(cases, scope, shrink_k=shrink_k)

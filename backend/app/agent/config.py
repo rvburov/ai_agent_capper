@@ -130,6 +130,22 @@ class AgentConfig(BaseModel):
     # проверка урока перед включением (В4): столько матчей набора
     eval_max_tokens: int = Field(default=8000, ge=1024, le=128000)
     quick_check_events: int = Field(default=40, ge=10, le=200)
+    # Замороженный набор (волна 3): событий в наборе и доля трудных (TOKEN_ECONOMY.md,
+    # 2.2: 200–300 и 15–20%); прогон версии — пакетами до eval_batch_size событий (Т8:
+    # худший случай пакета ≈ $11 помещается в бюджет). Бюджет проверок в месяц первого
+    # набора — не меньше eval_first_month_usd (Р25: $30, дальше — app_settings, $25)
+    eval_set_size: int = Field(default=250, ge=200, le=300)
+    eval_hard_share: float = Field(default=0.18, ge=0.15, le=0.2)
+    eval_batch_size: int = Field(default=100, ge=10, le=1000)
+    eval_first_month_usd: Decimal = Field(
+        default=Decimal(30), ge=0, le=5000, max_digits=10, decimal_places=2
+    )
+    # Кандидат инструкций включается только после прогона, где оценено не меньше этой доли
+    # событий набора (m2 волны 3): прогон без ответов ничего не проверил
+    eval_min_answered: float = Field(default=0.9, ge=0.5, le=1.0)
+    # Поправка Claude к вероятности числом (стэкинг) — после стольких событий с исходами
+    # (LLM_LEARNING.md, 6.1; Т20)
+    claude_min_events: int = Field(default=300, ge=50, le=100_000)
     # Уроки (LLM_LEARNING.md, 1.1): не больше lessons_max_active в анализе, проверка на
     # истории — с lesson_min_cases своих случаев (у процессного урока —
     # lesson_min_cases_process), усадка поправки effect · n / (n + lesson_shrink_k)

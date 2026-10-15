@@ -43,17 +43,16 @@ from app.db.models import (
     Dossier,
     Match,
     MatchStat,
-    MlModel,
     Player,
     PlayerNews,
     PlayerRating,
     Tournament,
 )
 from app.ingest.rounds import round_order
+from app.ml import model_versions
 from app.ml.backtest import PlattScaling
 from app.ml.elo import (
     ALL,
-    MODEL_ID,
     RESULT_STATUSES,
     EloParams,
     current_elo,
@@ -547,8 +546,8 @@ async def data_to_on(db: AsyncSession, day: date) -> date | None:
 
 
 async def model_params(db: AsyncSession) -> dict[str, Any]:
-    params = await db.scalar(select(MlModel.params).where(MlModel.id == MODEL_ID))
-    return dict(params or {})
+    """elo-v1 и калибровка активной версии базовой модели (app/ml/model_versions.py)."""
+    return await model_versions.model_params(db)
 
 
 def _platt(params: dict[str, Any]) -> PlattScaling | None:
@@ -663,6 +662,7 @@ async def build_dossier(
     surface: str,
     with_news: bool = True,
     swap: bool = False,
+    model: model_versions.ModelSnapshot | None = None,
 ) -> DossierResult:
     """Досье матча на момент as_of (aware datetime): собрать, записать в dossiers (новая
     строка или уже существующая с тем же sha256) и вернуть. surface и best_of — из
@@ -671,7 +671,9 @@ async def build_dossier(
 
     Для проверки на архиве (команда smoke-eval): with_news=False — досье без новостей
     (срез «Claude без новостей»), swap=True — игрок 2 матча становится p1 досье (в архиве
-    игрок 1 — победитель, стороны назначает проверка)."""
+    игрок 1 — победитель, стороны назначает проверка). model — снимок базовой модели
+    (один на анализ или закрепленный за набором); нет — активная версия. Id версии идет в
+    features.ml_model_id: прогноз помечается той версией, что дала p_base."""
     if as_of.tzinfo is None:
         raise ValueError("build_dossier: as_of без часового пояса")
     day = as_of.astimezone(UTC).date()
@@ -679,7 +681,8 @@ async def build_dossier(
     player_ids = (
         (match.player2_id, match.player1_id) if swap else (match.player1_id, match.player2_id)
     )
-    params = await model_params(db)
+    model = model or await model_versions.snapshot(db)
+    params = model.params
     weight = float(params.get("surface_weight", EloParams.surface_weight))
     initial = float(params.get("initial", EloParams.initial))
     platt = _platt(params)
@@ -813,6 +816,7 @@ async def build_dossier(
         "platt": {"a": platt.a, "b": platt.b} if platt is not None else None,
         "best_of": best_of,
         "surface": surface,
+        "ml_model_id": model.model_id,
     }
     return DossierResult(
         dossier_id=dossier_id,

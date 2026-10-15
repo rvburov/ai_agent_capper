@@ -23,12 +23,11 @@ from app.db.models import (
     Analysis,
     Dossier,
     MatchAssessment,
-    MlModel,
     PlayerNews,
     Prediction,
 )
-from app.ml.elo import MODEL_ID
 from app.ml.market import devig_pair
+from app.ml.model_versions import active_model_id
 from app.ml.sets import MARKET_MINUS, MARKETS, Probs3
 from app.ml.strategy import (
     DrawdownLevel,
@@ -51,6 +50,7 @@ from app.services.analysis_input import ConfirmedEvent, PlayerFacts, player_fact
 from app.services.app_settings import get_app_settings
 from app.services.bank import BankState, bank_state, drawdown_level
 from app.services.dossier import FEATURE_SET
+from app.services.strategy_versions import lessons_of_prompt
 
 ODDS_STEP = Decimal("0.001")
 P_DIGITS = 6
@@ -310,8 +310,10 @@ def _predictions(
     assessment: MatchAssessment,
     dossier: Dossier,
     ml_model: str | None,
+    lessons: list[str],
 ) -> dict[tuple[str, int], Prediction]:
-    """Прогнозы матча по 6 исходам (только INSERT)."""
+    """Прогнозы матча по 6 исходам (только INSERT). lessons — коды уроков в system оценки
+    (по ее версии промпта)."""
     event = item.event
     assert event.match_id is not None
     base = item.final.p_base.markets()
@@ -338,6 +340,7 @@ def _predictions(
                 llm_model=assessment.model,
                 effort=assessment.effort,
                 prompt_version=assessment.prompt_version,
+                lessons_applied=list(lessons),
                 p_base=clip01(base[(market, selection)]),
                 p_claude=clip01(claude[(market, selection)]),
                 p_final=clip01(p_final),
@@ -520,7 +523,8 @@ async def compose(db: AsyncSession, data: ComposeInput) -> dict[str, Any]:
     settings = await get_app_settings(db)
     state = await bank_state(db, data.analysis.user_id)
     level = drawdown_level(state, params)
-    ml_model: str | None = await db.scalar(select(MlModel.id).where(MlModel.id == MODEL_ID))
+    ml_model = await active_model_id(db)
+    lessons_by_prompt: dict[str, list[str]] = {}
     facts = await player_facts(
         db, {pid for event in data.events for pid in (event.player1_id, event.player2_id)}
     )
@@ -529,7 +533,15 @@ async def compose(db: AsyncSession, data: ComposeInput) -> dict[str, Any]:
     by_match: dict[int, dict[tuple[str, int], Prediction]] = {}
     for event in data.events:
         item, assessment, dossier = await _load_match(db, data, event)
-        rows = _predictions(data, item, assessment, dossier, ml_model)
+        prompt_id = assessment.prompt_version
+        if prompt_id not in lessons_by_prompt:
+            lessons_by_prompt[prompt_id] = await lessons_of_prompt(db, prompt_id)
+        # Версия базовой модели — та, что дала p_base досье (снимок начала анализа, m1)
+        features = item.entry.get("features") or {}
+        match_model = str(features.get("ml_model_id") or "") or ml_model
+        rows = _predictions(
+            data, item, assessment, dossier, match_model, lessons_by_prompt[prompt_id]
+        )
         db.add_all(rows.values())
         assert event.match_id is not None
         by_match[event.match_id] = rows

@@ -211,6 +211,15 @@ class BrierOut(BaseModel):
     points: list[BrierPointOut]
     windows: int
     better: int
+    # Ряд закрытия так же, как ряд при прогнозе (этап 5, волна 3), и главный ряд экрана:
+    # closing — событий с закрытием больше, чем с рынком при прогнозе (В2 этапа 4)
+    closing_diff: float | None
+    closing_diff_ci: CiOut | None
+    closing_noise: bool | None
+    closing_points: list[BrierPointOut]
+    closing_windows: int
+    closing_better: int
+    main: Literal["pred", "closing"]
 
 
 class SeriesPointOut(BaseModel):
@@ -418,7 +427,7 @@ class CalibrationOut(BaseModel):
     worst — диапазон с наибольшим расхождением, opposite — самый заметный с обратным
     знаком."""
 
-    kind: Literal["final", "claude"]
+    kind: Literal["final", "claude", "all"]
     events: int
     outside: int
     bins: list[CalibrationBinOut]
@@ -498,4 +507,8 @@ class AnalyticsOut(BaseModel):
     slices: SlicesOut
     parlays: ParlaysOut | None
     calibration: CalibrationOut
+    # «Все мои прогнозы» (В3 этапа 4, включено на этапе 5): прогнозы своих анализов с
+    # исходом по архиву или своей ноге, по паре исходов — сторона от 50%; kind = all.
+    # null — под фильтром «старый бот» (прогнозов у бота нет)
+    calibration_all: CalibrationOut | None
     clv: ClvOut

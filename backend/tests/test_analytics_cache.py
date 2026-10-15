@@ -399,11 +399,11 @@ async def test_clear_user_only_own_keys(redis: Redis) -> None:
     assert len(await _keys(redis, 2)) == 3
 
 
-async def test_version_ignores_new_analyses_but_not_replacements(
+async def test_version_follows_new_predictions_and_replacements(
     member: Signed, db: AsyncSession
 ) -> None:
-    """Новый прогноз анализа без ставки аналитику не меняет — кэш остается; замена прогноза
-    (supersedes) меняет калибровку — новая версия."""
+    """Новый прогноз анализа (этап 5, волна 3: «Все мои прогнозы» в калибровке) и замена
+    прогноза (supersedes) меняют калибровку — новая версия кэша."""
     from sqlalchemy import select
 
     from app.db.models import Prediction
@@ -416,10 +416,12 @@ async def test_version_ignores_new_analyses_but_not_replacements(
     fields = {"user_id": member.id, "match_id": old.match_id, "market": "ML", "as_of": utcnow()}
     db.add(Prediction(**fields, selection=2, p_final=0.4))
     await db.commit()
-    assert await analytics_cache.data_version(db, user) == before
+    added = await analytics_cache.data_version(db, user)
+    assert added != before
+    assert await analytics_cache.data_version(db, user) == added
     db.add(Prediction(**fields, selection=old.selection, p_final=0.7, supersedes=old.id))
     await db.commit()
-    assert await analytics_cache.data_version(db, user) != before
+    assert await analytics_cache.data_version(db, user) != added
 
 
 async def test_new_day_warm_picks_users_at_their_midnight(

@@ -29,7 +29,9 @@ CAPPER_DATA_UPDATE_HOUR_UTC (по умолчанию 5) и 25 минут: пос
 Волна 2: очередь и пакет разборов ставок — каждые 15 минут с 13-й минуты, сбор пакетов
 Batch — каждые 15 минут с 6-й, быструю проверку урока (run_quick_check) ставит API; уроки:
 проверка гипотез — раз в сутки в 06:33 UTC (после ночного обновления), перепроверка —
-1-го числа в 06:48 UTC.
+1-го числа в 06:48 UTC. Волна 3: прогон версии на наборе (run_eval) ставит API, следующие
+пакеты прогона уходят после сбора предыдущих (сбор пакетов, каждые 15 минут);
+перекалибровка базовой модели — по понедельникам в 06:12 UTC.
 """
 
 import argparse
@@ -59,9 +61,11 @@ from app.workers.jobs import (
     delete_requested_accounts,
     process_data_upload,
     reap_stuck_analyses,
+    recalibrate_model,
     recheck_lessons,
     remind_unsettled,
     run_analysis,
+    run_eval,
     run_quick_check,
     submit_postmortems,
     update_data,
@@ -116,6 +120,14 @@ LESSONS_MINUTE = 33
 RECHECK_DAY = 1
 RECHECK_MINUTE = 48
 LESSONS_TIMEOUT_SECONDS = 1800
+# Прогон версии на наборе: досье до 100 матчей и отправка пакета; дальше — сбор пакетов
+EVAL_RUN_TIMEOUT_SECONDS = 900
+# Перекалибровка базовой модели — по понедельникам после ночного обновления данных (05:25)
+# и до проверки уроков (06:33)
+RECALIBRATE_WEEKDAY = 0
+RECALIBRATE_HOUR_UTC = 6
+RECALIBRATE_MINUTE = 12
+RECALIBRATE_TIMEOUT_SECONDS = 1800
 
 
 async def startup(ctx: dict[Any, Any]) -> None:
@@ -207,6 +219,14 @@ def build_cron_jobs(settings: Settings) -> tuple[CronJob, ...] | None:
             max_tries=1,
             timeout=LESSONS_TIMEOUT_SECONDS,
         ),
+        cron(
+            recalibrate_model,
+            weekday=RECALIBRATE_WEEKDAY,
+            hour=RECALIBRATE_HOUR_UTC,
+            minute=RECALIBRATE_MINUTE,
+            max_tries=1,
+            timeout=RECALIBRATE_TIMEOUT_SECONDS,
+        ),
     )
 
 
@@ -230,6 +250,8 @@ class WorkerSettings:
         job_function(run_quick_check, timeout=QUICK_CHECK_TIMEOUT_SECONDS, max_tries=1),
         check_lessons,
         recheck_lessons,
+        job_function(run_eval, timeout=EVAL_RUN_TIMEOUT_SECONDS, max_tries=1),
+        recalibrate_model,
     )
     cron_jobs: Sequence[CronJob] | None = build_cron_jobs(get_settings())
     on_startup: StartupShutdown | None = startup

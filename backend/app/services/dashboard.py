@@ -57,7 +57,7 @@ from app.schemas.dashboard import (
     OpenBetOut,
     RecentBetOut,
 )
-from app.services import analytics, analytics_cache
+from app.services import analytics, analytics_cache, learning
 from app.services.admin_users import month_usage
 from app.services.ai_access import call_need_usd, limits_of, runs_out_on, threshold_level
 from app.services.app_settings import get_app_settings
@@ -450,4 +450,5 @@ async def dashboard(
         awaiting_count=(await bet_counts(db, user, moment)).awaiting_result,
         my_matches=await my_matches(db, user, zone, today, moment),
         admin=await admin_attention(db, moment) if user.role == "admin" else None,
+        learning=await learning.learning_out(db, user, now=moment),
     )

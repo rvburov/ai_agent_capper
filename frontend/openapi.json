@@ -3442,6 +3442,405 @@
         }
       }
     },
+    "/api/admin/eval/sets": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Eval Sets",
+        "description": "Замороженные наборы и сколько сыгранных матчей доступно для нового.",
+        "operationId": "list_eval_sets_api_admin_eval_sets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalSetsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Freeze Eval Set",
+        "description": "Заморозить набор: 200–300 сыгранных матчей после среза знаний модели, 15–20%\nтрудных, список и sha256. Такой код уже есть — 409 eval.set_exists; мало матчей —\n422 eval.set_too_small; раньше среза — 422 eval.set_seen.",
+        "operationId": "freeze_eval_set_api_admin_eval_sets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalSetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalSetOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/eval/runs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Eval Runs",
+        "description": "Прогоны проверок (версии на наборе, быстрые проверки уроков, приемка) с ценой и\nхудшим случаем; бюджет проверок.",
+        "operationId": "list_eval_runs_api_admin_eval_runs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Start Eval Run",
+        "description": "Запустить прогон версии на наборе (Batch, бюджет проверок): код 2FA обязателен\n(403 admin.totp_required / admin.totp_invalid). Нельзя — 409 с причиной плана.",
+        "operationId": "start_eval_run_api_admin_eval_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalRunIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/eval/runs/preview": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Eval Run Preview",
+        "description": "Прогон версии до запуска: события, пакеты, цена по живым числам, худший случай,\nбюджет проверок; можно ли запустить и почему нет.",
+        "operationId": "eval_run_preview_api_admin_eval_runs_preview_get",
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalPlanOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/eval/runs/{run_id}/cancel": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Cancel Eval Run",
+        "description": "Остановить прогон (денег не тратит, 2FA не нужна): ждущий отправки, бюджета или\nключа — сразу abandoned, резерв снимается; пакет у Anthropic отменяется (не начатые\nзапросы бесплатно), начатые дособираются. 404 eval.run_not_found; уже закончен — 409\neval.run_closed.",
+        "operationId": "cancel_eval_run_api_admin_eval_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/eval/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Eval Run",
+        "description": "Прогон: ход, цена и отчет (метрики с ДИ, калибровка).",
+        "operationId": "get_eval_run_api_admin_eval_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/strategy/versions": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Instructions Candidate",
+        "description": "Кандидат инструкций анализа: промпт analysis.vN и/или набор уроков. Включается\nтолько после прогона на наборе и кнопкой (POST /strategy/versions/{id}/activate).",
+        "operationId": "create_instructions_candidate_api_admin_strategy_versions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstructionsCandidateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyVersionOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ml/recalibrate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Recalibrate Model",
+        "description": "Перекалибровать базовую модель сейчас (как задача по понедельникам): новая версия\nвключается сама, если не хуже прежней на отложенной части (В6).",
+        "operationId": "recalibrate_model_api_admin_ml_recalibrate_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalibrationOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ml/models/{model_id}/rollback": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Rollback Model",
+        "description": "Вернуть версию базовой модели, которая уже была активной (404 / 409).",
+        "operationId": "rollback_model_api_admin_ml_models__model_id__rollback_post",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9@._-]+$",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MlModelOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analyses": {
       "post": {
         "tags": [
@@ -6036,6 +6435,313 @@
         }
       }
     },
+    "/api/strategy/versions": {
+      "get": {
+        "tags": [
+          "strategy"
+        ],
+        "summary": "List Versions",
+        "description": "Версии: общая линия инструкций (метрики на наборе, сравнение кандидата) и свои\nправила суммы (проверка на своих ставках).",
+        "operationId": "list_versions_api_strategy_versions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyVersionsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "strategy"
+        ],
+        "summary": "Create Rules Candidate",
+        "description": "Кандидат своих правил суммы (адаптации, доли банка по итоговому кэфу) с проверкой\nна своих ставках. Ничего не изменилось — 422 strategy.no_changes.",
+        "operationId": "create_rules_candidate_api_strategy_versions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RulesCandidateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyVersionOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/strategy/versions/compare": {
+      "get": {
+        "tags": [
+          "strategy"
+        ],
+        "summary": "Compare Versions",
+        "description": "Сравнение двух версий одной линии: a — база, b — кандидат. Разные линии — 422;\nучастнику — не больше 20 сравнений в минуту (429 common.rate_limited).",
+        "operationId": "compare_versions_api_strategy_versions_compare_get",
+        "parameters": [
+          {
+            "name": "a",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "A"
+            }
+          },
+          {
+            "name": "b",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "B"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionCompareOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/strategy/versions/{version_id}": {
+      "get": {
+        "tags": [
+          "strategy"
+        ],
+        "summary": "Get Version",
+        "operationId": "get_version_api_strategy_versions__version_id__get",
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyVersionOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/strategy/versions/{version_id}/activate": {
+      "post": {
+        "tags": [
+          "strategy"
+        ],
+        "summary": "Activate Version",
+        "description": "Включить кандидата (прежняя активная — в архив).",
+        "operationId": "activate_version_api_strategy_versions__version_id__activate_post",
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyVersionOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/strategy/versions/{version_id}/rollback": {
+      "post": {
+        "tags": [
+          "strategy"
+        ],
+        "summary": "Rollback Version",
+        "description": "Вернуть версию, которая уже была активной.",
+        "operationId": "rollback_version_api_strategy_versions__version_id__rollback_post",
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyVersionOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/strategy/versions/{version_id}/reject": {
+      "post": {
+        "tags": [
+          "strategy"
+        ],
+        "summary": "Reject Version",
+        "description": "Отклонить кандидата.",
+        "operationId": "reject_version_api_strategy_versions__version_id__reject_post",
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyVersionOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/lessons": {
       "get": {
         "tags": [
@@ -6416,6 +7122,70 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LessonOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning": {
+      "get": {
+        "tags": [
+          "learning"
+        ],
+        "summary": "Learning Summary",
+        "description": "Плитки, шапка и пороги «Обучения модели» (и блок «Модель учится» на главной).",
+        "operationId": "learning_summary_api_learning_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearningOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ml/model": {
+      "get": {
+        "tags": [
+          "learning"
+        ],
+        "summary": "Ml Model",
+        "description": "Базовая модель: активная версия калибровки, версии, проверка по месяцам против\nрынка архива, калибровка, события для поправки Claude числом.",
+        "operationId": "ml_model_api_ml_model_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MlModelOut"
                 }
               }
             }
@@ -7462,6 +8232,75 @@
         ],
         "title": "AgentSettingsOut",
         "description": "Настройки агента только для показа (Р23): меняются командой agent-config.\nПотолки анализа программы — из app_settings."
+      },
+      "AgreementOut": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "mean_abs_dp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Abs Dp"
+          },
+          "noise_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Value"
+          },
+          "noise_abs_dp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Abs Dp"
+          },
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "mean_abs_dp",
+          "noise_value",
+          "noise_abs_dp",
+          "ok"
+        ],
+        "title": "AgreementOut",
+        "description": "Совпадение решений по ставкам (набор исходов с p_final не ниже порога стратегии)\nи средняя |Δp| между кандидатом и базой; noise_* — то же между двумя прогонами базы\n(порог шума). ok — расхождение не больше 1,5 × шума (null — повтора базы нет)."
       },
       "AiBudgetOut": {
         "properties": {
@@ -8771,6 +9610,16 @@
           "calibration": {
             "$ref": "#/components/schemas/CalibrationOut"
           },
+          "calibration_all": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CalibrationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "clv": {
             "$ref": "#/components/schemas/ClvOut"
           }
@@ -8794,6 +9643,7 @@
           "slices",
           "parlays",
           "calibration",
+          "calibration_all",
           "clv"
         ],
         "title": "AnalyticsOut",
@@ -10854,6 +11704,61 @@
           "better": {
             "type": "integer",
             "title": "Better"
+          },
+          "closing_diff": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing Diff"
+          },
+          "closing_diff_ci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closing_noise": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing Noise"
+          },
+          "closing_points": {
+            "items": {
+              "$ref": "#/components/schemas/BrierPointOut"
+            },
+            "type": "array",
+            "title": "Closing Points"
+          },
+          "closing_windows": {
+            "type": "integer",
+            "title": "Closing Windows"
+          },
+          "closing_better": {
+            "type": "integer",
+            "title": "Closing Better"
+          },
+          "main": {
+            "type": "string",
+            "enum": [
+              "pred",
+              "closing"
+            ],
+            "title": "Main"
           }
         },
         "type": "object",
@@ -10869,7 +11774,14 @@
           "closing_market",
           "points",
           "windows",
-          "better"
+          "better",
+          "closing_diff",
+          "closing_diff_ci",
+          "closing_noise",
+          "closing_points",
+          "closing_windows",
+          "closing_better",
+          "main"
         ],
         "title": "BrierOut",
         "description": "Brier модели против рынка (В2): события — ноги рассчитанных ставок приложения с\nитоговой вероятностью модели (p_final) и рынком в момент прогноза без маржи\n(q_market_at_pred). diff = модель − рынок (меньше 0 — модель точнее), diff_ci —\nпарный бутстрэп по событиям, noise — интервал задевает ноль. Второй ряд — рынок\nзакрытия: события, где внесены обе стороны закрывающего кэфа (closing_*).\nСкользящее окно: windows — число окон (шаг rolling_step), better — в скольких из них\nмодель точнее рынка; points — окна для графика, не больше 200 равномерно по ряду\n(последнее — всегда), все окна — в выгрузке CSV."
@@ -11080,7 +11992,8 @@
             "type": "string",
             "enum": [
               "final",
-              "claude"
+              "claude",
+              "all"
             ],
             "title": "Kind"
           },
@@ -11143,6 +12056,50 @@
         "title": "CalibrationOut",
         "description": "Калибровка (В3, Т9): события рассчитанных ставок, по одному на пару исходов;\nпрогноз — последний не замененный, проверочные прогоны исключены. kind = final —\nитоговая вероятность модели (ставки приложения), claude — оценка Claude ставок бота\n(только под фильтром «старый бот», Т10). Корзины 5 п.п. от 50 до 95%; outside —\nсобытия вне этого отрезка. status: empty — событий нет, few — ни в одной корзине нет\ncalibration_min_n, off — есть расхождение на calibration_gap и больше, ok — нет.\nworst — диапазон с наибольшим расхождением, opposite — самый заметный с обратным\nзнаком."
       },
+      "CalibrationPointOut": {
+        "properties": {
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "p": {
+            "type": "number",
+            "title": "P"
+          },
+          "actual": {
+            "type": "number",
+            "title": "Actual"
+          },
+          "ci_low": {
+            "type": "number",
+            "title": "Ci Low"
+          },
+          "ci_high": {
+            "type": "number",
+            "title": "Ci High"
+          }
+        },
+        "type": "object",
+        "required": [
+          "low",
+          "high",
+          "n",
+          "p",
+          "actual",
+          "ci_low",
+          "ci_high"
+        ],
+        "title": "CalibrationPointOut",
+        "description": "Корзина калибровки: прогнозы в [low, high), средняя вероятность p, доля сбывшихся\nactual и 95% интервал Уилсона."
+      },
       "ChangeOut": {
         "properties": {
           "profit": {
@@ -11199,6 +12156,35 @@
         ],
         "title": "ChangeOut",
         "description": "Изменение к прошлому периоду: прибыль — деньгами, ROI, винрейт и CLV — разницей\nдолей (0.021 — это +2,1 п.п.); null — сравнить не с чем."
+      },
+      "CiNumOut": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "low",
+          "high",
+          "n"
+        ],
+        "title": "CiNumOut",
+        "description": "Среднее и 95% ДИ (бутстрэп); n — событий."
       },
       "CiOut": {
         "properties": {
@@ -11465,6 +12451,159 @@
         ],
         "title": "ClvOut",
         "description": "Распределение CLV ставок (кэф / закрытие − 1, В1) — тех же, что в KPI; positive и\nnegative — лучше и хуже закрытия. fair_mean — средний CLV без маржи (кэф · q_close −\n1) по событиям, где внесены обе стороны закрытия (fair_n)."
+      },
+      "ComparisonOut": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "candidate_run_id": {
+            "type": "integer",
+            "title": "Candidate Run Id"
+          },
+          "baseline_run_id": {
+            "type": "integer",
+            "title": "Baseline Run Id"
+          },
+          "noise_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Run Id"
+          },
+          "candidate_version_id": {
+            "type": "integer",
+            "title": "Candidate Version Id"
+          },
+          "candidate_code": {
+            "type": "string",
+            "title": "Candidate Code"
+          },
+          "baseline_version_id": {
+            "type": "integer",
+            "title": "Baseline Version Id"
+          },
+          "baseline_code": {
+            "type": "string",
+            "title": "Baseline Code"
+          },
+          "rule": {
+            "type": "string",
+            "enum": [
+              "improve",
+              "non_inferior"
+            ],
+            "title": "Rule"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "log_loss": {
+            "$ref": "#/components/schemas/MetricDiffOut"
+          },
+          "brier": {
+            "$ref": "#/components/schemas/MetricDiffOut"
+          },
+          "ece": {
+            "$ref": "#/components/schemas/MetricDiffOut"
+          },
+          "format_errors": {
+            "$ref": "#/components/schemas/CountDiffOut"
+          },
+          "max_tokens": {
+            "$ref": "#/components/schemas/CountDiffOut"
+          },
+          "refusals": {
+            "$ref": "#/components/schemas/CountDiffOut"
+          },
+          "cost_per_event": {
+            "$ref": "#/components/schemas/CostChangeOut"
+          },
+          "tokens_per_event": {
+            "$ref": "#/components/schemas/CostChangeOut"
+          },
+          "agreement": {
+            "$ref": "#/components/schemas/AgreementOut"
+          },
+          "passed": {
+            "type": "boolean",
+            "title": "Passed"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "better",
+              "not_worse",
+              "worse",
+              "noise",
+              "failed"
+            ],
+            "title": "Verdict"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed"
+          },
+          "bootstrap": {
+            "type": "integer",
+            "title": "Bootstrap"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "candidate_run_id",
+          "baseline_run_id",
+          "noise_run_id",
+          "candidate_version_id",
+          "candidate_code",
+          "baseline_version_id",
+          "baseline_code",
+          "rule",
+          "n",
+          "log_loss",
+          "brier",
+          "ece",
+          "format_errors",
+          "max_tokens",
+          "refusals",
+          "cost_per_event",
+          "tokens_per_event",
+          "agreement",
+          "passed",
+          "verdict",
+          "seed",
+          "bootstrap",
+          "created_at"
+        ],
+        "title": "ComparisonOut",
+        "description": "Сравнение кандидата с активной версией на одних событиях набора (правила\nLLM_LEARNING.md 3.4 и TOKEN_ECONOMY.md 2.4 — кодом). rule improve: ДИ разницы\nлог-лосса целиком ниже нуля; non_inferior: верхняя граница ДИ лог-лосса ≤ +0,01,\nBrier ≤ +0,005, ECE ≤ +0,02, стоимость на событие ниже. В обоих правилах ошибок\nформата, остановок по max_tokens и отказов — каждого не больше, чем у базы. passed —\nрешение кода; включает версию только администратор."
       },
       "ComparisonRow": {
         "properties": {
@@ -11782,6 +12921,63 @@
         ],
         "title": "CorridorOut"
       },
+      "CostChangeOut": {
+        "properties": {
+          "a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "A"
+          },
+          "b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "B"
+          },
+          "change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change"
+          },
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "a",
+          "b",
+          "change",
+          "ok"
+        ],
+        "title": "CostChangeOut",
+        "description": "Стоимость или токены на событие у двух версий; change = b / a − 1 (−0,31 —\nдешевле на 31%)."
+      },
       "CostPartOut": {
         "properties": {
           "tokens": {
@@ -11858,6 +13054,29 @@
           "models"
         ],
         "title": "CostsOut"
+      },
+      "CountDiffOut": {
+        "properties": {
+          "a": {
+            "type": "integer",
+            "title": "A"
+          },
+          "b": {
+            "type": "integer",
+            "title": "B"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "a",
+          "b",
+          "ok"
+        ],
+        "title": "CountDiffOut"
       },
       "CsrfOut": {
         "properties": {
@@ -12248,6 +13467,9 @@
                 "type": "null"
               }
             ]
+          },
+          "learning": {
+            "$ref": "#/components/schemas/LearningOut"
           }
         },
         "type": "object",
@@ -12273,10 +13495,11 @@
           "open_stake",
           "awaiting_count",
           "my_matches",
-          "admin"
+          "admin",
+          "learning"
         ],
         "title": "DashboardOut",
-        "description": "Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,\nпик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,\nдо OPEN_LIMIT; всего — open_count на open_stake), из них awaiting_count ждут результата\n(все матчи прошли, этап 5); admin — только у администратора."
+        "description": "Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,\nпик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,\nдо OPEN_LIMIT; всего — open_count на open_stake), из них awaiting_count ждут результата\n(все матчи прошли, этап 5); admin — только у администратора. learning — «Модель\nучится» и строки «Требует внимания» об обучении (кандидат ждет решения, урок готов к\nпроверке — learning.versions.candidate, learning.lessons.ready_codes; этап 5, волна 3)."
       },
       "DataUploadOut": {
         "properties": {
@@ -13051,6 +14274,613 @@
         "title": "EstimateOut",
         "description": "Оценка до запуска: цена, время, у скольких игроков поищем новости (из тех, у кого\nони устарели, — сколько помещается в лимит поисков анализа), сколько матчей возьмут\nготовую оценку Claude (бесплатно)."
       },
+      "EvalBudgetOut": {
+        "properties": {
+          "budget_usd": {
+            "type": "number",
+            "title": "Budget Usd"
+          },
+          "spent_usd": {
+            "type": "number",
+            "title": "Spent Usd"
+          },
+          "reserved_usd": {
+            "type": "number",
+            "title": "Reserved Usd"
+          },
+          "left_usd": {
+            "type": "number",
+            "title": "Left Usd"
+          },
+          "first_month": {
+            "type": "boolean",
+            "title": "First Month"
+          },
+          "next_usd": {
+            "type": "number",
+            "title": "Next Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "budget_usd",
+          "spent_usd",
+          "reserved_usd",
+          "left_usd",
+          "first_month",
+          "next_usd"
+        ],
+        "title": "EvalBudgetOut",
+        "description": "Бюджет проверок месяца (UTC): всего, потрачено, в резерве за пакетами, остаток.\nfirst_month — месяц первого замороженного набора: бюджет не меньше суммы первого\nмесяца (Р25: $30, дальше — настройка, $25); next_usd — бюджет со следующего месяца."
+      },
+      "EvalMetricsOut": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "unrated": {
+            "type": "integer",
+            "title": "Unrated"
+          },
+          "format_errors": {
+            "type": "integer",
+            "title": "Format Errors"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "title": "Max Tokens"
+          },
+          "refusals": {
+            "type": "integer",
+            "title": "Refusals"
+          },
+          "log_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss"
+          },
+          "brier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brier"
+          },
+          "ece": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ece"
+          },
+          "log_loss_final": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss Final"
+          },
+          "log_loss_base": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss Base"
+          },
+          "brier_base": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brier Base"
+          },
+          "market_n": {
+            "type": "integer",
+            "title": "Market N"
+          },
+          "log_loss_market": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss Market"
+          },
+          "brier_market": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brier Market"
+          },
+          "vs_base": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiNumOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vs_market": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiNumOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tokens_per_event": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens Per Event"
+          },
+          "cost_per_event_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per Event Usd"
+          },
+          "calibration": {
+            "items": {
+              "$ref": "#/components/schemas/CalibrationPointOut"
+            },
+            "type": "array",
+            "title": "Calibration"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "total",
+          "unrated",
+          "format_errors",
+          "max_tokens",
+          "refusals",
+          "log_loss",
+          "brier",
+          "ece",
+          "log_loss_final",
+          "log_loss_base",
+          "brier_base",
+          "market_n",
+          "log_loss_market",
+          "brier_market",
+          "vs_base",
+          "vs_market",
+          "tokens_per_event",
+          "cost_per_event_usd",
+          "calibration"
+        ],
+        "title": "EvalMetricsOut",
+        "description": "Итог прогона версии на наборе: оценены n из total событий (unrated — ответа нет или\nон не годится: ошибки формата, max_tokens, отказы, ошибки пакета). Лог-лосс, Brier и\nECE оценки Claude (p_claude, победа в матче), то же у базовой модели (p_base) и у\nрынка архива (на market_n событиях с кэфами). vs_base — разница лог-лосса Claude −\nбазовая, vs_market — Claude − рынок, парный блочный по дням бутстрэп."
+      },
+      "EvalPlanOut": {
+        "properties": {
+          "version_id": {
+            "type": "integer",
+            "title": "Version Id"
+          },
+          "version_code": {
+            "type": "string",
+            "title": "Version Code"
+          },
+          "eval_set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalSetOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repeat_no": {
+            "type": "integer",
+            "title": "Repeat No"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "chunks": {
+            "type": "integer",
+            "title": "Chunks"
+          },
+          "batch_size": {
+            "type": "integer",
+            "title": "Batch Size"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "title": "Max Tokens"
+          },
+          "estimate_usd": {
+            "type": "number",
+            "title": "Estimate Usd"
+          },
+          "worst_usd": {
+            "type": "number",
+            "title": "Worst Usd"
+          },
+          "worst_chunk_usd": {
+            "type": "number",
+            "title": "Worst Chunk Usd"
+          },
+          "per_event_worst_usd": {
+            "type": "number",
+            "title": "Per Event Worst Usd"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/EvalBudgetOut"
+          },
+          "can_run": {
+            "type": "boolean",
+            "title": "Can Run"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "running_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running Run Id"
+          },
+          "retry_events": {
+            "type": "integer",
+            "title": "Retry Events"
+          },
+          "set_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Model"
+          },
+          "set_seen_since": {
+            "type": "string",
+            "format": "date",
+            "title": "Set Seen Since"
+          },
+          "overlap_lesson": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Lesson"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version_id",
+          "version_code",
+          "eval_set",
+          "repeat_no",
+          "events",
+          "chunks",
+          "batch_size",
+          "model",
+          "max_tokens",
+          "estimate_usd",
+          "worst_usd",
+          "worst_chunk_usd",
+          "per_event_worst_usd",
+          "budget",
+          "can_run",
+          "reason",
+          "running_run_id",
+          "retry_events",
+          "set_model",
+          "set_seen_since",
+          "overlap_lesson"
+        ],
+        "title": "EvalPlanOut",
+        "description": "Прогон до запуска: сколько событий и пакетов (по batch_size), цена по живым числам\n(средняя цена ответа прошлых проверок, иначе оценка настроек), худший случай всего\nпрогона и одного пакета (весь вход по цене записи кэша на 1 час, eval_max_tokens\nвыхода, половина цены — Batch), бюджет проверок. worst_usd — вместе с пакетом повтора\nистекших и сбойных запросов (retry_events, не больше одного пакета). Запуск — если\nхудший случай пакета помещается в остаток; иначе reason (код ошибки): eval.set_model_seen —\nпервый день набора (eval_set.since) раньше среза знаний модели анализа\n(set_seen_since); eval.lesson_overlap — урок кандидата (overlap_lesson) проверен на\nархиве до заморозки набора, его надо перепроверить. set_model — модель, для которой\nнабор замораживали."
+      },
+      "EvalRunIn": {
+        "properties": {
+          "version_id": {
+            "type": "integer",
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Version Id"
+          },
+          "totp_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{6}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totp Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version_id"
+        ],
+        "title": "EvalRunIn",
+        "description": "Запуск прогона: версия инструкций и текущий код 2FA (тратит бюджет проверок)."
+      },
+      "EvalRunOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "eval",
+              "quick",
+              "smoke"
+            ],
+            "title": "Kind"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
+          "version_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Code"
+          },
+          "eval_set_code": {
+            "type": "string",
+            "title": "Eval Set Code"
+          },
+          "repeat_no": {
+            "type": "integer",
+            "title": "Repeat No"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed",
+              "abandoned"
+            ],
+            "title": "Status"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "chunks_done": {
+            "type": "integer",
+            "title": "Chunks Done"
+          },
+          "chunks_total": {
+            "type": "integer",
+            "title": "Chunks Total"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "worst_usd": {
+            "type": "number",
+            "title": "Worst Usd"
+          },
+          "estimate_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimate Usd"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "waiting": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalMetricsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "bootstrap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bootstrap"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "version_id",
+          "version_code",
+          "eval_set_code",
+          "repeat_no",
+          "status",
+          "events",
+          "chunks_done",
+          "chunks_total",
+          "created_at",
+          "finished_at",
+          "cost_usd",
+          "worst_usd",
+          "estimate_usd",
+          "model",
+          "error",
+          "waiting",
+          "metrics",
+          "seed",
+          "bootstrap"
+        ],
+        "title": "EvalRunOut",
+        "description": "Прогон: вид (eval — версия на наборе, quick — быстрая проверка урока, smoke —\nприемка этапа 3), версия инструкций, номер повтора (2 — повтор для порога шума), ход\n(пакетов собрано из всего), цена и худший случай. metrics — у законченного eval."
+      },
       "EvalRunUsageOut": {
         "properties": {
           "eval_run_id": {
@@ -13138,6 +14968,227 @@
         ],
         "title": "EvalRunUsageOut",
         "description": "Проверочный прогон (eval) месяца: вызовы и цена; eval_run_id пустой — вызовы без\nзаписи прогона."
+      },
+      "EvalRunsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvalRunOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/EvalBudgetOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "budget"
+        ],
+        "title": "EvalRunsOut"
+      },
+      "EvalSetIn": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{2,39}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 300.0,
+                "minimum": 200.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "EvalSetIn",
+        "description": "Заморозка набора: код (латиница, цифры, дефис; по умолчанию eval-ГГГГ-ММ по первому\nдню), первый день матчей (не раньше 1 августа 2026 и среза знаний модели), размер\n200–300 (по умолчанию из настроек, 250)."
+      },
+      "EvalSetOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "frozen_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frozen At"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "n_events": {
+            "type": "integer",
+            "title": "N Events"
+          },
+          "hard": {
+            "type": "integer",
+            "title": "Hard"
+          },
+          "hard_share": {
+            "type": "number",
+            "title": "Hard Share"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "with_news": {
+            "type": "boolean",
+            "title": "With News"
+          },
+          "market_n": {
+            "type": "integer",
+            "title": "Market N"
+          },
+          "market_log_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Log Loss"
+          },
+          "market_brier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Brier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "frozen_at",
+          "sha256",
+          "n_events",
+          "hard",
+          "hard_share",
+          "since",
+          "until",
+          "with_news",
+          "market_n",
+          "market_log_loss",
+          "market_brier"
+        ],
+        "title": "EvalSetOut",
+        "description": "Замороженный eval-набор: события после since (позже среза знаний модели), hard —\nтрудных (близкие вероятности или неожиданный исход), sha256 списка событий. Рынок —\nпо кэфам архива tennis-data без маржи (момент снятия не проверен): лог-лосс и Brier\nрынка на market_n событиях с кэфами."
+      },
+      "EvalSetsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvalSetOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "available": {
+            "type": "integer",
+            "title": "Available"
+          },
+          "since": {
+            "type": "string",
+            "format": "date",
+            "title": "Since"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "hard_share": {
+            "type": "number",
+            "title": "Hard Share"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "available",
+          "since",
+          "size",
+          "hard_share"
+        ],
+        "title": "EvalSetsOut"
       },
       "EvalUsageOut": {
         "properties": {
@@ -14152,6 +16203,64 @@
         "title": "InsightOut",
         "description": "Вывод кодом (до трех, без Claude): заголовок и текст — ключи локали с числами,\nоснование — basis событий или ставок, действие — по кнопке."
       },
+      "InstructionsCandidateIn": {
+        "properties": {
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^analysis\\.v[1-9][0-9]{0,3}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "lessons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "pattern": "^L-[0-9]{3,6}$"
+                },
+                "type": "array",
+                "maxItems": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lessons"
+          },
+          "goal": {
+            "type": "string",
+            "enum": [
+              "quality",
+              "saving"
+            ],
+            "title": "Goal",
+            "default": "quality"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "InstructionsCandidateIn",
+        "description": "Кандидат инструкций анализа (администратор): опубликованный промпт анализа\n(analysis.vN) и/или набор уроков (коды; null — как у активной), цель — улучшение или\nэкономия; note — что изменилось."
+      },
       "InviteCreatedOut": {
         "properties": {
           "invite": {
@@ -14641,6 +16750,367 @@
         "title": "LastMatchOut",
         "description": "Последний сыгранный матч игрока в базе: день (у матча без даты — начало турнира),\nтурнир архива, круг."
       },
+      "LearningLessonsOut": {
+        "properties": {
+          "in_prompt": {
+            "type": "integer",
+            "title": "In Prompt"
+          },
+          "max_active": {
+            "type": "integer",
+            "title": "Max Active"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "hypotheses": {
+            "type": "integer",
+            "title": "Hypotheses"
+          },
+          "ready": {
+            "type": "integer",
+            "title": "Ready"
+          },
+          "confirmed": {
+            "type": "integer",
+            "title": "Confirmed"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "retired": {
+            "type": "integer",
+            "title": "Retired"
+          },
+          "ready_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ready Codes"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonBriefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "in_prompt",
+          "max_active",
+          "total",
+          "hypotheses",
+          "ready",
+          "confirmed",
+          "rejected",
+          "retired",
+          "ready_codes",
+          "last"
+        ],
+        "title": "LearningLessonsOut",
+        "description": "Уроки: в анализе (in_prompt) из max_active, по статусам, готовые к решению (коды),\nпоследний (не отклоненный и не списанный)."
+      },
+      "LearningModelOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "brier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brier"
+          },
+          "log_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss"
+          },
+          "activated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "auto": {
+            "type": "boolean",
+            "title": "Auto"
+          },
+          "recalibrated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recalibrated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "brier",
+          "log_loss",
+          "activated_at",
+          "auto",
+          "recalibrated_at"
+        ],
+        "title": "LearningModelOut",
+        "description": "Базовая модель на плитке: действующая версия (калибровка или elo-v1, пока\nперекалибровок не было). auto — версию включила перекалибровка сама (только у версии\nкалибровки); recalibrated_at — когда была последняя перекалибровка (включена версия\nили нет), null — перекалибровок еще не было."
+      },
+      "LearningOut": {
+        "properties": {
+          "settled": {
+            "type": "integer",
+            "title": "Settled"
+          },
+          "settled_auto": {
+            "type": "integer",
+            "title": "Settled Auto"
+          },
+          "settled_legs": {
+            "type": "integer",
+            "title": "Settled Legs"
+          },
+          "awaiting": {
+            "type": "integer",
+            "title": "Awaiting"
+          },
+          "events_with_outcome": {
+            "type": "integer",
+            "title": "Events With Outcome"
+          },
+          "lessons": {
+            "$ref": "#/components/schemas/LearningLessonsOut"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/LearningVersionsOut"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LearningModelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "eval_set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalSetOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/LearningThresholdsOut"
+          },
+          "prices": {
+            "$ref": "#/components/schemas/LearningPricesOut"
+          },
+          "next_report": {
+            "type": "string",
+            "format": "date",
+            "title": "Next Report"
+          },
+          "last_report": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Report"
+          }
+        },
+        "type": "object",
+        "required": [
+          "settled",
+          "settled_auto",
+          "settled_legs",
+          "awaiting",
+          "events_with_outcome",
+          "lessons",
+          "versions",
+          "model",
+          "eval_set",
+          "thresholds",
+          "prices",
+          "next_report",
+          "last_report"
+        ],
+        "title": "LearningOut",
+        "description": "Сводка «Обучения модели» и блока «Модель учится» на главной: рассчитано ставок\nприложения (своих), из них по архиву, событий в них; уроки, версии (общая линия и\nсвои правила), базовая модель, набор, пороги и цены; следующий отчет — понедельник\nпо поясу участника (отчеты — волна 4, last_report пока null)."
+      },
+      "LearningPricesOut": {
+        "properties": {
+          "postmortem_usd": {
+            "type": "number",
+            "title": "Postmortem Usd"
+          },
+          "quick_check_usd": {
+            "type": "number",
+            "title": "Quick Check Usd"
+          },
+          "eval_event_worst_usd": {
+            "type": "number",
+            "title": "Eval Event Worst Usd"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/EvalBudgetOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "postmortem_usd",
+          "quick_check_usd",
+          "eval_event_worst_usd",
+          "budget"
+        ],
+        "title": "LearningPricesOut",
+        "description": "Цены по настройкам и живым числам: разбор ставки (Batch), быстрая проверка урока\n(оценка), худший случай одного события прогона; бюджет проверок."
+      },
+      "LearningThresholdsOut": {
+        "properties": {
+          "lessons_max": {
+            "type": "integer",
+            "title": "Lessons Max"
+          },
+          "lesson_min_cases": {
+            "type": "integer",
+            "title": "Lesson Min Cases"
+          },
+          "lesson_min_process": {
+            "type": "integer",
+            "title": "Lesson Min Process"
+          },
+          "shrink_k": {
+            "type": "integer",
+            "title": "Shrink K"
+          },
+          "claude_min_events": {
+            "type": "integer",
+            "title": "Claude Min Events"
+          },
+          "quick_check_events": {
+            "type": "integer",
+            "title": "Quick Check Events"
+          },
+          "eval_set_size": {
+            "type": "integer",
+            "title": "Eval Set Size"
+          },
+          "eval_batch_size": {
+            "type": "integer",
+            "title": "Eval Batch Size"
+          },
+          "eval_hard_share": {
+            "type": "number",
+            "title": "Eval Hard Share"
+          },
+          "eval_min_answered": {
+            "type": "number",
+            "title": "Eval Min Answered"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lessons_max",
+          "lesson_min_cases",
+          "lesson_min_process",
+          "shrink_k",
+          "claude_min_events",
+          "quick_check_events",
+          "eval_set_size",
+          "eval_batch_size",
+          "eval_hard_share",
+          "eval_min_answered"
+        ],
+        "title": "LearningThresholdsOut",
+        "description": "Пороги из настроек (app_settings.agent_config): уроков в анализе, своих случаев\nдля проверки урока (числовой и процессный), усадка k, событий для поправки Claude\nчислом, матчей быстрой проверки, размер набора, пакет прогона, доля трудных."
+      },
+      "LearningVersionsOut": {
+        "properties": {
+          "active": {
+            "$ref": "#/components/schemas/VersionBriefOut"
+          },
+          "candidate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VersionBriefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rules_active": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VersionBriefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rules_candidate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VersionBriefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "active",
+          "candidate",
+          "rules_active",
+          "rules_candidate"
+        ],
+        "title": "LearningVersionsOut",
+        "description": "active — действующая версия общей линии инструкций: есть всегда (v3 создается при\nпервом обращении к сводке)."
+      },
       "LegMatchOut": {
         "properties": {
           "id": {
@@ -14996,6 +17466,40 @@
         "title": "LegacyProfileOut",
         "description": "Профиль из старого бота (шаблоны 01–04 как есть): заполнен моделью бота, часто по\nпамяти; в анализ не идет, новых профилей программа не собирает (Р24)."
       },
+      "LessonBriefOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "text",
+          "status",
+          "created_at"
+        ],
+        "title": "LessonBriefOut"
+      },
       "LessonDictionaryOut": {
         "properties": {
           "features": {
@@ -15108,6 +17612,10 @@
             "type": "integer",
             "title": "N Holdout"
           },
+          "n_shrink": {
+            "type": "integer",
+            "title": "N Shrink"
+          },
           "holdout_since": {
             "anyOf": [
               {
@@ -15197,6 +17705,7 @@
           "n_hist",
           "n_history",
           "n_holdout",
+          "n_shrink",
           "holdout_since",
           "bias",
           "shift",
@@ -15207,7 +17716,7 @@
           "seed"
         ],
         "title": "LessonHistoryOut",
-        "description": "Проверка на архиве кодом: случаи истории и отложенной части (с holdout_since);\nbias — средний остаток y − p модели в условии (доля, −0,05 = модель завышает на\n5 п.п.); shift — поправка с усадкой; лог-лосс без урока и с поправкой; gain — выигрыш\nлог-лосса на истории (без − с, больше нуля — урок помогает), holdout_gain — на\nотложенной части; seed бутстрэпа."
+        "description": "Проверка на архиве кодом: случаи истории и отложенной части (с holdout_since);\nbias — средний остаток y − p модели в условии (доля, −0,05 = модель завышает на\n5 п.п.); shift — поправка с усадкой bias · n_shrink / (n_shrink + k), n_shrink — случаев\nистории архива (одно и то же для всех); лог-лосс без урока и с поправкой; gain — выигрыш\nлог-лосса на истории (без − с, больше нуля — урок помогает), holdout_gain — на\nотложенной части; seed бутстрэпа."
       },
       "LessonIn": {
         "properties": {
@@ -15309,8 +17818,23 @@
             "title": "Created At"
           },
           "n_cases": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "N Cases"
+          },
+          "n_cases_few": {
+            "type": "boolean",
+            "title": "N Cases Few"
+          },
+          "own_cases": {
+            "type": "integer",
+            "title": "Own Cases"
           },
           "need_cases": {
             "type": "integer",
@@ -15475,6 +17999,8 @@
           "in_prompt",
           "created_at",
           "n_cases",
+          "n_cases_few",
+          "own_cases",
           "need_cases",
           "n_hist",
           "effect",
@@ -15492,7 +18018,7 @@
           "watching"
         ],
         "title": "LessonOut",
-        "description": "Урок. n_cases — своих случаев (матчей ставок под условием; участник видит только\nматчи своих ставок, администратор — всех), need_cases — порог проверки; effect,\neffect_ci, effect_shrunk, holdout_* — как в lessons (доли);\nown_bets — ваши ставки в основании урока (только ваши, Т21); watching — вы просили\nсообщить, когда урок проверят; scope_ok — условие из словаря (его можно проверить на\nархиве)."
+        "description": "Урок. n_cases — случаев урока по ставкам всех участников (матчей под условием):\nадминистратору — всегда, участнику — только с 5 (иначе null и n_cases_few = true:\n«меньше 5»; по малому числу вычислялась бы чужая ставка); own_cases — сколько из них\n— матчи ставок смотрящего; need_cases — порог проверки (по общему числу); effect,\neffect_ci, effect_shrunk, holdout_* — как в lessons (доли);\nown_bets — ваши ставки в основании урока (только ваши, Т21); watching — вы просили\nсообщить, когда урок проверят; scope_ok — условие из словаря (его можно проверить на\nархиве)."
       },
       "LessonQuickOut": {
         "properties": {
@@ -16733,6 +19259,407 @@
         ],
         "title": "MessagesOut",
         "description": "Отправленные сообщения и сколько людей получит сообщение «всем» сейчас (по правилу\nсервера: активные, кроме вас) — число для переключателя «Всем участникам · N»."
+      },
+      "MetricDiffOut": {
+        "properties": {
+          "a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "A"
+          },
+          "b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "B"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff"
+          },
+          "low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low"
+          },
+          "high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High"
+          },
+          "margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin"
+          },
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "a",
+          "b",
+          "diff",
+          "low",
+          "high",
+          "margin",
+          "ok"
+        ],
+        "title": "MetricDiffOut",
+        "description": "Показатель двух версий: a — база (активная), b — кандидат, diff = b − a с 95% ДИ\n(парный блочный по дням бутстрэп), margin — допуск правила, ok — выполнено."
+      },
+      "MlModelOut": {
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MlVersionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/MlVersionOut"
+            },
+            "type": "array",
+            "title": "Versions"
+          },
+          "walk_forward": {
+            "items": {
+              "$ref": "#/components/schemas/WalkForwardOut"
+            },
+            "type": "array",
+            "title": "Walk Forward"
+          },
+          "calibration": {
+            "items": {
+              "$ref": "#/components/schemas/CalibrationPointOut"
+            },
+            "type": "array",
+            "title": "Calibration"
+          },
+          "events_with_outcome": {
+            "type": "integer",
+            "title": "Events With Outcome"
+          },
+          "claude_min_events": {
+            "type": "integer",
+            "title": "Claude Min Events"
+          },
+          "rule": {
+            "$ref": "#/components/schemas/MlRuleOut"
+          },
+          "next_run": {
+            "type": "string",
+            "format": "date",
+            "title": "Next Run"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active",
+          "versions",
+          "walk_forward",
+          "calibration",
+          "events_with_outcome",
+          "claude_min_events",
+          "rule",
+          "next_run"
+        ],
+        "title": "MlModelOut",
+        "description": "«Базовая модель»: активная версия, все версии (новые сверху), проверка по месяцам,\nкалибровка активной на отложенной части; поправка Claude числом — после\nclaude_min_events событий с исходами (сейчас events_with_outcome)."
+      },
+      "MlRuleOut": {
+        "properties": {
+          "log_loss_margin": {
+            "type": "number",
+            "title": "Log Loss Margin"
+          },
+          "brier_margin": {
+            "type": "number",
+            "title": "Brier Margin"
+          },
+          "holdout_share": {
+            "type": "number",
+            "title": "Holdout Share"
+          }
+        },
+        "type": "object",
+        "required": [
+          "log_loss_margin",
+          "brier_margin",
+          "holdout_share"
+        ],
+        "title": "MlRuleOut",
+        "description": "Правило включения перекалибровки (В6): верхняя граница ДИ разницы лог-лосса и\nBrier на отложенной части не выше допусков."
+      },
+      "MlVersionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "candidate",
+              "active",
+              "archived",
+              "rejected"
+            ],
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "activated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "auto": {
+            "type": "boolean",
+            "title": "Auto"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "train_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Train From"
+          },
+          "train_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Train To"
+          },
+          "n_train": {
+            "type": "integer",
+            "title": "N Train"
+          },
+          "n_holdout": {
+            "type": "integer",
+            "title": "N Holdout"
+          },
+          "brier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brier"
+          },
+          "log_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss"
+          },
+          "ece": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ece"
+          },
+          "prev_brier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Brier"
+          },
+          "prev_log_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Log Loss"
+          },
+          "diff_log_loss": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiNumOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "diff_brier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiNumOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "platt_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platt A"
+          },
+          "platt_b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platt B"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "can_rollback": {
+            "type": "boolean",
+            "title": "Can Rollback"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at",
+          "activated_at",
+          "auto",
+          "parent_id",
+          "train_from",
+          "train_to",
+          "n_train",
+          "n_holdout",
+          "brier",
+          "log_loss",
+          "ece",
+          "prev_brier",
+          "prev_log_loss",
+          "diff_log_loss",
+          "diff_brier",
+          "platt_a",
+          "platt_b",
+          "reason",
+          "can_rollback"
+        ],
+        "title": "MlVersionOut",
+        "description": "Версия калибровки базовой модели (Эло по покрытиям + Платт): на чем подобрана\n(train_*), проверка на отложенной части (holdout_*: Brier, лог-лосс, ECE) против\nпрежней (prev_*, diff_* — разница новая − прежняя с ДИ). auto — включена сама по\nправилу В6; reason — почему не включена. can_rollback — можно вернуть (была активной)."
       },
       "ModeDecisionIn": {
         "properties": {
@@ -18018,6 +20945,43 @@
           "name_ru"
         ],
         "title": "PairName"
+      },
+      "ParamDiffOut": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "a": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "A"
+          },
+          "b": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "B"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "a",
+          "b"
+        ],
+        "title": "ParamDiffOut"
       },
       "ParlaysOut": {
         "properties": {
@@ -20346,6 +23310,48 @@
         "title": "QuickCheckOut",
         "description": "Быстрая проверка урока до запуска (цена по живым числам и худший случай) и после\n(eval_run_id, status). requests — запросов в пакете: по матчу с уроком и, где нет\nготового прогона без урока, еще по одному без него. reason — почему запустить нельзя\n(ключ errors.*): нет матчей, мало бюджета проверок, проверка уже идет, урок не готов."
       },
+      "RecalibrationOut": {
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "activated",
+              "rejected",
+              "skipped"
+            ],
+            "title": "Decision"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MlVersionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision",
+          "reason",
+          "version"
+        ],
+        "title": "RecalibrationOut",
+        "description": "Итог перекалибровки: новая версия включена (activated), не включена — хуже прежней\n(rejected) или не посчитана — мало матчей (skipped, reason)."
+      },
       "RecentBetOut": {
         "properties": {
           "id": {
@@ -20955,6 +23961,128 @@
           "params"
         ],
         "title": "RuleCheck"
+      },
+      "RulesCandidateIn": {
+        "properties": {
+          "adapt": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "propertyNames": {
+              "enum": [
+                "dd10",
+                "dd20",
+                "week_loss",
+                "up15",
+                "week_win"
+              ]
+            },
+            "type": "object",
+            "title": "Adapt"
+          },
+          "stake_bands": {
+            "items": {
+              "$ref": "#/components/schemas/StakeBandIn"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Stake Bands"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RulesCandidateIn",
+        "description": "Кандидат своих правил суммы: включить или выключить правила адаптации и/или\nпоменять долю банка в диапазонах итогового кэфа; note — зачем."
+      },
+      "RulesCheckOut": {
+        "properties": {
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "bets": {
+            "type": "integer",
+            "title": "Bets"
+          },
+          "changed": {
+            "type": "integer",
+            "title": "Changed"
+          },
+          "stake_old": {
+            "type": "string",
+            "title": "Stake Old"
+          },
+          "stake_new": {
+            "type": "string",
+            "title": "Stake New"
+          },
+          "stake_change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stake Change"
+          },
+          "profit_old": {
+            "type": "string",
+            "title": "Profit Old"
+          },
+          "profit_new": {
+            "type": "string",
+            "title": "Profit New"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "triggered": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Triggered"
+          }
+        },
+        "type": "object",
+        "required": [
+          "since",
+          "bets",
+          "changed",
+          "stake_old",
+          "stake_new",
+          "stake_change",
+          "profit_old",
+          "profit_new",
+          "currency",
+          "triggered"
+        ],
+        "title": "RulesCheckOut",
+        "description": "Проверка правил суммы на своих ставках (код, бесплатно): рассчитанные ставки\nприложения с since, у скольких сумма изменилась бы (changed), сумма ставок до и после\n(stake_old/stake_new) и прибыль при тех же исходах (profit_old/profit_new);\ntriggered — сколько раз сработало бы каждое правило адаптации новой версии."
       },
       "RunCostOut": {
         "properties": {
@@ -21859,6 +24987,30 @@
         "title": "SlicesOut",
         "description": "Срезы. Срез по покрытию не сужается фильтром покрытия, по рынку — фильтром рынка\n(выбранное значение экран подсвечивает); по кэфу — всеми фильтрами."
       },
+      "StakeBandIn": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "title": "Index"
+          },
+          "pct": {
+            "type": "number",
+            "maximum": 0.05,
+            "minimum": 0.001,
+            "title": "Pct"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "index",
+          "pct"
+        ],
+        "title": "StakeBandIn",
+        "description": "Доля банка в диапазоне итогового кэфа: номер диапазона (с 0) и доля (0,0175)."
+      },
       "StakeBandOut": {
         "properties": {
           "low": {
@@ -22307,6 +25459,265 @@
           "adapt"
         ],
         "title": "StrategyParamsOut"
+      },
+      "StrategyVersionOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "line": {
+            "type": "string",
+            "enum": [
+              "instructions",
+              "rules"
+            ],
+            "title": "Line"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "candidate",
+              "active",
+              "archived",
+              "rejected"
+            ],
+            "title": "Status"
+          },
+          "goal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "quality",
+                  "saving",
+                  "rules"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "parent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Code"
+          },
+          "changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "activated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "base_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Prompt"
+          },
+          "lessons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Lessons"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategyParamsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "eval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VersionEvalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComparisonOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RulesCheckOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "can_activate": {
+            "type": "boolean",
+            "title": "Can Activate"
+          },
+          "activate_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activate Reason"
+          },
+          "can_rollback": {
+            "type": "boolean",
+            "title": "Can Rollback"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "line",
+          "code",
+          "name",
+          "status",
+          "goal",
+          "parent_id",
+          "parent_code",
+          "changes",
+          "created_at",
+          "activated_at",
+          "archived_at",
+          "prompt_version",
+          "base_prompt",
+          "lessons",
+          "params",
+          "eval",
+          "comparison",
+          "check",
+          "can_activate",
+          "activate_reason",
+          "can_rollback"
+        ],
+        "title": "StrategyVersionOut",
+        "description": "Версия стратегии. line instructions — общая линия инструкций анализа (ведет\nадминистратор, Р25): промпт анализа и уроки в system; rules — свои правила суммы\nставки участника (params). activated_at — когда включена; can_activate / can_rollback\n— может ли смотрящий включить или вернуть ее (activate_reason — почему нельзя)."
+      },
+      "StrategyVersionsOut": {
+        "properties": {
+          "instructions": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyVersionOut"
+            },
+            "type": "array",
+            "title": "Instructions"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyVersionOut"
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "eval_set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalSetOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "instructions",
+          "rules",
+          "eval_set"
+        ],
+        "title": "StrategyVersionsOut",
+        "description": "Версии: общая линия инструкций (новые сверху) и свои правила суммы ставки;\nзамороженный набор, на котором проверяются инструкции."
       },
       "SurfaceEloOut": {
         "properties": {
@@ -23762,6 +27173,314 @@
           "add"
         ],
         "title": "ValueAdjustOut"
+      },
+      "VersionBriefOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "candidate",
+              "active",
+              "archived",
+              "rejected"
+            ],
+            "title": "Status"
+          },
+          "activated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "checked": {
+            "type": "boolean",
+            "title": "Checked"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "rule": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "improve",
+                  "non_inferior"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "name",
+          "status",
+          "activated_at",
+          "checked",
+          "passed",
+          "rule"
+        ],
+        "title": "VersionBriefOut",
+        "description": "Версия кратко: checked — у кандидата инструкций есть прогон на наборе и сравнение,\npassed — решение кода по правилу (null — сравнения нет)."
+      },
+      "VersionCompareOut": {
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/StrategyVersionOut"
+          },
+          "b": {
+            "$ref": "#/components/schemas/StrategyVersionOut"
+          },
+          "diff": {
+            "items": {
+              "$ref": "#/components/schemas/ParamDiffOut"
+            },
+            "type": "array",
+            "title": "Diff"
+          },
+          "comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComparisonOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "a",
+          "b",
+          "diff",
+          "comparison"
+        ],
+        "title": "VersionCompareOut",
+        "description": "Сравнение двух версий одной линии: что отличается (diff) и, у инструкций,\nсравнение прогонов на наборе (null — у одной из версий нет прогона)."
+      },
+      "VersionEvalOut": {
+        "properties": {
+          "eval_set_code": {
+            "type": "string",
+            "title": "Eval Set Code"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "run_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Run Ids"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "log_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss"
+          },
+          "brier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brier"
+          },
+          "ece": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ece"
+          },
+          "format_errors": {
+            "type": "integer",
+            "title": "Format Errors"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "title": "Max Tokens"
+          },
+          "refusals": {
+            "type": "integer",
+            "title": "Refusals"
+          },
+          "to_market": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiNumOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "noise": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise"
+          },
+          "tokens_per_event": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens Per Event"
+          },
+          "cost_per_event_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per Event Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_set_code",
+          "runs",
+          "run_ids",
+          "n",
+          "log_loss",
+          "brier",
+          "ece",
+          "format_errors",
+          "max_tokens",
+          "refusals",
+          "to_market",
+          "noise",
+          "tokens_per_event",
+          "cost_per_event_usd"
+        ],
+        "title": "VersionEvalOut",
+        "description": "Версия инструкций на замороженном наборе: прогонов, последний прогон (метрики),\nnoise — насколько разошлись два прогона (лог-лосс), to_market — разница лог-лосса с\nрынком архива с ДИ."
+      },
+      "WalkForwardOut": {
+        "properties": {
+          "month": {
+            "type": "string",
+            "format": "date",
+            "title": "Month"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "model_brier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Brier"
+          },
+          "model_log_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Log Loss"
+          },
+          "market_n": {
+            "type": "integer",
+            "title": "Market N"
+          },
+          "market_brier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Brier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "month",
+          "n",
+          "model_brier",
+          "model_log_loss",
+          "market_n",
+          "market_brier"
+        ],
+        "title": "WalkForwardOut",
+        "description": "Проверка по месяцам: калибровка — только на матчах до месяца, Brier модели на\nматчах месяца (n) против рынка архива (market_n — с кэфами)."
       },
       "WeekOut": {
         "properties": {

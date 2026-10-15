@@ -1414,6 +1414,184 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/eval/sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Eval Sets
+         * @description Замороженные наборы и сколько сыгранных матчей доступно для нового.
+         */
+        get: operations["list_eval_sets_api_admin_eval_sets_get"];
+        put?: never;
+        /**
+         * Freeze Eval Set
+         * @description Заморозить набор: 200–300 сыгранных матчей после среза знаний модели, 15–20%
+         *     трудных, список и sha256. Такой код уже есть — 409 eval.set_exists; мало матчей —
+         *     422 eval.set_too_small; раньше среза — 422 eval.set_seen.
+         */
+        post: operations["freeze_eval_set_api_admin_eval_sets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/eval/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Eval Runs
+         * @description Прогоны проверок (версии на наборе, быстрые проверки уроков, приемка) с ценой и
+         *     худшим случаем; бюджет проверок.
+         */
+        get: operations["list_eval_runs_api_admin_eval_runs_get"];
+        put?: never;
+        /**
+         * Start Eval Run
+         * @description Запустить прогон версии на наборе (Batch, бюджет проверок): код 2FA обязателен
+         *     (403 admin.totp_required / admin.totp_invalid). Нельзя — 409 с причиной плана.
+         */
+        post: operations["start_eval_run_api_admin_eval_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/eval/runs/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Eval Run Preview
+         * @description Прогон версии до запуска: события, пакеты, цена по живым числам, худший случай,
+         *     бюджет проверок; можно ли запустить и почему нет.
+         */
+        get: operations["eval_run_preview_api_admin_eval_runs_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/eval/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Eval Run
+         * @description Остановить прогон (денег не тратит, 2FA не нужна): ждущий отправки, бюджета или
+         *     ключа — сразу abandoned, резерв снимается; пакет у Anthropic отменяется (не начатые
+         *     запросы бесплатно), начатые дособираются. 404 eval.run_not_found; уже закончен — 409
+         *     eval.run_closed.
+         */
+        post: operations["cancel_eval_run_api_admin_eval_runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/eval/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval Run
+         * @description Прогон: ход, цена и отчет (метрики с ДИ, калибровка).
+         */
+        get: operations["get_eval_run_api_admin_eval_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/strategy/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Instructions Candidate
+         * @description Кандидат инструкций анализа: промпт analysis.vN и/или набор уроков. Включается
+         *     только после прогона на наборе и кнопкой (POST /strategy/versions/{id}/activate).
+         */
+        post: operations["create_instructions_candidate_api_admin_strategy_versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ml/recalibrate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recalibrate Model
+         * @description Перекалибровать базовую модель сейчас (как задача по понедельникам): новая версия
+         *     включается сама, если не хуже прежней на отложенной части (В6).
+         */
+        post: operations["recalibrate_model_api_admin_ml_recalibrate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ml/models/{model_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rollback Model
+         * @description Вернуть версию базовой модели, которая уже была активной (404 / 409).
+         */
+        post: operations["rollback_model_api_admin_ml_models__model_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analyses": {
         parameters: {
             query?: never;
@@ -2052,6 +2230,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/strategy/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Versions
+         * @description Версии: общая линия инструкций (метрики на наборе, сравнение кандидата) и свои
+         *     правила суммы (проверка на своих ставках).
+         */
+        get: operations["list_versions_api_strategy_versions_get"];
+        put?: never;
+        /**
+         * Create Rules Candidate
+         * @description Кандидат своих правил суммы (адаптации, доли банка по итоговому кэфу) с проверкой
+         *     на своих ставках. Ничего не изменилось — 422 strategy.no_changes.
+         */
+        post: operations["create_rules_candidate_api_strategy_versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/strategy/versions/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare Versions
+         * @description Сравнение двух версий одной линии: a — база, b — кандидат. Разные линии — 422;
+         *     участнику — не больше 20 сравнений в минуту (429 common.rate_limited).
+         */
+        get: operations["compare_versions_api_strategy_versions_compare_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/strategy/versions/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Version */
+        get: operations["get_version_api_strategy_versions__version_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/strategy/versions/{version_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Version
+         * @description Включить кандидата (прежняя активная — в архив).
+         */
+        post: operations["activate_version_api_strategy_versions__version_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/strategy/versions/{version_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rollback Version
+         * @description Вернуть версию, которая уже была активной.
+         */
+        post: operations["rollback_version_api_strategy_versions__version_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/strategy/versions/{version_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Version
+         * @description Отклонить кандидата.
+         */
+        post: operations["reject_version_api_strategy_versions__version_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lessons": {
         parameters: {
             query?: never;
@@ -2202,6 +2504,47 @@ export interface paths {
          *     уже проверен — 409.
          */
         post: operations["notify_when_ready_api_lessons__lesson_id__notify_when_ready_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/learning": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Learning Summary
+         * @description Плитки, шапка и пороги «Обучения модели» (и блок «Модель учится» на главной).
+         */
+        get: operations["learning_summary_api_learning_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ml/model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ml Model
+         * @description Базовая модель: активная версия калибровки, версии, проверка по месяцам против
+         *     рынка архива, калибровка, события для поправки Claude числом.
+         */
+        get: operations["ml_model_api_ml_model_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2632,6 +2975,24 @@ export interface components {
             hard_cap_usd: number;
             /** Default Per Analysis Usd */
             default_per_analysis_usd: number;
+        };
+        /**
+         * AgreementOut
+         * @description Совпадение решений по ставкам (набор исходов с p_final не ниже порога стратегии)
+         *     и средняя |Δp| между кандидатом и базой; noise_* — то же между двумя прогонами базы
+         *     (порог шума). ok — расхождение не больше 1,5 × шума (null — повтора базы нет).
+         */
+        AgreementOut: {
+            /** Value */
+            value: number | null;
+            /** Mean Abs Dp */
+            mean_abs_dp: number | null;
+            /** Noise Value */
+            noise_value: number | null;
+            /** Noise Abs Dp */
+            noise_abs_dp: number | null;
+            /** Ok */
+            ok: boolean | null;
         };
         /**
          * AiBudgetOut
@@ -3083,6 +3444,7 @@ export interface components {
             slices: components["schemas"]["SlicesOut"];
             parlays: components["schemas"]["ParlaysOut"] | null;
             calibration: components["schemas"]["CalibrationOut"];
+            calibration_all: components["schemas"]["CalibrationOut"] | null;
             clv: components["schemas"]["ClvOut"];
         };
         /**
@@ -3770,6 +4132,22 @@ export interface components {
             windows: number;
             /** Better */
             better: number;
+            /** Closing Diff */
+            closing_diff: number | null;
+            closing_diff_ci: components["schemas"]["CiOut"] | null;
+            /** Closing Noise */
+            closing_noise: boolean | null;
+            /** Closing Points */
+            closing_points: components["schemas"]["BrierPointOut"][];
+            /** Closing Windows */
+            closing_windows: number;
+            /** Closing Better */
+            closing_better: number;
+            /**
+             * Main
+             * @enum {string}
+             */
+            main: "pred" | "closing";
         };
         /**
          * BrierPointOut
@@ -3870,7 +4248,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "final" | "claude";
+            kind: "final" | "claude" | "all";
             /** Events */
             events: number;
             /** Outside */
@@ -3886,6 +4264,27 @@ export interface components {
             opposite: components["schemas"]["CalibrationFlagOut"] | null;
         };
         /**
+         * CalibrationPointOut
+         * @description Корзина калибровки: прогнозы в [low, high), средняя вероятность p, доля сбывшихся
+         *     actual и 95% интервал Уилсона.
+         */
+        CalibrationPointOut: {
+            /** Low */
+            low: number;
+            /** High */
+            high: number;
+            /** N */
+            n: number;
+            /** P */
+            p: number;
+            /** Actual */
+            actual: number;
+            /** Ci Low */
+            ci_low: number;
+            /** Ci High */
+            ci_high: number;
+        };
+        /**
          * ChangeOut
          * @description Изменение к прошлому периоду: прибыль — деньгами, ROI, винрейт и CLV — разницей
          *     долей (0.021 — это +2,1 п.п.); null — сравнить не с чем.
@@ -3899,6 +4298,20 @@ export interface components {
             winrate: number | null;
             /** Clv */
             clv: number | null;
+        };
+        /**
+         * CiNumOut
+         * @description Среднее и 95% ДИ (бутстрэп); n — событий.
+         */
+        CiNumOut: {
+            /** Value */
+            value: number;
+            /** Low */
+            low: number;
+            /** High */
+            high: number;
+            /** N */
+            n: number;
         };
         /**
          * CiOut
@@ -4004,6 +4417,62 @@ export interface components {
             fair_n: number;
         };
         /**
+         * ComparisonOut
+         * @description Сравнение кандидата с активной версией на одних событиях набора (правила
+         *     LLM_LEARNING.md 3.4 и TOKEN_ECONOMY.md 2.4 — кодом). rule improve: ДИ разницы
+         *     лог-лосса целиком ниже нуля; non_inferior: верхняя граница ДИ лог-лосса ≤ +0,01,
+         *     Brier ≤ +0,005, ECE ≤ +0,02, стоимость на событие ниже. В обоих правилах ошибок
+         *     формата, остановок по max_tokens и отказов — каждого не больше, чем у базы. passed —
+         *     решение кода; включает версию только администратор.
+         */
+        ComparisonOut: {
+            /** Id */
+            id: number | null;
+            /** Candidate Run Id */
+            candidate_run_id: number;
+            /** Baseline Run Id */
+            baseline_run_id: number;
+            /** Noise Run Id */
+            noise_run_id: number | null;
+            /** Candidate Version Id */
+            candidate_version_id: number;
+            /** Candidate Code */
+            candidate_code: string;
+            /** Baseline Version Id */
+            baseline_version_id: number;
+            /** Baseline Code */
+            baseline_code: string;
+            /**
+             * Rule
+             * @enum {string}
+             */
+            rule: "improve" | "non_inferior";
+            /** N */
+            n: number;
+            log_loss: components["schemas"]["MetricDiffOut"];
+            brier: components["schemas"]["MetricDiffOut"];
+            ece: components["schemas"]["MetricDiffOut"];
+            format_errors: components["schemas"]["CountDiffOut"];
+            max_tokens: components["schemas"]["CountDiffOut"];
+            refusals: components["schemas"]["CountDiffOut"];
+            cost_per_event: components["schemas"]["CostChangeOut"];
+            tokens_per_event: components["schemas"]["CostChangeOut"];
+            agreement: components["schemas"]["AgreementOut"];
+            /** Passed */
+            passed: boolean;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "better" | "not_worse" | "worse" | "noise" | "failed";
+            /** Seed */
+            seed: number;
+            /** Bootstrap */
+            bootstrap: number;
+            /** Created At */
+            created_at: string | null;
+        };
+        /**
          * ComparisonRow
          * @description Строка «Сравнение игроков»: key — что сравниваем (elo_rank, elo_surface, form10,
          *     load14, serve_first, serve_second, return, tiebreaks, h2h), better — у кого лучше.
@@ -4088,6 +4557,21 @@ export interface components {
             odds: string;
         };
         /**
+         * CostChangeOut
+         * @description Стоимость или токены на событие у двух версий; change = b / a − 1 (−0,31 —
+         *     дешевле на 31%).
+         */
+        CostChangeOut: {
+            /** A */
+            a: number | null;
+            /** B */
+            b: number | null;
+            /** Change */
+            change: number | null;
+            /** Ok */
+            ok: boolean | null;
+        };
+        /**
          * CostPartOut
          * @description Часть цены вызова: токены (у поисков — число поисков), цена за 1 млн токенов (у
          *     поисков — за один поиск) и сумма с учетом второй ступени и Batch.
@@ -4116,6 +4600,15 @@ export interface components {
             duration_ms: number;
             /** Models */
             models: string[];
+        };
+        /** CountDiffOut */
+        CountDiffOut: {
+            /** A */
+            a: number;
+            /** B */
+            b: number;
+            /** Ok */
+            ok: boolean;
         };
         /**
          * CsrfOut
@@ -4245,7 +4738,9 @@ export interface components {
          * @description Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,
          *     пик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,
          *     до OPEN_LIMIT; всего — open_count на open_stake), из них awaiting_count ждут результата
-         *     (все матчи прошли, этап 5); admin — только у администратора.
+         *     (все матчи прошли, этап 5); admin — только у администратора. learning — «Модель
+         *     учится» и строки «Требует внимания» об обучении (кандидат ждет решения, урок готов к
+         *     проверке — learning.versions.candidate, learning.lessons.ready_codes; этап 5, волна 3).
          */
         DashboardOut: {
             /**
@@ -4296,6 +4791,7 @@ export interface components {
             /** My Matches */
             my_matches: components["schemas"]["MyMatchOut"][];
             admin: components["schemas"]["AdminAttentionOut"] | null;
+            learning: components["schemas"]["LearningOut"];
         };
         /**
          * DataUploadOut
@@ -4564,6 +5060,200 @@ export interface components {
             reused_matches: number;
         };
         /**
+         * EvalBudgetOut
+         * @description Бюджет проверок месяца (UTC): всего, потрачено, в резерве за пакетами, остаток.
+         *     first_month — месяц первого замороженного набора: бюджет не меньше суммы первого
+         *     месяца (Р25: $30, дальше — настройка, $25); next_usd — бюджет со следующего месяца.
+         */
+        EvalBudgetOut: {
+            /** Budget Usd */
+            budget_usd: number;
+            /** Spent Usd */
+            spent_usd: number;
+            /** Reserved Usd */
+            reserved_usd: number;
+            /** Left Usd */
+            left_usd: number;
+            /** First Month */
+            first_month: boolean;
+            /** Next Usd */
+            next_usd: number;
+        };
+        /**
+         * EvalMetricsOut
+         * @description Итог прогона версии на наборе: оценены n из total событий (unrated — ответа нет или
+         *     он не годится: ошибки формата, max_tokens, отказы, ошибки пакета). Лог-лосс, Brier и
+         *     ECE оценки Claude (p_claude, победа в матче), то же у базовой модели (p_base) и у
+         *     рынка архива (на market_n событиях с кэфами). vs_base — разница лог-лосса Claude −
+         *     базовая, vs_market — Claude − рынок, парный блочный по дням бутстрэп.
+         */
+        EvalMetricsOut: {
+            /** N */
+            n: number;
+            /** Total */
+            total: number;
+            /** Unrated */
+            unrated: number;
+            /** Format Errors */
+            format_errors: number;
+            /** Max Tokens */
+            max_tokens: number;
+            /** Refusals */
+            refusals: number;
+            /** Log Loss */
+            log_loss: number | null;
+            /** Brier */
+            brier: number | null;
+            /** Ece */
+            ece: number | null;
+            /** Log Loss Final */
+            log_loss_final: number | null;
+            /** Log Loss Base */
+            log_loss_base: number | null;
+            /** Brier Base */
+            brier_base: number | null;
+            /** Market N */
+            market_n: number;
+            /** Log Loss Market */
+            log_loss_market: number | null;
+            /** Brier Market */
+            brier_market: number | null;
+            vs_base: components["schemas"]["CiNumOut"] | null;
+            vs_market: components["schemas"]["CiNumOut"] | null;
+            /** Tokens Per Event */
+            tokens_per_event: number | null;
+            /** Cost Per Event Usd */
+            cost_per_event_usd: number | null;
+            /** Calibration */
+            calibration: components["schemas"]["CalibrationPointOut"][];
+        };
+        /**
+         * EvalPlanOut
+         * @description Прогон до запуска: сколько событий и пакетов (по batch_size), цена по живым числам
+         *     (средняя цена ответа прошлых проверок, иначе оценка настроек), худший случай всего
+         *     прогона и одного пакета (весь вход по цене записи кэша на 1 час, eval_max_tokens
+         *     выхода, половина цены — Batch), бюджет проверок. worst_usd — вместе с пакетом повтора
+         *     истекших и сбойных запросов (retry_events, не больше одного пакета). Запуск — если
+         *     худший случай пакета помещается в остаток; иначе reason (код ошибки): eval.set_model_seen —
+         *     первый день набора (eval_set.since) раньше среза знаний модели анализа
+         *     (set_seen_since); eval.lesson_overlap — урок кандидата (overlap_lesson) проверен на
+         *     архиве до заморозки набора, его надо перепроверить. set_model — модель, для которой
+         *     набор замораживали.
+         */
+        EvalPlanOut: {
+            /** Version Id */
+            version_id: number;
+            /** Version Code */
+            version_code: string;
+            eval_set: components["schemas"]["EvalSetOut"] | null;
+            /** Repeat No */
+            repeat_no: number;
+            /** Events */
+            events: number;
+            /** Chunks */
+            chunks: number;
+            /** Batch Size */
+            batch_size: number;
+            /** Model */
+            model: string;
+            /** Max Tokens */
+            max_tokens: number;
+            /** Estimate Usd */
+            estimate_usd: number;
+            /** Worst Usd */
+            worst_usd: number;
+            /** Worst Chunk Usd */
+            worst_chunk_usd: number;
+            /** Per Event Worst Usd */
+            per_event_worst_usd: number;
+            budget: components["schemas"]["EvalBudgetOut"];
+            /** Can Run */
+            can_run: boolean;
+            /** Reason */
+            reason: string | null;
+            /** Running Run Id */
+            running_run_id: number | null;
+            /** Retry Events */
+            retry_events: number;
+            /** Set Model */
+            set_model: string | null;
+            /**
+             * Set Seen Since
+             * Format: date
+             */
+            set_seen_since: string;
+            /** Overlap Lesson */
+            overlap_lesson: string | null;
+        };
+        /**
+         * EvalRunIn
+         * @description Запуск прогона: версия инструкций и текущий код 2FA (тратит бюджет проверок).
+         */
+        EvalRunIn: {
+            /** Version Id */
+            version_id: number;
+            /** Totp Code */
+            totp_code?: string | null;
+        };
+        /**
+         * EvalRunOut
+         * @description Прогон: вид (eval — версия на наборе, quick — быстрая проверка урока, smoke —
+         *     приемка этапа 3), версия инструкций, номер повтора (2 — повтор для порога шума), ход
+         *     (пакетов собрано из всего), цена и худший случай. metrics — у законченного eval.
+         */
+        EvalRunOut: {
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "eval" | "quick" | "smoke";
+            /** Version Id */
+            version_id: number | null;
+            /** Version Code */
+            version_code: string | null;
+            /** Eval Set Code */
+            eval_set_code: string;
+            /** Repeat No */
+            repeat_no: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed" | "abandoned";
+            /** Events */
+            events: number;
+            /** Chunks Done */
+            chunks_done: number;
+            /** Chunks Total */
+            chunks_total: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Worst Usd */
+            worst_usd: number;
+            /** Estimate Usd */
+            estimate_usd: number | null;
+            /** Model */
+            model: string | null;
+            /** Error */
+            error: string | null;
+            /** Waiting */
+            waiting: string | null;
+            metrics: components["schemas"]["EvalMetricsOut"] | null;
+            /** Seed */
+            seed: number | null;
+            /** Bootstrap */
+            bootstrap: number | null;
+        };
+        /**
          * EvalRunUsageOut
          * @description Проверочный прогон (eval) месяца: вызовы и цена; eval_run_id пустой — вызовы без
          *     записи прогона.
@@ -4585,6 +5275,77 @@ export interface components {
             runs: number;
             /** Cost Usd */
             cost_usd: number;
+        };
+        /** EvalRunsOut */
+        EvalRunsOut: {
+            /** Items */
+            items: components["schemas"]["EvalRunOut"][];
+            budget: components["schemas"]["EvalBudgetOut"];
+        };
+        /**
+         * EvalSetIn
+         * @description Заморозка набора: код (латиница, цифры, дефис; по умолчанию eval-ГГГГ-ММ по первому
+         *     дню), первый день матчей (не раньше 1 августа 2026 и среза знаний модели), размер
+         *     200–300 (по умолчанию из настроек, 250).
+         */
+        EvalSetIn: {
+            /** Code */
+            code?: string | null;
+            /** Since */
+            since?: string | null;
+            /** Size */
+            size?: number | null;
+        };
+        /**
+         * EvalSetOut
+         * @description Замороженный eval-набор: события после since (позже среза знаний модели), hard —
+         *     трудных (близкие вероятности или неожиданный исход), sha256 списка событий. Рынок —
+         *     по кэфам архива tennis-data без маржи (момент снятия не проверен): лог-лосс и Brier
+         *     рынка на market_n событиях с кэфами.
+         */
+        EvalSetOut: {
+            /** Id */
+            id: number;
+            /** Code */
+            code: string;
+            /** Frozen At */
+            frozen_at: string | null;
+            /** Sha256 */
+            sha256: string | null;
+            /** N Events */
+            n_events: number;
+            /** Hard */
+            hard: number;
+            /** Hard Share */
+            hard_share: number;
+            /** Since */
+            since: string | null;
+            /** Until */
+            until: string | null;
+            /** With News */
+            with_news: boolean;
+            /** Market N */
+            market_n: number;
+            /** Market Log Loss */
+            market_log_loss: number | null;
+            /** Market Brier */
+            market_brier: number | null;
+        };
+        /** EvalSetsOut */
+        EvalSetsOut: {
+            /** Items */
+            items: components["schemas"]["EvalSetOut"][];
+            /** Available */
+            available: number;
+            /**
+             * Since
+             * Format: date
+             */
+            since: string;
+            /** Size */
+            size: number;
+            /** Hard Share */
+            hard_share: number;
         };
         /**
          * EvalUsageOut
@@ -4910,6 +5671,26 @@ export interface components {
             filter?: components["schemas"]["InsightFilterOut"] | null;
         };
         /**
+         * InstructionsCandidateIn
+         * @description Кандидат инструкций анализа (администратор): опубликованный промпт анализа
+         *     (analysis.vN) и/или набор уроков (коды; null — как у активной), цель — улучшение или
+         *     экономия; note — что изменилось.
+         */
+        InstructionsCandidateIn: {
+            /** Prompt Version */
+            prompt_version?: string | null;
+            /** Lessons */
+            lessons?: string[] | null;
+            /**
+             * Goal
+             * @default quality
+             * @enum {string}
+             */
+            goal: "quality" | "saving";
+            /** Note */
+            note?: string | null;
+        };
+        /**
          * InviteCreatedOut
          * @description Созданное приглашение и его код CAP-XXXX-XXXX (в базе только хеш).
          */
@@ -5111,6 +5892,138 @@ export interface components {
             round: string;
         };
         /**
+         * LearningLessonsOut
+         * @description Уроки: в анализе (in_prompt) из max_active, по статусам, готовые к решению (коды),
+         *     последний (не отклоненный и не списанный).
+         */
+        LearningLessonsOut: {
+            /** In Prompt */
+            in_prompt: number;
+            /** Max Active */
+            max_active: number;
+            /** Total */
+            total: number;
+            /** Hypotheses */
+            hypotheses: number;
+            /** Ready */
+            ready: number;
+            /** Confirmed */
+            confirmed: number;
+            /** Rejected */
+            rejected: number;
+            /** Retired */
+            retired: number;
+            /** Ready Codes */
+            ready_codes: string[];
+            last: components["schemas"]["LessonBriefOut"] | null;
+        };
+        /**
+         * LearningModelOut
+         * @description Базовая модель на плитке: действующая версия (калибровка или elo-v1, пока
+         *     перекалибровок не было). auto — версию включила перекалибровка сама (только у версии
+         *     калибровки); recalibrated_at — когда была последняя перекалибровка (включена версия
+         *     или нет), null — перекалибровок еще не было.
+         */
+        LearningModelOut: {
+            /** Id */
+            id: string;
+            /** Brier */
+            brier: number | null;
+            /** Log Loss */
+            log_loss: number | null;
+            /** Activated At */
+            activated_at: string | null;
+            /** Auto */
+            auto: boolean;
+            /** Recalibrated At */
+            recalibrated_at: string | null;
+        };
+        /**
+         * LearningOut
+         * @description Сводка «Обучения модели» и блока «Модель учится» на главной: рассчитано ставок
+         *     приложения (своих), из них по архиву, событий в них; уроки, версии (общая линия и
+         *     свои правила), базовая модель, набор, пороги и цены; следующий отчет — понедельник
+         *     по поясу участника (отчеты — волна 4, last_report пока null).
+         */
+        LearningOut: {
+            /** Settled */
+            settled: number;
+            /** Settled Auto */
+            settled_auto: number;
+            /** Settled Legs */
+            settled_legs: number;
+            /** Awaiting */
+            awaiting: number;
+            /** Events With Outcome */
+            events_with_outcome: number;
+            lessons: components["schemas"]["LearningLessonsOut"];
+            versions: components["schemas"]["LearningVersionsOut"];
+            model: components["schemas"]["LearningModelOut"] | null;
+            eval_set: components["schemas"]["EvalSetOut"] | null;
+            thresholds: components["schemas"]["LearningThresholdsOut"];
+            prices: components["schemas"]["LearningPricesOut"];
+            /**
+             * Next Report
+             * Format: date
+             */
+            next_report: string;
+            /** Last Report */
+            last_report: string | null;
+        };
+        /**
+         * LearningPricesOut
+         * @description Цены по настройкам и живым числам: разбор ставки (Batch), быстрая проверка урока
+         *     (оценка), худший случай одного события прогона; бюджет проверок.
+         */
+        LearningPricesOut: {
+            /** Postmortem Usd */
+            postmortem_usd: number;
+            /** Quick Check Usd */
+            quick_check_usd: number;
+            /** Eval Event Worst Usd */
+            eval_event_worst_usd: number;
+            budget: components["schemas"]["EvalBudgetOut"];
+        };
+        /**
+         * LearningThresholdsOut
+         * @description Пороги из настроек (app_settings.agent_config): уроков в анализе, своих случаев
+         *     для проверки урока (числовой и процессный), усадка k, событий для поправки Claude
+         *     числом, матчей быстрой проверки, размер набора, пакет прогона, доля трудных.
+         */
+        LearningThresholdsOut: {
+            /** Lessons Max */
+            lessons_max: number;
+            /** Lesson Min Cases */
+            lesson_min_cases: number;
+            /** Lesson Min Process */
+            lesson_min_process: number;
+            /** Shrink K */
+            shrink_k: number;
+            /** Claude Min Events */
+            claude_min_events: number;
+            /** Quick Check Events */
+            quick_check_events: number;
+            /** Eval Set Size */
+            eval_set_size: number;
+            /** Eval Batch Size */
+            eval_batch_size: number;
+            /** Eval Hard Share */
+            eval_hard_share: number;
+            /** Eval Min Answered */
+            eval_min_answered: number;
+        };
+        /**
+         * LearningVersionsOut
+         * @description active — действующая версия общей линии инструкций: есть всегда (v3 создается при
+         *     первом обращении к сводке).
+         */
+        LearningVersionsOut: {
+            active: components["schemas"]["VersionBriefOut"];
+            candidate: components["schemas"]["VersionBriefOut"] | null;
+            rules_active: components["schemas"]["VersionBriefOut"] | null;
+            rules_candidate: components["schemas"]["VersionBriefOut"] | null;
+        };
+        /**
          * LegMatchOut
          * @description Матч ноги. Турнир из ввода участника показывается по его же вводу; покрытие и
          *     формат — из турнира, иначе из ввода анализа (null — не указано).
@@ -5233,6 +6146,22 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** LessonBriefOut */
+        LessonBriefOut: {
+            /** Id */
+            id: number;
+            /** Code */
+            code: string;
+            /** Text */
+            text: string;
+            /** Status */
+            status: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** LessonDictionaryOut */
         LessonDictionaryOut: {
             /** Features */
@@ -5260,7 +6189,8 @@ export interface components {
          * LessonHistoryOut
          * @description Проверка на архиве кодом: случаи истории и отложенной части (с holdout_since);
          *     bias — средний остаток y − p модели в условии (доля, −0,05 = модель завышает на
-         *     5 п.п.); shift — поправка с усадкой; лог-лосс без урока и с поправкой; gain — выигрыш
+         *     5 п.п.); shift — поправка с усадкой bias · n_shrink / (n_shrink + k), n_shrink — случаев
+         *     истории архива (одно и то же для всех); лог-лосс без урока и с поправкой; gain — выигрыш
          *     лог-лосса на истории (без − с, больше нуля — урок помогает), holdout_gain — на
          *     отложенной части; seed бутстрэпа.
          */
@@ -5282,6 +6212,8 @@ export interface components {
             n_history: number;
             /** N Holdout */
             n_holdout: number;
+            /** N Shrink */
+            n_shrink: number;
             /** Holdout Since */
             holdout_since: string | null;
             bias: components["schemas"]["LessonEstimateOut"] | null;
@@ -5314,8 +6246,10 @@ export interface components {
         };
         /**
          * LessonOut
-         * @description Урок. n_cases — своих случаев (матчей ставок под условием; участник видит только
-         *     матчи своих ставок, администратор — всех), need_cases — порог проверки; effect,
+         * @description Урок. n_cases — случаев урока по ставкам всех участников (матчей под условием):
+         *     администратору — всегда, участнику — только с 5 (иначе null и n_cases_few = true:
+         *     «меньше 5»; по малому числу вычислялась бы чужая ставка); own_cases — сколько из них
+         *     — матчи ставок смотрящего; need_cases — порог проверки (по общему числу); effect,
          *     effect_ci, effect_shrunk, holdout_* — как в lessons (доли);
          *     own_bets — ваши ставки в основании урока (только ваши, Т21); watching — вы просили
          *     сообщить, когда урок проверят; scope_ok — условие из словаря (его можно проверить на
@@ -5356,7 +6290,11 @@ export interface components {
              */
             created_at: string;
             /** N Cases */
-            n_cases: number;
+            n_cases: number | null;
+            /** N Cases Few */
+            n_cases_few: boolean;
+            /** Own Cases */
+            own_cases: number;
             /** Need Cases */
             need_cases: number;
             /** N Hist */
@@ -5851,6 +6789,120 @@ export interface components {
             recipients_all: number;
         };
         /**
+         * MetricDiffOut
+         * @description Показатель двух версий: a — база (активная), b — кандидат, diff = b − a с 95% ДИ
+         *     (парный блочный по дням бутстрэп), margin — допуск правила, ok — выполнено.
+         */
+        MetricDiffOut: {
+            /** A */
+            a: number | null;
+            /** B */
+            b: number | null;
+            /** Diff */
+            diff: number | null;
+            /** Low */
+            low: number | null;
+            /** High */
+            high: number | null;
+            /** Margin */
+            margin: number | null;
+            /** Ok */
+            ok: boolean | null;
+        };
+        /**
+         * MlModelOut
+         * @description «Базовая модель»: активная версия, все версии (новые сверху), проверка по месяцам,
+         *     калибровка активной на отложенной части; поправка Claude числом — после
+         *     claude_min_events событий с исходами (сейчас events_with_outcome).
+         */
+        MlModelOut: {
+            active: components["schemas"]["MlVersionOut"] | null;
+            /** Versions */
+            versions: components["schemas"]["MlVersionOut"][];
+            /** Walk Forward */
+            walk_forward: components["schemas"]["WalkForwardOut"][];
+            /** Calibration */
+            calibration: components["schemas"]["CalibrationPointOut"][];
+            /** Events With Outcome */
+            events_with_outcome: number;
+            /** Claude Min Events */
+            claude_min_events: number;
+            rule: components["schemas"]["MlRuleOut"];
+            /**
+             * Next Run
+             * Format: date
+             */
+            next_run: string;
+        };
+        /**
+         * MlRuleOut
+         * @description Правило включения перекалибровки (В6): верхняя граница ДИ разницы лог-лосса и
+         *     Brier на отложенной части не выше допусков.
+         */
+        MlRuleOut: {
+            /** Log Loss Margin */
+            log_loss_margin: number;
+            /** Brier Margin */
+            brier_margin: number;
+            /** Holdout Share */
+            holdout_share: number;
+        };
+        /**
+         * MlVersionOut
+         * @description Версия калибровки базовой модели (Эло по покрытиям + Платт): на чем подобрана
+         *     (train_*), проверка на отложенной части (holdout_*: Brier, лог-лосс, ECE) против
+         *     прежней (prev_*, diff_* — разница новая − прежняя с ДИ). auto — включена сама по
+         *     правилу В6; reason — почему не включена. can_rollback — можно вернуть (была активной).
+         */
+        MlVersionOut: {
+            /** Id */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "active" | "archived" | "rejected";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Activated At */
+            activated_at: string | null;
+            /** Auto */
+            auto: boolean;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Train From */
+            train_from: string | null;
+            /** Train To */
+            train_to: string | null;
+            /** N Train */
+            n_train: number;
+            /** N Holdout */
+            n_holdout: number;
+            /** Brier */
+            brier: number | null;
+            /** Log Loss */
+            log_loss: number | null;
+            /** Ece */
+            ece: number | null;
+            /** Prev Brier */
+            prev_brier: number | null;
+            /** Prev Log Loss */
+            prev_log_loss: number | null;
+            diff_log_loss: components["schemas"]["CiNumOut"] | null;
+            diff_brier: components["schemas"]["CiNumOut"] | null;
+            /** Platt A */
+            platt_a: number | null;
+            /** Platt B */
+            platt_b: number | null;
+            /** Reason */
+            reason: string | null;
+            /** Can Rollback */
+            can_rollback: boolean;
+        };
+        /**
          * ModeDecisionIn
          * @description Решение по просьбе вернуть ключ администратора. limit — лимит на ключе
          *     администратора при одобрении (не задан — остается прежний).
@@ -6273,6 +7325,15 @@ export interface components {
             name: string;
             /** Name Ru */
             name_ru: string | null;
+        };
+        /** ParamDiffOut */
+        ParamDiffOut: {
+            /** Key */
+            key: string;
+            /** A */
+            a: string | null;
+            /** B */
+            b: string | null;
         };
         /**
          * ParlaysOut
@@ -7022,6 +8083,21 @@ export interface components {
             status: ("pending" | "running" | "done" | "failed") | null;
         };
         /**
+         * RecalibrationOut
+         * @description Итог перекалибровки: новая версия включена (activated), не включена — хуже прежней
+         *     (rejected) или не посчитана — мало матчей (skipped, reason).
+         */
+        RecalibrationOut: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "activated" | "rejected" | "skipped";
+            /** Reason */
+            reason: string | null;
+            version: components["schemas"]["MlVersionOut"] | null;
+        };
+        /**
          * RecentBetOut
          * @description Рассчитанная ставка периода для таблицы «Динамика банка»: equity_after — капитал
          *     сразу после ее расчета («Банк после»).
@@ -7274,6 +8350,52 @@ export interface components {
             /** Params */
             params: {
                 [key: string]: unknown;
+            };
+        };
+        /**
+         * RulesCandidateIn
+         * @description Кандидат своих правил суммы: включить или выключить правила адаптации и/или
+         *     поменять долю банка в диапазонах итогового кэфа; note — зачем.
+         */
+        RulesCandidateIn: {
+            /** Adapt */
+            adapt?: {
+                [key: string]: boolean;
+            };
+            /** Stake Bands */
+            stake_bands?: components["schemas"]["StakeBandIn"][];
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * RulesCheckOut
+         * @description Проверка правил суммы на своих ставках (код, бесплатно): рассчитанные ставки
+         *     приложения с since, у скольких сумма изменилась бы (changed), сумма ставок до и после
+         *     (stake_old/stake_new) и прибыль при тех же исходах (profit_old/profit_new);
+         *     triggered — сколько раз сработало бы каждое правило адаптации новой версии.
+         */
+        RulesCheckOut: {
+            /** Since */
+            since: string | null;
+            /** Bets */
+            bets: number;
+            /** Changed */
+            changed: number;
+            /** Stake Old */
+            stake_old: string;
+            /** Stake New */
+            stake_new: string;
+            /** Stake Change */
+            stake_change: number | null;
+            /** Profit Old */
+            profit_old: string;
+            /** Profit New */
+            profit_new: string;
+            /** Currency */
+            currency: string;
+            /** Triggered */
+            triggered: {
+                [key: string]: number;
             };
         };
         /**
@@ -7621,6 +8743,16 @@ export interface components {
             /** Totals */
             totals: components["schemas"]["TotalSliceOut"][];
         };
+        /**
+         * StakeBandIn
+         * @description Доля банка в диапазоне итогового кэфа: номер диапазона (с 0) и доля (0,0175).
+         */
+        StakeBandIn: {
+            /** Index */
+            index: number;
+            /** Pct */
+            pct: number;
+        };
         /** StakeBandOut */
         StakeBandOut: {
             /** Low */
@@ -7778,6 +8910,76 @@ export interface components {
             adapt: {
                 [key: string]: boolean;
             };
+        };
+        /**
+         * StrategyVersionOut
+         * @description Версия стратегии. line instructions — общая линия инструкций анализа (ведет
+         *     администратор, Р25): промпт анализа и уроки в system; rules — свои правила суммы
+         *     ставки участника (params). activated_at — когда включена; can_activate / can_rollback
+         *     — может ли смотрящий включить или вернуть ее (activate_reason — почему нельзя).
+         */
+        StrategyVersionOut: {
+            /** Id */
+            id: number;
+            /**
+             * Line
+             * @enum {string}
+             */
+            line: "instructions" | "rules";
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "active" | "archived" | "rejected";
+            /** Goal */
+            goal: ("quality" | "saving" | "rules") | null;
+            /** Parent Id */
+            parent_id: number | null;
+            /** Parent Code */
+            parent_code: string | null;
+            /** Changes */
+            changes: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Activated At */
+            activated_at: string | null;
+            /** Archived At */
+            archived_at: string | null;
+            /** Prompt Version */
+            prompt_version: string | null;
+            /** Base Prompt */
+            base_prompt: string | null;
+            /** Lessons */
+            lessons: string[];
+            params: components["schemas"]["StrategyParamsOut"] | null;
+            eval: components["schemas"]["VersionEvalOut"] | null;
+            comparison: components["schemas"]["ComparisonOut"] | null;
+            check: components["schemas"]["RulesCheckOut"] | null;
+            /** Can Activate */
+            can_activate: boolean;
+            /** Activate Reason */
+            activate_reason: string | null;
+            /** Can Rollback */
+            can_rollback: boolean;
+        };
+        /**
+         * StrategyVersionsOut
+         * @description Версии: общая линия инструкций (новые сверху) и свои правила суммы ставки;
+         *     замороженный набор, на котором проверяются инструкции.
+         */
+        StrategyVersionsOut: {
+            /** Instructions */
+            instructions: components["schemas"]["StrategyVersionOut"][];
+            /** Rules */
+            rules: components["schemas"]["StrategyVersionOut"][];
+            eval_set: components["schemas"]["EvalSetOut"] | null;
         };
         /**
          * SurfaceEloOut
@@ -8332,6 +9534,101 @@ export interface components {
             min_value: string | null;
             /** Add */
             add: string;
+        };
+        /**
+         * VersionBriefOut
+         * @description Версия кратко: checked — у кандидата инструкций есть прогон на наборе и сравнение,
+         *     passed — решение кода по правилу (null — сравнения нет).
+         */
+        VersionBriefOut: {
+            /** Id */
+            id: number;
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "active" | "archived" | "rejected";
+            /** Activated At */
+            activated_at: string | null;
+            /** Checked */
+            checked: boolean;
+            /** Passed */
+            passed: boolean | null;
+            /** Rule */
+            rule: ("improve" | "non_inferior") | null;
+        };
+        /**
+         * VersionCompareOut
+         * @description Сравнение двух версий одной линии: что отличается (diff) и, у инструкций,
+         *     сравнение прогонов на наборе (null — у одной из версий нет прогона).
+         */
+        VersionCompareOut: {
+            a: components["schemas"]["StrategyVersionOut"];
+            b: components["schemas"]["StrategyVersionOut"];
+            /** Diff */
+            diff: components["schemas"]["ParamDiffOut"][];
+            comparison: components["schemas"]["ComparisonOut"] | null;
+        };
+        /**
+         * VersionEvalOut
+         * @description Версия инструкций на замороженном наборе: прогонов, последний прогон (метрики),
+         *     noise — насколько разошлись два прогона (лог-лосс), to_market — разница лог-лосса с
+         *     рынком архива с ДИ.
+         */
+        VersionEvalOut: {
+            /** Eval Set Code */
+            eval_set_code: string;
+            /** Runs */
+            runs: number;
+            /** Run Ids */
+            run_ids: number[];
+            /** N */
+            n: number;
+            /** Log Loss */
+            log_loss: number | null;
+            /** Brier */
+            brier: number | null;
+            /** Ece */
+            ece: number | null;
+            /** Format Errors */
+            format_errors: number;
+            /** Max Tokens */
+            max_tokens: number;
+            /** Refusals */
+            refusals: number;
+            to_market: components["schemas"]["CiNumOut"] | null;
+            /** Noise */
+            noise: number | null;
+            /** Tokens Per Event */
+            tokens_per_event: number | null;
+            /** Cost Per Event Usd */
+            cost_per_event_usd: number | null;
+        };
+        /**
+         * WalkForwardOut
+         * @description Проверка по месяцам: калибровка — только на матчах до месяца, Brier модели на
+         *     матчах месяца (n) против рынка архива (market_n — с кэфами).
+         */
+        WalkForwardOut: {
+            /**
+             * Month
+             * Format: date
+             */
+            month: string;
+            /** N */
+            n: number;
+            /** Model Brier */
+            model_brier: number | null;
+            /** Model Log Loss */
+            model_log_loss: number | null;
+            /** Market N */
+            market_n: number;
+            /** Market Brier */
+            market_brier: number | null;
         };
         /** WeekOut */
         WeekOut: {
@@ -10920,6 +12217,316 @@ export interface operations {
             };
         };
     };
+    list_eval_sets_api_admin_eval_sets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalSetsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    freeze_eval_set_api_admin_eval_sets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalSetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalSetOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_eval_runs_api_admin_eval_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    start_eval_run_api_admin_eval_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalRunIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    eval_run_preview_api_admin_eval_runs_preview_get: {
+        parameters: {
+            query: {
+                version_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalPlanOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    cancel_eval_run_api_admin_eval_runs__run_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_eval_run_api_admin_eval_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    create_instructions_candidate_api_admin_strategy_versions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstructionsCandidateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyVersionOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    recalibrate_model_api_admin_ml_recalibrate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecalibrationOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    rollback_model_api_admin_ml_models__model_id__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MlModelOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     list_analyses_api_analyses_get: {
         parameters: {
             query?: {
@@ -12030,6 +13637,224 @@ export interface operations {
             };
         };
     };
+    list_versions_api_strategy_versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyVersionsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    create_rules_candidate_api_strategy_versions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RulesCandidateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyVersionOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    compare_versions_api_strategy_versions_compare_get: {
+        parameters: {
+            query: {
+                a: number;
+                b: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionCompareOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_version_api_strategy_versions__version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyVersionOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    activate_version_api_strategy_versions__version_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyVersionOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    rollback_version_api_strategy_versions__version_id__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyVersionOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    reject_version_api_strategy_versions__version_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyVersionOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     list_lessons_api_lessons_get: {
         parameters: {
             query?: {
@@ -12296,6 +14121,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LessonOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    learning_summary_api_learning_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LearningOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    ml_model_api_ml_model_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MlModelOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

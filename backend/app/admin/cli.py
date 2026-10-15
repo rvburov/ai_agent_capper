@@ -88,10 +88,14 @@ from app.services import (
     admin_key,
     admin_users,
     agent_smoke,
+    check_runs,
     data_uploads,
+    eval_runs,
+    eval_sets,
     lessons,
     players,
     postmortems,
+    recalibration,
 )
 from app.services.app_settings import get_app_settings
 
@@ -917,6 +921,159 @@ async def _lessons_check(args: argparse.Namespace) -> None:
     _say(t(key, **{name: str(value) for name, value in counts.items()}))
 
 
+async def _eval_freeze(args: argparse.Namespace) -> None:
+    """Заморозка eval-набора (без денег): сыгранные матчи после среза знаний модели, доля
+    трудных, список и sha256 — тем же кодом, что POST /api/admin/eval/sets."""
+    from datetime import date as date_type
+
+    from app.schemas.learning import EvalSetIn
+
+    body = EvalSetIn(
+        code=args.code,
+        since=date_type.fromisoformat(args.since) if args.since else None,
+        size=args.size,
+    )
+    engine = create_engine()
+    try:
+        async with create_sessionmaker(engine)() as db:
+            found = await eval_sets.freeze(db, body, actor_id=None)
+            out = eval_sets.set_out(found)
+    finally:
+        await engine.dispose()
+    _say(
+        t(
+            "cli.eval.frozen",
+            code=out.code,
+            events=out.n_events,
+            hard=out.hard,
+            since=out.since.isoformat() if out.since else "—",
+            until=out.until.isoformat() if out.until else "—",
+            sha=out.sha256 or "—",
+        )
+    )
+
+
+async def _eval_run(args: argparse.Namespace) -> None:
+    """Прогон версии инструкций на последнем наборе: план (цена, худший случай, бюджет),
+    подтверждение, запуск и отправка первого пакета. Код 2FA не спрашивается: доступ к
+    серверу подтверждает владельца."""
+    from app.db.models import StrategyVersion
+    from app.schemas.learning import EvalRunIn
+
+    engine = create_engine()
+    try:
+        factory = create_sessionmaker(engine)
+        async with factory() as db:
+            version = await db.scalar(
+                select(StrategyVersion).where(
+                    StrategyVersion.user_id.is_(None), StrategyVersion.code == args.version
+                )
+            )
+            if version is None:
+                raise CliError("eval.no_version", version=args.version)
+            admin = await check_runs.pick_admin(db, args.email)
+            if admin is None:
+                raise CliError("eval.no_admin")
+            plan = await eval_runs.plan(db, version.id)
+            _say(
+                t(
+                    "cli.eval.plan",
+                    version=plan.version_code,
+                    events=plan.events,
+                    chunks=plan.chunks,
+                    estimate=str(plan.estimate_usd),
+                    worst=str(plan.worst_usd),
+                    chunk=str(plan.worst_chunk_usd),
+                    left=str(plan.budget.left_usd),
+                )
+            )
+            if not plan.can_run:
+                reason = t(
+                    f"errors.{plan.reason}",
+                    since=plan.set_seen_since.isoformat(),
+                    lesson=plan.overlap_lesson or "",
+                )
+                raise CliError("eval.refused", reason=reason)
+            if not args.yes and not _confirmed(t("cli.eval.confirm")):
+                _say(t("cli.cancelled"))
+                return
+            run = await eval_runs.start(
+                db,
+                admin,
+                EvalRunIn(version_id=version.id),
+                confirm=None,
+                ip=None,
+                enqueue=_no_queue,
+                terminal=True,
+            )
+            run_id = run.id
+        async with factory() as db:
+            status = await eval_runs.advance(db, run_id)
+    finally:
+        await engine.dispose()
+    _say(t("cli.eval.started", run=run_id, status=status))
+
+
+async def _eval_cancel(args: argparse.Namespace) -> None:
+    """Остановить прогон версии на наборе (как кнопка администратора): ждущий отправки,
+    бюджета или ключа — сразу, пакет у Anthropic — отменяется, начатые запросы
+    дособираются."""
+    engine = create_engine()
+    try:
+        async with create_sessionmaker(engine)() as db:
+            run = await eval_runs.cancel(db, None, args.run_id, ip=None)
+            status = str(run.status)
+    finally:
+        await engine.dispose()
+    _say(t(f"cli.eval.canceled_{'now' if status == 'abandoned' else 'later'}", run=args.run_id))
+
+
+async def _no_queue(run_id: int) -> None:
+    """Команда терминала отправляет первый пакет сама."""
+    return None
+
+
+async def _ml_recalibrate(args: argparse.Namespace) -> None:
+    """Перекалибровка базовой модели сейчас (как задача по понедельникам)."""
+    engine = create_engine()
+    try:
+        async with create_sessionmaker(engine)() as db:
+            result = await recalibration.recalibrate(db)
+    finally:
+        await engine.dispose()
+    version = result.version
+    _say(
+        t(
+            f"cli.ml_recalibrate.{result.decision}",
+            model=version.id if version else "—",
+            brier=f"{version.brier:.4f}" if version and version.brier is not None else "—",
+            prev=f"{version.prev_brier:.4f}" if version and version.prev_brier is not None else "—",
+            reason=t(f"errors.{result.reason}") if result.reason else "",
+        )
+    )
+
+
+def _add_learning_commands(command: Callable[[str, str], argparse.ArgumentParser]) -> None:
+    freeze = command("eval-freeze", "eval_freeze")
+    freeze.add_argument("--code", help=t("cli.help.eval_code"))
+    freeze.add_argument("--since", help=t("cli.help.eval_since"))
+    freeze.add_argument("--size", type=int, help=t("cli.help.eval_size"))
+    freeze.set_defaults(handler=_eval_freeze)
+
+    run = command("eval-run", "eval_run")
+    run.add_argument("--version", required=True, help=t("cli.help.eval_version"))
+    run.add_argument("--email", help=t("cli.help.email"))
+    run.add_argument("--yes", action="store_true", help=t("cli.help.eval_yes"))
+    run.set_defaults(handler=_eval_run)
+
+    cancel = command("eval-cancel", "eval_cancel")
+    cancel.add_argument("run_id", type=int, help=t("cli.help.eval_run_id"))
+    cancel.set_defaults(handler=_eval_cancel)
+
+    recal = command("ml-recalibrate", "ml_recalibrate")
+    recal.set_defaults(handler=_ml_recalibrate)
+
+
 def _add_player_commands(command: Callable[[str, str], argparse.ArgumentParser]) -> None:
     find = command("players-find", "players_find")
     find.add_argument("query", help=t("cli.help.players_query"))
@@ -1070,6 +1227,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     acceptance.add_commands(commands)
     _add_player_commands(command)
+    _add_learning_commands(command)
     return parser
 
 

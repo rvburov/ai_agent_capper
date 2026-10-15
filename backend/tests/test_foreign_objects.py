@@ -28,6 +28,7 @@ from app.db.models import (
     Lesson,
     LessonWatch,
     Notification,
+    StrategyVersion,
     TrustedDevice,
     UserSession,
 )
@@ -226,12 +227,51 @@ LESSON_ADMIN_ROUTES = {
 }
 
 
+# Версии стратегии (этап 5, волна 3): свои правила суммы другого участника — 404 и не
+# меняются; общую линию инструкций видит каждый, решения по ней — только администратор
+STRATEGY_ROUTES = {
+    ("GET", "/api/strategy/versions/{version_id}"),
+    ("POST", "/api/strategy/versions/{version_id}/activate"),
+    ("POST", "/api/strategy/versions/{version_id}/rollback"),
+    ("POST", "/api/strategy/versions/{version_id}/reject"),
+}
+
+
 def test_every_id_route_is_checked() -> None:
     """Новый адрес с id в пути (например, /api/bets/{bet_id}) должен попасть сюда."""
-    assert set(ID_ROUTES) == set(FOREIGN_CASES) | SHARED_ROUTES | LESSON_ROUTES, (
+    checked = set(FOREIGN_CASES) | SHARED_ROUTES | LESSON_ROUTES | STRATEGY_ROUTES
+    assert set(ID_ROUTES) == checked, (
         "добавьте в FOREIGN_CASES проверку чужого объекта для новых адресов"
     )
     assert not set(FOREIGN_CASES) & SHARED_ROUTES
+
+
+@pytest.mark.parametrize(("method", "path"), sorted(STRATEGY_ROUTES), ids=lambda v: str(v))
+async def test_strategy_routes_hide_foreign_rules_and_keep_shared_to_admin(
+    method: str,
+    path: str,
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    db: AsyncSession,
+) -> None:
+    owner = await make_user()
+    own = StrategyVersion(
+        user_id=owner.id, code="r2", name="r2", status="candidate", params={}, goal="rules"
+    )
+    shared = StrategyVersion(
+        user_id=None, code="v4", name="v4", status="candidate", params={}, goal="quality"
+    )
+    db.add_all([own, shared])
+    await db.commit()
+    alice = await login(await make_client("10.0.0.1"), await make_user())
+    foreign = await alice.request(method, path.replace("{version_id}", str(own.id)))
+    assert foreign.status_code == 404, foreign.text
+    common = await alice.request(method, path.replace("{version_id}", str(shared.id)))
+    assert common.status_code == (200 if method == "GET" else 403), common.text
+    for row_id in (own.id, shared.id):
+        row = await db.get_one(StrategyVersion, row_id, populate_existing=True)
+        assert row.status == "candidate"
 
 
 @pytest.mark.parametrize(("method", "path"), sorted(LESSON_ROUTES), ids=lambda v: str(v))

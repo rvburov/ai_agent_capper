@@ -30,8 +30,12 @@ ANALYSIS_RETRY = ("analysis_retry", 1)
 # Этап 5: разбор ставки (Batch) и блок уроков в system анализа (быстрая проверка урока)
 POSTMORTEM_PROMPT = ("postmortem", 1)
 POSTMORTEM_REQUEST = ("postmortem_request", 1)
-LESSONS_BLOCK = ("lessons_block", 1)
-LESSON_LINE = ("lesson_line", 1)
+# Блок уроков v2 (m7 волны 3): строка числового урока — условие из словаря и направление,
+# собранные кодом, без свободного текста; v1 (код и текст урока) — строка процессного
+# урока (его пишет только администратор)
+LESSONS_BLOCK = ("lessons_block", 2)
+LESSON_LINE = ("lesson_line", 2)
+LESSON_LINE_TEXT = ("lesson_line", 1)
 LESSON_SHIFT = ("lesson_shift", 1)
 
 
@@ -83,3 +87,64 @@ def published_prompts() -> dict[str, str]:
         name, version = parse_version_id(path.name.removesuffix(".md"))
         found[f"{name}.v{version}"] = load_prompt(name, version).sha256
     return found
+
+
+# --- system анализа: промпт версии и блок уроков (этап 5, волна 3) ---
+
+# Разделитель составной версии: analysis.v1+lessons_block.v2:<sha12 блока уроков>
+LESSONS_JOINER = "+"
+LESSONS_HASH_CHARS = 12
+
+
+@dataclass(frozen=True)
+class SystemPrompt:
+    """System анализа: промпт версии инструкций (base) и блок уроков (lessons — текст
+    блока, codes — коды уроков в нем). Блок — отдельный блок system со своей точкой кэша:
+    промпт без уроков общий у всех версий, его кэш не сбрасывается при смене уроков.
+    version_id — составная версия (Т6): у разных наборов уроков разные ключи повтора
+    оценки и кэша. text — весь system одним текстом (оценка токенов)."""
+
+    base: Prompt
+    lessons: str | None = None
+    codes: tuple[str, ...] = ()
+
+    @property
+    def version_id(self) -> str:
+        return compose_version_id(self.base.version_id, self.lessons)
+
+    @property
+    def text(self) -> str:
+        if not self.lessons:
+            return self.base.text
+        return f"{self.base.text}\n{self.lessons.strip()}\n"
+
+
+def compose_version_id(base_version_id: str, lessons: str | None) -> str:
+    """analysis.v1 без уроков; с уроками — analysis.v1+lessons_block.v2:<sha12 блока>
+    (до 64 символов, как колонки prompt_version)."""
+    if not lessons:
+        return base_version_id
+    block = load_prompt(*LESSONS_BLOCK).version_id
+    digest = hashlib.sha256(lessons.strip().encode("utf-8")).hexdigest()[:LESSONS_HASH_CHARS]
+    return f"{base_version_id}{LESSONS_JOINER}{block}:{digest}"[:64]
+
+
+def base_version_id(version_id: str) -> str:
+    """Версия промпта без блока уроков: analysis.v1+lessons_block.v2:… → analysis.v1."""
+    return version_id.split(LESSONS_JOINER, 1)[0]
+
+
+def system_blocks(prompt: Prompt | SystemPrompt, *, ttl: str | None = None) -> list[Any]:
+    """Блоки system с точками кэша: промпт и (если есть) блок уроков — каждый своей
+    точкой. ttl — «1h» для пакетов Batch (запросы идут параллельно и дольше 5 минут)."""
+    cache: dict[str, str] = {"type": "ephemeral"}
+    if ttl is not None:
+        cache["ttl"] = ttl
+    if isinstance(prompt, Prompt):
+        return [{"type": "text", "text": prompt.text, "cache_control": dict(cache)}]
+    blocks: list[Any] = [{"type": "text", "text": prompt.base.text, "cache_control": dict(cache)}]
+    if prompt.lessons:
+        blocks.append(
+            {"type": "text", "text": prompt.lessons.strip() + "\n", "cache_control": dict(cache)}
+        )
+    return blocks

@@ -3,10 +3,12 @@
 
 Оценка матча Opus 5.5 через Batch на quick_check_events сыгранных матчах после даты
 среза знаний модели (замороженный набор eval_sets, иначе первые матчи после среза, как
-smoke-eval): досье на день матча без новостей, в system — промпт анализа активной версии
-администратора и блок с этим уроком (prompts/lessons_block.v1.md). Без урока — готовые
-ответы прошлых прогонов (smoke-eval) на тех же досье, тем же промптом, моделью и effort;
-где их нет, в пакет идет и запрос без урока.
+smoke-eval): досье на день матча без новостей. «Без урока» — system активной версии
+общей линии инструкций (промпт и уроки, что уже в анализе); «с уроком» — тот же промпт и
+блок уроков с этим уроком (prompts/lessons_block.v2.md) отдельным блоком system, ровно
+такой, какой будет у версии после включения урока (strategy_versions.sync_lessons). Без
+урока — готовые ответы прошлых прогонов на тех же досье с той же версией промпта, моделью
+и effort; где их нет, в пакет идет и запрос без урока.
 
 Деньги — из бюджета проверок (app/services/check_runs.py): до запуска экран показывает
 цену по живым числам (средняя цена ответа прошлых проверок, иначе оценка настроек) и
@@ -44,7 +46,7 @@ from app.agent.calls import estimate_tokens
 from app.agent.client import client_for
 from app.agent.config import AgentConfig, load_agent_config
 from app.agent.errors import ClaudeStepError
-from app.agent.prompts import LESSON_LINE, LESSON_SHIFT, LESSONS_BLOCK, load_prompt, load_prompt_id
+from app.agent.prompts import SystemPrompt, system_blocks
 from app.agent.runs import price_for
 from app.agent.schemas import ASSESSMENT_SCHEMA_VERSION, assessment_schema
 from app.core.errors import AppError
@@ -66,8 +68,8 @@ from app.db.models import (
 from app.ml.metrics import Estimate, bootstrap_diff_ci, log_losses
 from app.ml.sets import MARKET_ML
 from app.schemas.lessons import QuickCheckOut
+from app.services import eval_sets, smoke_eval
 from app.services import lessons as lessons_service
-from app.services import smoke_eval
 from app.services.ai_access import usd_text
 from app.services.app_settings import SETTINGS_ROW_ID
 from app.services.audit import write_audit
@@ -75,7 +77,14 @@ from app.services.check_runs import PENDING_RESERVE, eval_budget, lock_budget
 from app.services.claude_key import key_for
 from app.services.notifications import notify
 from app.services.sessions import utcnow
-from app.services.strategy_versions import ensure_active, params_of, prompt_version_of
+from app.services.strategy_versions import (
+    ensure_shared_active,
+    lessons_block,
+    params_of,
+    prompt_lessons,
+    shared_active,
+    system_prompt_of,
+)
 
 KIND = "quick"
 QUICK_JOB = "run_quick_check"
@@ -94,41 +103,34 @@ WITHOUT = "b"
 # --- блок уроков ---
 
 
-def _shift_text(value: float) -> str:
-    return f"{value * 100:+.1f}".replace(".", ",").replace("-", "−")
+def lesson_prompt(base: SystemPrompt, active: Sequence[Lesson], lesson: Lesson) -> SystemPrompt:
+    """System «с уроком»: промпт активной версии инструкций и блок уроков из уроков, что
+    уже в анализе, и этого урока (по коду) — ровно такой, какой будет у версии после
+    включения урока (strategy_versions.sync_lessons)."""
+    lessons = sorted({item.code: item for item in [*active, lesson]}.values(), key=_code)
+    return SystemPrompt(base.base, lessons_block(lessons), tuple(item.code for item in lessons))
 
 
-def lesson_line(lesson: Lesson) -> str:
-    line = load_prompt(*LESSON_LINE).format(code=lesson.code, text=lesson.text).strip()
-    if lesson.kind == "numeric" and lesson.effect_shrunk is not None:
-        shift = load_prompt(*LESSON_SHIFT).format(shift=_shift_text(lesson.effect_shrunk))
-        line = f"{line} {shift.strip()}"
-    return line
-
-
-def lessons_block(lessons: Sequence[Lesson]) -> str:
-    """Блок уроков для system анализа (prompts/lessons_block.v1.md)."""
-    lines = "\n".join(lesson_line(lesson) for lesson in lessons)
-    return load_prompt(*LESSONS_BLOCK).format(lessons=lines).strip()
-
-
-def lesson_prompt_version(base_version: str, lesson: Lesson) -> str:
-    """Версия промпта с уроком для agent_runs (до 64 символов)."""
-    block = load_prompt(*LESSONS_BLOCK).version_id
-    return f"{base_version}+{block}:{lesson.code}"[:64]
+def _code(lesson: Lesson) -> str:
+    return lesson.code
 
 
 # --- матчи и готовые ответы без урока ---
 
 
-async def _frozen_matches(db: AsyncSession, count: int) -> list[int]:
-    """Матчи последнего замороженного набора (волна 3), по порядку событий."""
-    found = await db.scalar(
+async def _frozen_set(db: AsyncSession) -> int | None:
+    found: int | None = await db.scalar(
         select(EvalSet.id)
         .where(EvalSet.frozen_at.is_not(None))
-        .order_by(EvalSet.frozen_at.desc())
+        .order_by(EvalSet.frozen_at.desc(), EvalSet.id.desc())
         .limit(1)
     )
+    return found
+
+
+async def _frozen_matches(db: AsyncSession, count: int) -> list[int]:
+    """Матчи последнего замороженного набора (волна 3), по порядку событий."""
+    found = await _frozen_set(db)
     if found is None:
         return []
     return list(
@@ -320,23 +322,9 @@ async def preview(
     )
 
 
-async def _base_prompt_version(db: AsyncSession, admin_id: int | None = None) -> str:
-    """Промпт анализа активной версии администратора (как у smoke-eval)."""
-    if admin_id is None:
-        admin_id = await db.scalar(
-            select(User.id)
-            .where(User.role == "admin", User.status == "active")
-            .order_by(User.id)
-            .limit(1)
-        )
-    version = None
-    if admin_id is not None:
-        version = await db.scalar(
-            select(StrategyVersion).where(
-                StrategyVersion.user_id == admin_id, StrategyVersion.status == "active"
-            )
-        )
-    return prompt_version_of(version)
+async def _base_prompt_version(db: AsyncSession) -> str:
+    """Составная версия system активной версии инструкций (ответы без урока)."""
+    return system_prompt_of(await shared_active(db)).version_id
 
 
 Enqueue = Callable[[int], Awaitable[None]]
@@ -387,7 +375,7 @@ async def start(
     plan = await preview(db, lesson_id, now=moment)
     if not plan.can_run:
         raise AppError(409, plan.reason or "lesson.not_ready")
-    version = await ensure_active(db, admin.id)
+    version = await ensure_shared_active(db)
     matches = await pick_matches(db, config, today=moment.date())
     split = smoke_eval.split_for(
         min((item.day for item in matches), default=moment.date()), config.analysis_model
@@ -411,6 +399,8 @@ async def start(
         "lesson_code": lesson.code,
         "admin_id": admin.id,
         "match_ids": [item.match.id for item in matches],
+        # Матчи замороженного набора — его досье и калибровка (общие с прогонами версий)
+        "eval_set_id": await _frozen_set(db) if await _frozen_matches(db, 1) else None,
         "requests": plan.requests,
         "estimate_usd": str(plan.estimate_usd),
         "worst_usd": str(plan.worst_usd),
@@ -487,10 +477,10 @@ def parse_custom_id(value: str) -> tuple[int, str] | None:
 
 
 def quick_request(
-    custom: str, event: smoke_eval.SmokeEvent, system: str, config: AgentConfig
+    custom: str, event: smoke_eval.SmokeEvent, prompt: SystemPrompt, config: AgentConfig
 ) -> Request:
-    """Запрос как у оценки матча в пакете smoke-eval, но с system проверки и
-    eval_max_tokens (Т8)."""
+    """Запрос как у оценки матча в пакете smoke-eval, но с system проверки (промпт и блок
+    уроков — своими точками кэша на 1 час) и eval_max_tokens (Т8)."""
     return cast(
         Request,
         {
@@ -498,13 +488,7 @@ def quick_request(
             "params": {
                 "model": config.analysis_model,
                 "max_tokens": config.eval_max_tokens,
-                "system": [
-                    {
-                        "type": "text",
-                        "text": system,
-                        "cache_control": {"type": "ephemeral", "ttl": "1h"},
-                    }
-                ],
+                "system": system_blocks(prompt, ttl="1h"),
                 "messages": [
                     {
                         "role": "user",
@@ -585,16 +569,32 @@ async def _prepare_and_submit(
         return "failed"
     config = await load_agent_config(db)
     version = await db.get(StrategyVersion, run.strategy_version_id)
-    base = load_prompt_id(prompt_version_of(version))
-    with_prompt = f"{base.text.rstrip()}\n\n{lessons_block([lesson])}\n"
+    base = system_prompt_of(version)
+    with_prompt = lesson_prompt(base, await prompt_lessons(db), lesson)
     try:
         price = await price_for(db, config.analysis_model)
     except ClaudeStepError as exc:
         await db.rollback()
         await _fail(db, eval_run_id, exc.code)
         return "failed"
-    matches = await _matches_by_ids(db, [int(value) for value in metrics.get("match_ids") or []])
-    events = await smoke_eval.prepare_events(db, matches)
+    match_ids = [int(value) for value in metrics.get("match_ids") or []]
+    eval_set = (
+        await db.get(EvalSet, int(metrics["eval_set_id"])) if metrics.get("eval_set_id") else None
+    )
+    if eval_set is not None:
+        order = {match_id: index for index, match_id in enumerate(match_ids)}
+        items = sorted(
+            await db.scalars(
+                select(EvalSetItem).where(
+                    EvalSetItem.eval_set_id == eval_set.id, EvalSetItem.match_id.in_(match_ids)
+                )
+            ),
+            key=lambda item: order.get(item.match_id, 0),
+        )
+        events = await eval_sets.prepare_events(db, eval_set, items)
+    else:
+        matches = await _matches_by_ids(db, match_ids)
+        events = await smoke_eval.prepare_events(db, matches)
     found = await baselines(
         db, [event.match_id for event in events], prompt_version=base.version_id, config=config
     )
@@ -612,11 +612,11 @@ async def _prepare_and_submit(
         worst += worst_per_request(
             price,
             config,
-            estimate_tokens(with_prompt, event.dossier_text, smoke_eval.request_text(event)),
+            estimate_tokens(with_prompt.text, event.dossier_text, smoke_eval.request_text(event)),
         )
         if reuse is None:
             requests.append(
-                quick_request(custom_id(run.id, event.match_id, WITHOUT), event, base.text, config)
+                quick_request(custom_id(run.id, event.match_id, WITHOUT), event, base, config)
             )
             worst += worst_per_request(
                 price,
@@ -646,7 +646,7 @@ async def _prepare_and_submit(
         kind="eval",
         model=config.analysis_model,
         effort=config.analysis_effort,
-        prompt_version=lesson_prompt_version(base.version_id, lesson),
+        prompt_version=with_prompt.version_id,
         schema_version=ASSESSMENT_SCHEMA_VERSION,
         eval_run_id=run.id,
     )

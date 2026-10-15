@@ -20,7 +20,12 @@ from app.main import create_app
 from tests.helpers_admin import error_code
 from tests.support import ClientFactory
 from tests.test_admin_permissions import ADMIN_ROUTES
-from tests.test_foreign_objects import FOREIGN_CASES, LESSON_ROUTES, SHARED_ROUTES
+from tests.test_foreign_objects import (
+    FOREIGN_CASES,
+    LESSON_ROUTES,
+    SHARED_ROUTES,
+    STRATEGY_ROUTES,
+)
 
 _APP = create_app()
 
@@ -80,7 +85,7 @@ def test_every_id_route_has_foreign_check() -> None:
         for method, path in APP_ROUTES
         if "{" in path and not path.startswith("/api/admin")
     }
-    assert with_id == set(FOREIGN_CASES) | SHARED_ROUTES | LESSON_ROUTES
+    assert with_id == set(FOREIGN_CASES) | SHARED_ROUTES | LESSON_ROUTES | STRATEGY_ROUTES
 
 
 def test_every_admin_route_has_permission_check() -> None:

@@ -52,7 +52,7 @@ from app.agent.client import client_for
 from app.agent.config import AgentConfig, load_agent_config
 from app.agent.errors import ClaudeStepError
 from app.agent.news import NewsOutcome, NewsTarget, fetch_news
-from app.agent.prompts import Prompt, load_prompt_id
+from app.agent.prompts import SystemPrompt
 from app.agent.runs import price_for, record_run
 from app.agent.schemas import ASSESSMENT_SCHEMA_VERSION
 from app.core.errors import AppError
@@ -68,6 +68,7 @@ from app.db.models import (
     PlayerNews,
     StrategyVersion,
 )
+from app.ml import model_versions
 from app.ml.sets import Probs3
 from app.ml.strategy import (
     StrategyParams,
@@ -90,7 +91,7 @@ from app.services.claude_key import key_for_run
 from app.services.dossier import archive_tournament, build_dossier, canonical_json
 from app.services.progress import publish
 from app.services.sessions import utcnow
-from app.services.strategy_versions import params_of, prompt_version_of
+from app.services.strategy_versions import params_of, resolve_prompt
 
 log = structlog.get_logger(__name__)
 
@@ -424,7 +425,7 @@ class _Runner:
         self.confirmed = Confirmed(events=[], bank=None, bookmaker=None)
         self.config = AgentConfig()
         self.params = StrategyParams()
-        self.prompt: Prompt | None = None
+        self.prompt: SystemPrompt | None = None
         self.strategy_version_id: int | None = None
         self.started: dict[int, float] = {}
 
@@ -590,7 +591,7 @@ class _Runner:
             )
             self.strategy_version_id = analysis.strategy_version_id
             self.params = params_of(version)
-            self.prompt = load_prompt_id(analysis.prompt_version or prompt_version_of(version))
+            self.prompt = await resolve_prompt(db, analysis.prompt_version)
             self.confirmed = Confirmed.from_json(analysis.confirmed)
             self.events = self.confirmed.events
             self.checkpoint = {
@@ -1084,6 +1085,21 @@ class _Runner:
         await self.check_active()
         await self.set_step(index, "running")
         data_to: str | None = None
+        # Базовая модель — один снимок на анализ (m1 волны 3): перекалибровка посреди
+        # анализа не меняет p_base остальных матчей, а прогнозы помечаются той версией,
+        # что дала p_base. Анализ продолжается после сбоя — та же версия, что у готовых досье
+        pinned = next(
+            (
+                str(features["ml_model_id"])
+                for event in self.events
+                if isinstance(
+                    features := self.entry(cast(int, event.match_id)).get("features"), dict
+                )
+                and features.get("ml_model_id")
+            ),
+            None,
+        )
+        model: model_versions.ModelSnapshot | None = None
         for event in self.events:
             assert event.match_id is not None
             entry = self.entry(event.match_id)
@@ -1093,8 +1109,15 @@ class _Runner:
                 match = await db.get(Match, event.match_id)
                 if match is None:
                     raise AppError(409, "analysis.match_missing", position=event.position)
+                if model is None:
+                    model = await model_versions.snapshot(db, pinned)
                 result = await build_dossier(
-                    db, match, as_of=utcnow(), best_of=event.best_of, surface=event.surface
+                    db,
+                    match,
+                    as_of=utcnow(),
+                    best_of=event.best_of,
+                    surface=event.surface,
+                    model=model,
                 )
                 await db.commit()
             entry["dossier_id"] = result.dossier_id

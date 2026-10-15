@@ -13,6 +13,7 @@ from app.api.routes import (
     admin,
     admin_ai,
     admin_data,
+    admin_learning,
     admin_messages,
     admin_settings,
     ai,
@@ -24,6 +25,7 @@ from app.api.routes import (
     bookmakers,
     dashboard,
     health,
+    learning,
     lessons,
     me,
     players,
@@ -48,6 +50,7 @@ api_router.include_router(admin_ai.router)
 api_router.include_router(admin_settings.router)
 api_router.include_router(admin_messages.router)
 api_router.include_router(admin_data.router)
+api_router.include_router(admin_learning.router)
 api_router.include_router(analyses.router)
 api_router.include_router(bets.router)
 api_router.include_router(bank.router)
@@ -56,3 +59,4 @@ api_router.include_router(dashboard.router)
 api_router.include_router(players.router)
 api_router.include_router(strategy.router)
 api_router.include_router(lessons.router)
+api_router.include_router(learning.router)

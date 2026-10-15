@@ -209,7 +209,9 @@ async def test_real_bias_lesson_is_ready_then_retired(
     assert lesson.effect is not None and lesson.effect < -0.05
     assert lesson.effect_ci is not None and lesson.effect_ci[1] < 0
     assert lesson.effect_shrunk is not None and lesson.effect < lesson.effect_shrunk < 0
-    n = lesson.metrics["history"]["n_history"] + 5
+    # n усадки — только случаи истории архива (свои в формулу не входят)
+    n = lesson.metrics["history"]["n_history"]
+    assert lesson.metrics["history"]["n_shrink"] == n
     assert lesson.effect_shrunk == pytest.approx(lesson.effect * n / (n + 200))
     assert lesson.holdout_effect is not None and lesson.holdout_effect > 0
     assert lesson.metrics["history"]["gain"]["low"] > 0
@@ -371,7 +373,9 @@ async def test_propose_lesson(
     assert data["origin"] == "manual" and data["kind"] == "numeric"
     assert data["text"] == "На грунте аутсайдер берет сет чаще, чем дает модель"
     # Свои случаи считаются сразу (фора +1.5 у ноги на П1/П2 не считается)
-    assert data["n_cases"] == 0 and data["need_cases"] == 20
+    # Общее число случаев участнику — только с 5 (меньше — «меньше 5»), свои — отдельно
+    assert data["n_cases"] is None and data["n_cases_few"] is True
+    assert data["own_cases"] == 0 and data["need_cases"] == 20
     lesson = await db.get_one(Lesson, data["id"])
     assert lesson.created_by == first.id and lesson.user_id is None
     duplicate = await admin.client.post("/api/lessons", json=body)
@@ -496,8 +500,13 @@ async def test_quick_check_enable_disable(
     [batch] = [b for b in fake.batches.values() if b["requests"][0]["custom_id"].startswith("qc")]
     first = batch["requests"][0]["params"]
     assert first["max_tokens"] == 8000 and first["model"] == "claude-opus-5-5"
-    system = first["system"][0]["text"]
-    assert "Уроки из разборов" in system and "- L-001: Проверяемое правило урока" in system
+    # Блок уроков — отдельный блок system со своей точкой кэша (волна 3)
+    base_block, lessons_block = first["system"]
+    assert "Уроки из разборов" not in base_block["text"]
+    assert lessons_block["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    system = lessons_block["text"]
+    assert "Уроки из разборов" in system and "- L-001: round ∈ SF, F; role = favorite;" in system
+    assert "Проверяемое правило урока" not in system
     assert "−4,2 п.п." in system
     assert all(request["custom_id"].endswith("-l") for request in batch["requests"])
     # Резерв худшего случая — в бюджете проверок
@@ -513,7 +522,10 @@ async def test_quick_check_enable_disable(
     assert result["diff"]["value"] == pytest.approx(0.0)
     runs = list(await db.scalars(select(AgentRun).where(AgentRun.eval_run_id == run_id)))
     assert len(runs) == 40 and all(r.kind == "eval" and r.batch for r in runs)
-    assert all(r.prompt_version == "analysis.v1+lessons_block.v1:L-001" for r in runs)
+    with_lesson = {r.prompt_version for r in runs}
+    assert len(with_lesson) == 1
+    [prompt_id] = with_lesson
+    assert prompt_id is not None and prompt_id.startswith("analysis.v1+lessons_block.v2:")
     await db.refresh(lesson)
     quick = lesson.metrics["quick"]
     assert quick["status"] == "done" and quick["passed"] is True

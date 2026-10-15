@@ -22,8 +22,9 @@ Batch дешевле вдвое на все токены (и кэш), поиск
 reap_pending его не найдет или не убедится, что его нет.
 
 Здесь две части. Вызовы API: create_batch, retrieve (404 — BatchLost, а не «ключ
-отозван»), wait_batch, iter_results (каждый результат — BatchItem: успех с ответом, ошибка
-по result.error.error.type, истекший или отмененный), record_item — строка agent_runs
+отозван»), cancel_batch (отмена: не начатые запросы — canceled), wait_batch,
+iter_results (каждый результат — BatchItem: успех с ответом, ошибка по
+result.error.error.type, истекший или отмененный), record_item — строка agent_runs
 (batch = true, request_id «<batch_id>/<custom_id>», цена со скидкой Batch). Строки
 batch_jobs: open_job (pending, до отправки — резерв виден другим), send_job, collect_job
 (под FOR UPDATE: повторный или одновременный сбор не пишет agent_runs второй раз).
@@ -177,6 +178,17 @@ async def retrieve(client: anthropic.AsyncAnthropic, batch_id: str) -> MessageBa
     with claude_errors():
         try:
             return await client.messages.batches.retrieve(batch_id)
+        except anthropic.NotFoundError:
+            raise BatchLost(BATCH_NOT_FOUND) from None
+
+
+async def cancel_batch(client: anthropic.AsyncAnthropic, batch_id: str) -> MessageBatch:
+    """Отмена пакета у Anthropic: запросы, которые еще не начаты, получают canceled (за них
+    не платим), начатые доделываются и оплачиваются; результаты собираются как обычно.
+    404 — BatchLost."""
+    with claude_errors():
+        try:
+            return await client.messages.batches.cancel(batch_id)
         except anthropic.NotFoundError:
             raise BatchLost(BATCH_NOT_FOUND) from None
 

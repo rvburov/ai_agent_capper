@@ -60,16 +60,16 @@ from app.agent.schemas import ASSESSMENT_SCHEMA_VERSION, MatchAssessmentOut, ass
 from app.db.models import (
     EvalRun,
     Match,
-    MlModel,
     ModelPrice,
     Player,
     Prediction,
     StrategyVersion,
     Tournament,
 )
+from app.ml import model_versions
 from app.ml.backtest import side_flip
-from app.ml.elo import MODEL_ID
 from app.ml.metrics import Estimate, bootstrap_diff_ci, log_losses
+from app.ml.model_versions import active_model_id
 from app.ml.sets import MARKETS, PROBS3_FIELDS, Probs3
 from app.ml.strategy import apply_claude
 from app.services.check_runs import ABANDONED, LOST, SUBMITTED
@@ -210,9 +210,16 @@ class SmokeEvent:
         }
 
 
-async def prepare_events(db: AsyncSession, matches: Sequence[SmokeMatch]) -> list[SmokeEvent]:
-    """Досье каждого матча на день матча, без новостей, со сторонами по side_flip.
-    commit — за вызывающим."""
+async def prepare_events(
+    db: AsyncSession,
+    matches: Sequence[SmokeMatch],
+    *,
+    model: model_versions.ModelSnapshot | None = None,
+) -> list[SmokeEvent]:
+    """Досье каждого матча на день матча, без новостей, со сторонами по side_flip; model —
+    снимок базовой модели (у набора — закрепленный при заморозке), нет — один снимок
+    активной версии на все события. commit — за вызывающим."""
+    model = model or await model_versions.snapshot(db)
     ids = {pid for item in matches for pid in (item.match.player1_id, item.match.player2_id)}
     names = dict((await db.execute(select(Player.id, Player.name).where(Player.id.in_(ids)))).all())
     events: list[SmokeEvent] = []
@@ -231,6 +238,7 @@ async def prepare_events(db: AsyncSession, matches: Sequence[SmokeMatch]) -> lis
             surface=item.surface,
             with_news=False,
             swap=flip,
+            model=model,
         )
         events.append(
             SmokeEvent(
@@ -625,7 +633,9 @@ def _predictions(
                     features=event.get("features") or {},
                     feature_set=FEATURE_SET,
                     strategy_version_id=run.strategy_version_id,
-                    ml_model_id=ml_model,
+                    # Версия модели, что дала p_base досье (закрепленная за набором), иначе
+                    # активная на момент сбора
+                    ml_model_id=(event.get("features") or {}).get("ml_model_id") or ml_model,
                     llm_model=model,
                     effort=run.metrics.get("effort"),
                     prompt_version=run.metrics.get("prompt_version"),
@@ -692,7 +702,7 @@ async def collect(
     events = {str(event["custom_id"]): dict(event) for event in metrics.get("events") or []}
     version = await db.get(StrategyVersion, run.strategy_version_id)
     highlight = params_of(version).claude_highlight
-    ml_model: str | None = await db.scalar(select(MlModel.id).where(MlModel.id == MODEL_ID))
+    ml_model = await active_model_id(db)
     # Модель из настроек на момент отправки (как в учете вызовов анализа): по ней ищется цена
     model = str(metrics.get("model") or "")
     meta = batches.RunMeta(

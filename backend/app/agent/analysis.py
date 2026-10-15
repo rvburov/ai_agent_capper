@@ -1,7 +1,8 @@
 """Шаг анализа: Opus оценивает один матч по досье (три числа, факторы, флаги, пояснение).
 
 Один вызов на матч: system — общий промпт со сжатой стратегией (точка кэша в конце,
-одна на все матчи и всех участников), сообщение — досье матча и дата. Поток обязателен
+одна на все матчи и всех участников) и блок уроков версии инструкций (своя точка кэша,
+этап 5), сообщение — досье матча и дата. Поток обязателен
 (max_tokens больше 21 333), effort задается явно, инструментов и поиска нет. Ответ —
 structured outputs, затем проверка кодом (check_assessment). Нашлись ошибки — тот же
 разговор продолжается сообщением со списком ошибок (ответ ассистента возвращается как
@@ -26,7 +27,14 @@ from anthropic.types import Message, MessageParam
 from app.agent.calls import CallSpec, StepHooks, assistant_turn, call, estimate_tokens, stream
 from app.agent.config import AgentConfig
 from app.agent.errors import ClaudeStepError, parse_output
-from app.agent.prompts import ANALYSIS_REQUEST, ANALYSIS_RETRY, Prompt, load_prompt
+from app.agent.prompts import (
+    ANALYSIS_REQUEST,
+    ANALYSIS_RETRY,
+    Prompt,
+    SystemPrompt,
+    load_prompt,
+    system_blocks,
+)
 from app.agent.runs import Usage
 from app.agent.schemas import (
     ASSESSMENT_SCHEMA_VERSION,
@@ -120,7 +128,7 @@ def _reader(*, p_base: Probs3, refs: Collection[str], highlight: float) -> _Read
 async def assess_match(
     client: anthropic.AsyncAnthropic,
     *,
-    prompt: Prompt,
+    prompt: Prompt | SystemPrompt,
     dossier_text: str,
     today: date,
     p_base: Probs3,
@@ -132,9 +140,8 @@ async def assess_match(
     """Оценка одного матча по досье. Сбой — ClaudeStepError (учет каждого вызова
     записан)."""
     request = load_prompt(*ANALYSIS_REQUEST).format(today=today.isoformat())
-    system: list[Any] = [
-        {"type": "text", "text": prompt.text, "cache_control": {"type": "ephemeral"}}
-    ]
+    # Промпт версии и блок уроков — отдельными точками кэша (этап 5, волна 3)
+    system: list[Any] = system_blocks(prompt)
     output_config: Any = {
         "effort": config.analysis_effort,
         "format": {"type": "json_schema", "schema": assessment_schema()},

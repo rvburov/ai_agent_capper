@@ -373,6 +373,8 @@ class FakeClaude:
     # Пакеты Message Batches: id → запросы, сколько опросов еще «в работе», результаты
     batches: dict[str, dict[str, Any]] = field(default_factory=dict)
     batch_polls: int = 0
+    # Пакеты, которые отменили (POST …/cancel)
+    canceled: list[str] = field(default_factory=list)
     # Гипотеза разбора проигравшей стороны (None — без гипотезы)
     postmortem_hypothesis: dict[str, Any] | None = field(
         default_factory=lambda: dict(DEFAULT_HYPOTHESIS)
@@ -777,6 +779,25 @@ class FakeClaude:
                 batch["results"] = [self._batch_result(item, key) for item in batch["requests"]]
         return 200, self._batch_view(batch_id, origin), "json"
 
+    def _batch_cancel(self, batch_id: str, origin: str) -> tuple[int, Any, str]:
+        """POST /v1/messages/batches/{id}/cancel: еще не готовые запросы — canceled (за них
+        не платят), готовый пакет не меняется."""
+        batch = self.batches.get(batch_id)
+        if batch is None:
+            return (
+                404,
+                {"type": "error", "error": {"type": "not_found_error", "message": "batch"}},
+                "json",
+            )
+        with self.lock:
+            self.canceled.append(batch_id)
+            if batch["results"] is None:
+                batch["results"] = [
+                    {"custom_id": item.get("custom_id", ""), "result": {"type": "canceled"}}
+                    for item in batch["requests"]
+                ]
+        return 200, self._batch_view(batch_id, origin), "json"
+
     def _batch_lines(self, batch_id: str) -> tuple[int, Any, str]:
         batch = self.batches.get(batch_id)
         if batch is None or batch["results"] is None or batch.get("expired"):
@@ -829,6 +850,8 @@ class FakeClaude:
                 return self._batch_get(parts[0], key, origin)
             if method == "GET" and len(parts) == 2 and parts[1] == "results":
                 return self._batch_lines(parts[0])
+            if method == "POST" and len(parts) == 2 and parts[1] == "cancel":
+                return self._batch_cancel(parts[0], origin)
         if method == "GET" and path.rstrip("/") == "/v1/models":
             return (
                 200,
@@ -921,6 +944,7 @@ async def _reset(request: Request) -> Response:
         STATE.keys.clear()
         STATE.cached.clear()
         STATE.batches.clear()
+        STATE.canceled.clear()
     return JSONResponse({"ok": True})
 
 
@@ -936,6 +960,7 @@ app = Starlette(
         Route("/v1/messages/batches", _endpoint("POST"), methods=["POST"]),
         Route("/v1/messages/batches/{batch}", _endpoint("GET"), methods=["GET"]),
         Route("/v1/messages/batches/{batch}/results", _endpoint("GET"), methods=["GET"]),
+        Route("/v1/messages/batches/{batch}/cancel", _endpoint("POST"), methods=["POST"]),
         Route("/_fake/fail", _set_fail, methods=["POST"]),
         Route("/_fake/reset", _reset, methods=["POST"]),
         Route("/_fake/calls", _calls, methods=["GET"]),

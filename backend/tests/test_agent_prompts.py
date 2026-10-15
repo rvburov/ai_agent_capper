@@ -16,6 +16,7 @@ from app.agent.prompts import (
     ANALYSIS_REQUEST,
     ANALYSIS_RETRY,
     LESSON_LINE,
+    LESSON_LINE_TEXT,
     LESSON_SHIFT,
     LESSONS_BLOCK,
     NEWS_PROMPT,
@@ -40,8 +41,10 @@ PUBLISHED = {
     "analysis_request.v1": "aea6172f99724b88238e87b82074382b2cf65cbbb5d829d29a647c9109a82621",
     "analysis_retry.v1": "8504ae95151ae604a206e2b765cfcbf2ee968b6df795f4c8ab01b3290e6eee9c",
     "lesson_line.v1": "e2731e441533367e46f5240c5fba040978a53585008f2cf96569b356d5ed14ce",
+    "lesson_line.v2": "4a3e712791a6d03eb1677d2e70b923611d42423e8e929a582400fb448a0ba5e6",
     "lesson_shift.v1": "51397f058c92e91f6c0833d775a4c45ac3b78549cc5ac28a2398a1295b2a5811",
     "lessons_block.v1": "ed8d75ae5ac8d547a1fcab7d4496b4fb72e2de7e822872b4d36c6df34ec7d66b",
+    "lessons_block.v2": "a42f9c38ef0a24c55d782d825aaa87c264287399c4ea2fd8fe306d2d4aab2f03",
     "news.v1": "2993309576d631053ddce2a95cda6e162923f268ad1eb97177e8238a03268915",
     "news.v2": "0d7766c72ee82a1c2fa71e396ffcf005c5fb3c23b36a5077da847a426eb10b21",
     "news_request.v1": "c086524b071306191ca0e7503e6ce73553169d7d82b6b8fcba9469a71e9e97af",
@@ -107,7 +110,11 @@ def test_templates_take_their_fields() -> None:
     assert "2026-10-11" in load_prompt(*POSTMORTEM_REQUEST).format(today="2026-10-11")
     block = load_prompt(*LESSONS_BLOCK).format(lessons="- L-001: x")
     assert block.rstrip().endswith("- L-001: x")
-    assert load_prompt(*LESSON_LINE).format(code="L-001", text="x").strip() == "- L-001: x"
+    line = load_prompt(*LESSON_LINE).format(
+        code="L-001", condition="role = favorite", direction="lower"
+    )
+    assert line.strip() == "- L-001: role = favorite; направление lower."
+    assert load_prompt(*LESSON_LINE_TEXT).format(code="L-001", text="x").strip() == "- L-001: x"
     assert "+1,5" in load_prompt(*LESSON_SHIFT).format(shift="+1,5")
 
 

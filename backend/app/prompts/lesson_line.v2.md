@@ -1,0 +1,1 @@
+- {code}: {condition}; направление {direction}.

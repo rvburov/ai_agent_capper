@@ -23,6 +23,7 @@ from app.schemas.analytics import (
     ThresholdsOut,
 )
 from app.schemas.bets import BankOut, BetItemOut, BetSource, BetStatus, Period, PlayerRefOut
+from app.schemas.learning import LearningOut
 
 # Приветствие по времени суток в поясе участника: 5–12 утро, 12–17 день, 17–23 вечер
 Greeting = Literal["morning", "day", "evening", "night"]
@@ -162,7 +163,9 @@ class DashboardOut(DashboardCoreOut):
     """Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,
     пик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,
     до OPEN_LIMIT; всего — open_count на open_stake), из них awaiting_count ждут результата
-    (все матчи прошли, этап 5); admin — только у администратора."""
+    (все матчи прошли, этап 5); admin — только у администратора. learning — «Модель
+    учится» и строки «Требует внимания» об обучении (кандидат ждет решения, урок готов к
+    проверке — learning.versions.candidate, learning.lessons.ready_codes; этап 5, волна 3)."""
 
     currency: str
     tz: str
@@ -176,3 +179,4 @@ class DashboardOut(DashboardCoreOut):
     awaiting_count: int
     my_matches: list[MyMatchOut]
     admin: AdminAttentionOut | None
+    learning: LearningOut

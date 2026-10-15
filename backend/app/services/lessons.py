@@ -5,10 +5,10 @@
 lesson_min_cases_process) числовой урок проверяется на архиве кодом
 (app/services/lesson_check.py) и становится ready (ждет решения) или rejected; процессный
 вероятность не меняет — сразу ready. В анализ урок включает только администратор, после
-быстрой проверки (app/services/lesson_quick.py) и не больше lessons_max_active; включение
-меняет только статус (блок уроков в system собирает волна 3). Раз в месяц действующие и
-готовые уроки перепроверяются на новых матчах: не держится — retired (из анализа) или
-rejected.
+быстрой проверки (app/services/lesson_quick.py) и не больше lessons_max_active; включение,
+выключение и списание урока создают новую активную версию общей линии инструкций с блоком
+уроков в system (app/services/strategy_versions.py). Раз в месяц действующие и готовые
+уроки перепроверяются на новых матчах: не держится — retired (из анализа) или rejected.
 
 Т21, Р14: основание урока — прогнозы и матчи (общие); ставки-источники хранятся, но каждый
 видит только свои. Администратору приходят уведомления о готовых уроках, участник —
@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.config import AgentConfig, load_agent_config
 from app.core.errors import AppError
 from app.core.formatting import format_int
+from app.core.i18n import t
 from app.db.models import Bet, BetLeg, EvalRun, Lesson, LessonWatch, User
 from app.ml.lesson_scope import (
     DIRECTIONS,
@@ -50,7 +51,7 @@ from app.schemas.lessons import (
     LessonStatus,
     ScopeIO,
 )
-from app.services import lesson_check
+from app.services import lesson_check, strategy_versions
 from app.services.audit import write_audit
 from app.services.check_runs import PENDING_RESERVE
 from app.services.notifications import notify
@@ -63,6 +64,8 @@ CODE_LOCK = 0x6C6573736F6E0001
 CODE_PREFIX = "L-"
 # Ручных уроков от участника в сутки (администратор — без предела)
 MEMBER_PROPOSALS_PER_DAY = 5
+# Общее число случаев урока участнику — только с этого числа (иначе «меньше 5»)
+PUBLIC_CASES_MIN = 5
 # Куда ведут уведомления об уроках
 LEARNING_LINK = "/learning"
 # Порядок статусов в списке, как на экране «Уроки»
@@ -314,7 +317,7 @@ async def check_one(
     scope = stored_scope(lesson)
     assert scope is not None
     check = await lesson_check.check_history(
-        db, scope, today=now.date(), n_own=lesson.n_cases, shrink_k=config.lesson_shrink_k
+        db, scope, today=now.date(), shrink_k=config.lesson_shrink_k
     )
     apply_history(lesson, check, now)
     if check.status == "insufficient":
@@ -369,24 +372,36 @@ async def recheck_lessons(db: AsyncSession, *, now: datetime | None = None) -> d
     )
     counts = {"checked": 0, "kept": 0, "retired": 0, "rejected": 0}
     for lesson_id in ids:
+        # Порядок блокировок — как у решений администратора: общая линия, затем урок
+        await strategy_versions.lock_shared(db)
+        await strategy_versions.ensure_shared_active(db)
         lesson = await db.get(Lesson, lesson_id, with_for_update=True, populate_existing=True)
         scope = stored_scope(lesson) if lesson is not None else None
         if lesson is None or scope is None:
             continue
         await refresh_cases(db, lesson)
         check = await lesson_check.check_history(
-            db, scope, today=moment.date(), n_own=lesson.n_cases, shrink_k=config.lesson_shrink_k
+            db, scope, today=moment.date(), shrink_k=config.lesson_shrink_k
         )
         apply_history(lesson, check, moment)
         lesson.rechecked_at = moment
         counts["checked"] += 1
         if check.status == "rejected":
             if lesson.status == "confirmed":
+                was_on = lesson.in_prompt
                 lesson.status = "retired"
                 lesson.in_prompt = False
                 lesson.retired_at = moment
                 counts["retired"] += 1
                 await notify_status(db, lesson, "lesson_retired")
+                if was_on:
+                    # Списанный урок уходит из инструкций новой версией общей линии
+                    await db.flush()
+                    await strategy_versions.sync_lessons(
+                        db,
+                        actor_id=None,
+                        change=t("learning.changes.lesson_retired", code=lesson.code),
+                    )
             else:
                 lesson.status = "rejected"
                 counts["rejected"] += 1
@@ -433,9 +448,17 @@ def quick_passed(lesson: Lesson) -> bool:
 
 async def enable(db: AsyncSession, admin: User, lesson_id: int, *, ip: str | None) -> Lesson:
     """«Использовать в анализе» (В4): урок ready или confirmed, быстрая проверка пройдена,
-    в анализе меньше lessons_max_active. Меняет только статус (блок уроков в system —
-    волна 3). Журнал lesson_on. commit."""
+    в анализе меньше lessons_max_active. Решение администратора после быстрой проверки:
+    новая версия общей линии инструкций с этим уроком в блоке уроков system становится
+    активной (strategy_versions.sync_lessons; прежняя — в архиве, откат в один клик).
+    Журнал lesson_on. commit."""
     config = await load_agent_config(db)
+    # Порядок блокировок: общая линия инструкций, затем урок (как перепроверка и
+    # включение версии): включения уроков идут по одному, предел не превысить
+    await strategy_versions.lock_shared(db)
+    # Активная версия линии — до изменения урока: иначе первая версия (v3) создалась бы
+    # уже с ним, и новой версии «+ урок» не было бы
+    await strategy_versions.ensure_shared_active(db)
     lesson = await shared_lesson(db, lesson_id, lock=True)
     if lesson.in_prompt:
         await db.commit()
@@ -446,17 +469,30 @@ async def enable(db: AsyncSession, admin: User, lesson_id: int, *, ip: str | Non
         raise AppError(409, "lesson.quick_check_needed")
     active = await active_count(db)
     if active >= config.lessons_max_active:
-        raise AppError(409, "lesson.max_active", max=config.lessons_max_active)
+        raise AppError(
+            409,
+            "lesson.max_active",
+            max=config.lessons_max_active,
+            count=config.lessons_max_active,
+        )
     moment = utcnow()
     lesson.status = "confirmed"
     lesson.in_prompt = True
     lesson.decided_by = admin.id
     lesson.decided_at = moment
+    await db.flush()
+    version = await strategy_versions.sync_lessons(
+        db, actor_id=admin.id, change=t("learning.changes.lesson_on", code=lesson.code)
+    )
     await write_audit(
         db,
         action="lesson_on",
         actor_id=admin.id,
-        details={"code": lesson.code, "active": active + 1},
+        details={
+            "code": lesson.code,
+            "active": active + 1,
+            "version": version.code if version is not None else None,
+        },
         ip=ip,
     )
     await db.commit()
@@ -464,8 +500,11 @@ async def enable(db: AsyncSession, admin: User, lesson_id: int, *, ip: str | Non
 
 
 async def disable(db: AsyncSession, admin: User, lesson_id: int, *, ip: str | None) -> Lesson:
-    """Выключить урок из анализа: статус остается confirmed, включить снова — после новой
-    быстрой проверки. Журнал lesson_off. commit."""
+    """Выключить урок из анализа: статус остается confirmed, новая версия общей линии без
+    него становится активной; включить снова — после новой быстрой проверки. Журнал
+    lesson_off. commit."""
+    await strategy_versions.lock_shared(db)
+    await strategy_versions.ensure_shared_active(db)
     lesson = await shared_lesson(db, lesson_id, lock=True)
     if not lesson.in_prompt:
         await db.commit()
@@ -477,8 +516,19 @@ async def disable(db: AsyncSession, admin: User, lesson_id: int, *, ip: str | No
     if quick:
         # Включить снова — только после новой быстрой проверки (макет: «с быстрой проверкой»)
         lesson.metrics = {**(lesson.metrics or {}), "quick": {**quick, "passed": False}}
+    await db.flush()
+    version = await strategy_versions.sync_lessons(
+        db, actor_id=admin.id, change=t("learning.changes.lesson_off", code=lesson.code)
+    )
     await write_audit(
-        db, action="lesson_off", actor_id=admin.id, details={"code": lesson.code}, ip=ip
+        db,
+        action="lesson_off",
+        actor_id=admin.id,
+        details={
+            "code": lesson.code,
+            "version": version.code if version is not None else None,
+        },
+        ip=ip,
     )
     await db.commit()
     return lesson
@@ -548,6 +598,8 @@ def history_out(raw: Any) -> LessonHistoryOut | None:
         n_hist=int(raw.get("n_hist") or 0),
         n_history=int(raw.get("n_history") or 0),
         n_holdout=int(raw.get("n_holdout") or 0),
+        # Проверки до №3 (n с учетом своих) не хранили n_shrink: показываем историю
+        n_shrink=int(raw.get("n_shrink") or raw.get("n_history") or 0),
         holdout_since=datetime.fromisoformat(since).date() if isinstance(since, str) else None,
         bias=_estimate(raw.get("bias")),
         shift=raw.get("shift"),
@@ -588,7 +640,10 @@ def lesson_out(
     own_bets: Sequence[int] = (),
     watching: bool = False,
     n_cases: int | None = None,
+    own: int = 0,
 ) -> LessonOut:
+    """Урок для экрана. n_cases — общее число случаев, которое можно показать смотрящему
+    (public_cases; None — меньше PUBLIC_CASES_MIN), own — сколько из них его."""
     metrics = lesson.metrics or {}
     scope = stored_scope(lesson)
     return LessonOut(
@@ -603,7 +658,9 @@ def lesson_out(
         scope_ok=scope is not None,
         in_prompt=lesson.in_prompt,
         created_at=lesson.created_at,
-        n_cases=lesson.n_cases if n_cases is None else n_cases,
+        n_cases=n_cases,
+        n_cases_few=n_cases is None,
+        own_cases=own,
         need_cases=need_cases(lesson, config),
         n_hist=lesson.n_hist,
         effect=lesson.effect,
@@ -630,6 +687,16 @@ async def _own_bets(db: AsyncSession, user: User, lessons: Sequence[Lesson]) -> 
     return set(await db.scalars(select(Bet.id).where(Bet.id.in_(ids), Bet.user_id == user.id)))
 
 
+def public_cases(user: User, lesson: Lesson) -> int | None:
+    """Общее число случаев урока (по ставкам всех участников), которое можно показать:
+    администратору — всегда, участнику — с PUBLIC_CASES_MIN (№3 проверки экранов волны 3):
+    при меньшем числе по нему вычислялась бы чужая ставка (m2 волны 2). None — «меньше
+    PUBLIC_CASES_MIN»."""
+    if user.role == "admin" or lesson.n_cases >= PUBLIC_CASES_MIN:
+        return lesson.n_cases
+    return None
+
+
 async def cases_for_viewer(
     db: AsyncSession, user: User, lessons: Sequence[Lesson]
 ) -> dict[int, int]:
@@ -638,6 +705,14 @@ async def cases_for_viewer(
     по общему числу участник узнал бы, на что ставили другие). → урок → случаев."""
     if user.role == "admin" or not lessons:
         return {lesson.id: lesson.n_cases for lesson in lessons}
+    return await own_cases(db, user, lessons)
+
+
+async def own_cases(db: AsyncSession, user: User, lessons: Sequence[Lesson]) -> dict[int, int]:
+    """Сколько случаев урока — матчи ставок этого человека (у администратора — его
+    собственных). → урок → случаев."""
+    if not lessons:
+        return {}
     legs: dict[int, list[int]] = {}
     for lesson in lessons:
         own = (lesson.metrics or {}).get("own") or {}
@@ -680,14 +755,15 @@ async def lessons_for(
 ) -> list[LessonOut]:
     mine = await _own_bets(db, user, lessons)
     watching = await _watching(db, user, lessons)
-    cases = await cases_for_viewer(db, user, lessons)
+    mine_cases = await own_cases(db, user, lessons)
     return [
         lesson_out(
             lesson,
             config,
             own_bets=sorted(bet_id for bet_id in (lesson.source_bet_ids or []) if bet_id in mine),
             watching=lesson.id in watching,
-            n_cases=cases.get(lesson.id),
+            n_cases=public_cases(user, lesson),
+            own=mine_cases.get(lesson.id, 0),
         )
         for lesson in lessons
     ]

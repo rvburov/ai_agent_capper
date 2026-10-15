@@ -110,8 +110,9 @@ from app.services.sessions import utcnow
 from app.services.strategy_versions import (
     active_version,
     ensure_active,
+    ensure_shared_active,
+    instructions_prompt,
     params_of,
-    prompt_version_of,
 )
 
 log = structlog.get_logger(__name__)
@@ -609,7 +610,7 @@ async def preview(
         db,
         config,
         confirmed,
-        prompt_version=prompt_version_of(version),
+        prompt_version=(await instructions_prompt(db)).version_id,
         now=now,
         analysis_id=analysis.id,
     )
@@ -732,12 +733,11 @@ async def start_run(
         confirmed = Confirmed.from_json(analysis.confirmed)
     else:
         raise AppError(422, "analysis.no_events")
-    version = await active_version(db, user.id)
     estimate = await estimate_run(
         db,
         config,
         confirmed.events,
-        prompt_version=prompt_version_of(version),
+        prompt_version=(await instructions_prompt(db)).version_id,
         now=now,
         done=None if new_events else restart_work(analysis.checkpoint),
         analysis_id=analysis.id,
@@ -782,7 +782,8 @@ async def start_run(
         analysis.checkpoint = checkpoint
     strategy = await ensure_active(db, user.id)
     analysis.strategy_version_id = strategy.id
-    analysis.prompt_version = prompt_version_of(strategy)
+    # Промпт и уроки — из активной версии общей линии инструкций (Р25, Т6)
+    analysis.prompt_version = (await ensure_shared_active(db)).prompt_version
     analysis.status = "queued"
     analysis.attempt += 1
     analysis.error_code = None
@@ -850,12 +851,11 @@ async def restart_state(db: AsyncSession, user: User, analysis: Analysis) -> Res
             reason_params={key: str(value) for key, value in blocked.params.items()},
             retry_at=None,
         )
-    version = await active_version(db, user.id)
     estimate = await estimate_run(
         db,
         config,
         Confirmed.from_json(analysis.confirmed).events,
-        prompt_version=prompt_version_of(version),
+        prompt_version=(await instructions_prompt(db)).version_id,
         now=now,
         done=restart_work(analysis.checkpoint),
         analysis_id=analysis.id,

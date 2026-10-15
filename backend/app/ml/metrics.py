@@ -7,7 +7,8 @@
 Доверительные интервалы — бутстрэп по событиям или ставкам (по умолчанию 10 000
 пересэмплирований, перцентили 2,5 и 97,5) с заданным seed: одинаковые данные дают
 одинаковые интервалы. Разницу двух прогнозов на одних и тех же событиях сравниваем
-парно: пересэмплируются события, а не прогнозы по отдельности.
+парно: пересэмплируются события, а не прогнозы по отдельности. Сравнение версий на
+eval-наборе — блочный бутстрэп по дням (события одного дня коррелированы, Т11).
 
 CLV (насколько кэф ставки лучше закрывающего, решение В1, Р24): на экранах — кэф /
 закрытие − 1 (просто, но чуть завышен: 1/закрытие с маржой больше вероятности рынка); при
@@ -265,6 +266,92 @@ def bootstrap_diff_ci(
     if first.size != second.size:
         raise ValueError(t("ml.metrics.shape", n_p=first.size, n_y=second.size))
     return bootstrap_mean_ci(first - second, n=n, seed=seed, level=level)
+
+
+def _block_index(groups: Sequence[object] | npt.ArrayLike) -> tuple[npt.NDArray[np.int64], int]:
+    """Номер блока (группы) каждого события и число блоков."""
+    keys = np.asarray([str(group) for group in np.asarray(groups, dtype=object).reshape(-1)])
+    _, inverse = np.unique(keys, return_inverse=True)
+    index = inverse.astype(np.int64).reshape(-1)
+    return index, int(index.max()) + 1 if index.size else 0
+
+
+def block_bootstrap_mean_ci(
+    values: npt.ArrayLike,
+    groups: Sequence[object] | npt.ArrayLike,
+    *,
+    n: int = BOOTSTRAP_SAMPLES,
+    seed: int = 0,
+    level: float = CI_LEVEL,
+) -> Estimate:
+    """Среднее значений и интервал блочного бутстрэпа: пересэмплируются блоки (дни)
+    целиком, с возвращением, среднее — по всем событиям выбранных блоков. События одного
+    дня коррелированы (ноги одного экспресса, один турнир): бутстрэп по событиям дал бы
+    обманчиво узкий интервал (TOKEN_ECONOMY.md, 2.4)."""
+    array = _as_values(values)
+    index, blocks = _block_index(groups)
+    if index.size != array.size:
+        raise ValueError(t("ml.metrics.shape", n_p=array.size, n_y=index.size))
+    sums = np.bincount(index, weights=array, minlength=blocks)
+    counts = np.bincount(index, minlength=blocks).astype(np.float64)
+    rng = np.random.default_rng(seed)
+    means = np.empty(n)
+    step = max(1, min(n, _BOOTSTRAP_CHUNK // max(1, blocks)))
+    for start in range(0, n, step):
+        count = min(step, n - start)
+        drawn = rng.integers(0, blocks, size=(count, blocks))
+        means[start : start + count] = sums[drawn].sum(axis=1) / counts[drawn].sum(axis=1)
+    low, high = _percentiles(means, level)
+    return Estimate(value=float(array.mean()), low=low, high=high, n=int(array.size))
+
+
+def block_bootstrap_diff_ci(
+    a: npt.ArrayLike,
+    b: npt.ArrayLike,
+    groups: Sequence[object] | npt.ArrayLike,
+    *,
+    n: int = BOOTSTRAP_SAMPLES,
+    seed: int = 0,
+    level: float = CI_LEVEL,
+) -> Estimate:
+    """Парная разница mean(a − b) на одних событиях, блочный бутстрэп по groups."""
+    first, second = _as_values(a), _as_values(b)
+    if first.size != second.size:
+        raise ValueError(t("ml.metrics.shape", n_p=first.size, n_y=second.size))
+    return block_bootstrap_mean_ci(first - second, groups, n=n, seed=seed, level=level)
+
+
+def block_bootstrap_ece_diff(
+    p_a: npt.ArrayLike,
+    p_b: npt.ArrayLike,
+    y: npt.ArrayLike,
+    groups: Sequence[object] | npt.ArrayLike,
+    *,
+    n: int = 2_000,
+    seed: int = 0,
+    level: float = CI_LEVEL,
+    bin_width: float = BIN_WIDTH,
+) -> Estimate:
+    """Разница ECE(b) − ECE(a) на одних событиях и ее интервал блочного бутстрэпа: точечное
+    сравнение ECE на 200–300 событиях шумит на несколько п.п. (TOKEN_ECONOMY.md, 2.4).
+    ECE пересчитывается на каждой выборке, поэтому пересэмплирований меньше (n = 2000)."""
+    first, outcomes = _pair(p_a, y)
+    second, _ = _pair(p_b, y)
+    index, blocks = _block_index(groups)
+    if index.size != first.size or second.size != first.size:
+        raise ValueError(t("ml.metrics.shape", n_p=first.size, n_y=index.size))
+    members = [np.flatnonzero(index == block) for block in range(blocks)]
+    rng = np.random.default_rng(seed)
+    diffs = np.empty(n)
+    for number in range(n):
+        drawn = rng.integers(0, blocks, size=blocks)
+        rows = np.concatenate([members[block] for block in drawn])
+        diffs[number] = ece(second[rows], outcomes[rows], bin_width=bin_width) - ece(
+            first[rows], outcomes[rows], bin_width=bin_width
+        )
+    low, high = _percentiles(diffs, level)
+    value = ece(second, outcomes, bin_width=bin_width) - ece(first, outcomes, bin_width=bin_width)
+    return Estimate(value=value, low=low, high=high, n=int(first.size))
 
 
 @dataclass(frozen=True)

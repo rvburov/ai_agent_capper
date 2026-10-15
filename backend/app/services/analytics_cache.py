@@ -164,10 +164,9 @@ async def data_version(db: AsyncSession, user: User, *, now: datetime | None = N
                 .join(Bet, Bet.id == BetLeg.bet_id)
                 .where(Bet.user_id == uid)
                 .scalar_subquery(),
-                # Замены прогнозов (supersedes) меняют калибровку; новые анализы — нет
-                select(func.max(Prediction.id))
-                .where(Prediction.user_id == uid, Prediction.supersedes.is_not(None))
-                .scalar_subquery(),
+                # Новые прогнозы и их замены (supersedes) меняют калибровку, в том числе
+                # «Все мои прогнозы» (этап 5, волна 3)
+                select(func.max(Prediction.id)).where(Prediction.user_id == uid).scalar_subquery(),
                 # Загрузка архива меняет турниры и покрытия матчей ног
                 select(func.max(IngestionRun.finished_at)).scalar_subquery(),
                 select(StrategyVersion.id)

@@ -256,11 +256,13 @@ def test_real_bias_is_confirmed_with_shrinkage() -> None:
     """Модель в условии завышает вероятность на 8 п.п.: урок lower подтверждается на истории
     и на отложенной части, поправка — с усадкой к нулю."""
     scope = _scope(FAVORITE)
-    check = evaluate(_cases(3000, -0.08, 1), scope, n_own=20, shrink_k=200)
+    check = evaluate(_cases(3000, -0.08, 1), scope, shrink_k=200)
     assert check.status == "ready" and check.reason is None
     assert check.bias is not None and check.bias.value == pytest.approx(-0.08, abs=0.03)
     assert check.bias.high < 0
-    n = check.n_history + 20
+    # n в усадке — только случаи истории архива (свои в формулу не входят)
+    n = check.n_history
+    assert check.n_shrink == n
     assert check.shift == pytest.approx(check.bias.value * n / (n + 200))
     assert check.shift is not None and abs(check.shift) < abs(check.bias.value)
     assert check.gain is not None and check.gain.low > 0
@@ -269,8 +271,8 @@ def test_real_bias_is_confirmed_with_shrinkage() -> None:
     assert check.log_loss_with is not None and check.log_loss_without is not None
     assert check.log_loss_with < check.log_loss_without
     # Детерминизм: тот же seed — те же числа; другой seed — другой интервал
-    assert evaluate(_cases(3000, -0.08, 1), scope, n_own=20, shrink_k=200) == check
-    other = evaluate(_cases(3000, -0.08, 1), scope, n_own=20, shrink_k=200, seed=7)
+    assert evaluate(_cases(3000, -0.08, 1), scope, shrink_k=200) == check
+    other = evaluate(_cases(3000, -0.08, 1), scope, shrink_k=200, seed=7)
     assert other.bias is not None and other.bias.value == check.bias.value
     assert (other.bias.low, other.bias.high) != (check.bias.low, check.bias.high)
 
@@ -279,12 +281,12 @@ def test_wrong_direction_and_no_effect_are_rejected() -> None:
     scope = _scope(FAVORITE)
     raise_scope = _scope(FAVORITE, direction="raise")
     biased = _cases(3000, -0.08, 1)
-    assert evaluate(biased, raise_scope, n_own=20, shrink_k=200).reason == "direction"
-    flat = evaluate(_cases(3000, 0.0, 2), scope, n_own=20, shrink_k=200)
+    assert evaluate(biased, raise_scope, shrink_k=200).reason == "direction"
+    flat = evaluate(_cases(3000, 0.0, 2), scope, shrink_k=200)
     assert flat.status == "rejected" and flat.reason in ("direction", "no_bias", "no_gain")
-    few = evaluate(_cases(150, -0.08, 3), scope, n_own=20, shrink_k=200)
+    few = evaluate(_cases(150, -0.08, 3), scope, shrink_k=200)
     assert few.status == "insufficient" and few.reason == "few_history"
-    assert evaluate([], scope, n_own=0, shrink_k=200).reason == "no_history"
+    assert evaluate([], scope, shrink_k=200).reason == "no_history"
 
 
 def test_shrink() -> None:

@@ -194,14 +194,18 @@ async def test_member_sees_only_own_cases_and_no_process_lessons(
     made = await prober.client.post(
         "/api/lessons", json={"text": "Зондирующее условие для проверки", "scope": scope}
     )
-    assert made.status_code == 201 and made.json()["n_cases"] == 0
+    # Общее число (1) меньше 5 — участнику не показывается, только свои (№3 проверки
+    # экранов волны 3); администратору — точно
+    assert made.status_code == 201 and made.json()["n_cases"] is None
+    assert made.json()["n_cases_few"] is True and made.json()["own_cases"] == 0
     lesson_id = made.json()["id"]
     seen_admin = (await admin.client.get(f"/api/lessons/{lesson_id}")).json()
     assert seen_admin["n_cases"] == 1
     listed = (await prober.client.get("/api/lessons")).json()
-    assert [item["n_cases"] for item in listed["items"] if item["id"] == lesson_id] == [0]
+    [mine] = [item for item in listed["items"] if item["id"] == lesson_id]
+    assert (mine["n_cases"], mine["own_cases"]) == (None, 0)
     seen_other = (await other.client.get(f"/api/lessons/{lesson_id}")).json()
-    assert seen_other["n_cases"] == 1
+    assert (seen_other["n_cases"], seen_other["own_cases"]) == (None, 1)
 
     process = {
         "text": "Процессный урок от участника: всегда верь фавориту",
