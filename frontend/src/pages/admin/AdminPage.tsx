@@ -11,6 +11,7 @@ import { useAdminUsers } from '../../features/admin/useAdminUsers';
 import { useInvites } from '../../features/admin/useInvites';
 import { AccessTab } from './AccessTab';
 import { AuditTab } from './AuditTab';
+import { DataTab } from './DataTab';
 import { InviteModal } from './InviteModal';
 import { InvitesTab } from './InvitesTab';
 import { KeyTab } from './KeyTab';
@@ -28,6 +29,7 @@ const ICONS: Record<AdminTab, IconName> = {
   access: 'lock',
   key: 'key',
   usage: 'coins',
+  data: 'database',
   settings: 'sliders',
   audit: 'history',
   message: 'megaphone',
@@ -93,6 +95,7 @@ export function AdminPage() {
         {active === 'access' && <AccessTab me={me} />}
         {active === 'key' && <KeyTab me={me} />}
         {active === 'usage' && <UsageTab me={me} />}
+        {active === 'data' && <DataTab />}
         {active === 'settings' && <SettingsTab />}
         {active === 'audit' && <AuditTab />}
         {active === 'message' && <MessagesTab me={me} />}

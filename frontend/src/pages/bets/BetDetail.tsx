@@ -3,31 +3,68 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button, Callout, KeyValue, Modal } from '../../components';
-import { impliedProb, isImported, isLegacy, legProb, legShown, parlayProb } from '../../features/bets/display';
-import type { BetItem } from '../../features/bets/types';
-import { formatDateLong, formatDateTime, formatOdds, formatOddsExact, formatPp, formatProb } from '../../lib/format';
-import {
-  betKind,
-  ClvValue,
-  closingWhoText,
-  legMarket,
-  LegChip,
-  MatchName,
-  money,
-  ResultIcon,
-  Signed,
-  StatusChip,
-  VerdictChip,
-} from './parts';
+import { archiveConflicts, impliedProb, isImported, isLegacy, legProb, legShown, parlayProb, settledBy } from '../../features/bets/display';
+import type { BetItem, BetLeg } from '../../features/bets/types';
+import { formatDate, formatDateLong, formatDateTime, formatOdds, formatOddsExact, formatPp, formatProb } from '../../lib/format';
+import { ClosingCell, OpenStatusChip } from './marks';
+import { betKind, ClvValue, legMarket, LegChip, MatchName, matchText, money, ResultIcon, Signed } from './parts';
+import { ReviewBlock } from './ReviewBlock';
 
-// Детали ставки (detailBlock и detailModal макета): события с исходом, закрытием и CLV, расчет,
-// вердикт по CLV и действия «Внести закрытие» и «Исправить результат».
+// Детали ставки (detailBlock и detailModal макета): события с исходом, закрытием и CLV, расчет
+// (кто и когда рассчитал, расхождение с архивом), разбор ИИ с вердиктом по CLV строкой и
+// действия «Внести закрытие» и «Исправить результат».
 
+/** Кто и когда рассчитал ставку (settledNote макета). */
+export function settledNote(bet: BetItem, t: TFunction): string | null {
+  if (bet.status === 'open') return null;
+  const by = settledBy(bet);
+  if (by === 'auto') {
+    const at = bet.settled_at ? formatDateTime(bet.settled_at, { calendar: false }) : '';
+    return bet.archive_to
+      ? t('bets.settledNote.auto', { at, date: formatDate(bet.archive_to) })
+      : t('bets.settledNote.autoNoDate', { at });
+  }
+  if (by === 'manual') {
+    return bet.settled_at ? t('bets.settledNote.manual', { at: formatDate(bet.settled_at) }) : t('bets.settledNote.manualNoDate');
+  }
+  return isLegacy(bet) ? t('bets.settledNote.legacy') : null;
+}
 
-/** Пояснение к вердикту (reviewNext макета). Вердикт считает сервер, без запроса к ИИ. */
-export function reviewText(bet: BetItem, t: TFunction): string {
-  if (bet.status === 'open') return t('bets.review.open');
-  return t(`bets.review.${bet.verdict ?? 'no_closing'}`);
+function conflictText(leg: BetLeg, t: TFunction): string {
+  const archive = leg.archive_result ?? 'void';
+  const values = {
+    match: matchText(leg),
+    market: legMarket(leg),
+    archive: t(`bets.conflict.archive.${archive}`),
+    yours: leg.result ? t(`bets.conflict.yours.${leg.result}`) : t('bets.conflict.yours.none'),
+    score: leg.archive_score ?? '',
+  };
+  return leg.archive_score ? t('bets.conflict.text', values) : t('bets.conflict.textNoScore', values);
+}
+
+/** Архив показывает другое (Т3): по ноге архив разошелся с расчетом; банк не меняли. */
+function ConflictNotes({ bet, onCorrect }: { bet: BetItem; onCorrect: (bet: BetItem) => void }) {
+  const { t } = useTranslation();
+  const legs = archiveConflicts(bet);
+  if (!legs.length) return null;
+  return (
+    <Callout kind="warn" icon="alert" className="bets-conflict">
+      <div className="stack bets-conflict-in">
+        {legs.map((leg) => (
+          <span key={leg.id}>
+            <b>{t('bets.conflict.title')}</b> {conflictText(leg, t)}
+          </span>
+        ))}
+        {!isImported(bet) && (
+          <div className="row">
+            <Button size="sm" icon="edit" onClick={() => onCorrect(bet)}>
+              {t('bets.actions.correct')}
+            </Button>
+          </div>
+        )}
+      </div>
+    </Callout>
+  );
 }
 
 /** Есть событие без закрывающего кэфа (кроме возвратов): кнопка «Внести закрытие». */
@@ -101,22 +138,16 @@ function LegsTable({ bet }: { bet: BetItem }) {
                 </td>
                 <td className="c">
                   <span className="mono">{leg.score ?? '—'}</span>
+                  {leg.archive_result !== null && bet.status !== 'open' && (
+                    <div className="xsmall bets-archive-mark" title={t('bets.conflict.markTitle')}>
+                      {leg.archive_score ? t('bets.conflict.mark', { score: leg.archive_score }) : t('bets.conflict.markNoScore')}
+                    </div>
+                  )}
                 </td>
                 <td className="r">
                   <span className="odds">{formatOdds(leg.odds_taken)}</span>
                 </td>
-                <td className="r">
-                  {leg.closing ? (
-                    <>
-                      <span className="odds">{formatOdds(leg.closing.odds)}</span>
-                      <div className="xsmall muted bets-nw">{closingWhoText(leg.closing, bet.bookmaker, t)}</div>
-                    </>
-                  ) : legacy ? (
-                    <ClvValue value={null} legacy />
-                  ) : (
-                    <span className="odds">—</span>
-                  )}
-                </td>
+                <td className="r">{legacy && !leg.closing ? <ClvValue value={null} legacy /> : <ClosingCell bet={bet} leg={leg} />}</td>
                 <td className="r">
                   <ClvValue value={leg.clv} legacy={legacy} />
                 </td>
@@ -164,6 +195,7 @@ interface Actions {
 export function DetailBlock({ bet, onClosing, onCorrect }: { bet: BetItem } & Actions) {
   const { t } = useTranslation();
   const legacy = isLegacy(bet);
+  const note = settledNote(bet, t);
   return (
     <div className="bets-detail">
       <div className="bets-detail-main">
@@ -189,14 +221,11 @@ export function DetailBlock({ bet, onClosing, onCorrect }: { bet: BetItem } & Ac
               </div>
             ))}
           </dl>
+          {note && <p className="xsmall muted">{note}</p>}
+          <ConflictNotes bet={bet} onCorrect={onCorrect} />
         </div>
         <div className="bets-detail-box">
-          <div className="row-between">
-            <span className="eyebrow">{t('bets.detail.verdictTitle')}</span>
-            <VerdictChip verdict={bet.verdict} />
-          </div>
-          <p>{reviewText(bet, t)}</p>
-          <p className="xsmall muted">{t('bets.detail.verdictNote')}</p>
+          <ReviewBlock bet={bet} />
           {!isImported(bet) && (
             <div className="row">
               {/* Старый бот закрывающих кэфов не записывал, CLV по его ставкам не считается (В5) */}
@@ -227,6 +256,7 @@ export function BetSheet({
   const { t } = useTranslation();
   const legacy = isLegacy(bet);
   const open = bet.status === 'open';
+  const note = settledNote(bet, t);
   const footer = open ? (
     <>
       <Button onClick={onClose}>{t('common.close')}</Button>
@@ -260,15 +290,15 @@ export function BetSheet({
             {open ? money(bet, bet.stake) : <Signed value={bet.profit} text={money(bet, bet.profit, true)} />}
           </div>
         </div>
-        <StatusChip status={bet.status} />
+        <OpenStatusChip bet={bet} />
       </div>
-      {bet.verdict && (
-        <div className="row">
-          <span className="small muted">{t('bets.detail.verdictLabel')}</span>
-          <VerdictChip verdict={bet.verdict} />
+      {!open && !legacy && (
+        <div className="bets-detail-box">
+          <ReviewBlock bet={bet} />
         </div>
       )}
-      {!open && <p className="small soft">{reviewText(bet, t)}</p>}
+      {note && <p className="xsmall muted">{note}</p>}
+      <ConflictNotes bet={bet} onCorrect={onCorrect} />
       {bet.legs.map((leg) => {
         const p = legProb(leg);
         const meta = [legMarket(leg), leg.match.tournament, leg.score ? t('bets.detail.scoreShort', { score: leg.score }) : null, leg.match.best_of === 5 ? t('bets.detail.bestOf5') : null];
@@ -288,8 +318,7 @@ export function BetSheet({
               <div title={legacy ? t('bets.botClv') : undefined}>
                 <dt>{t('bets.detail.cols.closing')}</dt>
                 <dd>
-                  <span className="odds">{leg.closing ? formatOdds(leg.closing.odds) : '—'}</span>
-                  {leg.closing && <small>{closingWhoText(leg.closing, bet.bookmaker, t)}</small>}
+                  <ClosingCell bet={bet} leg={leg} small />
                 </dd>
               </div>
               <div title={legacy ? t('bets.botClv') : undefined}>

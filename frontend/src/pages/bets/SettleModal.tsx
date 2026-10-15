@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -7,13 +8,15 @@ import { apiErrorText } from '../../features/analysis/codes';
 import { displayName, shortName } from '../../features/analysis/draft';
 import { freshest, useBet, useSettleBet } from '../../features/bets/api';
 import { closingDraft, closingPayload, type ClosingDraft } from '../../features/bets/closing';
-import { isLegacy, legProb } from '../../features/bets/display';
+import { isLegacy, lastMatchDay, legProb, missingInArchive } from '../../features/bets/display';
+import { legNewsResult, newsResultOutcome, newsScoreText, safeSourceUrl, type NewsResult } from '../../features/bets/review';
 import { toMilli } from '../../features/bets/money';
 import { bankAfter, checkScore, scoreExamples, settlePreview, type SettlePreview } from '../../features/bets/settle';
 import type { BetItem, BetLeg, Closing, LegResult, LegSettleIn } from '../../features/bets/types';
 import { formatDate, formatOdds, formatOddsExact, formatProb } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { ClosingFields } from './ClosingFields';
+import { OpenStatusChip } from './marks';
 import { betKindLong, legMarket, matchText, money, Signed, StatusChip } from './parts';
 
 // «Результат ставки» (settleModal макета): исход каждого события, счет (по нему исход отмечается
@@ -126,6 +129,18 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
     }
   }
 
+  /** «Подставить 2:0»: счет и исход из новостей — в форму; сохраняет только участник (В1-Г). */
+  function applyHint(index: number, leg: BetLeg, news: NewsResult) {
+    const outcome = newsResultOutcome(leg, news);
+    if (news.sets && !news.retired) {
+      const check = checkScore(news.sets, leg.score_outcomes);
+      if (check.kind === 'ok') update(index, { score: news.sets, result: check.result, auto: true });
+      else update(index, { score: news.sets, ...(outcome ? { result: outcome, auto: false } : {}) });
+    } else if (outcome && !news.retired) {
+      update(index, { result: outcome, auto: false });
+    }
+  }
+
   function editClosing(index: number, leg: BetLeg, closing: ClosingDraft) {
     const state = legs[index];
     if (!state) return;
@@ -195,7 +210,7 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
         }}
       >
         <div className="bets-settle-intro">
-          <StatusChip status={bet.status} />
+          <OpenStatusChip bet={bet} />
           <span>
             {t('bets.settle.intro', { kind: betKindLong(bet, t), bookmaker: bet.bookmaker, stake: money(bet, bet.stake) })}{' '}
             <span className="odds">{formatOdds(bet.total_odds)}</span>
@@ -204,6 +219,11 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
         {notOpen && (
           <Callout kind="info" role="status">
             {t('bets.settle.alreadySettled')}
+          </Callout>
+        )}
+        {bet.awaiting_result && !corrected && !notOpen && (
+          <Callout kind="info" icon="database">
+            <b>{awaitedTitle(bet, t)}</b> {awaitedText(bet, t)}
           </Callout>
         )}
         {corrected && !notOpen && (
@@ -227,6 +247,7 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
               disabled={notOpen}
               onPick={(result) => pickResult(i, result)}
               onScore={(text) => typeScore(i, leg, text)}
+              onHint={(news) => applyHint(i, leg, news)}
               onClosing={(closing) => editClosing(i, leg, closing)}
             />
           );
@@ -242,6 +263,72 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
         )}
       </form>
     </Modal>
+  );
+}
+
+function awaitedTitle(bet: BetItem, t: TFunction): string {
+  const day = lastMatchDay(bet);
+  return day ? t('bets.awaiting.settleTitle', { date: formatDate(day) }) : t('bets.awaiting.settleTitleNoDate');
+}
+
+function awaitedText(bet: BetItem, t: TFunction): string {
+  if (bet.archive_matches_to && missingInArchive(bet)) {
+    return t('bets.awaiting.settleTextMissing', { archive: formatDate(bet.archive_matches_to) });
+  }
+  if (!bet.archive_matches_to || !bet.next_upload) return t('bets.awaiting.settleText');
+  return t('bets.awaiting.settleTextArchive', {
+    archive: formatDate(bet.archive_matches_to),
+    next: formatDate(bet.next_upload),
+  });
+}
+
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '') || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Подсказка из новостей у события: кто выиграл и счет, источник и день, «Подставить 2:0».
+ * Снятие — без кнопки: исход по правилам букмекера выбирает участник.
+ */
+function NewsHintBox({ leg, news, onApply }: { leg: BetLeg; news: NewsResult; onApply: () => void }) {
+  const { t } = useTranslation();
+  const winner = shortName(displayName(news.winner === 1 ? leg.match.player1 : leg.match.player2));
+  const score = newsScoreText(news.score);
+  const text = news.retired ? t('bets.news.retired', { name: winner, score }) : t('bets.news.won', { name: winner, score });
+  const url = safeSourceUrl(news.source_url);
+  const source = news.source_name ?? (url ? hostOf(url) : null);
+  let label: string | null = null;
+  if (!news.retired && news.sets) label = t('bets.news.apply', { score: news.sets });
+  else if (!news.retired && newsResultOutcome(leg, news)) label = t('bets.news.applyResult');
+  return (
+    <div className="bets-news" role="note">
+      <div className="bets-min">
+        <span>
+          {t('bets.news.found')} <b>{text}</b>
+        </span>
+        <small>
+          {source &&
+            (url ? (
+              <a href={url} target="_blank" rel="noopener noreferrer">
+                {source}
+              </a>
+            ) : (
+              source
+            ))}
+          {source && ' · '}
+          {[news.published_on ? formatDate(news.published_on) : null, news.retired ? t('bets.news.retiredHint') : t('bets.news.check')].filter(Boolean).join(' · ')}
+        </small>
+      </div>
+      {label && (
+        <Button size="sm" icon="check" onClick={onApply} title={t('bets.news.applyTitle')}>
+          {label}
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -263,10 +350,11 @@ interface LegBlockProps {
   disabled: boolean;
   onPick: (result: LegResult) => void;
   onScore: (text: string) => void;
+  onHint: (news: NewsResult) => void;
   onClosing: (closing: ClosingDraft) => void;
 }
 
-function LegBlock({ bet, leg, index, state, closing, submitted, serverBadScore, disabled, onPick, onScore, onClosing }: LegBlockProps) {
+function LegBlock({ bet, leg, index, state, closing, submitted, serverBadScore, disabled, onPick, onScore, onHint, onClosing }: LegBlockProps) {
   const { t } = useTranslation();
   const id = `bets-settle-${bet.id}-${index}`;
   const match = matchText(leg);
@@ -292,6 +380,7 @@ function LegBlock({ bet, leg, index, state, closing, submitted, serverBadScore, 
     note = { text: t('bets.settle.conflict', { result: t(`bets.settle.word.${fromScore}`) }), warn: true };
   }
   const scoreId = `${id}-score`;
+  const news = legNewsResult(leg);
   return (
     <fieldset className="bets-sleg" disabled={disabled}>
       <legend className="sr-only">{t('bets.settle.legLegend', { n: index + 1, match })}</legend>
@@ -357,6 +446,7 @@ function LegBlock({ bet, leg, index, state, closing, submitted, serverBadScore, 
           )}
         </div>
       </div>
+      {news && !disabled && <NewsHintBox leg={leg} news={news} onApply={() => onHint(news)} />}
       {/* у ставок старого бота CLV не считается (В5): закрывающий кэф не спрашиваем */}
       {!isLegacy(bet) && (
         <ClosingFields id={id} draft={closing} onChange={onClosing} odds={leg.odds_taken} bookmaker={bet.bookmaker} submitted={submitted} />

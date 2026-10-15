@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Button, Icon, IconButton } from '../../components';
 import type { BetItem } from '../../features/bets/types';
-import { reviewText } from './BetDetail';
+import { reviewText } from './marks';
 import { money, VerdictChip } from './parts';
 
 // Сообщение после расчета (banner макета): итог, банк, вердикт по CLV и «Исправить результат».

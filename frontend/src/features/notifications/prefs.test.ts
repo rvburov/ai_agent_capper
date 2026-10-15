@@ -72,7 +72,7 @@ describe('уведомления этапа 4', () => {
     expect(notificationLink({ kind: 'bet_settled', link: '/bets?bet=12' })).toBe('/bets?bet=12');
     expect(notificationLink({ kind: 'ai_alert', link: '/analysis/42' })).toBe('/analysis/42');
     expect(notificationLink({ kind: 'bet_settled', link: null })).toBe('/bets');
-    expect(notificationLink({ kind: 'data_stale', link: null })).toBe('/admin');
+    expect(notificationLink({ kind: 'data_stale', link: null })).toBe('/admin/data');
     expect(notificationLink({ kind: 'admin_message', link: null })).toBeNull();
     expect(notificationLink({ kind: 'bet_settled', link: 'https://evil.example' })).toBe('/bets');
   });

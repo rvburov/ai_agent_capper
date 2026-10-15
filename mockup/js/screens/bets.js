@@ -593,7 +593,7 @@
       h('div', { class: 'bets-banner-body' },
         h('div', null, h('b', null, 'Ставка №' + b.id + (lastSettled.corrected ? ' пересчитана: ' : ' рассчитана: ') + res + '. '), 'Банк — ' + fmt.money(S.bank) + '.' + (lastSettled.corrected ? ' ' + journalOnCorrect(b.correctedFrom) : '')),
         h('div', { class: 'row', style: 'gap:6px' }, h('span', null, 'Вердикт по CLV:'), v && chip(v.label, v.kind, v.icon), h('span', null, reviewNext(b))),
-        h('div', { class: 'xsmall muted' }, 'При ручном расчете уведомление не приходит — только это сообщение. Разбор ИИ будет в течение часа (Sonnet 5.5 через Batch, ≈ $0,01 за матч) — в деталях ставки.'),
+        h('div', { class: 'xsmall muted' }, 'При ручном расчете уведомление не приходит — только это сообщение. Разбор ИИ будет в течение нескольких часов (Sonnet 5.5 через Batch, ≈ $0,01 за матч) — в деталях ставки.'),
         h('div', { class: 'row' },
           button('Исправить результат', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: () => correctModal(b) }))),
       button('', { kind: 'ghost', size: 'sm', icon: 'x', title: 'Скрыть', onClick: () => { lastSettled = null; refresh(); } }));
@@ -865,7 +865,7 @@
     if (b.status === 'open') return [head, h('p', null, 'Разбор появится после расчета ставки.')];
     if (isBot(b)) return [head, h('p', null, 'Ставки старого бота не разбираются: у них нет досье и вероятностей модели на момент ставки.')];
     if (b.status === 'void') return [head, h('p', null, 'Возврат не разбирается: исхода нет.'), clvLine(b)];
-    if (b.pmPending) return [head, h('p', null, 'Разбор готовится: запрос в пакете Batch, ответ — в течение часа, иногда до суток. Стоимость ≈ $0,01 за матч.'), clvLine(b)];
+    if (b.pmPending) return [head, h('p', null, 'Разбор готовится: запрос в пакете Batch, ответ — в течение нескольких часов, иногда до суток. Стоимость ≈ $0,01 за матч.'), clvLine(b)];
     const pm = D.learning.postmortemOf(b);
     if (!pm) return [head];
     const tone = { fine: 'good', lucky: 'warn', luck: 'info', model_error: 'serious', data_gap: 'warn' }[pm.verdict];

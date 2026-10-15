@@ -10,6 +10,7 @@ import type { BetItem } from '../../features/bets/types';
 import { formatDate, formatMoney, formatOdds, formatPercent } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { DetailBlock } from './BetDetail';
+import { SettledByTag } from './marks';
 import { betKind, ClvValue, legMarket, MatchName, matchText, money, ResultIcon, Signed, StatusChip } from './parts';
 
 // История (historySection макета): рассчитанные ставки по месяцам. На компьютере — таблица,
@@ -276,6 +277,7 @@ function Row({ bet, open, fresh, onToggle }: { bet: BetItem; open: boolean; fres
             </Chip>
           </span>
         )}
+        <SettledByTag bet={bet} />
       </td>
       <td>
         {bet.legs.map((leg) => (

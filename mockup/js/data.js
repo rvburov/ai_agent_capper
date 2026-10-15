@@ -402,7 +402,7 @@
     { type: 'news', fresh: 262, written: 32444, read: 4498, output: 1076, searches: 2, duration: 41 },
     { type: 'analysis', fresh: 4100, written: 6100, read: 0, output: 1620, searches: 0, duration: 63 },
   ].forEach((o, k) => aiRuns.push(makeRun(Object.assign({ id: 'run-smoke-' + k, at: addMin('2026-10-02T21:10', k), shared: true, tag: 'Приемка (agent-smoke)', step: 0 }, o))));
-  // Разборы рассчитанных ставок (этап 5, В3): по одному на матч, результат пакета — в течение часа после расчета.
+  // Разборы рассчитанных ставок (этап 5, В3): по одному на матч, результат пакета — в течение нескольких часов после расчета.
   // Свои матчи демо-пользователя плюс матчи других участников — общая задача, в лимит участника не входит
   const pmMatches = [];
   bets.filter(b => b.source === 'app' && b.status !== 'open' && b.status !== 'void' && b.date >= '2026-10-01')

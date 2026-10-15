@@ -107,13 +107,18 @@ export function useBetCounts() {
   });
 }
 
-/** Карточка ставки (GET /api/bets/{id}); initial — ставка из списка, пока карточка не пришла. */
+/**
+ * Карточка ставки (GET /api/bets/{id}); initial — ставка из списка, пока карточка не пришла.
+ * Ставка списка неполная (подсказки исхода из новостей сервер отдает только в карточке),
+ * поэтому она считается устаревшей сразу: карточка запрашивается при открытии окна.
+ */
 export function useBet(id: number | null, initial?: BetItem) {
   return useQuery({
     queryKey: betKeys.one(id ?? 0),
     queryFn: () => unwrap(api.GET('/api/bets/{bet_id}', { params: { path: { bet_id: id ?? 0 } } })),
     enabled: id !== null,
     initialData: initial,
+    initialDataUpdatedAt: initial ? 0 : undefined,
   });
 }
 

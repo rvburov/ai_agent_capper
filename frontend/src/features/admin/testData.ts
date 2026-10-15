@@ -1,3 +1,4 @@
+import type { DataUpload, DataUploadReport, DataUploads } from './dataUploads';
 import type { AdminBudget, AdminKey, AdminUser, AuditEntry, LimitDefaults, MemberLimit } from './types';
 
 // Данные для тестов раздела «Администрирование».
@@ -93,4 +94,65 @@ export function adminBudget(over: Partial<AdminBudget> = {}): AdminBudget {
 
 export function adminKey(over: Partial<AdminKey> = {}): AdminKey {
   return { status: 'ok', last4: 'm9Tq', verified_at: '2026-10-01T10:12:00Z', users_on_key: 3, ...over };
+}
+
+// ---------- «Данные» (этап 5): загрузки файла tennis-data ----------
+
+export function uploadReport(over: Partial<DataUploadReport> = {}): DataUploadReport {
+  return {
+    file_rows: 2_712,
+    unchanged: false,
+    new_matches: 71,
+    updated_matches: 3,
+    matches_to: '2026-10-11',
+    settled_bets: 9,
+    people: 3,
+    legs: 14,
+    closing: 11,
+    linked: 14,
+    waiting: 1,
+    unlinked: 3,
+    not_found: 1,
+    unlinked_matches: [
+      { match_id: 501, player1: 'Синнер', player2: 'Руне', day: '2026-10-09', reason: 'ambiguous' },
+      { match_id: 502, player1: 'Медведев', player2: 'Рублев', day: '2026-10-10', reason: 'conflict' },
+    ],
+    conflicts: 1,
+    manual: 2,
+    legacy_legs: 0,
+    steps: [
+      { step: 'tennis_data', status: 'ok', error: null },
+      { step: 'players_link', status: 'ok', error: null },
+      { step: 'elo', status: 'ok', error: null },
+      { step: 'settle', status: 'ok', error: null },
+    ],
+    ...over,
+  };
+}
+
+/** Загрузка №12: 2026.xlsx, 1,9 МБ, готова 12 окт в 08:14 по UTC. */
+export function dataUpload(over: Partial<DataUpload> = {}): DataUpload {
+  return {
+    id: 12,
+    created_at: '2026-10-12T08:12:00Z',
+    filename: '2026.xlsx',
+    size_bytes: 1_992_294,
+    year: 2026,
+    status: 'done',
+    step: null,
+    uploaded_by: 'Роман Буров',
+    started_at: '2026-10-12T08:12:05Z',
+    finished_at: '2026-10-12T08:14:00Z',
+    error: null,
+    report: uploadReport(),
+    ...over,
+  };
+}
+
+/** Свежесть архива и загрузки (GET /api/admin/data/uploads), новые сверху. */
+export function dataUploads(uploads: DataUpload[] = [dataUpload()], archive: Partial<DataUploads['archive']> = {}): DataUploads {
+  return {
+    archive: { last_load: '2026-10-12T08:14:00Z', matches_to: '2026-10-11', next_upload: '2026-10-19', stale_days: 7, stale: false, max_mb: 10, ...archive },
+    uploads,
+  };
 }

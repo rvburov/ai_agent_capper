@@ -1,0 +1,36 @@
+/* «Администрирование → Данные» (этап 5) — как во вкладке data макета (mockup/js/screens/admin.js). */
+
+.adm-kv3.adm-data-kv { gap: 1px; padding: 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.adm-kv3.adm-kv4.adm-data-kv { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.adm-data-kv > div { background: var(--surface); padding: 10px 12px; }
+.adm-data-kv dd small { overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .adm-kv3.adm-data-kv,
+  .adm-kv3.adm-kv4.adm-data-kv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.adm-howsteps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); color: var(--fg-2); }
+.adm-howsteps b { color: var(--fg); }
+
+.adm-file { position: relative; overflow: hidden; }
+.adm-file-input { position: absolute; inset: -1px; width: calc(100% + 2px); height: calc(100% + 2px); margin: 0; opacity: 0; cursor: pointer; font-size: 0; }
+.adm-file:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.adm-file.is-disabled { opacity: .55; }
+.adm-file.is-disabled .adm-file-input { cursor: not-allowed; }
+.adm-upload-status { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.adm-upload-status:empty { display: none; }
+.adm-data-progress { gap: 8px; }
+.adm-data-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); }
+.adm-data-steps li { display: flex; gap: 8px; align-items: center; color: var(--fg-3); }
+.adm-data-steps li svg { width: 16px; height: 16px; flex: none; }
+.adm-data-steps li.done { color: var(--good-ink); }
+.adm-data-steps li.run { color: var(--accent-ink); }
+.adm-data-steps li.failed { color: var(--bad-ink); }
+.adm-data-steps li.run svg { animation: adm-spin 1.2s linear infinite; }
+@keyframes adm-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .adm-data-steps li.run svg { animation: none; } }
+
+.adm-data-unlinked { gap: 8px; }
+.adm-data-unlinked h4 { margin: 0; font-size: var(--fs-sm); }
+.adm-data-notes { gap: 4px; }
+.adm-data-notes b { color: var(--fg); }

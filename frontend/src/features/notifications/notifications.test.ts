@@ -7,7 +7,9 @@ import {
   markOneRead,
   notificationLink,
   notificationLook,
+  notificationOutcome,
   staleQueriesFor,
+  type NotificationItem,
   type NotificationsOut,
 } from './notifications';
 
@@ -77,6 +79,26 @@ describe('уведомления этапа 5', () => {
     expect(notificationLook('weekly_report')).toEqual({ icon: 'calendar', tone: 'info' });
     expect(notificationLook('learning')).toEqual({ icon: 'brain', tone: 'info' });
     expect(notificationLook('data_stale')).toEqual({ icon: 'database', tone: 'warn' });
+  });
+
+  it('«Ставка рассчитана» — цвет по исходу: выигрыш зеленый, проигрыш красный, возврат без цвета', () => {
+    const settled = (outcome: NotificationItem['outcome']) => ({ ...item(9, false), kind: 'bet_settled', outcome });
+    expect(notificationOutcome(settled('won'))).toBe('won');
+    expect(notificationOutcome(settled('lost'))).toBe('lost');
+    expect(notificationOutcome(settled('void'))).toBe('void');
+    expect(notificationOutcome(settled(null))).toBeNull();
+    expect(notificationOutcome({})).toBeNull();
+    expect(notificationLook('bet_settled', 'won')).toEqual({ icon: 'ticket', tone: 'good' });
+    expect(notificationLook('bet_settled', 'lost')).toEqual({ icon: 'ticket', tone: 'bad' });
+    expect(notificationLook('bet_settled', 'void')).toEqual({ icon: 'ticket', tone: null });
+    expect(notificationLook('bet_settled')).toEqual({ icon: 'ticket', tone: null });
+    // исход красит только «Ставка рассчитана»
+    expect(notificationLook('bet_needs_result', 'won')).toEqual({ icon: 'clock', tone: 'warn' });
+  });
+
+  it('«Пора загрузить файл tennis-data» ведет на «Администрирование → Данные»', () => {
+    expect(notificationLink({ kind: 'data_stale', link: null })).toBe('/admin/data');
+    expect(notificationLink({ kind: 'data_stale', link: '/admin/data' })).toBe('/admin/data');
   });
 
   it('ссылка без своей с сервера: ставки, отчеты, обучение', () => {

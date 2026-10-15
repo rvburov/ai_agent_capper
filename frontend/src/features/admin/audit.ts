@@ -1,5 +1,5 @@
 import i18n from '../../i18n';
-import { currencySign, formatPercent, type Currency } from '../../lib/format';
+import { currencySign, formatNumber, formatPercent, type Currency } from '../../lib/format';
 import { formatLimitUsd, limitText } from './limits';
 import { timeZoneName } from '../profile/timezones';
 import { formatRate } from './settings';
@@ -36,7 +36,7 @@ const GROUP_ACTIONS: Record<Exclude<AuditGroup, 'all'>, readonly AuditAction[]> 
   // Правка игроков — тоже команды терминала с общими данными, как импорт (этап 2)
   import: ['import', 'player_merge', 'player_edit'],
   // Этап 5: загрузка файла tennis-data, наборы и прогоны проверок, включение версий
-  learning: ['data_upload', 'eval_set', 'eval_run', 'version_on', 'lesson_on', 'model_on'],
+  learning: ['data_upload', 'eval_set', 'eval_run', 'version_on', 'lesson_on', 'lesson_off', 'model_on'],
 };
 
 /** Действия группы для запроса ?action=...; для «Все действия» — без фильтра. */
@@ -231,6 +231,13 @@ export function auditDetails(entry: AuditEntry): string {
       const to = text(d.to);
       if (d.field !== 'default_tz' || !from || !to) return '';
       return t('admin.audit.details.defaultTz', { from: timeZoneName(t, from), to: timeZoneName(t, to) });
+    }
+    case 'data_upload': {
+      // «2026.xlsx, 1,9 МБ» — итог загрузки знает только воркер: он на вкладке «Данные»
+      const file = text(d.filename);
+      if (!file) return '';
+      const size = typeof d.size_bytes === 'number' ? formatNumber(d.size_bytes / (1024 * 1024), 1) : null;
+      return size ? t('admin.audit.details.dataUpload', { file, mb: size }) : file;
     }
     default:
       // confirm_failed, player_merge, player_edit (этап 2) и agent_config_change пока без

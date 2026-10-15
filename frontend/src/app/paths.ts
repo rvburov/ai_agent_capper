@@ -10,6 +10,7 @@ export const ADMIN_TABS = [
   'access',
   'key',
   'usage',
+  'data',
   'settings',
   'audit',
   'message',

@@ -4,13 +4,14 @@ import { Link } from 'react-router';
 
 import { paths } from '../../app/paths';
 import { Button, Card, Chip, EmptyState } from '../../components';
-import { betTournament, impliedProb, legProb, localDay } from '../../features/bets/display';
+import { betTournament, impliedProb, lastMatchDay, legProb, localDay, missingInArchive } from '../../features/bets/display';
 import { sumMoney } from '../../features/bets/money';
 import { analysisNumber } from '../../features/analysis/number';
 import type { BetItem } from '../../features/bets/types';
 import { cx } from '../../lib/cx';
 import { formatDate, formatOdds, formatProb } from '../../lib/format';
-import { betKindLong, legMarket, MatchName, money, StatusChip } from './parts';
+import { OpenStatusChip } from './marks';
+import { betKindLong, legMarket, MatchName, money } from './parts';
 
 // «В игре» (openSection и openCard макета): открытые ставки карточками с «Внести результат».
 
@@ -77,6 +78,23 @@ function dayText(day: string | null, today: string, t: TFunction): string {
   return day === today ? t('bets.today') : formatDate(day);
 }
 
+/** Все матчи ставки сыграны, исхода в архиве еще нет (В1): когда рассчитается и что делать. */
+export function awaitingText(bet: BetItem, t: TFunction): string {
+  const day = lastMatchDay(bet);
+  // архив уже дальше дня матчей, а исхода нет — «рассчитается сама» не обещаем
+  if (day && bet.archive_matches_to && missingInArchive(bet)) {
+    return t('bets.awaiting.textMissing', { date: formatDate(day), archive: formatDate(bet.archive_matches_to) });
+  }
+  // Даты архива и следующего файла считает сервер (только у ставки «ждет результата»)
+  if (bet.archive_matches_to && bet.next_upload) {
+    const dates = { archive: formatDate(bet.archive_matches_to), next: formatDate(bet.next_upload) };
+    return day
+      ? t('bets.awaiting.textArchive', { date: formatDate(day), ...dates })
+      : t('bets.awaiting.textArchiveNoDate', dates);
+  }
+  return day ? t('bets.awaiting.text', { date: formatDate(day) }) : t('bets.awaiting.textNoDate');
+}
+
 function OpenCard({ bet, fresh, onSettle }: { bet: BetItem; fresh: boolean; onSettle: (bet: BetItem) => void }) {
   const { t } = useTranslation();
   const today = localDay(new Date());
@@ -90,7 +108,7 @@ function OpenCard({ bet, fresh, onSettle }: { bet: BetItem; fresh: boolean; onSe
           <div className="bets-open-title">{betKindLong(bet, t)}</div>
           <div className="xsmall muted">{meta.join(' · ')}</div>
         </div>
-        <StatusChip status="open" />
+        <OpenStatusChip bet={bet} />
       </div>
       <ul className="bets-olegs">
         {bet.legs.map((leg) => {
@@ -134,6 +152,7 @@ function OpenCard({ bet, fresh, onSettle }: { bet: BetItem; fresh: boolean; onSe
           <dd>{money(bet, bet.payout)}</dd>
         </div>
       </dl>
+      {bet.awaiting_result && <p className="xsmall muted">{awaitingText(bet, t)}</p>}
       <div className="bets-open-actions">
         <Button kind="primary" icon="edit" onClick={() => onSettle(bet)}>
           {t('bets.actions.settle')}

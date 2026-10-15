@@ -8,6 +8,7 @@ import {
   badgeText,
   notificationLink,
   notificationLook,
+  notificationOutcome,
   type NotificationItem,
 } from '../../features/notifications/notifications';
 import { hiddenKinds, useNotificationPrefs, visibleNotifications } from '../../features/notifications/prefs';
@@ -158,7 +159,7 @@ export function NotificationsBell() {
     list = (
       <ul className="notif-list-items">
         {items.map((item) => {
-          const look = notificationLook(item.kind);
+          const look = notificationLook(item.kind, notificationOutcome(item));
           return (
             <li key={item.id}>
               <button

@@ -18,8 +18,19 @@ export type NotificationItem = components['schemas']['NotificationOut'];
 
 export type NotificationTone = 'good' | 'warn' | 'bad' | 'info' | null;
 
-/** Иконка и цвет кружка по виду уведомления (как в макете: DATA.notifications). */
-export function notificationLook(kind: string): { icon: IconName; tone: NotificationTone } {
+/** Исход рассчитанной ставки — цвет значка «Ставка рассчитана» (этап 5). */
+export type NotificationOutcome = NonNullable<NotificationItem['outcome']>;
+
+/** Исход из уведомления (outcome у «Ставка рассчитана»; у остальных видов — нет). */
+export function notificationOutcome(item: Pick<NotificationItem, 'outcome'>): NotificationOutcome | null {
+  return item.outcome ?? null;
+}
+
+/**
+ * Иконка и цвет кружка по виду уведомления (как в макете: DATA.notifications). «Ставка
+ * рассчитана» окрашена исходом: выигрыш — зеленым, проигрыш — красным, возврат — без цвета.
+ */
+export function notificationLook(kind: string, outcome: NotificationOutcome | null = null): { icon: IconName; tone: NotificationTone } {
   switch (kind) {
     case 'new_device':
       return { icon: 'device', tone: 'info' };
@@ -47,7 +58,7 @@ export function notificationLook(kind: string): { icon: IconName; tone: Notifica
     case 'admin_message':
       return { icon: 'megaphone', tone: 'info' };
     case 'bet_settled':
-      return { icon: 'ticket', tone: null };
+      return { icon: 'ticket', tone: outcome === 'won' ? 'good' : outcome === 'lost' ? 'bad' : null };
     // Этап 4: сигнал расхода ИИ администратору (текст правила с числами — с сервера)
     case 'ai_alert':
       return { icon: 'alert', tone: 'warn' };
@@ -89,9 +100,9 @@ export function staleQueriesFor(kind: string): readonly QueryKey[] {
     case 'budget_80':
     case 'budget_100':
       return [...AI_BUDGET, adminKeys.aiBudget, adminKeys.aiLimits];
-    // Архив матчей устарел: дело администратора на «Обзоре» и в кабинете
+    // Архив матчей устарел: дело администратора на «Обзоре» и в кабинете, свежесть на «Данных»
     case 'data_stale':
-      return [adminKeys.attention];
+      return [adminKeys.attention, adminKeys.dataUploads];
     // Администратор сменил валюту программы: все суммы — заново (без уведомления участник
     // заметит смену по первому ответу в новой валюте, watchProgramCurrency)
     case 'currency_changed':
@@ -139,8 +150,8 @@ export function internalLink(link: string | null | undefined): string | null {
 /**
  * Куда ведет уведомление без ссылки с сервера: «Ставка рассчитана», «ждет результата» и
  * «архив показывает другое» — на «Ставки» (саму ставку откроет ссылка /bets?bet=ID с
- * сервера), архив матчей — на «Обзор» администрирования, где видно, когда была последняя
- * загрузка; отчет недели — на вкладку «Отчеты», обучение — на «Обучение модели».
+ * сервера), «Пора загрузить файл tennis-data» — на «Администрирование → Данные», где файл
+ * загружается; отчет недели — на вкладку «Отчеты», обучение — на «Обучение модели».
  */
 export function notificationLink(item: Pick<NotificationItem, 'kind' | 'link'>): string | null {
   const own = internalLink(item.link);
@@ -151,7 +162,7 @@ export function notificationLink(item: Pick<NotificationItem, 'kind' | 'link'>):
     case 'settle_conflict':
       return paths.bets;
     case 'data_stale':
-      return paths.admin();
+      return paths.admin('data');
     case 'weekly_report':
       return paths.learning('reports');
     case 'learning':

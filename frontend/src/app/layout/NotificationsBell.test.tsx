@@ -41,7 +41,7 @@ const ITEMS = [
   },
 ];
 
-type Item = (typeof ITEMS)[number] | { id: number; kind: string; title: string; body: string; link: string | null; created_at: string; read_at: string | null };
+type Item = (typeof ITEMS)[number] | { id: number; kind: string; title: string; body: string; link: string | null; created_at: string; read_at: string | null; outcome?: string | null };
 
 function setup({ items = ITEMS as readonly Item[], prefs = memberPrefsOut() }: { items?: readonly Item[]; prefs?: ReturnType<typeof memberPrefsOut> } = {}) {
   document.cookie = 'capper_csrf=tok; path=/';
@@ -70,6 +70,7 @@ function setup({ items = ITEMS as readonly Item[], prefs = memberPrefsOut() }: {
       { path: '/profile/:tab', element: <p>Безопасность</p> },
       { path: '/bets', element: <p>Ставки</p> },
       { path: '/learning/:tab?', element: <p>Обучение модели</p> },
+      { path: '/admin/:tab?', element: <p>Администрирование</p> },
       { path: '/analysis/:id', element: <p>Анализ</p> },
     ],
     { initialEntries: ['/'] },
@@ -241,5 +242,23 @@ describe('колокольчик', () => {
     await user.click(await screen.findByRole('button', { name: /Уведомления: непрочитанных 3/ }));
     await user.click(within(screen.getByRole('dialog', { name: 'Уведомления' })).getByRole('button', { name: /Отчет за неделю/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/learning/reports'));
+  });
+
+  it('этап 5: цвет «Ставка рассчитана» — по исходу; «Пора загрузить файл» ведет на «Данные»', async () => {
+    const { router } = setup({
+      items: [
+        { id: 34, kind: 'data_stale', title: 'Пора загрузить файл tennis-data', body: 'Последняя загрузка файла — 5 окт.', link: null, created_at: '2026-10-12T04:00:00Z', read_at: null },
+        { id: 33, kind: 'bet_settled', title: 'Ставка №75 рассчитана автоматически', body: 'Возврат.', link: '/bets?bet=75', created_at: '2026-10-11T08:00:00Z', read_at: null, outcome: 'void' },
+        { id: 32, kind: 'bet_settled', title: 'Ставка №74 рассчитана автоматически', body: 'Проигрыш.', link: '/bets?bet=74', created_at: '2026-10-10T08:00:00Z', read_at: null, outcome: 'lost' },
+        { id: 31, kind: 'bet_settled', title: 'Ставка №73 рассчитана автоматически', body: 'Выигрыш.', link: '/bets?bet=73', created_at: '2026-10-09T08:00:00Z', read_at: null, outcome: 'won' },
+      ],
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Уведомления: непрочитанных 4' }));
+    const dialog = screen.getByRole('dialog', { name: 'Уведомления' });
+    const rows = within(dialog).getAllByRole('button', { name: /рассчитана|Пора загрузить/ });
+    expect(rows.map((row) => row.querySelector('.notif-ic')?.className)).toEqual(['notif-ic warn', 'notif-ic', 'notif-ic bad', 'notif-ic good']);
+    await user.click(within(dialog).getByRole('button', { name: /Пора загрузить файл tennis-data/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/data'));
   });
 });

@@ -127,10 +127,14 @@ export function ClvValue({ value, legacy = false }: { value: number | null | und
   return <Signed value={value} text={formatPercent(value, { signed: true })} />;
 }
 
-/** Чей закрывающий кэф: «эталон · Pinnacle», «свой · Fonbet». */
-export function closingWhoText(closing: Pick<Closing, 'by' | 'bookmaker'>, betBookmaker: string, t: TFunction): string {
+type RefBy = 'pinnacle' | 'betfair_ex' | 'avg';
+
+/** Чей закрывающий кэф: «эталон · Pinnacle», «свой · Fonbet», «архив tennis-data · Pinnacle». */
+export function closingWhoText(closing: Pick<Closing, 'by' | 'bookmaker' | 'source'>, betBookmaker: string, t: TFunction): string {
   const own = closingBookmaker(closing, betBookmaker);
-  return own !== null ? t('bets.closing.whoOwn', { name: own }) : t(`bets.closing.whoRef.${closing.by as 'pinnacle' | 'betfair_ex' | 'avg'}`);
+  if (own !== null) return t('bets.closing.whoOwn', { name: own });
+  const by = closing.by as RefBy;
+  return closing.source === 'archive' ? t(`bets.closing.whoArchive.${by}`) : t(`bets.closing.whoRef.${by}`);
 }
 
 /** «Ординар», «Экспресс × 2». */

@@ -184,3 +184,51 @@ export function monthRange(
   }
   return from <= to ? { from, to } : null;
 }
+
+// ---------- этап 5: расчет по архиву tennis-data ----------
+
+/**
+ * Кто рассчитал ставку — метка под датой в истории: «авто · архив ‹дата›» (по файлу
+ * tennis-data) или «внесено вами». У открытой и у перенесенной из бота метки нет.
+ */
+export function settledBy(bet: Pick<BetItem, 'status' | 'settled_by' | 'source'>): 'auto' | 'manual' | null {
+  if (bet.status === 'open') return null;
+  if (bet.settled_by === 'auto') return 'auto';
+  if (bet.settled_by === 'manual') return 'manual';
+  return null;
+}
+
+/** Закрытие из архива tennis-data (Т1): только П1/П2, момент снятия кэфа не проверен. */
+export function isArchiveClosing(closing: Pick<Closing, 'source'> | null | undefined): boolean {
+  return closing?.source === 'archive';
+}
+
+/**
+ * У форы рассчитанной ставки нет закрытия: в архиве tennis-data кэфов на форы нет, закрытие
+ * вносит участник («внесите сами»).
+ */
+export function closingByHand(bet: Pick<BetItem, 'status' | 'source'>, leg: Pick<BetLeg, 'market' | 'closing' | 'result'>): boolean {
+  return bet.status !== 'open' && !isLegacy(bet) && leg.market !== 'ML' && !leg.closing && legShown(bet, leg) !== 'void';
+}
+
+/** Ноги, по которым архив разошелся с расчетом ставки (Т3): банк не меняли, проверяет участник. */
+export function archiveConflicts(bet: Pick<BetItem, 'status' | 'legs'>): BetLeg[] {
+  if (bet.status === 'open') return [];
+  return bet.legs.filter((leg) => leg.archive_result !== null);
+}
+
+/** Последний день матчей ставки («матчи сыграны 4 окт»); дней нет — null. */
+export function lastMatchDay(bet: Pick<BetItem, 'legs'>): string | null {
+  const days = bet.legs.map((leg) => leg.match.day).filter((day): day is string => Boolean(day));
+  return days.length ? (days.sort()[days.length - 1] ?? null) : null;
+}
+
+/**
+ * Ставка «ждет результата», а архив уже дальше дня ее матчей: файл с этими днями загружен, но
+ * исхода в нем нет (не основной тур или имя игрока записано иначе), сама ставка не рассчитается.
+ * День матча не сравниваем на равенство: в файле день матча мог быть по другому поясу.
+ */
+export function missingInArchive(bet: Pick<BetItem, 'legs' | 'awaiting_result' | 'archive_matches_to'>): boolean {
+  const day = lastMatchDay(bet);
+  return bet.awaiting_result && day !== null && bet.archive_matches_to != null && bet.archive_matches_to > day;
+}

@@ -20,6 +20,9 @@ export const adminKeys = {
   activity: (period: string) => ['admin', 'activity', period] as const,
   // Дела администратора (GET /api/admin/attention): «Обзор», точка у вкладки, пункт меню
   attention: ['admin', 'attention'] as const,
+  // «Данные» (этап 5): свежесть архива и загрузки файла tennis-data
+  dataUploads: ['admin', 'data', 'uploads'] as const,
+  dataUpload: (id: number) => ['admin', 'data', 'uploads', id] as const,
 };
 
 /**

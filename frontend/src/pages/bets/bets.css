@@ -231,12 +231,35 @@
 .bets-ssum small { font-size: 11px; color: var(--fg-3); font-weight: 400; }
 .bets-ssum-wrap { gap: 8px; }
 
+/* ---------- этап 5: расчет по архиву, разбор ИИ, подсказка из новостей ---------- */
+.bets-by { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: var(--fs-xs); color: var(--fg-3); white-space: nowrap; }
+.bets-by svg { width: 12px; height: 12px; flex: none; }
+.bets-by.auto { color: var(--accent-ink); }
+.bets-archive-mark { margin-top: 2px; color: var(--warn-ink); white-space: nowrap; }
+.bets-conflict-in { gap: 6px; }
+.bets-conflict-in b { color: var(--fg); }
+.bets-news { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 10px 12px; border-radius: var(--r-sm); background: var(--info-soft); color: var(--info-ink); font-size: var(--fs-sm); }
+.bets-news b { color: var(--fg); }
+.bets-news small { display: block; font-size: var(--fs-xs); color: var(--fg-2); }
+.bets-review-v { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bets-review-meta { font-size: var(--fs-xs); color: var(--fg-3); }
+.bets-review-leg { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); min-width: 0; }
+.bets-review-leg-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; font-size: var(--fs-sm); }
+.bets-detail-box p .btn { vertical-align: middle; }
+@media (max-width: 720px) {
+  .bets-news { grid-template-columns: minmax(0, 1fr); }
+  .bets-news .btn { justify-self: start; }
+}
+
 @media (max-width: 960px) {
   /* на телефоне цели касания не меньше 40px */
   .bets-resseg button,
   .bets-chipbtn,
   .bets-active .bets-chipbtn,
   .bets-banner .row .btn,
+  .bets-news .btn,
+  .bets-conflict .btn,
+  .bets-detail-box .btn,
   .bets-filters .bets-select { height: var(--tap); }
 }
 @media (max-width: 720px) {

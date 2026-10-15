@@ -1,3 +1,4 @@
+import type { BetReview, LegReview, NewsResult } from './review';
 import type { BetItem, BetLeg, BetPage, BetsSummary } from './types';
 
 /*
@@ -198,4 +199,98 @@ export function betsSummary(over: Partial<BetsSummary> = {}): BetsSummary {
     legacy_settled: 1,
     ...over,
   };
+}
+
+// ---------- этап 5: расчет по архиву, разбор ИИ, подсказка из новостей ----------
+
+/** Закрытие из архива tennis-data (Т1): эталон Pinnacle, момент снятия не проверен. */
+export function archiveClosing(over: Partial<NonNullable<BetLeg['closing']>> = {}): NonNullable<BetLeg['closing']> {
+  return { odds: '1.280', opp_odds: '3.900', by: 'pinnacle', bookmaker: null, source: 'archive', q_close: 0.7529, unverified: true, ...over };
+}
+
+/**
+ * Ставка №9, рассчитанная сама по архиву: экспресс Синнер П1 (закрытие из архива) и Джокович
+ * Ф1(−1.5) — у форы закрытия нет («внесите сами»).
+ */
+export function betAuto(over: Partial<BetItem> = {}): BetItem {
+  return betOpen({
+    id: 9,
+    placed_at: '2026-10-08T09:00:00Z',
+    status: 'won',
+    profit: '1168.20',
+    payout: '2488.20',
+    effective_odds: '1.885',
+    bank_after: '49168.20',
+    settled_at: '2026-10-12T08:14:00Z',
+    settled_by: 'auto',
+    updated_at: '2026-10-12T08:14:00.5Z',
+    clv: null,
+    clv_fair: null,
+    verdict: 'no_closing',
+    archive_to: '2026-10-11',
+    legs: [
+      betLeg({ id: 91, result: 'win', score: '2:0', settled_at: '2026-10-12T08:14:00Z', result_source: 'auto', closing: archiveClosing(), clv: 0.0156, clv_fair: -0.0212, score_outcomes: null, match: { ...betLeg().match, id: 191, day: '2026-10-09' } }),
+      betLeg2({ id: 92, market: 'HCP_-1.5', result: 'win', score: '2:0', settled_at: '2026-10-12T08:14:00Z', result_source: 'auto', score_outcomes: null, match: { ...betLeg2().match, id: 192, day: '2026-10-09' } }),
+    ],
+    ...over,
+  });
+}
+
+/** Открытая ставка №8: матчи уже сыграны, исхода в архиве нет — «ждет результата». */
+export function betAwaiting(over: Partial<BetItem> = {}, news: NewsResult | null = null): BetItem {
+  const leg = betLeg({ id: 81, match: { ...betLeg().match, id: 181, day: '2026-10-10' } });
+  return betOpen({
+    id: 8,
+    placed_at: '2026-10-10T07:00:00Z',
+    stake: '1000.00',
+    total_odds: '1.300',
+    payout: '1300.00',
+    awaiting_result: true,
+    updated_at: '2026-10-10T07:00:00.1Z',
+    legs: [news ? { ...leg, news_result: news } : leg],
+    ...over,
+  });
+}
+
+/** Подсказка исхода по новостям (news_result): Синнер выиграл 6:3 6:4 — «Подставить 2:0». */
+export function newsResult(over: Partial<NewsResult> = {}): NewsResult {
+  return {
+    winner: 1,
+    sets: '2:0',
+    score: '6:3 6:4',
+    retired: false,
+    source_name: 'atptour.com',
+    source_url: 'https://www.atptour.com/en/news/sinner-rune-2026',
+    published_on: '2026-10-10',
+    found_at: '2026-10-11T07:40:00Z',
+    ...over,
+  };
+}
+
+/** Разбор матча ноги: ошибка модели, гипотеза ушла в урок L-022. */
+export function legReview(over: Partial<LegReview> = {}): LegReview {
+  return {
+    leg_id: 92,
+    match_id: 192,
+    market: 'HCP_-1.5',
+    selection: 1,
+    same_pick: true,
+    won: false,
+    clv: null,
+    status: 'done',
+    verdict: 'model_error',
+    what: 'Джокович — Рублев, Ф1(−1.5) не сыграла. Модель давала 74%, рынок без маржи 64%.',
+    why: 'Соперники близки по Эло на харде, а модель заложила уверенную победу 2:0.',
+    hypothesis: 'Фора −1.5 на харде при разнице Эло меньше 100 — модель завышает шанс.',
+    lesson: { id: 22, code: 'L-022', status: 'hypothesis', in_prompt: false, n_cases: 3, need_cases: 20, text: 'Фора −1.5 на харде при близком Эло' },
+    model: 'claude-sonnet-5-5',
+    cost_usd: 0.0062,
+    done_at: '2026-10-12T09:20:00Z',
+    ...over,
+  };
+}
+
+/** Разбор ставки (GET /api/bets/{id}/review): готов, по одному матчу. */
+export function betReview(over: Partial<BetReview> = {}, legs: LegReview[] = [legReview()]): BetReview {
+  return { bet_id: 9, state: 'done', reason: null, clv_verdict: 'no_closing', legs, ...over };
 }
