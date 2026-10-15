@@ -47,6 +47,7 @@ from app.db.models import (
     BetLeg,
     Bookmaker,
     Lesson,
+    LessonWatch,
     LoginEvent,
     Match,
     Notification,
@@ -291,6 +292,7 @@ def _strategies(uid: int) -> _Query:
 
 
 def _lessons(uid: int) -> _Query:
+    """Свои уроки и уроки, которые участник предложил сам (этап 5: общие, origin manual)."""
     return (
         select(
             Lesson.id,
@@ -299,12 +301,23 @@ def _lessons(uid: int) -> _Query:
             Lesson.text,
             Lesson.kind,
             Lesson.status,
+            Lesson.origin,
             Lesson.n_cases,
             Lesson.effect,
             Lesson.validated_at,
         )
-        .where(Lesson.user_id == uid)
+        .where(or_(Lesson.user_id == uid, Lesson.created_by == uid))
         .order_by(Lesson.id)
+    )
+
+
+def _lesson_watches(uid: int) -> _Query:
+    """«Сообщить, когда наберется» (этап 5): какие уроки участник ждет."""
+    return (
+        select(Lesson.code, LessonWatch.created_at, LessonWatch.notified_at)
+        .join(Lesson, Lesson.id == LessonWatch.lesson_id)
+        .where(LessonWatch.user_id == uid)
+        .order_by(LessonWatch.created_at, Lesson.code)
     )
 
 
@@ -328,6 +341,7 @@ def _postmortems(uid: int) -> _Query:
             Postmortem.status,
             Postmortem.verdict,
             Postmortem.summary,
+            Postmortem.why,
             Postmortem.hypothesis,
             Postmortem.scope,
         )
@@ -451,6 +465,7 @@ TABLES: tuple[_Table, ...] = (
     _Table("analyses", _analyses),
     _Table("predictions", _predictions),
     _Table("lessons", _lessons),
+    _Table("lesson_watches", _lesson_watches),
     _Table("postmortems", _postmortems),
     _Table("weekly_reports", _weekly_reports),
     _Table("ai_runs", _agent_runs),

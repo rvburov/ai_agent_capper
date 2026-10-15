@@ -34,9 +34,9 @@ p_base по исходу матча, разница p_claude − p_base и ее 
 max_tokens 0, разница не больше LOG_LOSS_MARGIN (0,01).
 """
 
-import asyncio
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from datetime import UTC, date, datetime, time
 from decimal import ROUND_UP, Decimal
 from typing import Any, cast
@@ -49,12 +49,13 @@ from anthropic.types.messages.batch_create_params import Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent import batches
 from app.agent.analysis import check_assessment
+from app.agent.batches import BATCH_NOT_FOUND, RESULTS_EXPIRED, BatchLost
 from app.agent.calls import estimate_tokens
 from app.agent.config import AgentConfig
-from app.agent.errors import ClaudeStepError, claude_errors, parse_output, stop_error
+from app.agent.errors import ClaudeStepError, parse_output, stop_error
 from app.agent.prompts import ANALYSIS_REQUEST, Prompt, load_prompt
-from app.agent.runs import Usage, record_run, usage_from
 from app.agent.schemas import ASSESSMENT_SCHEMA_VERSION, MatchAssessmentOut, assessment_schema
 from app.db.models import (
     EvalRun,
@@ -89,7 +90,7 @@ ACCEPTANCE_EVENTS = 40
 # Средний лог-лосс Claude хуже базовой модели не больше чем на столько (PLAN.md, этап 3)
 LOG_LOSS_MARGIN = 0.01
 # Опрос пакета: большинство пакетов готово за час, результаты хранятся 29 дней
-POLL_SECONDS = 60.0
+POLL_SECONDS = batches.POLL_SECONDS
 BOOTSTRAP_SEED = 20261012
 MTOK = Decimal(1_000_000)
 USD_STEP = Decimal("0.0001")
@@ -99,9 +100,8 @@ ENDED = "ended"
 FAILED = "failed"
 # Пакеты, результаты которых еще можно попробовать забрать (--resume)
 COLLECTABLE = frozenset({SUBMITTED, LOST, ABANDONED})
-# Почему пакет потерян (metrics.error)
-BATCH_NOT_FOUND = "batch_not_found"
-RESULTS_EXPIRED = "results_expired"
+# Почему пакет потерян (metrics.error): BATCH_NOT_FOUND, RESULTS_EXPIRED (app/agent/batches.py)
+__all__ = ["BATCH_NOT_FOUND", "RESULTS_EXPIRED", "BatchLost"]
 # Итог одного события
 OK = "ok"
 CHECKS = "checks"
@@ -128,15 +128,6 @@ def split_for(since: date, model: str) -> str:
 def eval_set_name(since: date, count: int, split: str = SPLIT) -> str:
     name = f"{KIND}:{FEATURE_SET}-nonews:{since.isoformat()}:{count}"
     return name if split == SPLIT else f"{name}:seen"
-
-
-class BatchLost(Exception):
-    """Пакета или его результатов у Anthropic нет (reason — BATCH_NOT_FOUND или
-    RESULTS_EXPIRED)."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
 
 
 def custom_id(eval_run_id: int, match_id: int) -> str:
@@ -314,7 +305,8 @@ def estimate(
 ) -> SmokeEstimate:
     """Оценка и худший случай пакета: половина цены всех токенов. Оценка — как у вызова
     анализа (estimate_analysis_*), худший случай — вход по тексту сверху (2 символа на
-    токен) по цене записи кэша на 1 час и весь max_tokens."""
+    токен) по цене записи кэша на 1 час и весь max_tokens (batches.request_worst_usd: с
+    надбавкой за длинный вход)."""
     per_input = max(price.input, price.cache_write_5m)
     one = (
         (
@@ -325,10 +317,11 @@ def estimate(
         / 2
     )
     worst = Decimal(0)
-    worst_input = max(price.input, price.cache_write_1h)
     for event in events:
         tokens = estimate_tokens(prompt.text, event.dossier_text, request_text(event))
-        worst += (tokens * worst_input + config.analysis_max_tokens * price.output) / MTOK / 2
+        worst += batches.request_worst_usd(
+            price, input_tokens=tokens, max_tokens=config.analysis_max_tokens, cache_1h=True
+        )
     return SmokeEstimate(
         estimate_usd=(one * len(events)).quantize(USD_STEP, rounding=ROUND_UP),
         worst_usd=worst.quantize(USD_STEP, rounding=ROUND_UP),
@@ -390,8 +383,7 @@ async def submit(
     ClaudeStepError, строка — status = failed (ничего не потрачено)."""
     requests = [batch_request(run.id, event, prompt, config) for event in events]
     try:
-        with claude_errors():
-            batch = await client.messages.batches.create(requests=requests)
+        batch = await batches.create_batch(client, requests)
     except ClaudeStepError as exc:
         run.metrics = {**run.metrics, "status": FAILED, "error": exc.journal_detail}
         await db.commit()
@@ -414,23 +406,17 @@ async def wait_batch(
     poll_seconds: float | None = None,
 ) -> MessageBatch:
     """Опрос пакета раз в poll_seconds (по умолчанию POLL_SECONDS), пока он не закончен."""
-    while True:
-        batch = await retrieve(client, batch_id)
-        if batch.processing_status == "ended":
-            return batch
-        if on_poll is not None:
-            on_poll(batch)
-        await asyncio.sleep(POLL_SECONDS if poll_seconds is None else poll_seconds)
+    return await batches.wait_batch(
+        client,
+        batch_id,
+        on_poll=on_poll,
+        poll_seconds=POLL_SECONDS if poll_seconds is None else poll_seconds,
+    )
 
 
 async def retrieve(client: anthropic.AsyncAnthropic, batch_id: str) -> MessageBatch:
-    """Пакет по id. 404 — BatchLost, а не «ключ отозван»: claude_errors считает 404
-    недоступной моделью, а здесь это пакет другого workspace или удаленный."""
-    with claude_errors():
-        try:
-            return await client.messages.batches.retrieve(batch_id)
-        except anthropic.NotFoundError:
-            raise BatchLost(BATCH_NOT_FOUND) from None
+    """Пакет по id; 404 — BatchLost (app/agent/batches.py)."""
+    return await batches.retrieve(client, batch_id)
 
 
 async def mark_lost(db: AsyncSession, run_id: int, reason: str) -> EvalRun:
@@ -655,6 +641,26 @@ def _predictions(
     return rows, final.p_final
 
 
+_ITEM_OUTCOMES = {
+    batches.ERRORED: ERRORED,
+    batches.EXPIRED: EXPIRED,
+    batches.CANCELED: CANCELED,
+}
+
+
+def _judge_item(item: batches.BatchItem, event: dict[str, Any], highlight: float) -> Judged:
+    """Итог результата пакета: ответ — как в анализе (judge), остальное — ошибка пакета,
+    истекший или отмененный запрос."""
+    if item.message is not None:
+        return judge(item.message, event, highlight)
+    return Judged(_ITEM_OUTCOMES.get(item.kind, ERRORED), item.detail, None)
+
+
+def replace_detail(item: batches.BatchItem, detail: str | None) -> batches.BatchItem:
+    """Результат с меткой ошибки итога (ответ не по схеме, отказ) для agent_runs.error."""
+    return dataclass_replace(item, detail=detail)
+
+
 async def collect(
     db: AsyncSession, client: anthropic.AsyncAnthropic, run_id: int
 ) -> tuple[EvalRun, SmokeSummary]:
@@ -677,9 +683,8 @@ async def collect(
     batch_id = str(metrics["batch_id"])
     try:
         found = await retrieve(client, batch_id)
-        if found.processing_status == "ended" and found.results_url is None:
-            # Пакет закончен, а результатов нет: прошло 29 дней после создания
-            raise BatchLost(RESULTS_EXPIRED)
+        # Пакет закончен, а результатов нет (прошло 29 дней после создания) — BatchLost
+        batches.ended_with_results(found)
     except BatchLost as exc:
         await db.rollback()
         await mark_lost(db, run_id, exc.reason)
@@ -688,56 +693,27 @@ async def collect(
     version = await db.get(StrategyVersion, run.strategy_version_id)
     highlight = params_of(version).claude_highlight
     ml_model: str | None = await db.scalar(select(MlModel.id).where(MlModel.id == MODEL_ID))
+    # Модель из настроек на момент отправки (как в учете вызовов анализа): по ней ищется цена
+    model = str(metrics.get("model") or "")
+    meta = batches.RunMeta(
+        kind="eval",
+        model=model,
+        effort=metrics.get("effort"),
+        prompt_version=metrics.get("prompt_version"),
+        schema_version=metrics.get("schema_version"),
+        eval_run_id=run.id,
+    )
     total = Decimal(0)
     step = 0
-    with claude_errors():
-        try:
-            results = await client.messages.batches.results(batch_id)
-        except anthropic.NotFoundError:
-            await db.rollback()
-            await mark_lost(db, run_id, BATCH_NOT_FOUND)
-            raise BatchLost(BATCH_NOT_FOUND) from None
-        async for item in results:
+    try:
+        async for item in batches.iter_results(client, batch_id):
             event = events.get(item.custom_id)
             if event is None:
                 continue
             step += 1
-            usage: Usage | None = None
-            # Модель из настроек на момент отправки (как в учете вызовов анализа): по ней
-            # ищется цена
-            model = str(metrics.get("model") or "")
-            stop_reason: str | None = None
-            judged: Judged
-            match item.result.type:
-                case "succeeded":
-                    message = item.result.message
-                    usage = replace(usage_from(message), batch=True)
-                    stop_reason = message.stop_reason
-                    judged = judge(message, event, highlight)
-                case "errored":
-                    error_type = item.result.error.error.type
-                    judged = Judged(ERRORED, f"batch:{error_type}", None)
-                case "expired":
-                    judged = Judged(EXPIRED, "batch:expired", None)
-                case _:
-                    judged = Judged(CANCELED, "batch:canceled", None)
-            agent_run = await record_run(
-                db,
-                user_id=None,
-                key_source="admin",
-                analysis_id=None,
-                kind="eval",
-                step=step,
-                model=model,
-                effort=metrics.get("effort"),
-                prompt_version=metrics.get("prompt_version"),
-                schema_version=metrics.get("schema_version"),
-                usage=usage if usage is not None else Usage(batch=True),
-                duration_ms=None,
-                stop_reason=stop_reason,
-                error=judged.detail,
-                request_id=f"{batch_id}/{item.custom_id}",
-                eval_run_id=run.id,
+            judged = _judge_item(item, event, highlight)
+            agent_run = await batches.record_item(
+                db, replace_detail(item, judged.detail), batch_id=batch_id, meta=meta, step=step
             )
             total += agent_run.cost_usd
             event["outcome"] = judged.outcome
@@ -754,6 +730,10 @@ async def collect(
                 db.add_all(rows)
                 event["p_claude"] = _clip(judged.assessment.p1_win)
                 event["p_final"] = final.p1_win
+    except BatchLost:
+        await db.rollback()
+        await mark_lost(db, run_id, BATCH_NOT_FOUND)
+        raise
     for event in events.values():
         # Запроса нет в результатах (такого быть не должно): считаем ошибкой пакета
         event.setdefault("outcome", ERRORED)

@@ -14,6 +14,17 @@ Claude с kind из CHECK_RUN_KINDS (eval, shadow): smoke-eval через Batch 
 - lost (пакета или результатов у Anthropic нет) и abandoned (закрыт владельцем,
   smoke-eval --abandon) — до конца месяца отправки: деньги, скорее всего, списаны, а
   сколько — неизвестно.
+
+Пакеты этапа 5 (быстрая проверка урока, прогоны eval) живут в batch_jobs (kind eval и
+shadow) с теми же окнами резерва (app/agent/batches.py, reserved_usd); прогон eval_runs
+со ссылкой на пакет (batch_job_id) второй раз не считается.
+
+До отправки резерв тоже держится (М2 волны 2): быстрая проверка урока в pending (резерв
+пишется при запуске, metrics.worst_usd) и smoke-eval в creating — PENDING_RESERVE после
+создания строки (дольше — сбой до отправки, такую быструю проверку уборщик ставит failed).
+Остаток проверяется и резерв пишется под FOR UPDATE строки app_settings (lock_budget, та
+же блокировка, что у резерва анализа и пакета разборов): две проверки не займут один
+остаток.
 """
 
 from dataclasses import dataclass
@@ -23,6 +34,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.batches import reserved_usd
 from app.db.models import AgentRun, AppSettings, EvalRun, User
 from app.services.admin_users import CHECK_RUN_KINDS, find_user_by_email, month_start
 from app.services.app_settings import SETTINGS_ROW_ID
@@ -34,8 +46,19 @@ ZERO = Decimal(0)
 SUBMITTED = "submitted"
 LOST = "lost"
 ABANDONED = "abandoned"
+CREATING = "creating"
 # Результаты пакета хранятся 29 дней после создания
 RESULTS_DAYS = 29
+# Резерв проверки до отправки пакета (pending быстрой проверки, creating smoke-eval)
+PENDING_RESERVE = timedelta(hours=1)
+
+
+async def lock_budget(db: AsyncSession) -> None:
+    """FOR UPDATE строки app_settings до commit вызывающего: проверка остатка и запись
+    резерва бюджета (проверок или общего) идут по одной."""
+    await db.execute(
+        select(AppSettings.id).where(AppSettings.id == SETTINGS_ROW_ID).with_for_update()
+    )
 
 
 async def pick_admin(db: AsyncSession, email: str | None) -> User | None:
@@ -65,7 +88,11 @@ class EvalBudget:
         return max(ZERO, self.budget_usd - self.spent_usd - self.reserved_usd)
 
 
-async def eval_budget(db: AsyncSession, now: datetime | None = None) -> EvalBudget:
+async def eval_budget(
+    db: AsyncSession, now: datetime | None = None, *, exclude_run_id: int | None = None
+) -> EvalBudget:
+    """Бюджет проверок месяца. exclude_run_id — без резерва до отправки этого прогона (его
+    пакет сейчас уходит, худший случай считается заново)."""
     moment = now or utcnow()
     budget = await db.scalar(
         select(AppSettings.eval_budget_usd).where(AppSettings.id == SETTINGS_ROW_ID)
@@ -80,19 +107,30 @@ async def eval_budget(db: AsyncSession, now: datetime | None = None) -> EvalBudg
     collectable_since = min(month, moment - timedelta(days=RESULTS_DAYS))
     reserved = ZERO
     rows = await db.execute(
-        select(EvalRun.created_at, EvalRun.metrics).where(
-            EvalRun.metrics["status"].astext.in_((SUBMITTED, LOST, ABANDONED))
+        select(EvalRun.id, EvalRun.created_at, EvalRun.status, EvalRun.metrics).where(
+            EvalRun.batch_job_id.is_(None),
+            EvalRun.metrics["status"].astext.in_((SUBMITTED, LOST, ABANDONED, CREATING))
+            | (EvalRun.status == "pending"),
         )
     )
-    for created_at, metrics in rows:
-        sent = _submitted_at(metrics, created_at)
-        since = collectable_since if metrics.get("status") == SUBMITTED else month
-        if sent < since:
+    for run_id, created_at, status, metrics in rows:
+        if run_id == exclude_run_id:
             continue
+        state = metrics.get("status")
+        if status == "pending" or state == CREATING:
+            # До отправки: резерв проверки, пока строка свежая
+            if created_at < moment - PENDING_RESERVE:
+                continue
+        else:
+            sent = _submitted_at(metrics, created_at)
+            since = collectable_since if state == SUBMITTED else month
+            if sent < since:
+                continue
         try:
             reserved += Decimal(str(metrics.get("worst_usd") or 0))
         except ArithmeticError:
             continue
+    reserved += await reserved_usd(db, CHECK_RUN_KINDS, moment)
     return EvalBudget(
         budget_usd=Decimal(budget or 0), spent_usd=Decimal(spent or 0), reserved_usd=reserved
     )

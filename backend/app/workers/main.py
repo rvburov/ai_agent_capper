@@ -8,9 +8,10 @@
 Своя точка входа вместо команды arq: логи идут через structlog с фильтром секретов
 (app.core.logging), как у API. Настройки — те же CAPPER_*: Redis из CAPPER_REDIS_URL,
 база из CAPPER_DATABASE_URL. Очередь и все ключи arq (задачи, результаты, повторы,
-отметка здоровья) — с префиксом CAPPER_REDIS_PREFIX: так тесты и разные окружения в
-одном Redis не берут чужие задачи и не видят чужих результатов. Ставить задачи в
-очередь — только через create_queue_pool() отсюда.
+отметка здоровья) — с префиксом CAPPER_REDIS_PREFIX (app/workers/queue.py): так тесты и
+разные окружения в одном Redis не берут чужие задачи и не видят чужих результатов. Ставить
+задачи в очередь — только через app.workers.queue.create_queue_pool(): у работающего
+воркера этот модуль — __main__, и его импорт из сервиса создал бы вторую копию.
 
 Время в расписании — UTC. Ночная очистка в 03:15 UTC: после бэкапа (01:30 UTC,
 deploy/backup/crontab) и до утра в Европе. Обновление данных — в час
@@ -25,21 +26,20 @@ CAPPER_DATA_UPDATE_HOUR_UTC (по умолчанию 5) и 25 минут: пос
 (process_data_upload) ставит API, у задачи предел часа и повторы, пока идет ночное
 обновление; напоминания «ставка ждет результата» и «пора загрузить файл» (в понедельник в
 07:04 по поясу администратора) и уборка зависших загрузок файла — каждый час на 4-й минуте.
+Волна 2: очередь и пакет разборов ставок — каждые 15 минут с 13-й минуты, сбор пакетов
+Batch — каждые 15 минут с 6-й, быструю проверку урока (run_quick_check) ставит API; уроки:
+проверка гипотез — раз в сутки в 06:33 UTC (после ночного обновления), перепроверка —
+1-го числа в 06:48 UTC.
 """
 
 import argparse
 import gc
 from collections.abc import Sequence
 from datetime import UTC
-from types import FunctionType
 from typing import Any
 
-import arq.connections
-import arq.constants
-import arq.jobs
-import arq.worker
-from arq import create_pool, cron
-from arq.connections import ArqRedis, RedisSettings
+from arq import cron
+from arq.connections import RedisSettings
 from arq.cron import CronJob
 from arq.typing import StartupShutdown, WorkerCoroutine
 from arq.worker import Function, check_health, run_worker
@@ -53,16 +53,22 @@ from app.services import data_uploads
 from app.services.data_status import DATA_UPDATE_MINUTE
 from app.workers.jobs import (
     check_ai_alerts,
+    check_lessons,
     cleanup_auth_records,
+    collect_batches,
     delete_requested_accounts,
     process_data_upload,
     reap_stuck_analyses,
+    recheck_lessons,
     remind_unsettled,
     run_analysis,
+    run_quick_check,
+    submit_postmortems,
     update_data,
     warm_analytics,
     warm_new_day,
 )
+from app.workers.queue import make_queue_name
 
 # Как часто воркер отмечается в Redis (ключ живет на секунду дольше). Healthcheck
 # контейнера раз в 30 с, поэтому живой воркер всегда успевает отметиться
@@ -98,86 +104,18 @@ UPLOAD_MAX_TRIES = 30
 # Напоминания — раз в час, на 4-й минуте: свободная от других задач минута в начале часа,
 # «пора загрузить файл» приходит в понедельник в 07:04 по поясу администратора
 REMIND_MINUTE = 4
-
-
-# Имена ключей arq. В arq 0.28 они — константы модулей (arq.constants), настройки
-# префикса нет; модули импортируют их к себе по имени, поэтому меняются копии в каждом
-_ARQ_KEY_NAMES = (
-    "default_queue_name",
-    "job_key_prefix",
-    "in_progress_key_prefix",
-    "result_key_prefix",
-    "retry_key_prefix",
-    "abort_jobs_ss",
-)
-_ARQ_MODULES = (arq.constants, arq.connections, arq.jobs, arq.worker)
-_ARQ_DEFAULT_KEYS = {name: str(getattr(arq.constants, name)) for name in _ARQ_KEY_NAMES}
-# Параметры, у которых очередь по умолчанию — значение константы на момент импорта arq
-# (Python вычисляет его при определении функции): Job(job_id, pool) без них искал бы
-# задачу в очереди без префикса и для ждущей задачи отвечал not_found
-_ARQ_QUEUE_PARAMS: tuple[tuple[object, str], ...] = (
-    (arq.jobs.Job.__init__, "_queue_name"),
-    (arq.connections.ArqRedis.__init__, "default_queue_name"),
-    (arq.connections.create_pool, "default_queue_name"),
-    (arq.worker.Worker.__init__, "queue_name"),
-)
-
-
-def _set_param_default(func: object, param: str, value: str) -> None:
-    """Новое значение параметра по умолчанию: именованный после * — в __kwdefaults__,
-    обычный — в __defaults__ (они выровнены по последним параметрам)."""
-    if not isinstance(func, FunctionType):
-        raise TypeError(f"{func!r}: ожидается функция")
-    kwdefaults = func.__kwdefaults__ or {}
-    if param in kwdefaults:
-        func.__kwdefaults__ = {**kwdefaults, param: value}
-        return
-    names = func.__code__.co_varnames[: func.__code__.co_argcount]
-    defaults = func.__defaults__ or ()
-    index = names.index(param) - (len(names) - len(defaults)) if param in names else -1
-    if index < 0:
-        raise ValueError(f"{func.__qualname__}: нет параметра {param} со значением по умолчанию")
-    func.__defaults__ = (*defaults[:index], value, *defaults[index + 1 :])
-
-
-def apply_redis_prefix(prefix: str) -> None:
-    """Ключи arq с префиксом приложения: capper:arq:job:<id>, capper:arq:result:<id> и т. д.
-    Меняются константы модулей и очередь по умолчанию в параметрах Job, ArqRedis,
-    create_pool и Worker. Действует на весь процесс (воркер или API); повторный вызов с тем
-    же префиксом ничего не меняет. Проверка, что ни один ключ не ушел без префикса, —
-    tests/test_workers.py: после обновления arq она покажет, если в нем появились новые
-    ключи или параметры."""
-    for module in _ARQ_MODULES:
-        for name, default in _ARQ_DEFAULT_KEYS.items():
-            if hasattr(module, name):
-                setattr(module, name, prefix + default)
-    queue_name = prefix + _ARQ_DEFAULT_KEYS["default_queue_name"]
-    for func, param in _ARQ_QUEUE_PARAMS:
-        _set_param_default(func, param, queue_name)
-
-
-def make_queue_name(settings: Settings) -> str:
-    """Очередь arq с префиксом приложения: capper:arq:queue."""
-    return f"{settings.redis_prefix}{_ARQ_DEFAULT_KEYS['default_queue_name']}"
-
-
-# При импорте: WorkerSettings ниже, check_health и create_queue_pool работают уже с префиксом
-apply_redis_prefix(get_settings().redis_prefix)
-
-
-async def create_queue_pool(
-    settings: Settings | None = None, *, retries: int | None = None
-) -> ArqRedis:
-    """Соединение для постановки задач: та же очередь и те же ключи, что у воркера.
-    Статус уже поставленной задачи — Job(job_id, pool): очередь по умолчанию у Job тоже
-    с префиксом (apply_redis_prefix). retries — попыток соединиться (по умолчанию arq —
-    5 раз с паузой в секунду); 0 — для необязательных задач вроде прогрева кэша."""
-    settings = settings or get_settings()
-    apply_redis_prefix(settings.redis_prefix)
-    redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    if retries is not None:
-        redis_settings.conn_retries = retries
-    return await create_pool(redis_settings, default_queue_name=make_queue_name(settings))
+# Разборы ставок и пакеты Batch (волна 2) — каждые 15 минут, в свободные минуты
+POSTMORTEM_MINUTES = frozenset({13, 28, 43, 58})
+COLLECT_MINUTES = frozenset({6, 21, 36, 51})
+BATCH_JOB_TIMEOUT_SECONDS = 900
+# Быстрая проверка урока: досье 40 матчей и отправка пакета
+QUICK_CHECK_TIMEOUT_SECONDS = 900
+# Уроки: проверка гипотез — после ночного обновления данных, перепроверка — 1-го числа
+LESSONS_HOUR_UTC = 6
+LESSONS_MINUTE = 33
+RECHECK_DAY = 1
+RECHECK_MINUTE = 48
+LESSONS_TIMEOUT_SECONDS = 1800
 
 
 async def startup(ctx: dict[Any, Any]) -> None:
@@ -242,6 +180,33 @@ def build_cron_jobs(settings: Settings) -> tuple[CronJob, ...] | None:
             timeout=WARM_NEW_DAY_TIMEOUT_SECONDS,
         ),
         cron(remind_unsettled, minute=REMIND_MINUTE, max_tries=1, timeout=300),
+        cron(
+            submit_postmortems,
+            minute=set(POSTMORTEM_MINUTES),
+            max_tries=1,
+            timeout=BATCH_JOB_TIMEOUT_SECONDS,
+        ),
+        cron(
+            collect_batches,
+            minute=set(COLLECT_MINUTES),
+            max_tries=1,
+            timeout=BATCH_JOB_TIMEOUT_SECONDS,
+        ),
+        cron(
+            check_lessons,
+            hour=LESSONS_HOUR_UTC,
+            minute=LESSONS_MINUTE,
+            max_tries=1,
+            timeout=LESSONS_TIMEOUT_SECONDS,
+        ),
+        cron(
+            recheck_lessons,
+            day=RECHECK_DAY,
+            hour=LESSONS_HOUR_UTC,
+            minute=RECHECK_MINUTE,
+            max_tries=1,
+            timeout=LESSONS_TIMEOUT_SECONDS,
+        ),
     )
 
 
@@ -260,6 +225,11 @@ class WorkerSettings:
             process_data_upload, timeout=UPLOAD_TIMEOUT_SECONDS, max_tries=UPLOAD_MAX_TRIES
         ),
         remind_unsettled,
+        submit_postmortems,
+        collect_batches,
+        job_function(run_quick_check, timeout=QUICK_CHECK_TIMEOUT_SECONDS, max_tries=1),
+        check_lessons,
+        recheck_lessons,
     )
     cron_jobs: Sequence[CronJob] | None = build_cron_jobs(get_settings())
     on_startup: StartupShutdown | None = startup

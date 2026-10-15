@@ -25,6 +25,7 @@ from app.db.models import (
     Bookmaker,
     EvalRun,
     Lesson,
+    LessonWatch,
     LoginEvent,
     Match,
     Notification,
@@ -226,7 +227,18 @@ async def _fill_personal_data(db: AsyncSession, user: User, *, suffix: str) -> P
     postmortem = Postmortem(
         match_id=match.id, prediction_id=first.id, bet_id=bet.id, user_id=uid, status="done"
     )
-    db.add(postmortem)
+    # Волна 2: общий урок, который участник предложил сам и ждет («сообщить, когда наберется»)
+    proposed = Lesson(
+        user_id=None,
+        code=f"L-9{suffix}",
+        text="Урок участника",
+        kind="numeric",
+        origin="manual",
+        created_by=uid,
+    )
+    db.add_all([postmortem, proposed])
+    await db.flush()
+    db.add(LessonWatch(lesson_id=proposed.id, user_id=uid))
     await db.commit()
     return Personal(
         match_id=match.id,
@@ -326,6 +338,10 @@ async def test_delete_member_erases_personal_data(
     assert user.totp_key_version is None and user.totp_last_step is None
     assert user.deleted_at is not None and user.last_login_at is None
 
+    # Предложенный участником общий урок остается, но без автора
+    assert await db.scalar(select(Lesson.id).where(Lesson.created_by == member_id)) is None
+    assert await db.scalar(select(Lesson.id).where(Lesson.code == "L-9m")) is not None
+
     # Расход на ИИ остается в бюджете месяца
     run = await db.get_one(AgentRun, data.agent_run_id, populate_existing=True)
     assert run.user_id == member_id
@@ -397,6 +413,8 @@ async def test_set_null_references_are_only_expected_tables() -> None:
         # администратора; разбор матча общий (обнуляется в _erase_personal_data)
         "data_uploads.uploaded_by",
         "lessons.decided_by",
+        # Волна 2: кто предложил общий урок (обнуляется в _erase_personal_data)
+        "lessons.created_by",
         "strategy_versions.decided_by",
         "ml_models.activated_by",
         "postmortems.user_id",

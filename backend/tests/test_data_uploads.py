@@ -5,6 +5,7 @@
 
 import asyncio
 import json
+import re
 import zipfile
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
@@ -136,8 +137,9 @@ async def test_upload_permissions_and_bad_files(
     assert denied.status_code == 403 and error_code(denied) == "common.forbidden"
 
     cases = [
-        (b"<html>Just a moment...</html>", "2026.xlsx", "upload.bad_file"),
-        (b"PK\x03\x04 broken zip", "2026.xlsx", "upload.bad_file"),
+        (b"<html>Just a moment...</html>", "2026.xlsx", "upload.not_xlsx"),
+        (b"PK\x03\x04 broken zip", "2026.xlsx", "upload.unreadable"),
+        (b"plain text, not a zip", "2026.xlsx", "upload.unreadable"),
         (_file(), "2026.csv", "upload.not_xlsx"),
         (b"", "2026.xlsx", "upload.empty"),
         (_file(), "2010.xlsx", "upload.year_range"),
@@ -146,6 +148,10 @@ async def test_upload_permissions_and_bad_files(
         response = await _upload(admin, content, name)
         assert response.status_code == 422, (name, response.text)
         assert error_code(response) == code, name
+        # Текст — только по-русски из локали, без причины на английском (№5)
+        message = response.json()["error"]["message"]
+        plain = re.sub(r"tennis-data(\.co\.uk)?|xlsx", "", message)
+        assert not re.search(r"[A-Za-z]{3,}", plain), message
     no_name = await admin.client.post(URL, content=_file(), headers={"Content-Type": XLSX})
     assert no_name.status_code == 422
     # Имя файла в подсказке — от текущего года, а не зашито в текст
@@ -232,6 +238,7 @@ async def test_upload_settles_bets_and_repeat_is_idempotent(
     assert archive["last_load"] is not None and archive["stale"] is False
     assert archive["matches_to"] == "2026-10-04" and archive["max_mb"] == 10
     assert archive["stale_days"] == 7
+    assert archive["next_upload"] is not None
 
     # Тот же файл еще раз: новых матчей нет, ставки и банк не меняются
     ledger = [(row.kind, row.amount) for row in await ledger_rows(db, member.id)]
@@ -302,7 +309,7 @@ async def test_upload_reminder_on_monday_morning(db: AsyncSession, admin: Signed
     [note] = await db.scalars(select(Notification).where(Notification.user_id == admin.id))
     # Загрузок еще не было: свой текст, без «— —»; имя файла — от текущего года
     assert note.kind == "data_stale" and note.params["variant"] == "upload_first"
-    assert note.title == "Пора загрузить файл tennis-data" and note.link == "/admin"
+    assert note.title == "Пора загрузить файл tennis-data" and note.link == "/admin/data"
     assert note.body.startswith("Файл tennis-data еще не загружали.")
     assert "Скачайте 2026.xlsx" in note.body and "—" not in note.body
     tuesday = datetime(2026, 10, 20, 4, 4, tzinfo=UTC)
@@ -467,7 +474,8 @@ async def test_crash_marks_upload_failed_and_retry_skips(
     assert await data_uploads.process_upload(factory, upload_id) == "skipped"
     row = await db.get_one(DataUpload, upload_id, populate_existing=True)
     assert row.status == "failed" and row.content is None and row.finished_at is not None
-    assert row.error is not None and "RuntimeError" in row.error
+    # Текст — по-русски из локали, тип исключения — только в логе воркера (№5)
+    assert row.error is not None and "RuntimeError" not in row.error and "прервалась" in row.error
     shown = (await admin.client.get(f"/api/admin/data/uploads/{upload_id}")).json()
     assert shown["status"] == "failed" and "Отправьте файл еще раз" in shown["error"]
 
@@ -538,3 +546,29 @@ async def test_upload_gives_up_waiting_for_update(
     row = await db.get_one(DataUpload, upload_id, populate_existing=True)
     assert row.status == "failed" and row.content is None
     assert row.error is not None and "не закончилось" in row.error
+
+
+async def test_next_upload_day_same_rule_as_bets(db: AsyncSession, make_user: UserFactory) -> None:
+    """№4 проверки экранов: день следующей загрузки на «Данных» считает сервер тем же
+    правилом, что «ждет результата» у участника: понедельник после загрузки, прошел —
+    ближайший понедельник с сегодняшнего дня (в поясе того, кто смотрит)."""
+    db.add(
+        IngestionRun(
+            source="tennis_data",
+            status="ok",
+            started_at=datetime(2026, 10, 6, 9, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 10, 6, 9, 5, tzinfo=UTC),
+            details={"files": {"2026.xlsx": "sha"}},
+        )
+    )
+    await db.commit()
+    admin = (await make_user(role="admin")).user
+    # Загрузка во вторник 6 окт, сегодня вторник 13 окт: понедельник 12 окт прошел
+    late = await data_uploads.archive_status(
+        db, datetime(2026, 10, 13, 12, 0, tzinfo=UTC), viewer=admin
+    )
+    assert late.next_upload == date(2026, 10, 19)
+    soon = await data_uploads.archive_status(
+        db, datetime(2026, 10, 8, 12, 0, tzinfo=UTC), viewer=admin
+    )
+    assert soon.next_upload == date(2026, 10, 12)

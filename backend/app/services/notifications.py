@@ -12,14 +12,18 @@ Push браузера появится на этапе 6 и будет чита�
 устройства, неудачные попытки входа, сообщение администратора) приходят всегда.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import t
 from app.db.models import Notification
 from app.db.models.auth import NOTIFICATION_KINDS
+from app.schemas.me import NotificationOut, NotificationOutcome
 from app.services.notification_prefs import is_enabled
+
+# Исходы ставки для цвета значка «Ставка рассчитана» (params.status уведомления)
+OUTCOMES = ("won", "lost", "void")
 
 
 async def notify(
@@ -55,3 +59,11 @@ async def notify(
     db.add(note)
     await db.flush()
     return note
+
+
+def notification_out(note: Notification) -> NotificationOut:
+    """Уведомление для центра уведомлений: у «Ставка рассчитана» — исход из params
+    (выигрыш, проигрыш, возврат) для цвета значка; чужого в нем нет — только своя ставка."""
+    status = (note.params or {}).get("status") if note.kind == "bet_settled" else None
+    outcome = cast(NotificationOutcome, status) if status in OUTCOMES else None
+    return NotificationOut.model_validate(note).model_copy(update={"outcome": outcome})

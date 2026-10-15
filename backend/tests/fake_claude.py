@@ -12,9 +12,13 @@ Playwright волны 3.
 - анализ (схема с p1_win) — потоком SSE: p_base досье со сдвигом +0,02 к игроку 1,
   факторы со ссылками elo и form; первый вызов с этими инструментами и system пишет
   кэш, следующие читают;
+- разбор матча (схема с verdict, этап 5) — по фактам: разбираемая сторона (subject)
+  выиграла — fine без гипотезы, нет — model_error и гипотеза postmortem_hypothesis
+  (условие из словаря: фаворит на покрытии матча, модель завышает);
 - GET /v1/models и /v1/models/{id} — для проверки ключа; у модели есть capabilities
   (веб-поиск у всех, programmatic tool calling — у всех, кроме claude-haiku-4-5);
-- Message Batches (smoke-eval): POST /v1/messages/batches, GET …/batches/{id} (пакет
+- Message Batches: POST /v1/messages/batches, GET /v1/messages/batches (список, новые
+  первыми: поиск пакета, созданного до сбоя воркера), GET …/batches/{id} (пакет
   в работе первые batch_polls опросов, потом ended и results_url), GET …/{id}/results —
   JSONL: каждый запрос пакета отвечается как обычный (без потока, service_tier batch);
   ответ с ошибкой HTTP — результат errored с тем же типом ошибки. Неизвестный пакет —
@@ -27,8 +31,10 @@ POST /_fake/fail {"step": "analysis", "error": "overloaded", "times": 1} у се
 parse, news, analysis или any; error — overloaded (529), rate_limited (429),
 key_rejected (401), server (500), refusal, max_tokens, bad_json, bad_checks (ответ не
 проходит проверку кода), search_error (ошибка поиска unavailable), no_record
-(новости без record_news). Пакеты: step batch — error expired или canceled (результат
-запроса пакета такого вида), step batch_create — ошибка из списка выше при отправке.
+(новости без record_news); у разбора (step postmortem) bad_checks — вывод против исхода,
+bad_scope — условие гипотезы не из словаря. Пакеты: step batch — error expired или
+canceled (результат запроса пакета такого вида), step batch_create — ошибка из списка
+выше при отправке.
 
 Запуск сервера:
     cd backend && .venv/bin/uvicorn tests.fake_claude:app --port 8099
@@ -52,7 +58,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 MODELS = ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-4-5")
-STEPS = ("parse", "news", "analysis")
+STEPS = ("parse", "news", "analysis", "postmortem")
 ERRORS = {
     "overloaded": (529, "overloaded_error"),
     "rate_limited": (429, "rate_limit_error"),
@@ -66,6 +72,16 @@ CODE_CALLER = "code_execution_20260120"
 FAKE_CONTAINER = {"id": "container_fake", "expires_at": "2026-12-31T00:00:00Z"}
 # Модели без programmatic tool calling: фильтрация поиска кодом им недоступна
 NO_CODE_CALLERS = frozenset({"claude-haiku-4-5"})
+
+# Гипотеза разбора по умолчанию: «{surface}» заменяется покрытием матча из фактов
+DEFAULT_HYPOTHESIS: dict[str, Any] = {
+    "text": "Фаворит на этом покрытии выигрывает реже, чем дает модель",
+    "direction": "lower",
+    "conditions": [
+        {"feature": "role", "op": "eq", "values": ["favorite"], "value": None},
+        {"feature": "surface", "op": "in", "values": ["{surface}"], "value": None},
+    ],
+}
 
 _SURFACES = {
     "хард": "hard",
@@ -279,6 +295,8 @@ def step_of(body: dict[str, Any]) -> str:
     properties = schema.get("properties") or {}
     if "p1_win" in properties:
         return "analysis"
+    if "verdict" in properties:
+        return "postmortem"
     return "parse"
 
 
@@ -355,6 +373,10 @@ class FakeClaude:
     # Пакеты Message Batches: id → запросы, сколько опросов еще «в работе», результаты
     batches: dict[str, dict[str, Any]] = field(default_factory=dict)
     batch_polls: int = 0
+    # Гипотеза разбора проигравшей стороны (None — без гипотезы)
+    postmortem_hypothesis: dict[str, Any] | None = field(
+        default_factory=lambda: dict(DEFAULT_HYPOTHESIS)
+    )
 
     def fail(self, step: str, error: str, times: int = 1) -> "FakeClaude":
         with self.lock:
@@ -422,6 +444,8 @@ class FakeClaude:
             msg = self._parse(body, model, error)
         elif step == "news":
             msg = self._news(body, model, error)
+        elif step == "postmortem":
+            msg = self._postmortem(body, model, error)
         else:
             msg = self._analysis(body, model, error)
         if body.get("stream"):
@@ -620,6 +644,41 @@ class FakeClaude:
             **self._cache(body),
         )
 
+    def _postmortem(self, body: dict[str, Any], model: str, error: str | None) -> dict[str, Any]:
+        facts = _dossier(body)
+        subject = facts.get("subject") or {}
+        won = bool(subject.get("won"))
+        surface = ((facts.get("match") or {}).get("surface")) or "hard"
+        hypothesis: dict[str, Any] | None = None
+        if not won and self.postmortem_hypothesis is not None:
+            hypothesis = json.loads(
+                json.dumps(self.postmortem_hypothesis).replace('"{surface}"', json.dumps(surface))
+            )
+            if error == "bad_scope":
+                hypothesis["conditions"] = [
+                    {"feature": "surface", "op": "in", "values": ["mud"], "value": None}
+                ]
+        verdict = "fine" if won else "model_error"
+        if error == "bad_checks":
+            verdict = "luck" if won else "fine"
+        answer = {
+            "verdict": verdict,
+            "what": "Матч сыгран: модель давала " + str((facts.get("model") or {}).get("p_base")),
+            "why": "Фаворит устал после длинного матча накануне, модель это не учла.",
+            "hypothesis": hypothesis,
+        }
+        text = json.dumps(answer, ensure_ascii=False)
+        if error == "bad_json":
+            text = text[: len(text) // 2]
+        stop = "max_tokens" if error == "max_tokens" else "end_turn"
+        return message(
+            [_thinking(), {"type": "text", "text": text}],
+            model=model,
+            stop_reason=stop,
+            input_tokens=3000,
+            output_tokens=600,
+        )
+
     # --- Message Batches ---
 
     def _batch_create(self, raw: bytes) -> tuple[int, Any, str]:
@@ -638,6 +697,25 @@ class FakeClaude:
                 "results": None,
             }
         return 200, self._batch_view(batch_id, ""), "json"
+
+    def _batch_list(self, query: str) -> tuple[int, Any, str]:
+        """GET /v1/messages/batches: новые первыми (как у Anthropic), limit и after_id."""
+        params = dict(item.split("=", 1) for item in query.split("&") if "=" in item)
+        ids = sorted(self.batches, key=lambda key: self.batches[key]["created_at"], reverse=True)
+        if params.get("after_id") in ids:
+            ids = ids[ids.index(params["after_id"]) + 1 :]
+        limit = int(params.get("limit") or 20)
+        page = ids[:limit]
+        return (
+            200,
+            {
+                "data": [self._batch_view(batch_id, "") for batch_id in page],
+                "has_more": len(ids) > limit,
+                "first_id": page[0] if page else None,
+                "last_id": page[-1] if page else None,
+            },
+            "json",
+        )
 
     def _batch_view(self, batch_id: str, origin: str) -> dict[str, Any]:
         batch = self.batches[batch_id]
@@ -722,6 +800,7 @@ class FakeClaude:
             request.content,
             request.headers.get("x-api-key", ""),
             origin=origin,
+            query=url.query.decode() if isinstance(url.query, bytes) else str(url.query),
         )
         headers = {"request-id": "req_fake"}
         if kind == "sse":
@@ -738,12 +817,14 @@ class FakeClaude:
         return anthropic.DefaultAsyncHttpxClient(transport=httpx2.MockTransport(self.handler))
 
     def _route(
-        self, method: str, path: str, raw: bytes, key: str, *, origin: str = ""
+        self, method: str, path: str, raw: bytes, key: str, *, origin: str = "", query: str = ""
     ) -> tuple[int, Any, str]:
         if path.startswith("/v1/messages/batches"):
             parts = path.rstrip("/").split("/")[4:]
             if method == "POST" and not parts:
                 return self._batch_create(raw)
+            if method == "GET" and not parts:
+                return self._batch_list(query)
             if method == "GET" and len(parts) == 1:
                 return self._batch_get(parts[0], key, origin)
             if method == "GET" and len(parts) == 2 and parts[1] == "results":
@@ -811,6 +892,7 @@ def _endpoint(method: str) -> Callable[[Request], Any]:
             await request.body(),
             request.headers.get("x-api-key", ""),
             origin=str(request.base_url).rstrip("/"),
+            query=request.url.query,
         )
         headers = {"request-id": "req_fake"}
         if kind == "sse":

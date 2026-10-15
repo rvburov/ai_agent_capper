@@ -1382,7 +1382,8 @@ export interface paths {
         };
         /**
          * List Uploads
-         * @description Свежесть файла tennis-data и последние 20 загрузок, новые сверху.
+         * @description Свежесть файла tennis-data (с днем следующей загрузки в поясе администратора) и
+         *     последние 20 загрузок, новые сверху.
          */
         get: operations["list_uploads_api_admin_data_uploads_get"];
         put?: never;
@@ -1661,6 +1662,27 @@ export interface paths {
          * @description Карточка ставки: ноги, матчи, исходы, закрытие, CLV и вердикт.
          */
         get: operations["get_bet_api_bets__bet_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bets/{bet_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bet Review
+         * @description Разбор ИИ своей ставки (этап 5, В3): по разбору на матч (общий для всех, кто на
+         *     него ставил) и вердикт по CLV кодом. Чужая или несуществующая — 404.
+         */
+        get: operations["bet_review_api_bets__bet_id__review_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2024,6 +2046,162 @@ export interface paths {
         get: operations["active_strategy_api_strategy_active_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lessons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lessons
+         * @description Уроки (готовые к решению — первыми) и пороги из настроек: сколько в анализе и
+         *     предел, своих случаев для проверки, усадка.
+         */
+        get: operations["list_lessons_api_lessons_get"];
+        put?: never;
+        /**
+         * Propose Lesson
+         * @description Предложить урок: гипотеза с условием из словаря, проверка — как у гипотез из
+         *     разборов. Условие не из словаря — 422; такой урок уже есть — 409; участник — не больше
+         *     5 в сутки (429).
+         */
+        post: operations["propose_lesson_api_lessons_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lessons/dictionary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lesson Dictionary
+         * @description Словарь признаков условия урока (форма «Предложить урок»).
+         */
+        get: operations["lesson_dictionary_api_lessons_dictionary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lessons/{lesson_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Lesson
+         * @description Урок: условие, основание, проверка на архиве и быстрая проверка.
+         */
+        get: operations["get_lesson_api_lessons__lesson_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lessons/{lesson_id}/quick-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quick Check Preview
+         * @description Быстрая проверка до запуска: матчей, запросов, цена по живым числам, худший случай
+         *     и остаток бюджета проверок; можно ли запустить и почему нет. Только администратор.
+         */
+        get: operations["quick_check_preview_api_lessons__lesson_id__quick_check_get"];
+        put?: never;
+        /**
+         * Quick Check Start
+         * @description Запустить быструю проверку (Batch, из бюджета проверок): ход — в GET урока
+         *     (quick). Нельзя — 409 с причиной; очередь недоступна — 503. Только администратор.
+         */
+        post: operations["quick_check_start_api_lessons__lesson_id__quick_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lessons/{lesson_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable Lesson
+         * @description «Использовать в анализе»: урок проверен на архиве и быстрой проверкой, в анализе
+         *     меньше предела (409 иначе). Только администратор.
+         */
+        post: operations["enable_lesson_api_lessons__lesson_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lessons/{lesson_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable Lesson
+         * @description Выключить урок из анализа; включить снова — после новой быстрой проверки. Только
+         *     администратор.
+         */
+        post: operations["disable_lesson_api_lessons__lesson_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lessons/{lesson_id}/notify-when-ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify When Ready
+         * @description «Сообщить, когда наберется»: уведомление на сайте, когда гипотезу проверят. Урок
+         *     уже проверен — 409.
+         */
+        post: operations["notify_when_ready_api_lessons__lesson_id__notify_when_ready_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2910,14 +3088,19 @@ export interface components {
         /**
          * ArchiveFileStatusOut
          * @description Свежесть файла tennis-data: последняя успешная загрузка архива (любым путем) и
-         *     последний день матча в нем; stale — не загружали дольше stale_days дней (тогда
-         *     приходит напоминание); max_mb — предел размера файла.
+         *     последний день матча в нем; next_upload — когда ждать следующий файл (понедельник
+         *     после последней загрузки, прошел — ближайший с сегодняшнего дня, в поясе того, кто
+         *     смотрит; то же правило, что у «ждет результата» в «Ставках»; не загружали — null);
+         *     stale — не загружали дольше stale_days дней (тогда приходит напоминание); max_mb —
+         *     предел размера файла.
          */
         ArchiveFileStatusOut: {
             /** Last Load */
             last_load: string | null;
             /** Matches To */
             matches_to: string | null;
+            /** Next Upload */
+            next_upload: string | null;
             /** Stale Days */
             stale_days: number;
             /** Stale */
@@ -3022,7 +3205,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change" | "data_upload" | "eval_set" | "eval_run" | "version_on" | "lesson_on" | "model_on";
+            action: "invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change" | "data_upload" | "eval_set" | "eval_run" | "version_on" | "lesson_on" | "model_on" | "lesson_off";
             /** Target User Id */
             target_user_id: number | null;
             /** Target Name */
@@ -3241,7 +3424,10 @@ export interface components {
          *     app/services/bet_versions.py). Этап 5: archive_to — у рассчитанной по архиву
          *     (settled_by = auto) последний день матчей в архиве на момент расчета («авто · архив
          *     ‹дата›»); awaiting_result — открытая ставка, все матчи которой уже прошли (по поясу
-         *     участника): ждет результата из архива или от участника.
+         *     участника): ждет результата из архива или от участника; у такой ставки
+         *     archive_matches_to — последний день матчей в архиве сейчас, next_upload — когда ждать
+         *     следующий файл tennis-data (понедельник после последней загрузки; null — файл еще не
+         *     загружали).
          */
         BetItemOut: {
             /** Id */
@@ -3300,6 +3486,10 @@ export interface components {
             archive_to: string | null;
             /** Awaiting Result */
             awaiting_result: boolean;
+            /** Archive Matches To */
+            archive_matches_to?: string | null;
+            /** Next Upload */
+            next_upload?: string | null;
         };
         /** BetLegBrief */
         BetLegBrief: {
@@ -3328,7 +3518,7 @@ export interface components {
          *     окна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все
          *     равно за участником (В16). archive_result и archive_score — исход и счет (первым —
          *     игрок 1) по архиву, когда он разошелся с расчетом ставки (этап 5, Т3): банк не
-         *     меняли, участник проверяет сам.
+         *     меняли, участник проверяет сам. news_result — подсказка исхода по новостям.
          */
         BetLegItemOut: {
             /** Id */
@@ -3374,6 +3564,7 @@ export interface components {
             archive_result: ("win" | "loss" | "void") | null;
             /** Archive Score */
             archive_score: string | null;
+            news_result?: components["schemas"]["NewsResultOut"] | null;
         };
         /** BetLegOut */
         BetLegOut: {
@@ -3431,6 +3622,26 @@ export interface components {
             items: components["schemas"]["BetItemOut"][];
             /** Next Before */
             next_before: number | null;
+        };
+        /**
+         * BetReviewOut
+         * @description Разбор ИИ ставки: по разбору на каждый матч с исходом (возвраты ног не
+         *     разбираются) и вердикт по CLV кодом (строкой на экране, как на этапе 4).
+         */
+        BetReviewOut: {
+            /** Bet Id */
+            bet_id: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "not_reviewed" | "pending" | "done" | "failed";
+            /** Reason */
+            reason: ("void" | "legacy" | "no_prediction") | null;
+            /** Clv Verdict */
+            clv_verdict: ("legacy" | "void" | "no_closing" | "edge_confirmed" | "won_against_market" | "variance" | "model_error") | null;
+            /** Legs */
+            legs: components["schemas"]["LegReviewOut"][];
         };
         /**
          * BetsSummaryOut
@@ -4511,6 +4722,35 @@ export interface components {
             /** Q */
             q: number;
         };
+        /**
+         * FeatureOut
+         * @description Признак словаря: перечень (values) или число (low…high с шагом step); side —
+         *     признак своей стороны исхода.
+         */
+        FeatureOut: {
+            /**
+             * Feature
+             * @enum {string}
+             */
+            feature: "market" | "surface" | "round" | "best_of" | "role" | "elo_gap" | "odds" | "sets_48h" | "opp_sets_48h" | "rest_days" | "h2h_matches" | "h2h_wins";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "enum" | "number";
+            /** Ops */
+            ops: ("in" | "eq" | "lt" | "le" | "gt" | "ge")[];
+            /** Values */
+            values: string[];
+            /** Low */
+            low: number | null;
+            /** High */
+            high: number | null;
+            /** Step */
+            step: number | null;
+            /** Side */
+            side: boolean;
+        };
         /** FlagsOut */
         FlagsOut: {
             /** P1 */
@@ -4894,6 +5134,57 @@ export interface components {
             best_of: number | null;
         };
         /**
+         * LegReviewOut
+         * @description Разбор матча ноги (общий для всех, кто на него ставил, В3) и вердикт по вашей ноге.
+         *     Общий разбор построен только по архиву и досье: market и selection — сторона, которую
+         *     разбирали (прогноз базовой модели на победу в матче — ее фаворит), same_pick — ваша
+         *     нога на эту же сторону. what — что произошло, why — почему, hypothesis — гипотеза
+         *     текстом, lesson — ее урок (нет — условие не из словаря или гипотезы нет). verdict —
+         *     вывод по вашей ноге, считает код: won — ваша нога сыграла (как внесена или
+         *     рассчитана), clv — CLV вашей ноги (доля; нет закрытия — null); вывод общего разбора
+         *     берется, только если нога на ту же сторону и обе проиграли. model, cost_usd,
+         *     done_at — модель, цена вызова (Batch) и когда разбор готов.
+         */
+        LegReviewOut: {
+            /** Leg Id */
+            leg_id: number;
+            /** Match Id */
+            match_id: number;
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Selection */
+            selection: number;
+            /** Same Pick */
+            same_pick: boolean;
+            /** Won */
+            won: boolean;
+            /** Clv */
+            clv: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "submitted" | "done" | "failed";
+            /** Verdict */
+            verdict: ("fine" | "lucky" | "luck" | "model_error" | "data_gap") | null;
+            /** What */
+            what: string | null;
+            /** Why */
+            why: string | null;
+            /** Hypothesis */
+            hypothesis: string | null;
+            lesson: components["schemas"]["ReviewLessonOut"] | null;
+            /** Model */
+            model: string | null;
+            /** Cost Usd */
+            cost_usd: number | null;
+            /** Done At */
+            done_at: string | null;
+        };
+        /**
          * LegSettleIn
          * @description Исход ноги, счет (необязательно; первым — игрок 1) и закрывающий кэф: поля нет —
          *     закрытие не меняется, null — стирается.
@@ -4941,6 +5232,218 @@ export interface components {
             profile: {
                 [key: string]: unknown;
             };
+        };
+        /** LessonDictionaryOut */
+        LessonDictionaryOut: {
+            /** Features */
+            features: components["schemas"]["FeatureOut"][];
+            /** Directions */
+            directions: ("lower" | "raise")[];
+            /** Max Conditions */
+            max_conditions: number;
+        };
+        /**
+         * LessonEstimateOut
+         * @description Значение и его 95% ДИ (бутстрэп), n — событий.
+         */
+        LessonEstimateOut: {
+            /** Value */
+            value: number;
+            /** Low */
+            low: number;
+            /** High */
+            high: number;
+            /** N */
+            n: number;
+        };
+        /**
+         * LessonHistoryOut
+         * @description Проверка на архиве кодом: случаи истории и отложенной части (с holdout_since);
+         *     bias — средний остаток y − p модели в условии (доля, −0,05 = модель завышает на
+         *     5 п.п.); shift — поправка с усадкой; лог-лосс без урока и с поправкой; gain — выигрыш
+         *     лог-лосса на истории (без − с, больше нуля — урок помогает), holdout_gain — на
+         *     отложенной части; seed бутстрэпа.
+         */
+        LessonHistoryOut: {
+            /** Checked At */
+            checked_at: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "rejected" | "insufficient";
+            /** Reason */
+            reason: string | null;
+            /** Method */
+            method: string;
+            /** N Hist */
+            n_hist: number;
+            /** N History */
+            n_history: number;
+            /** N Holdout */
+            n_holdout: number;
+            /** Holdout Since */
+            holdout_since: string | null;
+            bias: components["schemas"]["LessonEstimateOut"] | null;
+            /** Shift */
+            shift: number | null;
+            /** Log Loss Without */
+            log_loss_without: number | null;
+            /** Log Loss With */
+            log_loss_with: number | null;
+            gain: components["schemas"]["LessonEstimateOut"] | null;
+            holdout_gain: components["schemas"]["LessonEstimateOut"] | null;
+            /** Seed */
+            seed: number;
+        };
+        /**
+         * LessonIn
+         * @description Предложить урок: наблюдение одной фразой и условие из словаря (Т7). Процессный урок
+         *     (kind process) — только администратор.
+         */
+        LessonIn: {
+            /** Text */
+            text: string;
+            /**
+             * Kind
+             * @default numeric
+             * @enum {string}
+             */
+            kind: "numeric" | "process";
+            scope: components["schemas"]["ScopeIO"];
+        };
+        /**
+         * LessonOut
+         * @description Урок. n_cases — своих случаев (матчей ставок под условием; участник видит только
+         *     матчи своих ставок, администратор — всех), need_cases — порог проверки; effect,
+         *     effect_ci, effect_shrunk, holdout_* — как в lessons (доли);
+         *     own_bets — ваши ставки в основании урока (только ваши, Т21); watching — вы просили
+         *     сообщить, когда урок проверят; scope_ok — условие из словаря (его можно проверить на
+         *     архиве).
+         */
+        LessonOut: {
+            /** Id */
+            id: number;
+            /** Code */
+            code: string;
+            /** Text */
+            text: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "numeric" | "process";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "hypothesis" | "ready" | "confirmed" | "rejected" | "retired";
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "postmortem" | "manual";
+            /** Shared */
+            shared: boolean;
+            scope: components["schemas"]["ScopeIO"] | null;
+            /** Scope Ok */
+            scope_ok: boolean;
+            /** In Prompt */
+            in_prompt: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** N Cases */
+            n_cases: number;
+            /** Need Cases */
+            need_cases: number;
+            /** N Hist */
+            n_hist: number;
+            /** Effect */
+            effect: number | null;
+            /** Effect Ci */
+            effect_ci: number[] | null;
+            /** Effect Shrunk */
+            effect_shrunk: number | null;
+            /** Holdout Effect */
+            holdout_effect: number | null;
+            /** Holdout Ci */
+            holdout_ci: number[] | null;
+            /** Validated At */
+            validated_at: string | null;
+            /** Decided At */
+            decided_at: string | null;
+            /** Retired At */
+            retired_at: string | null;
+            /** Rechecked At */
+            rechecked_at: string | null;
+            history: components["schemas"]["LessonHistoryOut"] | null;
+            quick: components["schemas"]["LessonQuickOut"] | null;
+            /** Own Bets */
+            own_bets: number[];
+            /** Watching */
+            watching: boolean;
+        };
+        /**
+         * LessonQuickOut
+         * @description Быстрая проверка перед включением (В4): матчей, итог, разница лог-лосса с уроком и
+         *     без (с − без, меньше нуля — лучше), ошибки формата и отказы, цена и худший случай.
+         *     passed — не хуже: верхняя граница ДИ разницы не выше допуска, все события оценены.
+         */
+        LessonQuickOut: {
+            /** Eval Run Id */
+            eval_run_id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed";
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Events */
+            events: number;
+            /** Requests */
+            requests: number;
+            /** Passed */
+            passed: boolean | null;
+            diff: components["schemas"]["LessonEstimateOut"] | null;
+            /** Margin */
+            margin: number;
+            /** Format Errors */
+            format_errors: number;
+            /** Refusals */
+            refusals: number;
+            /** Unrated */
+            unrated: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Worst Usd */
+            worst_usd: number;
+            /** Error */
+            error: string | null;
+        };
+        /**
+         * LessonsOut
+         * @description Уроки и пороги из настроек: не больше max_active в анализе (сейчас active),
+         *     проверка — с min_cases своих случаев (процессный — min_cases_process), усадка k.
+         */
+        LessonsOut: {
+            /** Items */
+            items: components["schemas"]["LessonOut"][];
+            /** Active */
+            active: number;
+            /** Max Active */
+            max_active: number;
+            /** Min Cases */
+            min_cases: number;
+            /** Min Cases Process */
+            min_cases_process: number;
+            /** Shrink K */
+            shrink_k: number;
         };
         /**
          * LimitAlertOut
@@ -5444,6 +5947,41 @@ export interface components {
             analyses: number[];
         };
         /**
+         * NewsResultOut
+         * @description Подсказка исхода по новостям (этап 5, В1-Г): результат матча нашел шаг новостей
+         *     перед анализом. Только подсказка — деньги по ней не считаются, исход вносит участник.
+         *     winner — игрок 1 или 2 матча; sets — счет по сетам (первым — игрок 1), если в новости
+         *     полный счет; score — счет как в новости; retired — в новости снятие; source_name,
+         *     source_url, published_on — откуда и за какой день факт; found_at — когда его нашли.
+         */
+        NewsResultOut: {
+            /**
+             * Winner
+             * @enum {integer}
+             */
+            winner: 1 | 2;
+            /** Sets */
+            sets: string | null;
+            /** Score */
+            score: string;
+            /** Retired */
+            retired: boolean;
+            /** Source Name */
+            source_name: string | null;
+            /** Source Url */
+            source_url: string;
+            /**
+             * Published On
+             * Format: date
+             */
+            published_on: string;
+            /**
+             * Found At
+             * Format: date-time
+             */
+            found_at: string;
+        };
+        /**
          * NewsStatusOut
          * @description Новости игрока: когда последний раз искали, свежие ли (моложе ttl_hours), сколько
          *     фактов за lookback_days.
@@ -5460,7 +5998,11 @@ export interface components {
             /** Count */
             count: number;
         };
-        /** NotificationOut */
+        /**
+         * NotificationOut
+         * @description Уведомление центра уведомлений. outcome — исход у «Ставка рассчитана» (цвет
+         *     значка: выигрыш, проигрыш, возврат), у остальных видов — null (этап 5).
+         */
         NotificationOut: {
             /** Id */
             id: number;
@@ -5479,6 +6021,8 @@ export interface components {
             created_at: string;
             /** Read At */
             read_at: string | null;
+            /** Outcome */
+            outcome?: ("won" | "lost" | "void") | null;
         };
         /** NotificationPrefIn */
         NotificationPrefIn: {
@@ -5658,6 +6202,10 @@ export interface components {
             archive_to: string | null;
             /** Awaiting Result */
             awaiting_result: boolean;
+            /** Archive Matches To */
+            archive_matches_to?: string | null;
+            /** Next Upload */
+            next_upload?: string | null;
             /** Implied */
             implied: number[];
         };
@@ -6431,6 +6979,49 @@ export interface components {
             currency: "RUB" | "USD" | "EUR";
         };
         /**
+         * QuickCheckOut
+         * @description Быстрая проверка урока до запуска (цена по живым числам и худший случай) и после
+         *     (eval_run_id, status). requests — запросов в пакете: по матчу с уроком и, где нет
+         *     готового прогона без урока, еще по одному без него. reason — почему запустить нельзя
+         *     (ключ errors.*): нет матчей, мало бюджета проверок, проверка уже идет, урок не готов.
+         */
+        QuickCheckOut: {
+            /** Lesson Id */
+            lesson_id: number;
+            /** Events */
+            events: number;
+            /** Requests */
+            requests: number;
+            /** Baseline Reused */
+            baseline_reused: number;
+            /** Model */
+            model: string;
+            /** Estimate Usd */
+            estimate_usd: number;
+            /** Worst Usd */
+            worst_usd: number;
+            /** Budget Usd */
+            budget_usd: number;
+            /** Spent Usd */
+            spent_usd: number;
+            /** Reserved Usd */
+            reserved_usd: number;
+            /** Left Usd */
+            left_usd: number;
+            /** Active */
+            active: number;
+            /** Max Active */
+            max_active: number;
+            /** Can Run */
+            can_run: boolean;
+            /** Reason */
+            reason: string | null;
+            /** Eval Run Id */
+            eval_run_id: number | null;
+            /** Status */
+            status: ("pending" | "running" | "done" | "failed") | null;
+        };
+        /**
          * RecentBetOut
          * @description Рассчитанная ставка периода для таблицы «Динамика банка»: equity_after — капитал
          *     сразу после ее расчета («Банк после»).
@@ -6640,6 +7231,30 @@ export interface components {
              */
             expected_updated_at: string;
         };
+        /**
+         * ReviewLessonOut
+         * @description Урок гипотезы разбора: код, статус, случаев из порога (у участника — только по его
+         *     ставкам, Р14), в анализе ли.
+         */
+        ReviewLessonOut: {
+            /** Id */
+            id: number;
+            /** Code */
+            code: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "hypothesis" | "ready" | "confirmed" | "rejected" | "retired";
+            /** In Prompt */
+            in_prompt: boolean;
+            /** N Cases */
+            n_cases: number;
+            /** Need Cases */
+            need_cases: number;
+            /** Text */
+            text: string;
+        };
         /** RoleChangeIn */
         RoleChangeIn: {
             /**
@@ -6715,6 +7330,40 @@ export interface components {
             last_day: string | null;
             /** Last Settled At */
             last_settled_at: string | null;
+        };
+        /**
+         * ScopeConditionIO
+         * @description Условие из словаря признаков: перечень — op in/eq и values, число — op lt/le/gt/ge
+         *     и value.
+         */
+        ScopeConditionIO: {
+            /**
+             * Feature
+             * @enum {string}
+             */
+            feature: "market" | "surface" | "round" | "best_of" | "role" | "elo_gap" | "odds" | "sets_48h" | "opp_sets_48h" | "rest_days" | "h2h_matches" | "h2h_wins";
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "in" | "eq" | "lt" | "le" | "gt" | "ge";
+            /** Values */
+            values?: string[];
+            /** Value */
+            value?: number | null;
+        };
+        /**
+         * ScopeIO
+         * @description Условие урока: направление (модель завышает — lower, занижает — raise) и признаки.
+         */
+        ScopeIO: {
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "lower" | "raise";
+            /** Conditions */
+            conditions: components["schemas"]["ScopeConditionIO"][];
         };
         /**
          * SeriesOut
@@ -9396,7 +10045,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 before_id?: number | null;
-                action?: ("invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change" | "data_upload" | "eval_set" | "eval_run" | "version_on" | "lesson_on" | "model_on")[] | null;
+                action?: ("invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change" | "data_upload" | "eval_set" | "eval_run" | "version_on" | "lesson_on" | "model_on" | "lesson_off")[] | null;
             };
             header?: never;
             path?: never;
@@ -10746,6 +11395,37 @@ export interface operations {
             };
         };
     };
+    bet_review_api_bets__bet_id__review_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bet_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetReviewOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     settle_bet_api_bets__bet_id__result_put: {
         parameters: {
             query?: never;
@@ -11337,6 +12017,285 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrategyOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_lessons_api_lessons_get: {
+        parameters: {
+            query?: {
+                status?: ("hypothesis" | "ready" | "confirmed" | "rejected" | "retired") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    propose_lesson_api_lessons_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LessonIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    lesson_dictionary_api_lessons_dictionary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonDictionaryOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_lesson_api_lessons__lesson_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lesson_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    quick_check_preview_api_lessons__lesson_id__quick_check_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lesson_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickCheckOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    quick_check_start_api_lessons__lesson_id__quick_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lesson_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickCheckOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    enable_lesson_api_lessons__lesson_id__enable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lesson_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    disable_lesson_api_lessons__lesson_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lesson_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    notify_when_ready_api_lessons__lesson_id__notify_when_ready_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lesson_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

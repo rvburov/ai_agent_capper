@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import func, select, text, update
@@ -30,8 +31,10 @@ from app.db.session import create_sessionmaker
 from app.ingest import match_link
 from app.ml.market import devig_pair
 from app.services import auto_settlement, players
+from app.services import bank as bank_service
 from app.services.archive_settlement import settle_from_archive, summary_lines
 from app.services.bank import CURRENCY_LOCK, bank_from_entries, bank_state, ledger_entries
+from app.services.data_status import next_upload_day
 from tests.helpers_admin import Signed, signed_in
 from tests.helpers_bets import (
     BetMaker,
@@ -418,6 +421,11 @@ async def test_conflict_with_manual_result(
     assert [(row.kind, row.amount) for row in await ledger_rows(db, member.id)] == ledger_before
     [note] = await _notes(db, member.id, "settle_conflict")
     assert note.link == f"/bets?bet={bet.id}" and "Банк не меняли" in note.body
+    # Событие названо: в экспрессе видно, о каком матче речь
+    match = await db.get_one(Match, leg.match_id)
+    names = [await db.get_one(Player, pid) for pid in (match.player1_id, match.player2_id)]
+    event = " — ".join(player.name_ru or player.name for player in names)
+    assert note.params["event"] == event and f"событие {event} —" in note.body
     card = await get_bet(member.client, bet.id)
     assert card["legs"][0]["archive_result"] == "loss"
     assert card["legs"][0]["archive_score"] == "0:2"
@@ -522,6 +530,65 @@ async def test_reminder_once_per_bet(member: Signed, maker: BetMaker, db: AsyncS
     # «Ждет результата»: открытые ставки, все матчи которых прошли
     counts = (await member.client.get("/api/bets/counts")).json()
     assert counts == {"open": 2, "awaiting_result": 2}
+
+
+async def test_awaiting_bet_shows_archive_dates(
+    member: Signed,
+    maker: BetMaker,
+    archive: Archive,
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ставка ждет результата: в карточке и списке — последний день матчей в архиве и
+    когда ждать следующий файл (понедельник после последней загрузки; прошел — ближайший
+    понедельник). У ставки с будущим матчем этих дат нет."""
+    waiting = await maker.bet(member.user, [_spec()], placed_at=PLACED)
+    later = await maker.bet(
+        member.user, [LegSpec(tournament=None, match_day=date(2099, 1, 1))], placed_at=PLACED
+    )
+    clock = {"now": datetime(2026, 10, 7, 12, 0, tzinfo=UTC)}  # среда
+    monkeypatch.setattr(bank_service, "utcnow", lambda: clock["now"])
+    card = await get_bet(member.client, waiting.id)
+    # Файл еще не загружали, матчей в архиве нет
+    assert card["awaiting_result"] is True
+    assert (card["archive_matches_to"], card["next_upload"]) == (None, None)
+
+    others = [Player(name="Archive Other One"), Player(name="Archive Other Two")]
+    db.add_all(others)
+    await db.flush()
+    await archive.match(others[0].id, others[1].id, day=date(2026, 10, 3))
+    db.add(
+        IngestionRun(
+            source="tennis_data",
+            status="ok",
+            started_at=datetime(2026, 10, 5, 6, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 10, 5, 6, 0, tzinfo=UTC),
+            details={"files": {"2026.xlsx": "0" * 64}},
+        )
+    )
+    await db.commit()
+    card = await get_bet(member.client, waiting.id)
+    assert (card["archive_matches_to"], card["next_upload"]) == ("2026-10-03", "2026-10-12")
+    page = (await member.client.get("/api/bets")).json()["items"]
+    by_id = {item["id"]: item for item in page}
+    assert by_id[waiting.id]["next_upload"] == "2026-10-12"
+    assert by_id[later.id]["awaiting_result"] is False
+    assert (by_id[later.id]["archive_matches_to"], by_id[later.id]["next_upload"]) == (None, None)
+    # Понедельник 12 окт прошел без файла — ждем в ближайший понедельник
+    clock["now"] = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+    card = await get_bet(member.client, waiting.id)
+    assert card["next_upload"] == "2026-10-19"
+
+
+def test_next_upload_day() -> None:
+    zone = ZoneInfo("Europe/Moscow")
+    sunday_night = datetime(2026, 10, 4, 22, 0, tzinfo=UTC)  # 5 окт, 01:00 в Москве
+    assert next_upload_day(sunday_night, zone, date(2026, 10, 6)) == date(2026, 10, 12)
+    assert next_upload_day(sunday_night, ZoneInfo("UTC"), date(2026, 10, 4)) == date(2026, 10, 5)
+    # В сам понедельник опоздания — сегодня
+    assert next_upload_day(sunday_night, zone, date(2026, 10, 19)) == date(2026, 10, 19)
+    assert next_upload_day(sunday_night, zone, date(2026, 10, 20)) == date(2026, 10, 26)
+    assert next_upload_day(None, zone, date(2026, 10, 6)) is None
 
 
 async def test_manual_settle_waits_for_auto_and_loses_the_race(

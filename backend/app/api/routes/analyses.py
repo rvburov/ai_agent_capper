@@ -42,7 +42,7 @@ async def enqueue_analysis(analysis_id: int, attempt: int, job_id: str) -> None:
     анализа редкий, держать пул в API незачем."""
     # Модуль воркера тянет за собой загрузчики данных (openpyxl): API грузит его только
     # при первом запуске анализа
-    from app.workers.main import create_queue_pool
+    from app.workers.queue import create_queue_pool
 
     pool = await create_queue_pool()
     try:

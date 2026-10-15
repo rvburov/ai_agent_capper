@@ -115,6 +115,28 @@ class AgentConfig(BaseModel):
     estimate_news_input_tokens: int = Field(default=37000, ge=0, le=1_000_000)
     estimate_news_output_tokens: int = Field(default=1500, ge=0, le=64000)
     estimate_news_searches: int = Field(default=2, ge=0, le=100)
+    # Разбор рассчитанной ставки (этап 5, В3 Р25): Sonnet 5.5 через Batch, один на матч,
+    # из общего бюджета ключа администратора. Пакет собирается раз в
+    # postmortem_every_minutes минут, не больше postmortem_batch_max разборов
+    postmortem_enabled: bool = True
+    postmortem_model: ModelId = "claude-sonnet-5-5"
+    postmortem_effort: Effort = "low"
+    postmortem_max_tokens: int = Field(default=4000, ge=512, le=32000)
+    postmortem_every_minutes: int = Field(default=60, ge=15, le=1440)
+    postmortem_batch_max: int = Field(default=100, ge=1, le=1000)
+    estimate_postmortem_input_tokens: int = Field(default=4000, ge=0, le=1_000_000)
+    estimate_postmortem_output_tokens: int = Field(default=1000, ge=0, le=32000)
+    # Проверки (eval, Т8): предел ответа оценки матча в пакете проверки и быстрая
+    # проверка урока перед включением (В4): столько матчей набора
+    eval_max_tokens: int = Field(default=8000, ge=1024, le=128000)
+    quick_check_events: int = Field(default=40, ge=10, le=200)
+    # Уроки (LLM_LEARNING.md, 1.1): не больше lessons_max_active в анализе, проверка на
+    # истории — с lesson_min_cases своих случаев (у процессного урока —
+    # lesson_min_cases_process), усадка поправки effect · n / (n + lesson_shrink_k)
+    lessons_max_active: int = Field(default=15, ge=1, le=50)
+    lesson_min_cases: int = Field(default=20, ge=5, le=1000)
+    lesson_min_cases_process: int = Field(default=10, ge=1, le=1000)
+    lesson_shrink_k: int = Field(default=200, ge=0, le=100_000)
     # Потолок одного анализа по умолчанию для новых участников (на ключе администратора и
     # потолок своего ключа, Р13). Меняется в кабинете администратора («Лимиты по
     # умолчанию»); у зарегистрированных не меняется. Это не жесткий потолок программы

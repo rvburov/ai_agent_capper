@@ -25,6 +25,8 @@ from app.db.models import (
     Bet,
     BetLeg,
     Bookmaker,
+    Lesson,
+    LessonWatch,
     Notification,
     TrustedDevice,
     UserSession,
@@ -187,6 +189,7 @@ FOREIGN_CASES: dict[tuple[str, str], tuple[Create, Untouched]] = {
     ("POST", "/api/analyses/{analysis_id}/cancel"): (_analysis, _analysis_untouched),
     ("PUT", "/api/analyses/{analysis_id}/decision"): (_analysis, _analysis_untouched),
     ("GET", "/api/bets/{bet_id}"): (_bet, _bet_untouched),
+    ("GET", "/api/bets/{bet_id}/review"): (_bet, _bet_untouched),
     ("PUT", "/api/bets/{bet_id}/result"): (_bet, _bet_untouched),
     ("POST", "/api/bets/{bet_id}/reverse"): (_bet, _bet_untouched),
     ("PUT", "/api/bets/{bet_id}/legs/{leg_id}/closing"): (_bet_leg, _bet_untouched),
@@ -205,12 +208,60 @@ SHARED_ROUTES = {
 }
 
 
+# Уроки (этап 5, волна 2): общие уроки видит каждый, решения — только администратор (403),
+# свой урок участника (user_id) другому не виден (404)
+LESSON_ROUTES = {
+    ("GET", "/api/lessons/{lesson_id}"),
+    ("GET", "/api/lessons/{lesson_id}/quick-check"),
+    ("POST", "/api/lessons/{lesson_id}/quick-check"),
+    ("POST", "/api/lessons/{lesson_id}/enable"),
+    ("POST", "/api/lessons/{lesson_id}/disable"),
+    ("POST", "/api/lessons/{lesson_id}/notify-when-ready"),
+}
+LESSON_ADMIN_ROUTES = {
+    ("GET", "/api/lessons/{lesson_id}/quick-check"),
+    ("POST", "/api/lessons/{lesson_id}/quick-check"),
+    ("POST", "/api/lessons/{lesson_id}/enable"),
+    ("POST", "/api/lessons/{lesson_id}/disable"),
+}
+
+
 def test_every_id_route_is_checked() -> None:
     """Новый адрес с id в пути (например, /api/bets/{bet_id}) должен попасть сюда."""
-    assert set(ID_ROUTES) == set(FOREIGN_CASES) | SHARED_ROUTES, (
+    assert set(ID_ROUTES) == set(FOREIGN_CASES) | SHARED_ROUTES | LESSON_ROUTES, (
         "добавьте в FOREIGN_CASES проверку чужого объекта для новых адресов"
     )
     assert not set(FOREIGN_CASES) & SHARED_ROUTES
+
+
+@pytest.mark.parametrize(("method", "path"), sorted(LESSON_ROUTES), ids=lambda v: str(v))
+async def test_lesson_routes_hide_personal_and_keep_decisions_to_admin(
+    method: str,
+    path: str,
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    db: AsyncSession,
+) -> None:
+    owner = await make_user()
+    personal = Lesson(user_id=owner.id, code="L-001", text="Свой урок", kind="numeric")
+    shared = Lesson(user_id=None, code="L-001", text="Общий урок", kind="numeric")
+    db.add_all([personal, shared])
+    await db.commit()
+    alice = await login(await make_client("10.0.0.1"), await make_user())
+    foreign = await alice.request(method, path.replace("{lesson_id}", str(personal.id)))
+    assert foreign.status_code in (403, 404), foreign.text
+    common = await alice.request(method, path.replace("{lesson_id}", str(shared.id)))
+    if (method, path) in LESSON_ADMIN_ROUTES:
+        assert common.status_code == 403, common.text
+    else:
+        assert common.status_code == 200, common.text
+    row = await db.get_one(Lesson, personal.id, populate_existing=True)
+    assert (row.status, row.in_prompt) == ("hypothesis", False)
+    assert (
+        await db.scalar(select(LessonWatch.user_id).where(LessonWatch.lesson_id == personal.id))
+        is None
+    )
 
 
 def _keys(node: Any) -> set[str]:

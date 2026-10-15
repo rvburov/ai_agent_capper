@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -46,6 +47,8 @@ POSTMORTEM_STATUSES = ("queued", "submitted", "done", "failed")
 POSTMORTEM_VERDICTS = ("fine", "lucky", "luck", "model_error", "data_gap")
 BATCH_KINDS = ("postmortem", "eval", "shadow")
 BATCH_STATUSES = ("pending", "submitted", "collected", "failed", "lost", "abandoned")
+# Откуда урок: гипотеза из разбора ставки или предложен вручную (этап 5, волна 2)
+LESSON_ORIGINS = ("postmortem", "manual")
 
 
 class Lesson(CreatedAtMixin, UpdatedAtMixin, Base):
@@ -62,6 +65,7 @@ class Lesson(CreatedAtMixin, UpdatedAtMixin, Base):
         Index("ix_lessons_user_id_status", "user_id", "status"),
         check_in("kind", LESSON_KINDS, "kind"),
         check_in("status", LESSON_STATUSES, "status"),
+        check_in("origin", LESSON_ORIGINS, "origin"),
     )
 
     id: Mapped[BigIntPK]
@@ -96,6 +100,31 @@ class Lesson(CreatedAtMixin, UpdatedAtMixin, Base):
     decided_at: Mapped[datetime | None]
     retired_at: Mapped[datetime | None]
     rechecked_at: Mapped[datetime | None]
+    # Волна 2: откуда урок, кто предложил его вручную (обнуляется при удалении участника),
+    # подробности проверок кодом — история, отложенная часть, быстрая проверка
+    # (app/services/lesson_check.py, app/services/lesson_quick.py)
+    origin: Mapped[str] = mapped_column(String(16), server_default="postmortem")
+    created_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    metrics: Mapped[dict[str, Any]] = mapped_column(server_default=sa_text("'{}'::jsonb"))
+
+
+class LessonWatch(Base):
+    """«Сообщить, когда наберется» (макет learning.js): участник ждет решения по уроку;
+    notified_at — когда сообщили (повторно не сообщаем)."""
+
+    __tablename__ = "lesson_watches"
+    __table_args__ = (Index("ix_lesson_watches_user_id", "user_id"),)
+
+    lesson_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("lessons.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    notified_at: Mapped[datetime | None]
 
 
 class MlModel(CreatedAtMixin, Base):
@@ -204,12 +233,18 @@ class BatchJob(CreatedAtMixin, Base):
     submitted_at: Mapped[datetime | None]
     ended_at: Mapped[datetime | None]
     error: Mapped[str | None]
+    # Модель, effort, max_tokens, версии промпта и схемы запросов пакета: по ним пишутся
+    # строки agent_runs при сборе (настройки могут поменяться, пока пакет в работе)
+    params: Mapped[dict[str, Any]] = mapped_column(server_default=sa_text("'{}'::jsonb"))
 
 
 class Postmortem(CreatedAtMixin, Base):
-    """Разбор рассчитанного прогноза (В3, Р25): один на прогноз матча, общий. bet_id и
-    user_id — чья ставка его вызвала: видит только ее владелец (Т21); при удалении
-    участника обнуляются (app/services/admin_users.py)."""
+    """Разбор сыгранного матча (В3, Р25): один на матч, общий для всех, кто на него ставил.
+    Строится только по архиву и досье (исход и счет архива, прогноз базовой модели), без
+    ставок и анализов участников; вердикт по своей ноге каждому считает код
+    (app/services/postmortems.py). prediction_id, bet_id и user_id — чья ставка поставила
+    матч в очередь (досье берется из этого прогноза); участнику не показываются (Т21), при
+    удалении участника bet_id и user_id обнуляются (app/services/admin_users.py)."""
 
     __tablename__ = "postmortems"
     __table_args__ = (
@@ -219,6 +254,8 @@ class Postmortem(CreatedAtMixin, Base):
         Index("ix_postmortems_user_id", "user_id"),
         check_in("status", POSTMORTEM_STATUSES, "status"),
         check_in("verdict", POSTMORTEM_VERDICTS, "verdict"),
+        CheckConstraint("side IS NULL OR side IN (1, 2)", name="side"),
+        CheckConstraint("winner IS NULL OR winner IN (1, 2)", name="winner"),
     )
 
     id: Mapped[BigIntPK]
@@ -241,6 +278,12 @@ class Postmortem(CreatedAtMixin, Base):
     status: Mapped[str] = mapped_column(String(16), server_default="queued")
     verdict: Mapped[str | None] = mapped_column(String(16))
     summary: Mapped[str | None]
+    # «Почему» разбора (волна 2): summary — что произошло
+    why: Mapped[str | None]
+    # Разбор общий на матч (М5 волны 2): сторона, которую разбирали (фаворит базовой модели,
+    # рынок ML), и победитель по архиву, на котором разбор построен
+    side: Mapped[int | None] = mapped_column(SmallInteger)
+    winner: Mapped[int | None] = mapped_column(SmallInteger)
     hypothesis: Mapped[str | None]
     scope: Mapped[dict[str, Any] | None]
     lesson_id: Mapped[int | None] = mapped_column(

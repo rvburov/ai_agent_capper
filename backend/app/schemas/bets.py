@@ -202,6 +202,23 @@ class ClosingOut(BaseModel):
     unverified: bool
 
 
+class NewsResultOut(BaseModel):
+    """Подсказка исхода по новостям (этап 5, В1-Г): результат матча нашел шаг новостей
+    перед анализом. Только подсказка — деньги по ней не считаются, исход вносит участник.
+    winner — игрок 1 или 2 матча; sets — счет по сетам (первым — игрок 1), если в новости
+    полный счет; score — счет как в новости; retired — в новости снятие; source_name,
+    source_url, published_on — откуда и за какой день факт; found_at — когда его нашли."""
+
+    winner: Literal[1, 2]
+    sets: str | None
+    score: str
+    retired: bool
+    source_name: str | None
+    source_url: str
+    published_on: date
+    found_at: datetime
+
+
 class BetLegItemOut(BaseModel):
     """Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда
     рассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),
@@ -211,7 +228,7 @@ class BetLegItemOut(BaseModel):
     окна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все
     равно за участником (В16). archive_result и archive_score — исход и счет (первым —
     игрок 1) по архиву, когда он разошелся с расчетом ставки (этап 5, Т3): банк не
-    меняли, участник проверяет сам."""
+    меняли, участник проверяет сам. news_result — подсказка исхода по новостям."""
 
     id: int
     match: LegMatchOut
@@ -233,6 +250,8 @@ class BetLegItemOut(BaseModel):
     score_outcomes: dict[str, LegResult] | None
     archive_result: LegResult | None
     archive_score: str | None
+    # Только в карточке ставки (GET /bets/{id}) у ноги, чей матч прошел, а исхода нет
+    news_result: NewsResultOut | None = None
 
 
 class BetItemOut(BaseModel):
@@ -245,7 +264,10 @@ class BetItemOut(BaseModel):
     app/services/bet_versions.py). Этап 5: archive_to — у рассчитанной по архиву
     (settled_by = auto) последний день матчей в архиве на момент расчета («авто · архив
     ‹дата›»); awaiting_result — открытая ставка, все матчи которой уже прошли (по поясу
-    участника): ждет результата из архива или от участника."""
+    участника): ждет результата из архива или от участника; у такой ставки
+    archive_matches_to — последний день матчей в архиве сейчас, next_upload — когда ждать
+    следующий файл tennis-data (понедельник после последней загрузки; null — файл еще не
+    загружали)."""
 
     id: int
     analysis_id: int | None
@@ -269,6 +291,8 @@ class BetItemOut(BaseModel):
     legs: list[BetLegItemOut]
     archive_to: date | None
     awaiting_result: bool
+    archive_matches_to: date | None = None
+    next_upload: date | None = None
 
 
 class BetCountsOut(BaseModel):

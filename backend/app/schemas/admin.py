@@ -68,6 +68,7 @@ AuditAction = Literal[
     "version_on",
     "lesson_on",
     "model_on",
+    "lesson_off",
 ]
 
 

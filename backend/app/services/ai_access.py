@@ -44,6 +44,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import ColumnElement, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.batches import reserved_usd
 from app.agent.config import AgentConfig, default_per_analysis, load_agent_config
 from app.agent.errors import ClaudeStepError
 from app.agent.runs import max_tokens_within, worst_case_usd
@@ -77,6 +78,8 @@ ACCESS_REASONS = (
     "ai.no_admin_key",
     "ai.no_price",
 )
+# Пакеты Batch, которые платит общий бюджет ключа администратора (а не бюджет проверок)
+SHARED_BATCH_KINDS = ("postmortem",)
 # Статус ответа API при отказе в запуске: запрос верный, но состояние лимитов не дает
 ACCESS_STATUS = 409
 CENT = Decimal("0.01")
@@ -245,7 +248,8 @@ async def _reserved(
     db: AsyncSession, *, user_id: int | None, exclude_analysis_id: int | None
 ) -> Decimal:
     """Занятый резерв активных анализов на ключе администратора (одного участника или
-    всех), кроме exclude_analysis_id."""
+    всех), кроме exclude_analysis_id. В общем бюджете (user_id None) — еще худший
+    случай незабранных пакетов разборов ставок (этап 5, В3: платит ключ администратора)."""
     stmt = select(func.sum(_outstanding())).where(
         Analysis.key_source == "admin", Analysis.status.in_(ANALYSIS_ACTIVE_STATUSES)
     )
@@ -253,7 +257,25 @@ async def _reserved(
         stmt = stmt.where(Analysis.user_id == user_id)
     if exclude_analysis_id is not None:
         stmt = stmt.where(Analysis.id != exclude_analysis_id)
-    return await _sum(db, stmt)
+    total = await _sum(db, stmt)
+    if user_id is None:
+        total += await reserved_usd(db, SHARED_BATCH_KINDS)
+    return total
+
+
+async def shared_budget_left(
+    db: AsyncSession, now: datetime | None = None, *, lock: bool = False
+) -> Decimal:
+    """Остаток общего бюджета ключа администратора на месяц: бюджет минус расход месяца
+    (без проверок) и резервы идущих анализов и незабранных пакетов разборов. Им проверяется
+    пакет разборов ставок до отправки (app/services/postmortems.py). lock — под FOR UPDATE
+    строки app_settings, той же блокировкой, что резерв анализа (reserve_for_run): пока
+    вызывающий не сделал commit своего резерва, другой резерв общего бюджета ждет."""
+    moment = now or utcnow()
+    settings = await _settings(db, lock=lock)
+    spent = await _budget_spent(db, moment)
+    reserved = await _reserved(db, user_id=None, exclude_analysis_id=None)
+    return max(ZERO, settings.monthly_budget_usd - spent - reserved)
 
 
 async def _analyses_today(db: AsyncSession, user: User, now: datetime) -> int:

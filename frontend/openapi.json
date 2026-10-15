@@ -2265,7 +2265,8 @@
                       "eval_run",
                       "version_on",
                       "lesson_on",
-                      "model_on"
+                      "model_on",
+                      "lesson_off"
                     ],
                     "type": "string"
                   }
@@ -3370,7 +3371,7 @@
           "admin"
         ],
         "summary": "List Uploads",
-        "description": "Свежесть файла tennis-data и последние 20 загрузок, новые сверху.",
+        "description": "Свежесть файла tennis-data (с днем следующей загрузки в поясе администратора) и\nпоследние 20 загрузок, новые сверху.",
         "operationId": "list_uploads_api_admin_data_uploads_get",
         "responses": {
           "200": {
@@ -4569,6 +4570,51 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BetItemOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bets/{bet_id}/review": {
+      "get": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "Bet Review",
+        "description": "Разбор ИИ своей ставки (этап 5, В3): по разбору на матч (общий для всех, кто на\nнего ставил) и вердикт по CLV кодом. Чужая или несуществующая — 404.",
+        "operationId": "bet_review_api_bets__bet_id__review_get",
+        "parameters": [
+          {
+            "name": "bet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Bet Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetReviewOut"
                 }
               }
             }
@@ -5973,6 +6019,403 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/StrategyOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons": {
+      "get": {
+        "tags": [
+          "lessons"
+        ],
+        "summary": "List Lessons",
+        "description": "Уроки (готовые к решению — первыми) и пороги из настроек: сколько в анализе и\nпредел, своих случаев для проверки, усадка.",
+        "operationId": "list_lessons_api_lessons_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "hypothesis",
+                    "ready",
+                    "confirmed",
+                    "rejected",
+                    "retired"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "lessons"
+        ],
+        "summary": "Propose Lesson",
+        "description": "Предложить урок: гипотеза с условием из словаря, проверка — как у гипотез из\nразборов. Условие не из словаря — 422; такой урок уже есть — 409; участник — не больше\n5 в сутки (429).",
+        "operationId": "propose_lesson_api_lessons_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LessonIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons/dictionary": {
+      "get": {
+        "tags": [
+          "lessons"
+        ],
+        "summary": "Lesson Dictionary",
+        "description": "Словарь признаков условия урока (форма «Предложить урок»).",
+        "operationId": "lesson_dictionary_api_lessons_dictionary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonDictionaryOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons/{lesson_id}": {
+      "get": {
+        "tags": [
+          "lessons"
+        ],
+        "summary": "Get Lesson",
+        "description": "Урок: условие, основание, проверка на архиве и быстрая проверка.",
+        "operationId": "get_lesson_api_lessons__lesson_id__get",
+        "parameters": [
+          {
+            "name": "lesson_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Lesson Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons/{lesson_id}/quick-check": {
+      "get": {
+        "tags": [
+          "lessons"
+        ],
+        "summary": "Quick Check Preview",
+        "description": "Быстрая проверка до запуска: матчей, запросов, цена по живым числам, худший случай\nи остаток бюджета проверок; можно ли запустить и почему нет. Только администратор.",
+        "operationId": "quick_check_preview_api_lessons__lesson_id__quick_check_get",
+        "parameters": [
+          {
+            "name": "lesson_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Lesson Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickCheckOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "lessons"
+        ],
+        "summary": "Quick Check Start",
+        "description": "Запустить быструю проверку (Batch, из бюджета проверок): ход — в GET урока\n(quick). Нельзя — 409 с причиной; очередь недоступна — 503. Только администратор.",
+        "operationId": "quick_check_start_api_lessons__lesson_id__quick_check_post",
+        "parameters": [
+          {
+            "name": "lesson_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Lesson Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickCheckOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons/{lesson_id}/enable": {
+      "post": {
+        "tags": [
+          "lessons"
+        ],
+        "summary": "Enable Lesson",
+        "description": "«Использовать в анализе»: урок проверен на архиве и быстрой проверкой, в анализе\nменьше предела (409 иначе). Только администратор.",
+        "operationId": "enable_lesson_api_lessons__lesson_id__enable_post",
+        "parameters": [
+          {
+            "name": "lesson_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Lesson Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons/{lesson_id}/disable": {
+      "post": {
+        "tags": [
+          "lessons"
+        ],
+        "summary": "Disable Lesson",
+        "description": "Выключить урок из анализа; включить снова — после новой быстрой проверки. Только\nадминистратор.",
+        "operationId": "disable_lesson_api_lessons__lesson_id__disable_post",
+        "parameters": [
+          {
+            "name": "lesson_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Lesson Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons/{lesson_id}/notify-when-ready": {
+      "post": {
+        "tags": [
+          "lessons"
+        ],
+        "summary": "Notify When Ready",
+        "description": "«Сообщить, когда наберется»: уведомление на сайте, когда гипотезу проверят. Урок\nуже проверен — 409.",
+        "operationId": "notify_when_ready_api_lessons__lesson_id__notify_when_ready_post",
+        "parameters": [
+          {
+            "name": "lesson_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Lesson Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonOut"
                 }
               }
             }
@@ -8382,6 +8825,18 @@
             ],
             "title": "Matches To"
           },
+          "next_upload": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Upload"
+          },
           "stale_days": {
             "type": "integer",
             "title": "Stale Days"
@@ -8399,12 +8854,13 @@
         "required": [
           "last_load",
           "matches_to",
+          "next_upload",
           "stale_days",
           "stale",
           "max_mb"
         ],
         "title": "ArchiveFileStatusOut",
-        "description": "Свежесть файла tennis-data: последняя успешная загрузка архива (любым путем) и\nпоследний день матча в нем; stale — не загружали дольше stale_days дней (тогда\nприходит напоминание); max_mb — предел размера файла."
+        "description": "Свежесть файла tennis-data: последняя успешная загрузка архива (любым путем) и\nпоследний день матча в нем; next_upload — когда ждать следующий файл (понедельник\nпосле последней загрузки, прошел — ближайший с сегодняшнего дня, в поясе того, кто\nсмотрит; то же правило, что у «ждет результата» в «Ставках»; не загружали — null);\nstale — не загружали дольше stale_days дней (тогда приходит напоминание); max_mb —\nпредел размера файла."
       },
       "ArchiveInfoOut": {
         "properties": {
@@ -8677,7 +9133,8 @@
               "eval_run",
               "version_on",
               "lesson_on",
-              "model_on"
+              "model_on",
+              "lesson_off"
             ],
             "title": "Action"
           },
@@ -9458,6 +9915,30 @@
           "awaiting_result": {
             "type": "boolean",
             "title": "Awaiting Result"
+          },
+          "archive_matches_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Matches To"
+          },
+          "next_upload": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Upload"
           }
         },
         "type": "object",
@@ -9486,7 +9967,7 @@
           "awaiting_result"
         ],
         "title": "BetItemOut",
-        "description": "Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если\nзакрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги\nсчитается с кэфом 1.00), payout — выплата (у открытой — возможная). bank_after —\nкапитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у\nоткрытой), то же число, что equity_after в последних ставках главной. updated_at —\nверсия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,\napp/services/bet_versions.py). Этап 5: archive_to — у рассчитанной по архиву\n(settled_by = auto) последний день матчей в архиве на момент расчета («авто · архив\n‹дата›»); awaiting_result — открытая ставка, все матчи которой уже прошли (по поясу\nучастника): ждет результата из архива или от участника."
+        "description": "Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если\nзакрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги\nсчитается с кэфом 1.00), payout — выплата (у открытой — возможная). bank_after —\nкапитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у\nоткрытой), то же число, что equity_after в последних ставках главной. updated_at —\nверсия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,\napp/services/bet_versions.py). Этап 5: archive_to — у рассчитанной по архиву\n(settled_by = auto) последний день матчей в архиве на момент расчета («авто · архив\n‹дата›»); awaiting_result — открытая ставка, все матчи которой уже прошли (по поясу\nучастника): ждет результата из архива или от участника; у такой ставки\narchive_matches_to — последний день матчей в архиве сейчас, next_upload — когда ждать\nследующий файл tennis-data (понедельник после последней загрузки; null — файл еще не\nзагружали)."
       },
       "BetLegBrief": {
         "properties": {
@@ -9756,6 +10237,16 @@
               }
             ],
             "title": "Archive Score"
+          },
+          "news_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NewsResultOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -9782,7 +10273,7 @@
           "archive_score"
         ],
         "title": "BetLegItemOut",
-        "description": "Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда\nрассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),\nвероятности прогноза (p_final; у ставок бота — только p_claude) и перевес над рынком\nedge — вероятность прогноза минус 1/кэф (пусто — прогноза нет). score_outcomes — у\nоткрытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для\nокна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все\nравно за участником (В16). archive_result и archive_score — исход и счет (первым —\nигрок 1) по архиву, когда он разошелся с расчетом ставки (этап 5, Т3): банк не\nменяли, участник проверяет сам."
+        "description": "Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда\nрассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),\nвероятности прогноза (p_final; у ставок бота — только p_claude) и перевес над рынком\nedge — вероятность прогноза минус 1/кэф (пусто — прогноза нет). score_outcomes — у\nоткрытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для\nокна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все\nравно за участником (В16). archive_result и archive_score — исход и счет (первым —\nигрок 1) по архиву, когда он разошелся с расчетом ставки (этап 5, Т3): банк не\nменяли, участник проверяет сам. news_result — подсказка исхода по новостям."
       },
       "BetLegOut": {
         "properties": {
@@ -9944,6 +10435,78 @@
         ],
         "title": "BetPageOut",
         "description": "Страница ставок, новые сверху. next_before — курсор следующей страницы."
+      },
+      "BetReviewOut": {
+        "properties": {
+          "bet_id": {
+            "type": "integer",
+            "title": "Bet Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "not_reviewed",
+              "pending",
+              "done",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "void",
+                  "legacy",
+                  "no_prediction"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "clv_verdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "legacy",
+                  "void",
+                  "no_closing",
+                  "edge_confirmed",
+                  "won_against_market",
+                  "variance",
+                  "model_error"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv Verdict"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/LegReviewOut"
+            },
+            "type": "array",
+            "title": "Legs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bet_id",
+          "state",
+          "reason",
+          "clv_verdict",
+          "legs"
+        ],
+        "title": "BetReviewOut",
+        "description": "Разбор ИИ ставки: по разбору на каждый матч с исходом (возвраты ног не\nразбираются) и вердикт по CLV кодом (строкой на экране, как на этапе 4)."
       },
       "BetsSummaryOut": {
         "properties": {
@@ -12976,6 +13539,108 @@
         "title": "FairOut",
         "description": "Рынок без маржи: вероятность исхода по паре кэфов."
       },
+      "FeatureOut": {
+        "properties": {
+          "feature": {
+            "type": "string",
+            "enum": [
+              "market",
+              "surface",
+              "round",
+              "best_of",
+              "role",
+              "elo_gap",
+              "odds",
+              "sets_48h",
+              "opp_sets_48h",
+              "rest_days",
+              "h2h_matches",
+              "h2h_wins"
+            ],
+            "title": "Feature"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "enum",
+              "number"
+            ],
+            "title": "Kind"
+          },
+          "ops": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "in",
+                "eq",
+                "lt",
+                "le",
+                "gt",
+                "ge"
+              ]
+            },
+            "type": "array",
+            "title": "Ops"
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Values"
+          },
+          "low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low"
+          },
+          "high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "side": {
+            "type": "boolean",
+            "title": "Side"
+          }
+        },
+        "type": "object",
+        "required": [
+          "feature",
+          "kind",
+          "ops",
+          "values",
+          "low",
+          "high",
+          "step",
+          "side"
+        ],
+        "title": "FeatureOut",
+        "description": "Признак словаря: перечень (values) или число (low…high с шагом step); side —\nпризнак своей стороны исхода."
+      },
       "FlagsOut": {
         "properties": {
           "p1": {
@@ -14070,6 +14735,176 @@
         "title": "LegMatchOut",
         "description": "Матч ноги. Турнир из ввода участника показывается по его же вводу; покрытие и\nформат — из турнира, иначе из ввода анализа (null — не указано)."
       },
+      "LegReviewOut": {
+        "properties": {
+          "leg_id": {
+            "type": "integer",
+            "title": "Leg Id"
+          },
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "market": {
+            "type": "string",
+            "enum": [
+              "ML",
+              "HCP_-1.5",
+              "HCP_+1.5"
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "type": "integer",
+            "title": "Selection"
+          },
+          "same_pick": {
+            "type": "boolean",
+            "title": "Same Pick"
+          },
+          "won": {
+            "type": "boolean",
+            "title": "Won"
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "submitted",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "fine",
+                  "lucky",
+                  "luck",
+                  "model_error",
+                  "data_gap"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "what": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "What"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why"
+          },
+          "hypothesis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis"
+          },
+          "lesson": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewLessonOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "done_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "leg_id",
+          "match_id",
+          "market",
+          "selection",
+          "same_pick",
+          "won",
+          "clv",
+          "status",
+          "verdict",
+          "what",
+          "why",
+          "hypothesis",
+          "lesson",
+          "model",
+          "cost_usd",
+          "done_at"
+        ],
+        "title": "LegReviewOut",
+        "description": "Разбор матча ноги (общий для всех, кто на него ставил, В3) и вердикт по вашей ноге.\nОбщий разбор построен только по архиву и досье: market и selection — сторона, которую\nразбирали (прогноз базовой модели на победу в матче — ее фаворит), same_pick — ваша\nнога на эту же сторону. what — что произошло, why — почему, hypothesis — гипотеза\nтекстом, lesson — ее урок (нет — условие не из словаря или гипотезы нет). verdict —\nвывод по вашей ноге, считает код: won — ваша нога сыграла (как внесена или\nрассчитана), clv — CLV вашей ноги (доля; нет закрытия — null); вывод общего разбора\nберется, только если нога на ту же сторону и обе проиграли. model, cost_usd,\ndone_at — модель, цена вызова (Batch) и когда разбор готов."
+      },
       "LegSettleIn": {
         "properties": {
           "leg_id": {
@@ -14160,6 +14995,672 @@
         ],
         "title": "LegacyProfileOut",
         "description": "Профиль из старого бота (шаблоны 01–04 как есть): заполнен моделью бота, часто по\nпамяти; в анализ не идет, новых профилей программа не собирает (Р24)."
+      },
+      "LessonDictionaryOut": {
+        "properties": {
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureOut"
+            },
+            "type": "array",
+            "title": "Features"
+          },
+          "directions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "lower",
+                "raise"
+              ]
+            },
+            "type": "array",
+            "title": "Directions"
+          },
+          "max_conditions": {
+            "type": "integer",
+            "title": "Max Conditions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "features",
+          "directions",
+          "max_conditions"
+        ],
+        "title": "LessonDictionaryOut"
+      },
+      "LessonEstimateOut": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "low",
+          "high",
+          "n"
+        ],
+        "title": "LessonEstimateOut",
+        "description": "Значение и его 95% ДИ (бутстрэп), n — событий."
+      },
+      "LessonHistoryOut": {
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "rejected",
+              "insufficient"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "n_hist": {
+            "type": "integer",
+            "title": "N Hist"
+          },
+          "n_history": {
+            "type": "integer",
+            "title": "N History"
+          },
+          "n_holdout": {
+            "type": "integer",
+            "title": "N Holdout"
+          },
+          "holdout_since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdout Since"
+          },
+          "bias": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonEstimateOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shift"
+          },
+          "log_loss_without": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss Without"
+          },
+          "log_loss_with": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss With"
+          },
+          "gain": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonEstimateOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "holdout_gain": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonEstimateOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "checked_at",
+          "status",
+          "reason",
+          "method",
+          "n_hist",
+          "n_history",
+          "n_holdout",
+          "holdout_since",
+          "bias",
+          "shift",
+          "log_loss_without",
+          "log_loss_with",
+          "gain",
+          "holdout_gain",
+          "seed"
+        ],
+        "title": "LessonHistoryOut",
+        "description": "Проверка на архиве кодом: случаи истории и отложенной части (с holdout_since);\nbias — средний остаток y − p модели в условии (доля, −0,05 = модель завышает на\n5 п.п.); shift — поправка с усадкой; лог-лосс без урока и с поправкой; gain — выигрыш\nлог-лосса на истории (без − с, больше нуля — урок помогает), holdout_gain — на\nотложенной части; seed бутстрэпа."
+      },
+      "LessonIn": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 10,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Text"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "numeric",
+              "process"
+            ],
+            "title": "Kind",
+            "default": "numeric"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeIO"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "scope"
+        ],
+        "title": "LessonIn",
+        "description": "Предложить урок: наблюдение одной фразой и условие из словаря (Т7). Процессный урок\n(kind process) — только администратор."
+      },
+      "LessonOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "numeric",
+              "process"
+            ],
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "hypothesis",
+              "ready",
+              "confirmed",
+              "rejected",
+              "retired"
+            ],
+            "title": "Status"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "postmortem",
+              "manual"
+            ],
+            "title": "Origin"
+          },
+          "shared": {
+            "type": "boolean",
+            "title": "Shared"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScopeIO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scope_ok": {
+            "type": "boolean",
+            "title": "Scope Ok"
+          },
+          "in_prompt": {
+            "type": "boolean",
+            "title": "In Prompt"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "n_cases": {
+            "type": "integer",
+            "title": "N Cases"
+          },
+          "need_cases": {
+            "type": "integer",
+            "title": "Need Cases"
+          },
+          "n_hist": {
+            "type": "integer",
+            "title": "N Hist"
+          },
+          "effect": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect"
+          },
+          "effect_ci": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect Ci"
+          },
+          "effect_shrunk": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect Shrunk"
+          },
+          "holdout_effect": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdout Effect"
+          },
+          "holdout_ci": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdout Ci"
+          },
+          "validated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "retired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired At"
+          },
+          "rechecked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rechecked At"
+          },
+          "history": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonHistoryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quick": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonQuickOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "own_bets": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Own Bets"
+          },
+          "watching": {
+            "type": "boolean",
+            "title": "Watching"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "text",
+          "kind",
+          "status",
+          "origin",
+          "shared",
+          "scope",
+          "scope_ok",
+          "in_prompt",
+          "created_at",
+          "n_cases",
+          "need_cases",
+          "n_hist",
+          "effect",
+          "effect_ci",
+          "effect_shrunk",
+          "holdout_effect",
+          "holdout_ci",
+          "validated_at",
+          "decided_at",
+          "retired_at",
+          "rechecked_at",
+          "history",
+          "quick",
+          "own_bets",
+          "watching"
+        ],
+        "title": "LessonOut",
+        "description": "Урок. n_cases — своих случаев (матчей ставок под условием; участник видит только\nматчи своих ставок, администратор — всех), need_cases — порог проверки; effect,\neffect_ci, effect_shrunk, holdout_* — как в lessons (доли);\nown_bets — ваши ставки в основании урока (только ваши, Т21); watching — вы просили\nсообщить, когда урок проверят; scope_ok — условие из словаря (его можно проверить на\nархиве)."
+      },
+      "LessonQuickOut": {
+        "properties": {
+          "eval_run_id": {
+            "type": "integer",
+            "title": "Eval Run Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "requests": {
+            "type": "integer",
+            "title": "Requests"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonEstimateOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "margin": {
+            "type": "number",
+            "title": "Margin"
+          },
+          "format_errors": {
+            "type": "integer",
+            "title": "Format Errors"
+          },
+          "refusals": {
+            "type": "integer",
+            "title": "Refusals"
+          },
+          "unrated": {
+            "type": "integer",
+            "title": "Unrated"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "worst_usd": {
+            "type": "number",
+            "title": "Worst Usd"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_run_id",
+          "status",
+          "started_at",
+          "finished_at",
+          "events",
+          "requests",
+          "passed",
+          "diff",
+          "margin",
+          "format_errors",
+          "refusals",
+          "unrated",
+          "cost_usd",
+          "worst_usd",
+          "error"
+        ],
+        "title": "LessonQuickOut",
+        "description": "Быстрая проверка перед включением (В4): матчей, итог, разница лог-лосса с уроком и\nбез (с − без, меньше нуля — лучше), ошибки формата и отказы, цена и худший случай.\npassed — не хуже: верхняя граница ДИ разницы не выше допуска, все события оценены."
+      },
+      "LessonsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LessonOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "active": {
+            "type": "integer",
+            "title": "Active"
+          },
+          "max_active": {
+            "type": "integer",
+            "title": "Max Active"
+          },
+          "min_cases": {
+            "type": "integer",
+            "title": "Min Cases"
+          },
+          "min_cases_process": {
+            "type": "integer",
+            "title": "Min Cases Process"
+          },
+          "shrink_k": {
+            "type": "integer",
+            "title": "Shrink K"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "active",
+          "max_active",
+          "min_cases",
+          "min_cases_process",
+          "shrink_k"
+        ],
+        "title": "LessonsOut",
+        "description": "Уроки и пороги из настроек: не больше max_active в анализе (сейчас active),\nпроверка — с min_cases своих случаев (процессный — min_cases_process), усадка k."
       },
       "LimitAlertOut": {
         "properties": {
@@ -15492,6 +16993,75 @@
         "title": "MyMatchOut",
         "description": "Мой матч сегодня (В6): из ног открытых ставок и сегодняшних анализов участника.\nrank1 и rank2 — место по Эло (null — нет в таблице текущего Эло); tournament — из\nархива или своего ввода; scheduled_at — время, если известно."
       },
+      "NewsResultOut": {
+        "properties": {
+          "winner": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Winner"
+          },
+          "sets": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sets"
+          },
+          "score": {
+            "type": "string",
+            "title": "Score"
+          },
+          "retired": {
+            "type": "boolean",
+            "title": "Retired"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          },
+          "published_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Published On"
+          },
+          "found_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Found At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "winner",
+          "sets",
+          "score",
+          "retired",
+          "source_name",
+          "source_url",
+          "published_on",
+          "found_at"
+        ],
+        "title": "NewsResultOut",
+        "description": "Подсказка исхода по новостям (этап 5, В1-Г): результат матча нашел шаг новостей\nперед анализом. Только подсказка — деньги по ней не считаются, исход вносит участник.\nwinner — игрок 1 или 2 матча; sets — счет по сетам (первым — игрок 1), если в новости\nполный счет; score — счет как в новости; retired — в новости снятие; source_name,\nsource_url, published_on — откуда и за какой день факт; found_at — когда его нашли."
+      },
       "NewsStatusOut": {
         "properties": {
           "checked_at": {
@@ -15579,6 +17149,22 @@
               }
             ],
             "title": "Read At"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "won",
+                  "lost",
+                  "void"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
           }
         },
         "type": "object",
@@ -15591,7 +17177,8 @@
           "created_at",
           "read_at"
         ],
-        "title": "NotificationOut"
+        "title": "NotificationOut",
+        "description": "Уведомление центра уведомлений. outcome — исход у «Ставка рассчитана» (цвет\nзначка: выигрыш, проигрыш, возврат), у остальных видов — null (этап 5)."
       },
       "NotificationPrefIn": {
         "properties": {
@@ -16161,6 +17748,30 @@
           "awaiting_result": {
             "type": "boolean",
             "title": "Awaiting Result"
+          },
+          "archive_matches_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Matches To"
+          },
+          "next_upload": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Upload"
           },
           "implied": {
             "items": {
@@ -18614,6 +20225,127 @@
         "title": "PublicSettingsOut",
         "description": "Валюта программы (Р17): в ней показываются банки, ставки и прибыль у всех."
       },
+      "QuickCheckOut": {
+        "properties": {
+          "lesson_id": {
+            "type": "integer",
+            "title": "Lesson Id"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "requests": {
+            "type": "integer",
+            "title": "Requests"
+          },
+          "baseline_reused": {
+            "type": "integer",
+            "title": "Baseline Reused"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "estimate_usd": {
+            "type": "number",
+            "title": "Estimate Usd"
+          },
+          "worst_usd": {
+            "type": "number",
+            "title": "Worst Usd"
+          },
+          "budget_usd": {
+            "type": "number",
+            "title": "Budget Usd"
+          },
+          "spent_usd": {
+            "type": "number",
+            "title": "Spent Usd"
+          },
+          "reserved_usd": {
+            "type": "number",
+            "title": "Reserved Usd"
+          },
+          "left_usd": {
+            "type": "number",
+            "title": "Left Usd"
+          },
+          "active": {
+            "type": "integer",
+            "title": "Active"
+          },
+          "max_active": {
+            "type": "integer",
+            "title": "Max Active"
+          },
+          "can_run": {
+            "type": "boolean",
+            "title": "Can Run"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "eval_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Run Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "running",
+                  "done",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lesson_id",
+          "events",
+          "requests",
+          "baseline_reused",
+          "model",
+          "estimate_usd",
+          "worst_usd",
+          "budget_usd",
+          "spent_usd",
+          "reserved_usd",
+          "left_usd",
+          "active",
+          "max_active",
+          "can_run",
+          "reason",
+          "eval_run_id",
+          "status"
+        ],
+        "title": "QuickCheckOut",
+        "description": "Быстрая проверка урока до запуска (цена по живым числам и худший случай) и после\n(eval_run_id, status). requests — запросов в пакете: по матчу с уроком и, где нет\nготового прогона без урока, еще по одному без него. reason — почему запустить нельзя\n(ключ errors.*): нет матчей, мало бюджета проверок, проверка уже идет, урок не готов."
+      },
       "RecentBetOut": {
         "properties": {
           "id": {
@@ -19126,6 +20858,57 @@
         "title": "ReverseIn",
         "description": "Исправление результата: версия ставки, которую видел участник."
       },
+      "ReviewLessonOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "hypothesis",
+              "ready",
+              "confirmed",
+              "rejected",
+              "retired"
+            ],
+            "title": "Status"
+          },
+          "in_prompt": {
+            "type": "boolean",
+            "title": "In Prompt"
+          },
+          "n_cases": {
+            "type": "integer",
+            "title": "N Cases"
+          },
+          "need_cases": {
+            "type": "integer",
+            "title": "Need Cases"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "status",
+          "in_prompt",
+          "n_cases",
+          "need_cases",
+          "text"
+        ],
+        "title": "ReviewLessonOut",
+        "description": "Урок гипотезы разбора: код, статус, случаев из порога (у участника — только по его\nставкам, Р14), в анализе ли."
+      },
       "RoleChangeIn": {
         "properties": {
           "role": {
@@ -19304,6 +21087,96 @@
         ],
         "title": "SampleOut",
         "description": "Что попало в выборку: bets — рассчитанные ставки (с возвратами), из них singles и\nparlays; events — события (ноги с исходом «выиграл» или «проиграл») под фильтрами\nрынка и покрытия; legacy_bets — ставки старого бота среди bets (в банке и ROI, но не в\nCLV, Brier и калибровке, В5); legacy_parlay_events — события экспрессов бота, которые\nпо отдельности не считаются (Т10); open_bets — ставки в игре под теми же фильтрами (в\nрасчет не входят); first_day и last_day — даты первой и последней ставки выборки по\nпоясу участника; last_settled_at — когда рассчитана последняя."
+      },
+      "ScopeConditionIO": {
+        "properties": {
+          "feature": {
+            "type": "string",
+            "enum": [
+              "market",
+              "surface",
+              "round",
+              "best_of",
+              "role",
+              "elo_gap",
+              "odds",
+              "sets_48h",
+              "opp_sets_48h",
+              "rest_days",
+              "h2h_matches",
+              "h2h_wins"
+            ],
+            "title": "Feature"
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "in",
+              "eq",
+              "lt",
+              "le",
+              "gt",
+              "ge"
+            ],
+            "title": "Op"
+          },
+          "values": {
+            "items": {
+              "type": "string",
+              "maxLength": 16
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Values"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "feature",
+          "op"
+        ],
+        "title": "ScopeConditionIO",
+        "description": "Условие из словаря признаков: перечень — op in/eq и values, число — op lt/le/gt/ge\nи value."
+      },
+      "ScopeIO": {
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "lower",
+              "raise"
+            ],
+            "title": "Direction"
+          },
+          "conditions": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeConditionIO"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "title": "Conditions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "direction",
+          "conditions"
+        ],
+        "title": "ScopeIO",
+        "description": "Условие урока: направление (модель завышает — lower, занижает — raise) и признаки."
       },
       "SeriesOut": {
         "properties": {

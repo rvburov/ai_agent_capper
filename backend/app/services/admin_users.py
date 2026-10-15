@@ -46,6 +46,7 @@ from app.db.models import (
     Bet,
     Bookmaker,
     Lesson,
+    LessonWatch,
     LoginEvent,
     Notification,
     NotificationPref,
@@ -515,6 +516,10 @@ async def _erase_personal_data(db: AsyncSession, user: User) -> None:
         delete(Bet).where(Bet.user_id == uid),
         delete(Analysis).where(Analysis.user_id == uid),
         delete(Lesson).where(Lesson.user_id == uid),
+        # Этап 5, волна 2: предложенный вручную урок общий — остается без автора;
+        # «сообщить, когда наберется» — личное
+        update(Lesson).where(Lesson.created_by == uid).values(created_by=None),
+        delete(LessonWatch).where(LessonWatch.user_id == uid),
         # Этап 5: разбор матча общий (В3) — остается без пути к участнику; еженедельные
         # отчеты — личные
         update(Postmortem).where(Postmortem.user_id == uid).values(user_id=None, bet_id=None),

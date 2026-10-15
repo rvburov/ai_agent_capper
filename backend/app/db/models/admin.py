@@ -56,6 +56,8 @@ AUDIT_ACTIONS = (
     "version_on",
     "lesson_on",
     "model_on",
+    # Этап 5, волна 2: урок выключен из анализа
+    "lesson_off",
 )
 # Порог предупреждения о расходе, % от лимита или бюджета
 BUDGET_ALERT_PCTS = (50, 70, 80, 90)

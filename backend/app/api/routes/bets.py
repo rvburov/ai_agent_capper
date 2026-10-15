@@ -1,6 +1,6 @@
 """Ставки участника: «Сохранить ставку» по анализу, список «Ставок» с фильтрами и
 курсором, итоги, карточка, ручной расчет, исправление результата (сторно), закрывающий
-кэф ноги, выгрузка CSV. Видит и меняет только сам участник (Р14): чужая ставка —
+кэф ноги, выгрузка CSV, разбор ИИ (этап 5). Видит и меняет только сам участник (Р14): чужая ставка —
 404, как несуществующая. После изменения ставки — прогрев кэша аналитики после ответа
 (app/services/analytics_cache.py)."""
 
@@ -23,7 +23,8 @@ from app.schemas.bets import (
     ReverseIn,
     SettleIn,
 )
-from app.services import analytics_cache
+from app.schemas.lessons import BetReviewOut
+from app.services import analytics_cache, postmortems
 from app.services import bets as bets_service
 from app.services import closing as closing_service
 from app.services import settlement as settlement_service
@@ -94,6 +95,13 @@ async def export_bets(
 async def get_bet(bet_id: RowId, user: CurrentUser, db: DbSession) -> BetItemOut:
     """Карточка ставки: ноги, матчи, исходы, закрытие, CLV и вердикт."""
     return await bets_service.bet_detail(db, user, bet_id)
+
+
+@router.get("/bets/{bet_id}/review")
+async def bet_review(bet_id: RowId, user: CurrentUser, db: DbSession) -> BetReviewOut:
+    """Разбор ИИ своей ставки (этап 5, В3): по разбору на матч (общий для всех, кто на
+    него ставил) и вердикт по CLV кодом. Чужая или несуществующая — 404."""
+    return await postmortems.bet_review(db, user, bet_id)
 
 
 @router.put("/bets/{bet_id}/result")

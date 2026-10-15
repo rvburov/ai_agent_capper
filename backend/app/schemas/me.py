@@ -168,7 +168,13 @@ class TrustedDeviceOut(BaseModel):
     current: bool = False
 
 
+NotificationOutcome = Literal["won", "lost", "void"]
+
+
 class NotificationOut(BaseModel):
+    """Уведомление центра уведомлений. outcome — исход у «Ставка рассчитана» (цвет
+    значка: выигрыш, проигрыш, возврат), у остальных видов — null (этап 5)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -178,6 +184,7 @@ class NotificationOut(BaseModel):
     link: str | None
     created_at: datetime
     read_at: datetime | None
+    outcome: NotificationOutcome | None = None
 
 
 class NotificationsOut(BaseModel):

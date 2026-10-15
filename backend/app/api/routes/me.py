@@ -31,7 +31,6 @@ from app.schemas.me import (
     LoginEventOut,
     LoginResult,
     MeOut,
-    NotificationOut,
     NotificationsOut,
     PasswordChangeIn,
     ProfileUpdateIn,
@@ -47,6 +46,7 @@ from app.services import devices as devices_service
 from app.services import notification_prefs as prefs_service
 from app.services import play_limits as play_service
 from app.services import profile as profile_service
+from app.services.notifications import notification_out
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -200,9 +200,7 @@ async def notifications(
     user: CurrentUser, db: DbSession, limit: ListLimit = 50
 ) -> NotificationsOut:
     rows, unread = await account_service.list_notifications(db, user.id, limit=limit)
-    return NotificationsOut(
-        items=[NotificationOut.model_validate(row) for row in rows], unread=unread
-    )
+    return NotificationsOut(items=[notification_out(row) for row in rows], unread=unread)
 
 
 @router.post("/notifications/read-all", status_code=status.HTTP_204_NO_CONTENT)

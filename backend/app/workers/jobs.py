@@ -46,6 +46,16 @@ startup в app.workers.main. Логика задачи — отдельной ф
 tennis-data», если его не загружали больше 7 дней (одно в сутки; время последней загрузки
 и год файла — по поясу администратора), и уборка загрузок файла, которые уже никто не
 доделает (data_uploads.reap_stuck_uploads).
+
+Этап 5, волна 2 — разборы и уроки. submit_postmortems (каждые 15 минут): новые
+рассчитанные матчи — в очередь разбора, пакет Batch — раз в postmortem_every_minutes
+(app/services/postmortems.py). collect_batches (каждые 15 минут): пакеты разборов и
+быстрых проверок уроков — сбор результатов, agent_runs, гипотезы в уроки; пакеты, которые
+не ушли или потеряны, — разборы снова в очередь, проверка — failed. run_quick_check —
+быстрая проверка урока (ставит API): досье, запросы и отправка пакета
+(app/services/lesson_quick.py). check_lessons (раз в сутки): свои случаи гипотез и
+проверка на архиве на пороге; recheck_lessons (1-го числа): перепроверка уроков
+(app/services/lessons.py).
 """
 
 from dataclasses import asdict, dataclass
@@ -55,13 +65,16 @@ from typing import Any
 import structlog
 from arq import Retry
 from redis.asyncio import Redis
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agent import batches
+from app.agent.client import client_for
+from app.agent.errors import ClaudeStepError
 from app.core.config import get_settings
 from app.core.formatting import format_moment
 from app.core.redis import create_redis
-from app.db.models import LoginEvent, Notification, TrustedDevice, User, UserSession
+from app.db.models import BatchJob, LoginEvent, Notification, TrustedDevice, User, UserSession
 from app.ingest.update import run_update
 from app.schemas.analytics import AnalyticsFiltersIn
 from app.services import (
@@ -73,8 +86,12 @@ from app.services import (
     auto_settlement,
     dashboard,
     data_uploads,
+    lesson_quick,
+    lessons,
+    postmortems,
 )
 from app.services.bank import user_zone
+from app.services.claude_key import key_for
 from app.services.data_status import STALE_AFTER, is_stale, last_ok_loads
 from app.services.notifications import notify
 
@@ -350,9 +367,8 @@ async def check_ai_alerts(ctx: dict[Any, Any]) -> list[str]:
 # Напоминание «пора загрузить файл»: понедельник, 07:00 по поясу администратора
 UPLOAD_REMINDER_WEEKDAY = 0
 UPLOAD_REMINDER_HOUR = 7
-# Куда ведет «пора загрузить файл»: пока «Администрирование → Обзор» (дело «Архив матчей не
-# обновлялся»); с вкладкой «Данные» (волна 2) — "/admin/data"
-UPLOAD_LINK = "/admin"
+# Куда ведет «пора загрузить файл»: «Администрирование → Данные» (волна 2)
+UPLOAD_LINK = "/admin/data"
 # Тексты «пора загрузить файл»: была загрузка и еще не было ни одной
 UPLOAD_VARIANTS = ("upload", "upload_first")
 
@@ -430,4 +446,147 @@ async def remind_unsettled(ctx: dict[Any, Any]) -> dict[str, int]:
     summary = {"bets": bets, "admins": len(admins), "stuck_uploads": len(stuck)}
     if bets or admins or stuck:
         log.info("worker.remind_unsettled", **summary)
+    return summary
+
+
+# --- разборы и уроки (этап 5, волна 2) ---
+
+BATCH_TIMEOUT_S = 120.0
+
+
+async def submit_postmortems(ctx: dict[Any, Any]) -> dict[str, Any]:
+    """Задача arq (cron каждые 15 минут): очередь разборов и пакет Batch."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        summary = await postmortems.submit(db)
+    if summary.get("sent") or summary.get("queued") or summary.get("waiting"):
+        log.info("worker.submit_postmortems", **summary)
+    return summary
+
+
+async def _release(db: AsyncSession, job: BatchJob, reason: str) -> None:
+    """Пакет не ушел или потерян: разборы — снова в очередь, проверка урока — failed."""
+    if job.kind == "postmortem":
+        await postmortems.requeue_job(db, job.id)
+    elif job.kind == "eval":
+        await lesson_quick.mark_lost(db, job, reason)
+
+
+async def collect_all(db: AsyncSession) -> dict[str, Any]:
+    """Сбор всех отправленных пакетов batch_jobs (разборы, быстрые проверки) и проверка
+    уроков, у которых прибавились основания. Пакеты в работе не трогаются. Сначала
+    уборка: строки pending, которые не ушли (пакет, созданный до сбоя, ищется у Anthropic
+    и привязывается), и быстрые проверки, зависшие до отправки (failed)."""
+    summary: dict[str, Any] = {
+        "collected": 0,
+        "lost": 0,
+        "failed_sends": 0,
+        "attached": 0,
+        "lessons": {},
+    }
+    summary["quick_reaped"] = len(await lesson_quick.reap_stuck(db))
+    stale = await db.scalar(
+        select(func.count())
+        .select_from(BatchJob)
+        .where(
+            BatchJob.status == batches.PENDING,
+            BatchJob.created_at < datetime.now(UTC) - batches.PENDING_STALE,
+        )
+    )
+    submitted = await db.scalar(
+        select(func.count()).select_from(BatchJob).where(BatchJob.status == batches.SUBMITTED)
+    )
+    client = None
+    key_error: str | None = None
+    if stale or submitted:
+        try:
+            key = await key_for(db, key_source="admin", user_id=0)
+            client = client_for(key, timeout=BATCH_TIMEOUT_S)
+        except ClaudeStepError as exc:
+            key_error = exc.code
+        await db.commit()
+    failed, attached = await batches.reap_pending(db, client=client)
+    for job_id in failed:
+        job = await db.get(BatchJob, job_id)
+        if job is not None:
+            await _release(db, job, "not_sent")
+            summary["failed_sends"] += 1
+    summary["attached"] = len(attached)
+    jobs = list(
+        await db.scalars(
+            select(BatchJob).where(BatchJob.status == batches.SUBMITTED).order_by(BatchJob.id)
+        )
+    )
+    await db.commit()
+    if not jobs:
+        return summary
+    if client is None:
+        return {**summary, "skipped": key_error or "ai.no_admin_key"}
+    touched: set[int] = set()
+    for job in jobs:
+        try:
+            if job.kind == "postmortem":
+                collected, lessons_touched = await postmortems.collect(db, client, job)
+                touched |= lessons_touched
+            elif job.kind == "eval":
+                collected = await lesson_quick.collect(db, client, job)
+            else:
+                meta = batches.RunMeta.from_params(job.kind, job.params or {})
+                collected = await batches.collect_job(
+                    db, client, job.id, meta=meta, handle=_skip_item
+                )
+        except batches.BatchLost as exc:
+            await _release(db, job, exc.reason)
+            summary["lost"] += 1
+            continue
+        except ClaudeStepError as exc:
+            await db.rollback()
+            log.warning("worker.collect_batches.error", job_id=job.id, code=exc.code)
+            continue
+        if collected.status == batches.COLLECTED:
+            summary["collected"] += 1
+    if touched:
+        summary["lessons"] = await lessons.check_lessons(db, lesson_ids=sorted(touched))
+    return summary
+
+
+async def _skip_item(db: AsyncSession, item: batches.BatchItem, run: Any) -> None:
+    return None
+
+
+async def collect_batches(ctx: dict[Any, Any]) -> dict[str, Any]:
+    """Задача arq (cron каждые 15 минут): сбор пакетов Batch (collect_all)."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        summary = await collect_all(db)
+    if summary.get("collected") or summary.get("lost") or summary.get("failed_sends"):
+        log.info("worker.collect_batches", **summary)
+    return summary
+
+
+async def run_quick_check(ctx: dict[Any, Any], eval_run_id: int) -> str:
+    """Задача arq (ставит API): быстрая проверка урока — досье, запросы и пакет."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        status = await lesson_quick.prepare_and_submit(db, eval_run_id)
+    log.info("worker.run_quick_check", eval_run_id=eval_run_id, status=status)
+    return status
+
+
+async def check_lessons(ctx: dict[Any, Any]) -> dict[str, int]:
+    """Задача arq (cron раз в сутки): свои случаи гипотез и проверка на архиве."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        summary = await lessons.check_lessons(db)
+    if summary.get("ready") or summary.get("rejected"):
+        log.info("worker.check_lessons", **summary)
+    return summary
+
+
+async def recheck_lessons(ctx: dict[Any, Any]) -> dict[str, int]:
+    """Задача arq (cron 1-го числа): перепроверка готовых и действующих уроков."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        summary = await lessons.recheck_lessons(db)
+    log.info("worker.recheck_lessons", **summary)
     return summary

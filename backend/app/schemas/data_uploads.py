@@ -89,11 +89,15 @@ class DataUploadOut(BaseModel):
 
 class ArchiveFileStatusOut(BaseModel):
     """Свежесть файла tennis-data: последняя успешная загрузка архива (любым путем) и
-    последний день матча в нем; stale — не загружали дольше stale_days дней (тогда
-    приходит напоминание); max_mb — предел размера файла."""
+    последний день матча в нем; next_upload — когда ждать следующий файл (понедельник
+    после последней загрузки, прошел — ближайший с сегодняшнего дня, в поясе того, кто
+    смотрит; то же правило, что у «ждет результата» в «Ставках»; не загружали — null);
+    stale — не загружали дольше stale_days дней (тогда приходит напоминание); max_mb —
+    предел размера файла."""
 
     last_load: datetime | None
     matches_to: date | None
+    next_upload: date | None
     stale_days: int
     stale: bool
     max_mb: int

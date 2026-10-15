@@ -314,7 +314,7 @@ async def test_match_merge_changes_version(
 
 
 async def test_request_warm_enqueues_once(member: Signed, redis: Redis) -> None:
-    from app.workers.main import create_queue_pool
+    from app.workers.queue import create_queue_pool
 
     await analytics_cache.request_warm(member.id)
     await analytics_cache.request_warm(member.id)
@@ -330,12 +330,12 @@ async def test_request_warm_enqueues_once(member: Signed, redis: Redis) -> None:
 
 
 async def test_request_warm_survives_queue_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.workers.main as worker_main
+    import app.workers.queue as worker_queue
 
     async def broken(*args: Any, **kwargs: Any) -> Any:
         raise OSError("connection refused")
 
-    monkeypatch.setattr(worker_main, "create_queue_pool", broken)
+    monkeypatch.setattr(worker_queue, "create_queue_pool", broken)
     await analytics_cache.request_warm(1)
 
 

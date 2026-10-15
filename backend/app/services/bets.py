@@ -109,6 +109,8 @@ from app.services.bank import (
     period_start,
     user_zone,
 )
+from app.services.data_status import archive_matches_to, last_ok_loads, next_upload_day
+from app.services.news_hints import news_results
 from app.services.sessions import utcnow
 from app.services.strategy_versions import active_version, params_of
 
@@ -856,8 +858,12 @@ def bet_item(
     *,
     today: date | None = None,
     archive_to: date | None = None,
+    archive_now: tuple[date | None, date | None] = (None, None),
 ) -> BetItemOut:
+    """archive_now — последний день матчей в архиве и день следующего файла: только для
+    ставки, которая ждет результата."""
     legs = [context.leg for context in contexts]
+    waiting = bet.status == "open" and today is not None and awaiting_result(contexts, today)
     live = [leg for leg in legs if leg.result != "void"]
     bet_clv = clv_parlay([(leg.odds_taken, leg.closing_odds) for leg in live])
     bet_fair = clv_fair_parlay([(leg.odds_taken, leg.q_close) for leg in live])
@@ -885,9 +891,9 @@ def bet_item(
         verdict=verdict(bet, legs, bet_clv),
         legs=[_leg_out(context, players, open_bet=bet.status == "open") for context in contexts],
         archive_to=archive_to if bet.settled_by == "auto" else None,
-        awaiting_result=(
-            bet.status == "open" and today is not None and awaiting_result(contexts, today)
-        ),
+        awaiting_result=waiting,
+        archive_matches_to=archive_now[0] if waiting else None,
+        next_upload=archive_now[1] if waiting else None,
     )
 
 
@@ -952,8 +958,16 @@ async def bet_items(
         after = await equity_after_bets(
             db, user.id, [bet.id for bet in bets if bet.status != "open"]
         )
-    today = local_today(user_zone(user.tz))
+    zone = user_zone(user.tz)
+    today = local_today(zone)
     archive = await _archive_days(db, bets)
+    archive_now: tuple[date | None, date | None] = (None, None)
+    if any(bet.status == "open" and awaiting_result(contexts[bet.id], today) for bet in bets):
+        last_load = (await last_ok_loads(db))["tennis_data"]
+        archive_now = (
+            await archive_matches_to(db),
+            next_upload_day(last_load, zone, today),
+        )
     return [
         bet_item(
             bet,
@@ -962,6 +976,7 @@ async def bet_items(
             after.get(bet.id),
             today=today,
             archive_to=archive.get(bet.id),
+            archive_now=archive_now,
         )
         for bet in bets
     ]
@@ -982,11 +997,25 @@ async def bet_counts(db: AsyncSession, user: User, now: datetime | None = None) 
 
 
 async def bet_detail(db: AsyncSession, user: User, bet_id: int) -> BetItemOut:
-    """Карточка своей ставки; чужая или несуществующая — 404."""
+    """Карточка своей ставки; чужая или несуществующая — 404. У открытой ставки ноги,
+    чей матч прошел, получают подсказку исхода по новостям (этап 5, В1-Г)."""
     items = await bet_items(db, user, [bet_id])
     if not items:
         raise AppError(404, "bet.not_found")
-    return items[0]
+    item = items[0]
+    if item.status != "open":
+        return item
+    today = local_today(user_zone(user.tz))
+    waiting = [
+        (leg.id, leg.match.player1.id, leg.match.player2.id, leg.match.day, leg.match.best_of)
+        for leg in item.legs
+        if leg.result is None and leg.match.day is not None and leg.match.day < today
+    ]
+    hints = await news_results(db, waiting)
+    if not hints:
+        return item
+    legs = [leg.model_copy(update={"news_result": hints.get(leg.id)}) for leg in item.legs]
+    return item.model_copy(update={"legs": legs})
 
 
 def _ordered(conds: Sequence[ColumnElement[bool]]) -> Select[int]:

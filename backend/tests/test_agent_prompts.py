@@ -10,14 +10,20 @@ from typing import Any
 
 import pytest
 
+from app.agent.postmortem import postmortem_schema
 from app.agent.prompts import (
     ANALYSIS_PROMPT,
     ANALYSIS_REQUEST,
     ANALYSIS_RETRY,
+    LESSON_LINE,
+    LESSON_SHIFT,
+    LESSONS_BLOCK,
     NEWS_PROMPT,
     NEWS_REQUEST,
     NEWS_RETRY,
     PARSE_PROMPT,
+    POSTMORTEM_PROMPT,
+    POSTMORTEM_REQUEST,
     PROMPTS_DIR,
     load_prompt,
     load_prompt_id,
@@ -33,12 +39,17 @@ PUBLISHED = {
     "analysis.v1": "dd9fa05229a5070d989e231790a72a7e725c048687a2c7f13e0501c311e5c37b",
     "analysis_request.v1": "aea6172f99724b88238e87b82074382b2cf65cbbb5d829d29a647c9109a82621",
     "analysis_retry.v1": "8504ae95151ae604a206e2b765cfcbf2ee968b6df795f4c8ab01b3290e6eee9c",
+    "lesson_line.v1": "e2731e441533367e46f5240c5fba040978a53585008f2cf96569b356d5ed14ce",
+    "lesson_shift.v1": "51397f058c92e91f6c0833d775a4c45ac3b78549cc5ac28a2398a1295b2a5811",
+    "lessons_block.v1": "ed8d75ae5ac8d547a1fcab7d4496b4fb72e2de7e822872b4d36c6df34ec7d66b",
     "news.v1": "2993309576d631053ddce2a95cda6e162923f268ad1eb97177e8238a03268915",
     "news.v2": "0d7766c72ee82a1c2fa71e396ffcf005c5fb3c23b36a5077da847a426eb10b21",
     "news_request.v1": "c086524b071306191ca0e7503e6ce73553169d7d82b6b8fcba9469a71e9e97af",
     "news_request.v2": "4ec0f4d796e31bb8faf017e83edc173509a786c92ab182f3691fb5d70dceb026",
     "news_retry.v1": "a3f33a19f390523250626ff698135b6f1ec015123678052f7ae4d5b447917f4f",
     "parse_input.v1": "7bbb18f5a817f99878923cde98a05014850f9f6597f919ce2aa71a66f710c5bb",
+    "postmortem.v1": "5c693bfaac5850f257dbf97c3d11030553396c2a3dc3abfb4ce28ddb084d1fcf",
+    "postmortem_request.v1": "f1b04fcf1b18bbfd8f643a00b6a48f960a072b6c4038b73c878f476df844c184",
 }
 # Слова, на которые модель отвечает отказом reasoning_extraction (он оплачивается)
 FORBIDDEN_WORDS = re.compile(r"reasoning|thinking|trace|по шагам|пошагов", re.IGNORECASE)
@@ -66,6 +77,11 @@ def test_prompts_used_by_code_exist() -> None:
         ANALYSIS_PROMPT,
         ANALYSIS_REQUEST,
         ANALYSIS_RETRY,
+        POSTMORTEM_PROMPT,
+        POSTMORTEM_REQUEST,
+        LESSONS_BLOCK,
+        LESSON_LINE,
+        LESSON_SHIFT,
     ):
         prompt = load_prompt(name, version)
         assert prompt.text.strip() and prompt.version_id == f"{name}.v{version}"
@@ -88,6 +104,11 @@ def test_templates_take_their_fields() -> None:
     assert "2026-10-11" in news and "2. B" in news and "не больше 2 " in news
     assert "2026-10-11" in load_prompt(*ANALYSIS_REQUEST).format(today="2026-10-11")
     assert "- x" in load_prompt(*ANALYSIS_RETRY).format(problems="- x")
+    assert "2026-10-11" in load_prompt(*POSTMORTEM_REQUEST).format(today="2026-10-11")
+    block = load_prompt(*LESSONS_BLOCK).format(lessons="- L-001: x")
+    assert block.rstrip().endswith("- L-001: x")
+    assert load_prompt(*LESSON_LINE).format(code="L-001", text="x").strip() == "- L-001: x"
+    assert "+1,5" in load_prompt(*LESSON_SHIFT).format(shift="+1,5")
 
 
 def _properties(node: Any) -> list[dict[str, Any]]:
@@ -103,7 +124,9 @@ def _properties(node: Any) -> list[dict[str, Any]]:
     return found
 
 
-@pytest.mark.parametrize("schema", [parse_schema, news_schema, assessment_schema])
+@pytest.mark.parametrize(
+    "schema", [parse_schema, news_schema, assessment_schema, postmortem_schema]
+)
 def test_schemas_are_strict_and_clean(schema: Any) -> None:
     data = schema()
     assert not FORBIDDEN_WORDS.search(json.dumps(data))

@@ -894,6 +894,19 @@ async def _smoke_new(args: argparse.Namespace, maker: Maker) -> None:
     if not args.yes and not confirmed("cli.acceptance.confirm"):
         raise _cancel()
     async with maker() as db:
+        # Остаток заново под блокировкой бюджета проверок, до commit строки creating (ее
+        # худший случай — в резерве): две проверки не займут один остаток (М2 волны 2)
+        await check_runs.lock_budget(db)
+        budget = await check_runs.eval_budget(db)
+        if cost.worst_usd > budget.left_usd:
+            raise CliError(
+                "smoke_eval.budget",
+                max=_usd(cost.worst_usd, 2),
+                left=_usd(budget.left_usd, 2),
+                budget=_usd(budget.budget_usd, 2),
+                spent=_usd(budget.spent_usd, 2),
+                reserved=_usd(budget.reserved_usd, 2),
+            )
         version = await db.get_one(StrategyVersion, version_id)
         run = await smoke_eval.create_run(
             db,

@@ -360,7 +360,7 @@ async def request_warm(user_id: int) -> None:
     """Поставить прогрев аналитики участника (не чаще одной задачи в очереди). Сбой
     очереди не роняет запрос: прогрев — только ускорение."""
     # Модуль воркера тянет загрузчики данных: API грузит его при первом прогреве
-    from app.workers.main import create_queue_pool
+    from app.workers.queue import create_queue_pool
 
     async def enqueue() -> Any:
         pool = await create_queue_pool(retries=0)

@@ -86,9 +86,10 @@ async def upload_tennis_data(
 
 
 @router.get("/uploads")
-async def list_uploads(db: DbSession) -> DataUploadsOut:
-    """Свежесть файла tennis-data и последние 20 загрузок, новые сверху."""
-    return await data_uploads.list_uploads(db)
+async def list_uploads(db: DbSession, admin: AdminUser) -> DataUploadsOut:
+    """Свежесть файла tennis-data (с днем следующей загрузки в поясе администратора) и
+    последние 20 загрузок, новые сверху."""
+    return await data_uploads.list_uploads(db, admin)
 
 
 @router.get("/uploads/{upload_id}")

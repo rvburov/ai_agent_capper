@@ -64,7 +64,8 @@ from app.schemas.data_uploads import (
 )
 from app.services.access_codes import person_name
 from app.services.audit import write_audit
-from app.services.data_status import last_ok_loads
+from app.services.bank import local_today, user_zone
+from app.services.data_status import archive_matches_to, last_ok_loads, next_upload_day
 from app.services.sessions import utcnow
 
 log = structlog.get_logger(__name__)
@@ -125,11 +126,17 @@ def _check_year(year: int) -> None:
 
 
 def _file_error(exc: IngestError) -> AppError:
-    """Ошибка разбора файла → ошибка загрузки (422) с текстом из локали."""
+    """Ошибка разбора файла → ошибка загрузки (422) с текстом из локали: только по-русски,
+    без технических причин (тип исключения, текст openpyxl — в лог, замечание №5)."""
     if exc.key == "ingest_tennis_data.errors.too_many_rows":
         return AppError(422, "upload.too_many_rows", limit=format_int(tennis_data.MAX_ROWS))
     if exc.key == "ingest_tennis_data.errors.too_big_unpacked":
         return AppError(422, "upload.too_big_unpacked", limit=tennis_data.MAX_UNPACKED_MB)
+    if exc.key == "ingest_tennis_data.errors.not_xlsx":
+        return AppError(422, "upload.not_xlsx", year=example_year())
+    if exc.key == "ingest_tennis_data.errors.bad_file":
+        log.info("data_upload.unreadable", detail=exc.message)
+        return AppError(422, "upload.unreadable", year=example_year())
     return AppError(422, "upload.bad_file", reason=exc.message)
 
 
@@ -207,7 +214,7 @@ async def enqueue_upload(upload_id: int) -> None:
     """Задача воркера process_data_upload (одна на загрузку). Очередь недоступна — 503,
     загрузка помечается failed: файл нужно отправить еще раз."""
     # Модуль воркера тянет загрузчики данных: API грузит его при первой загрузке
-    from app.workers.main import create_queue_pool
+    from app.workers.queue import create_queue_pool
 
     pool = await create_queue_pool(retries=1)
     try:
@@ -335,7 +342,7 @@ async def process_upload(factory: Callable[[], AsyncSession], upload_id: int) ->
     try:
         return await _process(factory, upload)
     except BaseException as exc:
-        await _fail(factory, upload_id, t("errors.upload.crashed", error=type(exc).__name__))
+        await _fail(factory, upload_id, t("errors.upload.crashed"))
         log.warning("data_upload.crashed", upload_id=upload_id, error=type(exc).__name__)
         raise
 
@@ -502,23 +509,26 @@ async def get_upload(db: AsyncSession, upload_id: int) -> DataUploadOut:
     return upload_out(upload, await _names(db, [upload]))
 
 
-async def archive_status(db: AsyncSession, now: datetime | None = None) -> ArchiveFileStatusOut:
-    """Свежесть файла tennis-data: последняя успешная загрузка и последний день матча."""
+async def archive_status(
+    db: AsyncSession, now: datetime | None = None, *, viewer: User | None = None
+) -> ArchiveFileStatusOut:
+    """Свежесть файла tennis-data: последняя успешная загрузка, последний день матча и
+    день следующей загрузки (data_status.next_upload_day в поясе viewer — как у участника
+    в «Ставках»; без viewer — пояс по умолчанию)."""
     moment = now or utcnow()
     last = (await last_ok_loads(db)).get("tennis_data")
-    matches_to = await db.scalar(
-        select(func.max(Match.match_date)).where(Match.source.in_(("sackmann", "tennis_data")))
-    )
+    zone = user_zone(viewer.tz if viewer is not None else None)
     return ArchiveFileStatusOut(
         last_load=last,
-        matches_to=matches_to if isinstance(matches_to, date) else None,
+        matches_to=await archive_matches_to(db),
+        next_upload=next_upload_day(last, zone, local_today(zone, moment)),
         stale_days=STALE_DAYS,
         stale=last is None or moment - last > timedelta(days=STALE_DAYS),
         max_mb=MAX_MB,
     )
 
 
-async def list_uploads(db: AsyncSession) -> DataUploadsOut:
+async def list_uploads(db: AsyncSession, viewer: User | None = None) -> DataUploadsOut:
     uploads = list(
         await db.scalars(
             select(DataUpload)
@@ -529,6 +539,6 @@ async def list_uploads(db: AsyncSession) -> DataUploadsOut:
     )
     names = await _names(db, uploads)
     return DataUploadsOut(
-        archive=await archive_status(db),
+        archive=await archive_status(db, viewer=viewer),
         uploads=[upload_out(upload, names) for upload in uploads],
     )

@@ -89,6 +89,8 @@ EXPECTED_TABLES = {
     "eval_set_items",
     "eval_comparisons",
     "weekly_reports",
+    # Этап 5, волна 2 (0009): «сообщить, когда наберется»
+    "lesson_watches",
 }
 
 
@@ -102,7 +104,7 @@ async def test_all_tables_exist(engine: AsyncEngine) -> None:
         extension = (
             await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'"))
         ).scalar()
-    assert len(EXPECTED_TABLES) == 45
+    assert len(EXPECTED_TABLES) == 46
     assert names == EXPECTED_TABLES | {"alembic_version"}
     assert set(Base.metadata.tables) == EXPECTED_TABLES
     assert extension == 1
@@ -1137,5 +1139,54 @@ async def test_stage5_migration_keeps_stage4_data(settings: Settings) -> None:
             async with engine.begin() as conn:
                 await conn.run_sync(run_alembic_upgrade, "head")
                 assert await conn.scalar(text("SELECT count(*) FROM bet_legs")) == 1
+        finally:
+            await engine.dispose()
+
+
+async def test_stage5_wave2_migration(settings: Settings) -> None:
+    """0008 → 0009: у прежних уроков origin — postmortem, metrics пустые; новая таблица
+    lesson_watches; действие журнала lesson_off и CHECK origin. Откат до 0008 удаляет
+    подписки и записи lesson_off; повторный upgrade проходит."""
+    async with _temp_database(settings, "wave2") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0008")
+                await conn.execute(text("INSERT INTO users (email) VALUES ('m@example.com')"))
+                await conn.execute(
+                    text(
+                        "INSERT INTO lessons (user_id, code, text, kind) VALUES"
+                        " (NULL, 'L-001', 'Грунт', 'numeric')"
+                    )
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                lesson = (
+                    await conn.execute(text("SELECT origin, created_by, metrics FROM lessons"))
+                ).one()
+                assert tuple(lesson) == ("postmortem", None, {})
+                await conn.execute(
+                    text("INSERT INTO lesson_watches (lesson_id, user_id) VALUES (1, 1)")
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO admin_audit_log (action, details) VALUES ('lesson_off', '{}')"
+                    )
+                )
+                for sql in (
+                    "UPDATE lessons SET origin = 'chat'",
+                    "INSERT INTO lesson_watches (lesson_id, user_id) VALUES (1, 1)",
+                    "INSERT INTO admin_audit_log (action, details) VALUES ('lesson_x', '{}')",
+                ):
+                    assert await _refused(conn, sql), sql
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0008")
+            async with engine.begin() as conn:
+                assert "lesson_watches" not in await conn.run_sync(_table_names)
+                assert await conn.scalar(text("SELECT count(*) FROM admin_audit_log")) == 0
+                assert await conn.scalar(text("SELECT count(*) FROM lessons")) == 1
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
         finally:
             await engine.dispose()

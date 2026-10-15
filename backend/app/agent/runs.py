@@ -142,7 +142,8 @@ def usage_from(message: Message) -> Usage:
     )
 
 
-def _long_factor(price: ModelPrice, prompt_tokens: int) -> Decimal:
+def long_factor(price: ModelPrice, prompt_tokens: int) -> Decimal:
+    """Множитель второй ступени цены: вход длиннее порога модели — вся цена вызова дороже."""
     threshold, multiplier = price.long_input_threshold, price.long_multiplier
     if threshold is not None and multiplier is not None and prompt_tokens > threshold:
         return Decimal(multiplier)
@@ -158,7 +159,7 @@ def cost_usd(price: ModelPrice, usage: Usage) -> Decimal:
         + usage.cache_read_tokens * price.cache_read
         + usage.output_tokens * price.output
     ) / MTOK
-    tokens *= _long_factor(price, usage.prompt_tokens)
+    tokens *= long_factor(price, usage.prompt_tokens)
     if usage.batch:
         tokens /= 2
     total = tokens + usage.web_searches * price.search_price
@@ -191,7 +192,7 @@ def worst_case_usd(
     По нему проверяется потолок анализа и лимиты перед вызовом."""
     per_input = max(price.input, price.cache_write_5m)
     tokens = (input_tokens * per_input + max_tokens * price.output) / MTOK
-    tokens *= _long_factor(price, input_tokens)
+    tokens *= long_factor(price, input_tokens)
     total = tokens + searches * price.search_price
     return total.quantize(USD_STEP, rounding=ROUND_UP)
 
@@ -203,7 +204,7 @@ def max_tokens_within(
     budget_usd. 0 — не помещается даже вход. Выход бесплатный — без предела (большое
     число, вызывающий сам ограничит его настройкой)."""
     per_input = max(price.input, price.cache_write_5m)
-    factor = _long_factor(price, input_tokens)
+    factor = long_factor(price, input_tokens)
     fixed = input_tokens * per_input / MTOK * factor + searches * price.search_price
     per_output = price.output * factor / MTOK
     # Запас в миллионную долю: worst_case_usd округляет сумму вверх до нее

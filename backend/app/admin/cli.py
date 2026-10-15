@@ -83,7 +83,16 @@ from app.db.session import create_engine, create_sessionmaker, get_session
 from app.ingest import players_link
 from app.ingest.runs import IngestError, update_lock
 from app.ml import elo
-from app.services import access_codes, admin_key, admin_users, agent_smoke, data_uploads, players
+from app.services import (
+    access_codes,
+    admin_key,
+    admin_users,
+    agent_smoke,
+    data_uploads,
+    lessons,
+    players,
+    postmortems,
+)
 from app.services.app_settings import get_app_settings
 
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -862,6 +871,52 @@ async def _data_upload(args: argparse.Namespace) -> None:
         raise CliError("data_upload.failed", error=out.error or "")
 
 
+async def _postmortems(args: argparse.Namespace) -> None:
+    """Очередь и пакет разборов ставок сейчас (без расписания воркера) и сбор готовых
+    пакетов разборов и быстрых проверок — тем же кодом, что задачи воркера."""
+    # Задачи воркера тянут сервисы анализа: команда грузит их только здесь
+    from app.workers.jobs import collect_all
+
+    engine = create_engine()
+    try:
+        factory = create_sessionmaker(engine)
+        async with factory() as db:
+            sent = await postmortems.submit(db, force=True)
+        async with factory() as db:
+            collected = await collect_all(db)
+    finally:
+        await engine.dispose()
+    _say(
+        t(
+            "cli.postmortems.result",
+            queued=sent.get("queued", 0),
+            sent=sent.get("sent", 0),
+            waiting=sent.get("waiting", 0),
+            collected=collected.get("collected", 0),
+            lost=collected.get("lost", 0),
+        )
+    )
+    skipped = sent.get("skipped") or collected.get("skipped")
+    if skipped:
+        _say(t("cli.postmortems.skipped", reason=skipped))
+
+
+async def _lessons_check(args: argparse.Namespace) -> None:
+    """Проверка гипотез на пороге своих случаев (--recheck — ежемесячная перепроверка
+    готовых и действующих уроков) тем же кодом, что задачи воркера."""
+    engine = create_engine()
+    try:
+        async with create_sessionmaker(engine)() as db:
+            if args.recheck:
+                counts = await lessons.recheck_lessons(db)
+            else:
+                counts = await lessons.check_lessons(db)
+    finally:
+        await engine.dispose()
+    key = "cli.lessons_check.recheck" if args.recheck else "cli.lessons_check.result"
+    _say(t(key, **{name: str(value) for name, value in counts.items()}))
+
+
 def _add_player_commands(command: Callable[[str, str], argparse.ArgumentParser]) -> None:
     find = command("players-find", "players_find")
     find.add_argument("query", help=t("cli.help.players_query"))
@@ -911,6 +966,13 @@ def _add_player_commands(command: Callable[[str, str], argparse.ArgumentParser])
     upload = command("data-upload", "data_upload")
     upload.add_argument("file", help=t("cli.help.data_upload_file"))
     upload.set_defaults(handler=_data_upload)
+
+    reviews = command("postmortems", "postmortems")
+    reviews.set_defaults(handler=_postmortems)
+
+    check = command("lessons-check", "lessons_check")
+    check.add_argument("--recheck", action="store_true", help=t("cli.help.lessons_recheck"))
+    check.set_defaults(handler=_lessons_check)
 
 
 # --- разбор аргументов ---

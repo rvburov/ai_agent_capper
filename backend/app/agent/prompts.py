@@ -27,6 +27,12 @@ NEWS_RETRY = ("news_retry", 1)
 ANALYSIS_PROMPT = ("analysis", 1)
 ANALYSIS_REQUEST = ("analysis_request", 1)
 ANALYSIS_RETRY = ("analysis_retry", 1)
+# Этап 5: разбор ставки (Batch) и блок уроков в system анализа (быстрая проверка урока)
+POSTMORTEM_PROMPT = ("postmortem", 1)
+POSTMORTEM_REQUEST = ("postmortem_request", 1)
+LESSONS_BLOCK = ("lessons_block", 1)
+LESSON_LINE = ("lesson_line", 1)
+LESSON_SHIFT = ("lesson_shift", 1)
 
 
 @dataclass(frozen=True)

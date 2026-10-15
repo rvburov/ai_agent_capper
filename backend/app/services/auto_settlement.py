@@ -43,7 +43,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 from app.core.errors import AppError
 from app.core.formatting import format_money
 from app.core.i18n import t
-from app.db.models import Bet, BetLeg, Match, Tournament, User
+from app.db.models import Bet, BetLeg, Match, Player, Tournament, User
 from app.ingest.match_link import archive_day, played_before
 from app.ml.sets import (
     BEST_OF,
@@ -419,11 +419,29 @@ async def check_settled_bets(db: AsyncSession, *, now: datetime | None = None) -
                     kind="settle_conflict",
                     link=bet_link(bet.id),
                     bet=bet.id,
+                    event=await _event_text(db, differs[0].match_id),
                     archive=_leg_result_text(differs[0].archive_result),
                     yours=_leg_result_text(differs[0].result),
                 )
         await db.commit()
     return result
+
+
+async def _event_text(db: AsyncSession, match_id: int) -> str:
+    """Событие для текста уведомления: «Игрок 1 — Игрок 2» (русское имя, если есть) — в
+    экспрессе видно, о каком матче речь."""
+    match = await db.get(Match, match_id)
+    if match is None:
+        return ""
+    names = {
+        int(pid): name_ru or name
+        for pid, name, name_ru in await db.execute(
+            select(Player.id, Player.name, Player.name_ru).where(
+                Player.id.in_((match.player1_id, match.player2_id))
+            )
+        )
+    }
+    return f"{names.get(match.player1_id, '?')} — {names.get(match.player2_id, '?')}"
 
 
 def _leg_result_text(result: str | None) -> str:

@@ -39,7 +39,7 @@ from app.db.models import (
 )
 from app.db.session import create_sessionmaker
 from app.ingest import update
-from app.services import analysis_run, data_uploads
+from app.services import analysis_run, data_uploads, lesson_quick
 from app.services.data_status import DATA_UPDATE_MINUTE, STALE_AFTER
 from app.services.sessions import create_session, get_active_session
 from app.workers import jobs
@@ -61,15 +61,21 @@ from app.workers.main import (
     ANALYSIS_TIMEOUT_SECONDS,
     CLEANUP_HOUR_UTC,
     CLEANUP_MINUTE,
+    COLLECT_MINUTES,
+    LESSONS_HOUR_UTC,
+    LESSONS_MINUTE,
+    POSTMORTEM_MINUTES,
+    QUICK_CHECK_TIMEOUT_SECONDS,
     REAP_MINUTES,
+    RECHECK_DAY,
+    RECHECK_MINUTE,
     REMIND_MINUTE,
     UPLOAD_TIMEOUT_SECONDS,
     WARM_NEW_DAY_MINUTE,
     WorkerSettings,
-    apply_redis_prefix,
     build_cron_jobs,
-    create_queue_pool,
 )
+from app.workers.queue import apply_redis_prefix, create_queue_pool
 from tests.claude_mock import seed_prices
 from tests.support import BACKEND_DIR, UserFactory
 from tests.test_ingest_tennis_data import write_year
@@ -264,6 +270,11 @@ def test_worker_settings(settings: Settings) -> None:
         alerts_job,
         upload_job,
         remind_job,
+        submit_job,
+        collect_job,
+        quick_job,
+        lessons_job,
+        recheck_job,
     ) = functions
     assert (cleanup_job, update_job, reaper_job, deletion_job, alerts_job) == (
         cleanup_auth_records,
@@ -290,8 +301,56 @@ def test_worker_settings(settings: Settings) -> None:
     assert upload_job.name == "process_data_upload" == data_uploads.UPLOAD_JOB
     assert upload_job.timeout_s == UPLOAD_TIMEOUT_SECONDS and upload_job.max_tries == 30
     assert remind_job is jobs.remind_unsettled
+    # Волна 2: разборы, сбор пакетов, быстрая проверка урока (ставит API), уроки
+    assert (submit_job, collect_job, lessons_job, recheck_job) == (
+        jobs.submit_postmortems,
+        jobs.collect_batches,
+        jobs.check_lessons,
+        jobs.recheck_lessons,
+    )
+    assert isinstance(quick_job, arq.worker.Function)
+    assert quick_job.coroutine is jobs.run_quick_check
+    assert quick_job.name == "run_quick_check" == lesson_quick.QUICK_JOB
+    assert quick_job.timeout_s == QUICK_CHECK_TIMEOUT_SECONDS and quick_job.max_tries == 1
     assert WorkerSettings.cron_jobs is not None
-    cleanup, data, reaper, deletion, alerts, new_day, remind = WorkerSettings.cron_jobs
+    (
+        cleanup,
+        data,
+        reaper,
+        deletion,
+        alerts,
+        new_day,
+        remind,
+        submit,
+        collect,
+        lessons_cron,
+        recheck,
+    ) = WorkerSettings.cron_jobs
+    # Разборы и пакеты — каждые 15 минут, не в минуты соседних задач
+    hourly = {
+        CLEANUP_MINUTE,
+        DATA_UPDATE_MINUTE,
+        0,
+        ACCOUNT_DELETION_MINUTE,
+        AI_ALERTS_MINUTE,
+        WARM_NEW_DAY_MINUTE,
+        REMIND_MINUTE,
+    } | REAP_MINUTES
+    assert submit.coroutine is jobs.submit_postmortems and submit.minute == set(POSTMORTEM_MINUTES)
+    assert collect.coroutine is jobs.collect_batches and collect.minute == set(COLLECT_MINUTES)
+    assert len(POSTMORTEM_MINUTES) == len(COLLECT_MINUTES) == 4
+    assert not (POSTMORTEM_MINUTES | COLLECT_MINUTES) & hourly
+    assert not POSTMORTEM_MINUTES & COLLECT_MINUTES
+    assert submit.max_tries == collect.max_tries == 1
+    assert lessons_cron.coroutine is jobs.check_lessons
+    assert (lessons_cron.hour, lessons_cron.minute) == (LESSONS_HOUR_UTC, LESSONS_MINUTE)
+    assert recheck.coroutine is jobs.recheck_lessons
+    assert (recheck.day, recheck.hour, recheck.minute) == (
+        RECHECK_DAY,
+        LESSONS_HOUR_UTC,
+        RECHECK_MINUTE,
+    )
+    assert settings.data_update_hour_utc != LESSONS_HOUR_UTC
     # Напоминания — раз в час, без повтора, не в минуты соседних задач
     assert remind.coroutine is jobs.remind_unsettled and remind.max_tries == 1
     assert remind.hour is None and remind.minute == REMIND_MINUTE
@@ -342,7 +401,7 @@ def test_worker_cron_can_be_turned_off(settings: Settings) -> None:
     # CAPPER_WORKER_CRON=false (стек сквозных тестов): только задачи из очереди, без
     # ночной загрузки архивов и уборщика
     jobs_on = build_cron_jobs(settings)
-    assert jobs_on is not None and len(jobs_on) == 7
+    assert jobs_on is not None and len(jobs_on) == 11
     assert build_cron_jobs(settings.model_copy(update={"worker_cron": False})) is None
     assert Settings.model_fields["worker_cron"].default is True
 
@@ -386,6 +445,62 @@ def test_arq_keys_use_redis_prefix(settings: Settings) -> None:
         "arq.worker.Worker.__init__(queue_name)",
     }
     assert set(queue_defaults.values()) == {f"{prefix}arq:queue"}
+
+
+# Воркер — python -m app.workers.main: у него этот модуль — __main__ (здесь — копия под
+# другим именем, чтобы не запускать воркер). Шаг загрузки файла ставит задачу через сервис
+# (archive_settlement → analytics_cache.request_warm), тот импортирует очередь; раньше это
+# был второй импорт app.workers.main и префикс ставился второй раз. Еще одна копия самого
+# app/workers/queue.py — на случай, если и он исполнится дважды
+_DOUBLE_IMPORT_SCRIPT = """
+import importlib.util, runpy, sys
+import arq.constants, arq.jobs, arq.worker
+runpy.run_module("app.workers.main", run_name="__worker__")
+from app.services import analytics_cache, archive_settlement, data_uploads, lesson_quick
+import app.api.routes.analyses
+import app.workers.main
+spec = importlib.util.spec_from_file_location("queue_copy", sys.argv[1])
+spec.loader.exec_module(importlib.util.module_from_spec(spec))
+import inspect
+job_queue = inspect.signature(arq.jobs.Job.__init__).parameters["_queue_name"].default
+print(arq.constants.job_key_prefix, arq.jobs.job_key_prefix, arq.worker.result_key_prefix,
+      job_queue)
+"""
+
+
+async def test_arq_prefix_survives_double_import(settings: Settings) -> None:
+    prefix = settings.redis_prefix
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        _DOUBLE_IMPORT_SCRIPT,
+        str(BACKEND_DIR / "app" / "workers" / "queue.py"),
+        cwd=BACKEND_DIR,
+        env=os.environ.copy(),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, err = await asyncio.wait_for(process.communicate(), timeout=60)
+    assert process.returncode == 0, err.decode()
+    assert out.decode().split() == [
+        f"{prefix}arq:job:",
+        f"{prefix}arq:job:",
+        f"{prefix}arq:result:",
+        f"{prefix}arq:queue",
+    ]
+
+
+def test_services_queue_jobs_without_worker_module() -> None:
+    """Сервисы и маршруты ставят задачи через app.workers.queue, а не через модуль воркера:
+    у работающего воркера тот — __main__, и импорт по имени создал бы его вторую копию."""
+    app_dir = BACKEND_DIR / "app"
+    offenders = [
+        str(path.relative_to(BACKEND_DIR))
+        for path in app_dir.rglob("*.py")
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith(("from app.workers.main ", "import app.workers.main"))
+    ]
+    assert offenders == []
 
 
 def _arq_key_defaults() -> dict[str, str]:

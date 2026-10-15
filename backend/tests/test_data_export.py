@@ -85,6 +85,7 @@ async def _fill(db: AsyncSession, maker: BetMaker, made: MadeUser, tag: str) -> 
             user_id=made.id,
             status="done",
             summary=f"Summary-{tag}",
+            why=f"Why-{tag}",
         )
     )
     await db.commit()
@@ -173,6 +174,7 @@ async def test_json_export_is_own_and_without_secrets(
     assert len(tables["analyses"]) == 1 and len(tables["predictions"]) == 2
     [postmortem] = tables["postmortems"]
     assert postmortem["bet_id"] == mine["bet_id"] and postmortem["summary"] == "Summary-mine"
+    assert postmortem["why"] == "Why-mine"
     assert "agent_run_id" not in postmortem and "batch_job_id" not in postmortem
     # Чужого нет
     text = raw.decode()
@@ -183,6 +185,7 @@ async def test_json_export_is_own_and_without_secrets(
         "Device-theirs",
         "Phone-theirs",
         "Summary-theirs",
+        "Why-theirs",
     ):
         assert foreign not in text
     assert str(theirs["bet_id"]) not in {str(bet["id"]) for bet in tables["bets"]}

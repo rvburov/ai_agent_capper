@@ -43,6 +43,7 @@ from app.core.i18n import t
 from app.db.models import BankrollLedger, Bet, BetLeg, User
 from app.ml.sets import BEST_OF, parse_set_count
 from app.schemas.bets import BetItemOut, LegSettleIn, ReverseIn, SettleIn
+from app.services import postmortems
 from app.services.bank import MONEY_MAX
 from app.services.bet_versions import same_version, touch
 from app.services.bets import bet_detail, leg_contexts, money, score_to_own, settle_odds
@@ -269,5 +270,9 @@ async def reverse_settlement(
         leg.result_source = None
         leg.archive_result = None
         leg.archive_score = None
+    # Общий разбор матча строится только по архиву: свой исход участника его не меняет, а
+    # вердикт по ноге считается на лету. Разбор, построенный на другом исходе архива
+    # (архив исправлен), — снова в очередь (m5)
+    await postmortems.refresh_stale(db, sorted({leg.match_id for leg in legs}))
     await db.commit()
     return await bet_detail(db, user, bet.id)
