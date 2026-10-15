@@ -1,5 +1,7 @@
 /* Главная: банк и показатели за выбранный период, открытые ставки, мои матчи сегодня (из своих ставок и анализов),
-   «требует внимания», расходы ИИ; «Модель учится» — пустое состояние до этапа 5. Все цифры — из window.DATA. */
+   «требует внимания» (ставки ждут результата, кандидат и урок ждут решения), «Модель учится», расходы ИИ.
+   «Банк по дням» по В7 этапа 5: пунктир «вложено» ступенькой, отметка пополнения, главное число — прибыль ставок.
+   Все цифры — из window.DATA. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
@@ -54,16 +56,25 @@
     const cur = summarize(settled);
     const legs = D.allLegs.filter(l => l.date > anchor);
     const startBank = bankAt(anchor);
-    const dates = [], values = [];
-    for (let d = anchor; d <= TODAY; d = addDays(d, 1)) { dates.push(d); values.push(bankAt(d)); }
+    // В7: «вложено» — капитал на начало периода плюс пополнения и минус выводы внутри периода (ступенька)
+    const invested0 = D.investedAt(anchor);
+    const flows = D.bankFlows.filter(f => !f.start && f.at.slice(0, 10) > anchor && f.at.slice(0, 10) <= TODAY);
+    const dates = [], values = [], invested = [];
+    for (let d = anchor; d <= TODAY; d = addDays(d, 1)) { dates.push(d); values.push(bankAt(d)); invested.push(startBank + D.investedAt(d) - invested0); }
+    // Просадка — только от ставок: пополнение сдвигает пик в той же доле, что и банк (Р22)
     let peak = startBank, maxDD = 0;
-    values.forEach(v => { peak = Math.max(peak, v); maxDD = Math.min(maxDD, (v - peak) / peak * 100); });
+    values.forEach((v, i) => {
+      const flow = i ? invested[i] - invested[i - 1] : 0;
+      if (flow) { const before = v - flow; peak = before > 0 ? peak * v / before : v; }
+      peak = Math.max(peak, v); maxDD = Math.min(maxDD, (v - peak) / peak * 100);
+    });
     let prev = null;
     if (p.days) {
       const prevAnchor = addDays(anchor, -p.days);
       if (prevAnchor >= firstDate) prev = summarize(D.bets.filter(b => b.status !== 'open' && b.date > prevAnchor && b.date <= anchor));
     }
-    return { p, anchor, settled, cur, prev, brier: brier(legs), startBank, dates, values, maxDD };
+    const flowSum = flows.reduce((a, f) => a + (f.kind === 'withdrawal' ? -f.amount : f.amount), 0);
+    return { p, anchor, settled, cur, prev, brier: brier(legs), startBank, dates, values, invested, flows, flowSum, maxDD };
   }
 
   const openBets = () => D.bets.filter(b => b.status === 'open');
@@ -137,7 +148,7 @@
     .dashboard-hero-kv > div { min-width: 0; }
     .dashboard-hero-kv dt { font-size: var(--fs-xs); color: var(--fg-3); }
     .dashboard-hero-kv dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .dashboard-hero-kv dd small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); }
+    .dashboard-hero-kv dd small { display: block; font-weight: 400; color: var(--fg-3); font-size: var(--fs-xs); white-space: normal; }
 
     .dashboard-card .card-head { flex-wrap: nowrap; }
     .dashboard-card .card-head > div:first-child { flex: 1 1 auto; }
@@ -229,11 +240,16 @@
       .dashboard-alert.is-wide { grid-column: 1 / -1; }
     }
 
-    /* «Модель учится» до этапа 5 */
-    .dashboard-soon { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; align-items: start; }
-    .dashboard-soon-ic { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-3); }
-    .dashboard-soon-ic svg { width: 20px; height: 20px; }
-    .dashboard-soon p { font-size: var(--fs-sm); color: var(--fg-2); }
+    /* «Модель учится» */
+    .dashboard-learn { display: flex; flex-direction: column; margin: -4px 0; }
+    .dashboard-learn-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 16px; gap: 10px; align-items: center; padding: 8px 0; min-height: 44px; color: var(--fg); text-decoration: none; border-top: 1px solid var(--line); }
+    .dashboard-learn-row:first-child { border-top: 0; }
+    .dashboard-learn-row:hover b { color: var(--accent-ink); }
+    .dashboard-learn-row > svg { color: var(--fg-3); }
+    .dashboard-learn-row b { display: block; font-weight: 600; font-size: var(--fs-sm); }
+    .dashboard-learn-row small { display: block; font-size: var(--fs-xs); color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dashboard-learn-ic { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+    .dashboard-learn-ic svg { width: 16px; height: 16px; }
 
     /* расходы */
     .dashboard-cost-value { font-family: var(--font-display); font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
@@ -252,9 +268,11 @@
       UI.segmented({ label: 'Период для показателей', items: PERIODS.map(p => ({ id: p.id, label: p.label })), active: periodId, onChange: onPeriod }));
   }
 
+  // Короткая подпись пополнения или вывода: «+20 000 ₽ · пополнение, 14 сен»
+  const flowLabel = (f, short) => fmt.signedMoney(f.kind === 'withdrawal' ? -f.amount : f.amount) + ' · ' + (f.kind === 'withdrawal' ? 'вывод' : 'пополнение') + (short ? '' : ', ' + fmt.date(f.at));
   function heroCard(st) {
-    const delta = S.bank - st.startBank;
-    const pct = st.startBank ? delta / st.startBank * 100 : 0;
+    // В7: главное число периода — прибыль ставок и ROI, а не рост капитала (он смешивает прибыль с пополнением)
+    const c = st.cur;
     const open = openBets();
     const inPlay = sum(open, b => b.stake);
     const fromPeak = (S.bank - S.peak) / S.peak * 100;
@@ -262,10 +280,10 @@
       h('div', { class: 'dashboard-hero-top' },
         h('div', { class: 'stat-label' }, icon('wallet', { width: 16, height: 16 }), 'Банк', h('span', { class: 'xsmall muted', style: 'font-weight:400' }, '· с учетом ставок в игре')),
         h('div', { class: 'stat-value hero' }, fmt.money(S.bank)),
-        h('div', { class: 'row', style: 'gap:8px' }, deltaEl(fmt.signedMoney(delta) + ' · ' + fmt.signedPct(pct), trendOf(delta)), h('span', { class: 'stat-hint' }, st.p.ctx))),
+        h('div', { class: 'row', style: 'gap:8px' }, deltaEl(fmt.signedMoney(c.profit) + (c.roi != null ? ' · ROI ' + fmt.signedPct(c.roi) : ''), trendOf(c.profit)), h('span', { class: 'stat-hint' }, 'прибыль ставок ' + st.p.ctx))),
       h('div', { class: 'dashboard-hero-spark', title: 'Банк по дням ' + st.p.ctx }, UI.sparkline(st.values, { color: 'var(--s1)', width: 320, height: 52 })),
       h('dl', { class: 'dashboard-hero-kv' },
-        h('div', null, h('dt', null, 'Старт периода'), h('dd', null, fmt.money(st.startBank), h('small', null, fmt.date(st.anchor)))),
+        h('div', { title: st.flows.length ? 'Внутри периода: ' + st.flows.map(f => flowLabel(f)).join('; ') : null }, h('dt', null, 'Старт периода'), h('dd', null, fmt.money(st.startBank), h('small', null, fmt.date(st.anchor) + (st.flowSum ? ' · ' + fmt.signedMoney(st.flowSum) + ' пополнение' : '')))),
         h('div', null, h('dt', null, 'Сейчас в игре'), h('dd', null, fmt.money(inPlay), h('small', null, open.length + ' ' + fmt.plural(open.length, 'ставка', 'ставки', 'ставок')))),
         h('div', { title: 'Пик банка — ' + fmt.money(S.peak) }, h('dt', null, 'От пика'), h('dd', null, fmt.signedPct(fromPeak), h('small', null, 'пик ' + fmt.money(S.peak))))));
   }
@@ -338,13 +356,17 @@
     const c = st.cur;
     // Значения графика — в валюте программы (демо-данные в рублях): круглые деления оси без копеек, банк на день — с копейками
     const yFormat = v => (Number.isInteger(v) || UI.currency.code === 'RUB' ? fmt.int(v) : fmt.dec(v, 2));
+    // В7: пунктир «вложено» — ступенькой (старт периода и пополнения), в день пополнения — отметка с подписью
+    const marks = st.flows.map(f => ({ i: st.dates.indexOf(f.at.slice(0, 10)), label: flowLabel(f, mobile), series: 0 }));
     const chart = UI.lineChart({
       labels: st.dates,
-      series: [{ name: 'Банк, ' + fmt.cur(), color: 'var(--s1)', values: st.values.map(fmt.moneyNum) }],
-      area: true, endLabel: true, height: mobile ? 200 : 250,
-      refLines: [{ value: fmt.moneyNum(st.startBank) }],
+      series: [
+        { name: 'Банк, ' + fmt.cur(), color: 'var(--s1)', values: st.values.map(fmt.moneyNum) },
+        { name: 'Вложено', color: 'var(--fg-3)', values: st.invested.map(fmt.moneyNum), dashed: true, step: true, width: 1.5, noEnd: true },
+      ],
+      area: true, endLabel: true, height: mobile ? 200 : 250, marks,
       yFormat, xFormat: d => fmt.date(d), tipTitle: d => fmt.dateFull(d),
-      ariaLabel: 'Банк по дням ' + st.p.ctx + ': с ' + fmt.money(st.startBank) + ' до ' + fmt.money(S.bank),
+      ariaLabel: 'Банк по дням ' + st.p.ctx + ': с ' + fmt.money(st.startBank) + ' до ' + fmt.money(S.bank) + (st.flows.length ? '; ' + st.flows.map(f => flowLabel(f)).join('; ') : ''),
     });
     return card({
       class: 'dashboard-card',
@@ -352,12 +374,12 @@
       subtitle: st.p.ctx[0].toUpperCase() + st.p.ctx.slice(1) + ', ' + curIn(),
       actions: [chip(fmt.signedMoney(c.profit), c.profit > 0 ? 'good' : c.profit < 0 ? 'bad' : 'outline', c.profit > 0 ? 'arrowUp' : c.profit < 0 ? 'arrowDown' : null)],
       body: [
-        UI.legend([{ name: 'Банк на конец дня', color: 'var(--s1)' }, { name: 'Банк на начало периода · ' + fmt.money(st.startBank), type: 'dash' }]),
+        UI.legend([{ name: 'Банк на конец дня', color: 'var(--s1)' }, { name: 'Вложено: старт ' + fmt.money(st.startBank) + (st.flowSum ? ' и пополнения' : ''), type: 'dash' }]),
         UI.withTable(chart, () => betsTable(st, mobile)),
-        h('div', { class: 'dashboard-howto' }, icon('info'), 'Как читать: линия выше пунктира — вы в плюсе за период. ' + (mobile ? 'Коснитесь графика' : 'Наведите на график') + ', чтобы увидеть банк на любой день.'),
+        h('div', { class: 'dashboard-howto' }, icon('info'), 'Как читать: линия банка выше пунктира «вложено» — ставки в плюсе на любом участке. Пополнение поднимает пунктир ступенькой и в прибыль не входит. ' + (mobile ? 'Коснитесь графика' : 'Наведите на график') + ', чтобы увидеть банк на любой день.'),
         h('dl', { class: 'dashboard-strip' },
-          h('div', null, h('dt', null, 'Прибыль'), h('dd', { class: c.profit > 0 ? 'good-text' : c.profit < 0 ? 'bad-text' : null }, fmt.signedMoney(c.profit))),
-          h('div', null, h('dt', null, 'Ставок рассчитано'), h('dd', null, String(c.n))),
+          h('div', null, h('dt', null, 'Прибыль ставок'), h('dd', { class: c.profit > 0 ? 'good-text' : c.profit < 0 ? 'bad-text' : null }, fmt.signedMoney(c.profit))),
+          h('div', null, h('dt', null, 'Пополнения'), h('dd', null, st.flowSum ? fmt.signedMoney(st.flowSum) : 'нет')),
           h('div', null, h('dt', null, 'Оборот'), h('dd', null, fmt.money(c.turnover))),
           h('div', null, h('dt', null, 'Макс. просадка'), h('dd', null, st.maxDD < 0 ? fmt.signedPct(st.maxDD) : '0%'))),
       ],
@@ -371,13 +393,13 @@
       const payout = payoutOf(b.stake, b.total);
       return h('article', { class: 'dashboard-bet', 'aria-label': 'Ставка №' + b.id },
         h('div', { class: 'dashboard-bet-head' },
-          h('div', null, h('strong', null, b.legs.length > 1 ? 'Экспресс из ' + b.legs.length + ' ' + fmt.plural(b.legs.length, 'события', 'событий', 'событий') : 'Ординар'), h('div', { class: 'xsmall muted' }, '№' + b.id + ' · ' + b.bookmaker + ' · ' + b.tournament)),
-          UI.statusChip('open')),
+          h('div', null, h('strong', null, b.legs.length > 1 ? 'Экспресс из ' + b.legs.length + ' ' + fmt.plural(b.legs.length, 'события', 'событий', 'событий') : 'Ординар'), h('div', { class: 'xsmall muted' }, '№' + b.id + ' · ' + b.bookmaker + ' · ' + b.tournament + (b.awaiting ? ', ' + fmt.date(b.date) : ''))),
+          b.awaiting ? chip('Ждет результата', 'warn', 'clock') : UI.statusChip('open')),
         h('ul', { class: 'dashboard-legs' }, b.legs.map(l => {
           const m = matchOf(l);
           const implied = 1 / l.odds;
           return h('li', { class: 'dashboard-leg' },
-            h('span', { class: 'dashboard-leg-time' }, m ? m.time : '—'),
+            h('span', { class: 'dashboard-leg-time' }, m ? m.time : b.awaiting ? fmt.date(b.date) : '—'),
             h('div', { class: 'dashboard-leg-match' }, playerLink(l.p1), ' — ', playerLink(l.p2)),
             h('span', { class: 'odds', 'aria-label': 'Кэф ' + fmt.odds(l.odds) }, fmt.odds(l.odds)),
             h('div', { class: 'dashboard-leg-meta', title: 'Вероятность исхода: оценка модели и 1/кэф букмекера (с его маржой)' }, h('b', null, l.marketLabel), h('span', null, 'модель ' + fmt.prob(l.p) + ' · по кэфу ' + fmt.prob(implied))));
@@ -386,6 +408,7 @@
           h('div', null, h('dt', null, 'Кэф'), h('dd', { class: 'odds' }, fmt.odds(b.total))),
           h('div', null, h('dt', null, 'Ставка'), h('dd', null, fmt.money(b.stake))),
           h('div', null, h('dt', null, 'Выплата'), h('dd', null, fmt.money(payout)))),
+        b.awaiting && h('div', { class: 'dashboard-howto' }, icon('database'), 'Матчи сыграны ' + fmt.date(b.date) + ', а в архиве tennis-data они появятся после загрузки файла ≈ ' + fmt.date(D.archive.next) + '. Можно не ждать и внести результат самим.'),
         button('Внести результат', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#bets-' + b.id, block: true, ariaLabel: 'Внести результат ставки №' + b.id }));
     }) : UI.empty('Открытых ставок нет. Запустите анализ матчей дня — ИИ предложит экспресс.');
     return card({
@@ -437,34 +460,38 @@
       : d.user.name + ' — уже ' + fmt.pct(d.ratio * 100, 0) + ' месячного лимита (' + fmt.usd(D.ai.keySpent(d.user)) + ' из ' + usdL(D.ai.limitOf(d.user).monthly) + ').');
   }
 
-  // Архив матчей не обновлялся больше 3 дней (уведомление data_stale) — только администратору
+  // Файл tennis-data не загружали больше 7 дней (уведомление data_stale) — только администратору
   const daysSince = iso => Math.floor((Date.parse(NOW + ':00Z') - Date.parse(iso + ':00Z')) / 86400000);
-  function archiveModal() {
-    const A = D.archive;
-    UI.modal({
-      title: 'Архив матчей не обновляется',
-      body: [
-        h('p', { class: 'small soft' }, 'Ночное обновление в ' + A.nightly + ' скачивает новые матчи ' + A.source + ' и пересчитывает Эло. Последняя успешная загрузка — ' + fmt.dateFull(A.lastLoad) + ', ' + A.lastLoad.slice(11, 16) + ' UTC.'),
-        UI.kv([['Что устарело', 'Эло, форма и подача игроков — без матчей после этой даты'], ['Что работает', 'анализы, новости перед анализом, ставки и банк'], ['Как обновить вручную', h('code', null, 'bash deploy/local.sh data')]]),
-        h('p', { class: 'xsmall muted' }, 'Уведомление приходит администраторам, если загрузки не было больше ' + A.staleDays + ' дней, не чаще раза в сутки.'),
-      ],
-      actions: close => [button('Понятно', { kind: 'primary', onClick: close })],
-    });
-  }
-
   function attentionCard() {
     const list = h('div', { class: 'dashboard-alerts' });
     const isAdmin = UI.auth.isAdmin;
     const items = [];
+    // Этап 5 (В1): ставки ждут результата, пока матчей нет в загруженном файле tennis-data — задержка до недели
+    const waiting = openBets().filter(b => b.awaiting);
+    if (waiting.length) items.push({
+      tone: 'warn', ic: 'clock', sr: 'Ждет результата',
+      title: waiting.length + ' ' + fmt.plural(waiting.length, 'ставка ждет', 'ставки ждут', 'ставок ждут') + ' результата',
+      text: 'В архиве tennis-data матчи по ' + fmt.date(D.archive.matchesTo) + ', следующий файл ≈ ' + fmt.date(D.archive.next) + ' — тогда ставки рассчитаются сами. Можно внести результат и раньше: по новостям уже есть подсказка.',
+      action: button('Внести результат', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#bets-' + waiting[0].id }),
+    });
     if (isAdmin && D.archive) {
       const days = daysSince(D.archive.lastLoad);
       if (days > D.archive.staleDays) items.push({
         tone: 'warn', ic: 'database', sr: 'Предупреждение',
-        title: 'Архив матчей не обновлялся ' + days + ' ' + fmt.plural(days, 'день', 'дня', 'дней'),
-        text: 'Последняя загрузка ' + D.archive.source + ' — ' + fmt.date(D.archive.lastLoad) + '. Эло и форма игроков — без матчей после этой даты, анализы идут.',
-        action: button('Что делать', { kind: 'secondary', size: 'sm', icon: 'info', onClick: archiveModal }),
+        title: 'Файл tennis-data не загружали ' + days + ' ' + fmt.plural(days, 'день', 'дня', 'дней'),
+        text: 'В архиве матчи по ' + fmt.date(D.archive.matchesTo) + '. Ставки после этой даты не рассчитаются сами, Эло — без новых матчей.',
+        action: button('Загрузить файл', { kind: 'secondary', size: 'sm', icon: 'upload', href: '#admin-data' }),
       });
     }
+    // Решения администратора по обучению (В4, В5): общий кандидат инструкций и урок, готовый к проверке
+    const L = D.learning;
+    const cand = L.versions.find(v => v.status === 'candidate'), ready = L.lessons.filter(x => x.status === 'ready');
+    if (isAdmin && (cand || ready.length)) items.push({
+      tone: 'accent', ic: 'brain', sr: 'Нужно решение',
+      title: 'Обучение модели: ' + [cand && 'кандидат ' + cand.id + ' ждет решения', ready.length && 'урок ' + ready.map(x => x.id).join(', ') + ' готов к проверке'].filter(Boolean).join(', '),
+      text: [cand && cand.cmp ? cand.id + ' прошел правило экономии: качество не хуже ' + cand.cmp.base + ', токенов ' + fmt.signedPct(cand.cmp.tokens, 0) + '.' : null, ready.length ? 'Урок подтвержден на истории; в анализ — после быстрой проверки ≈ ' + fmt.usd(D.ai.eval.quickCheck) + ' и вашего «да».' : null].filter(Boolean).join(' '),
+      action: button('Обучение модели', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: cand ? '#learning-versions' : '#learning-lessons' }),
+    });
     if (isAdmin) {
       const todo = adminTodo();
       if (todo.length) items.push({
@@ -476,7 +503,7 @@
     }
     // Адаптации размера ставки (Р22) — те же правила, что в «Профиль → Банк и стратегия».
     // В7: «рост банка» и «прибыльная неделя» по умолчанию выключены, статус остальных считается из DATA.stats
-    const fromPeak = (S.bank - S.peak) / S.peak * 100, growth = (S.bank - S.start) / S.start * 100;
+    const fromPeak = (S.bank - S.peak) / S.peak * 100, growth = (S.bank - S.invested) / S.invested * 100;
     const weekBase = D.bankHistory.filter(x => x.date <= addDays(D.today, -7)).pop() || D.bankHistory[0];
     const week = (S.bank - weekBase.bank) / weekBase.bank * 100;
     const cond = {
@@ -495,9 +522,9 @@
           + (active.length ? 'Сейчас ' + active.map(r => r.effect).join('; ') + '.' : 'Сегодня суммы — по таблице стратегии.')),
         h('ul', { class: 'dashboard-rules', 'aria-label': 'Правила адаптации' }, rules.map(r => h('li', null,
           h('span', { class: 'dashboard-rule-name' }, r.label, h('small', null, r.effect)), STATUS(r)))),
-        off.length ? h('span', { class: 'dashboard-rule-note' }, icon('info'), h('span', null, h('b', null, 'По умолчанию выключены: '), off.map(r => '«' + r.label.toLowerCase() + '»').join(' и ') + '. В утвержденных правилах суммы их нет, они опираются на короткие серии, то есть на шум. Включенные, они увеличили бы следующие ставки' + (off.some(r => r.met) ? ' — и сейчас бы сработали' : '; сейчас не сработали бы и включенными') + '. Включить — только по вашему решению.')) : null,
-        // Для согласования (В7): в коде этапа 3 эти правила включены, «Выключено» — предложение, оно меняет суммы ставок
-        off.length ? h('span', { class: 'dashboard-rule-note' }, h('span', null, h('span', { class: 'demo-pill' }, 'Только в макете'), ' ', h('b', null, 'На согласование. '), 'Сейчас в коде этапа 3 эти правила включены. «Выключено» — предложение: оно меняет суммы следующих ставок, поэтому выключаем только с вашего согласия. Подробнее — в «Правилах ставок».')) : null,
+        off.length ? h('span', { class: 'dashboard-rule-note' }, icon('info'), h('span', null, h('b', null, 'По умолчанию выключены: '), off.map(r => '«' + r.label.toLowerCase() + '»').join(' и ') + '. В утвержденных правилах суммы их нет, они опираются на короткие серии, то есть на шум. Включенные, они увеличили бы следующие ставки' + (off.some(r => r.met) ? ' — и сейчас бы сработали' : '; сейчас не сработали бы и включенными') + '.')) : null,
+        // Правила суммы — свои у каждого и меняются новой версией (этап 5): рост ставки выключен версией r2
+        off.length ? h('span', { class: 'dashboard-rule-note' }, icon('history'), h('span', null, 'Выключены версией правил r2. Изменить — «Предложить изменение» в «Правилах ставок»: новая версия сначала кандидат, потом вы ее включаете.')) : null,
       ],
       action: button('Правила ставок', { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', href: '#profile-bank' }),
       wide: true,
@@ -512,18 +539,31 @@
     return card({ class: 'dashboard-card dashboard-attn-card', title: 'Требует внимания', subtitle: n + ' ' + fmt.plural(n, 'пункт', 'пункта', 'пунктов') + ' · ' + (isAdmin ? 'стратегия, архив и администрирование' : 'стратегия'), body: list });
   }
 
-  // «Модель учится» — этап 5 (уроки, гипотезы, версии стратегии): пока пустое состояние
+  // «Модель учится» (этап 5): разборы рассчитанных ставок, последний урок, гипотезы, кандидат версии, отчет недели.
+  // Уроки и инструкции общие (В5): участник видит, что учится, а решения принимает администратор
   function learningCard() {
+    const L = D.learning, isAdmin = UI.auth.isAdmin;
+    const inPrompt = L.lessons.filter(x => x.status === 'confirmed' && x.inPrompt);
+    const hyp = L.lessons.filter(x => x.status === 'hypothesis');
+    const ready = L.lessons.filter(x => x.status === 'ready');
+    const cand = L.versions.find(v => v.status === 'candidate'), act = L.versions.find(v => v.status === 'active');
+    const lastLesson = L.lessons.filter(x => x.status !== 'rejected' && x.status !== 'retired').slice().sort((a, b) => b.created.localeCompare(a.created))[0];
+    const appSettled = D.bets.filter(b => b.source === 'app' && b.status !== 'open');
+    const auto = appSettled.filter(b => b.settledBy === 'auto').length;
+    const rep = L.weekReport(L.reportWeeks[0]);
+    const row = (ic, title, meta, href) => h('a', { class: 'dashboard-learn-row', href }, h('span', { class: 'dashboard-learn-ic', 'aria-hidden': 'true' }, icon(ic)), h('span', { style: 'min-width:0' }, h('b', null, title), h('small', null, meta)), icon('chevronRight', { width: 16, height: 16 }));
     return card({
       class: 'dashboard-card',
       title: 'Модель учится',
-      subtitle: 'Появится на этапе 5',
+      subtitle: 'Рассчитано ' + appSettled.length + ' ' + fmt.plural(appSettled.length, 'ставка', 'ставки', 'ставок') + ' приложения, ' + auto + ' — по архиву',
       body: [
-        h('div', { class: 'dashboard-soon' },
-          h('span', { class: 'dashboard-soon-ic', 'aria-hidden': 'true' }, icon('brain')),
-          h('p', null, 'Разбор рассчитанных ставок, уроки и версии стратегии появятся на этапе 5. Пока модель не меняется: точность прогнозов и калибровка — в «Аналитике».')),
+        h('div', { class: 'dashboard-learn' },
+          row('book', 'В анализе ' + inPrompt.length + ' ' + fmt.plural(inPrompt.length, 'урок', 'урока', 'уроков') + ' из ' + L.LESSONS_MAX, hyp.length + ' ' + fmt.plural(hyp.length, 'гипотеза копит', 'гипотезы копят', 'гипотез копят') + ' случаи' + (ready.length ? ' · ' + ready[0].id + ' готов к проверке' : ''), '#learning-lessons'),
+          lastLesson && row('flask', 'Последний: ' + lastLesson.id, lastLesson.text, '#learning-lessons'),
+          row('layers', 'Инструкции ' + (act ? act.id : '—') + (cand ? ' · кандидат ' + cand.id : ''), cand ? (isAdmin ? 'ждет вашего решения' : 'ждет решения администратора') + ': не хуже ' + (act ? act.id : '') + ', дешевле' : 'кандидатов нет', '#learning-versions'),
+          row('calendar', 'Отчет за ' + fmt.date(rep.from) + ' – ' + fmt.date(rep.to), rep.n + ' ' + fmt.plural(rep.n, 'ставка', 'ставки', 'ставок') + ' · ' + fmt.signedMoney(rep.profit) + ' · следующий ' + fmt.date(L.nextReport) + ', 07:00', '#learning-reports')),
       ],
-      foot: [button('Аналитика', { kind: 'ghost', size: 'sm', icon: 'chart', iconRight: 'chevronRight', href: '#analytics' })],
+      foot: [button('Обучение модели', { kind: 'ghost', size: 'sm', icon: 'brain', iconRight: 'chevronRight', href: '#learning' })],
     });
   }
 
@@ -568,9 +608,9 @@
             ['Участники на вашем ключе', fmt.usd(sum(others, A.keySpent))],
             ['Общие фоновые задачи', fmt.usd(B.shared)],
             ['Прогноз на месяц', '≈ ' + fmt.usd(B.forecast)],
-            ['Проверки (eval), отдельно', fmt.usd(A.eval.spent) + ' из ' + usdL(A.eval.monthly)],
+            ['Проверки (eval), отдельно', fmt.usd(A.eval.spent) + ' из ' + usdL(A.eval.monthly) + (A.eval.firstMonth ? ' · с ноября ' + usdL(A.eval.next) : '')],
           ]),
-          howto('Общие фоновые задачи — вызовы без участника, сейчас это приемка этапа. Проверки идут из своего бюджета и в общий не входят. Прогноз учитывает личные лимиты участников. Ставки и банк участников вам не видны — только расход на ИИ.'),
+          howto('Общие фоновые задачи — вызовы без участника: разборы рассчитанных ставок (Sonnet 5.5 через Batch, ≈ $0,01 за матч) и приемка этапа. Проверки идут из своего бюджета и в общий не входят. Прогноз учитывает личные лимиты участников. Ставки и банк участников вам не видны — только расход на ИИ.'),
         ],
         foot: [button('Администрирование', { kind: 'ghost', size: 'sm', icon: 'admin', iconRight: 'chevronRight', href: '#admin-usage', title: 'Расход ИИ по людям — в Администрировании' })],
       });

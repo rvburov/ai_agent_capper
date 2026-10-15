@@ -369,7 +369,9 @@
   }
   function textWidth(s) { return String(s).length * 6.4; }
 
-  // lineChart({labels:[..], series:[{name,color,values:[..], dashed, width}], height, yFormat, xFormat(label,i), area, yMin, yMax, refLines:[{value,label}], endLabel:true})
+  // lineChart({labels:[..], series:[{name,color,values:[..], dashed, width, step, noEnd}], height, yFormat, xFormat(label,i), area, yMin, yMax, refLines:[{value,label}], endLabel:true,
+  //   marks:[{i, label, series}]}) — step: линия ступенькой (сначала по горизонтали); noEnd: без точки и подписи в конце;
+  //   marks: отметка события на дне i (вертикальный пунктир, точка на линии series и подпись)
   function lineChart(o) {
     const height = o.height || 240;
     const yf = o.yFormat || (v => fmt.int(v));
@@ -382,7 +384,8 @@
       const ticks = niceTicks(lo, hi, H < 200 ? 3 : 4);
       lo = Math.min(lo, ticks[0]); hi = Math.max(hi, ticks[ticks.length - 1]);
       const yLabelW = Math.max(...ticks.map(t => textWidth(yf(t)))) + 10;
-      const endW = o.endLabel ? Math.min(80, Math.max(...o.series.map(s => textWidth(yf(s.values[s.values.length - 1])))) + 14) : 10;
+      const endSeries = o.series.filter(s => !s.noEnd);
+      const endW = o.endLabel && endSeries.length ? Math.min(80, Math.max(...endSeries.map(s => textWidth(yf(s.values[s.values.length - 1])))) + 14) : 10;
       const m = { t: 10, r: endW, b: 26, l: yLabelW };
       const iw = W - m.l - m.r, ih = H - m.t - m.b;
       const n = o.labels.length;
@@ -404,7 +407,12 @@
       });
       o.series.forEach((s, si) => {
         const pts = s.values.map((v, i) => v == null ? null : [X(i), Y(v)]);
-        const d = pts.reduce((acc, p, i) => p ? acc + (acc && pts[i - 1] ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1) : acc, '');
+        const d = pts.reduce((acc, p, i) => {
+          if (!p) return acc;
+          const prev = pts[i - 1];
+          if (s.step && acc && prev) return acc + 'H' + p[0].toFixed(1) + 'V' + p[1].toFixed(1);
+          return acc + (acc && prev ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1);
+        }, '');
         if (o.area && si === 0) {
           const first = pts.findIndex(Boolean), last = pts.length - 1 - [...pts].reverse().findIndex(Boolean);
           const base = Y(Math.max(lo, Math.min(hi, o.areaBase != null ? o.areaBase : lo)));
@@ -412,9 +420,21 @@
         }
         svg.appendChild(h('path', { d, fill: 'none', stroke: s.color, 'stroke-width': s.width || 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'stroke-dasharray': s.dashed ? '5 4' : null }));
         const lastI = s.values.length - 1;
-        if (pts[lastI]) {
+        if (pts[lastI] && !s.noEnd) {
           svg.appendChild(h('circle', { cx: pts[lastI][0], cy: pts[lastI][1], r: 4, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 2 }));
           if (o.endLabel) svg.appendChild(h('text', { x: pts[lastI][0] + 8, y: pts[lastI][1] + 4, style: 'fill:var(--fg);font-weight:600' }, yf(s.values[lastI])));
+        }
+      });
+      // отметки событий (например, пополнение банка): пунктир, точка на линии и подпись у верхнего края
+      (o.marks || []).forEach(mk => {
+        if (mk.i == null || mk.i < 0 || mk.i >= n) return;
+        const s = o.series[mk.series || 0], v = s && s.values[mk.i];
+        const x = X(mk.i);
+        svg.appendChild(h('line', { x1: x, x2: x, y1: m.t, y2: m.t + ih, stroke: 'var(--fg-3)', 'stroke-width': 1, 'stroke-dasharray': '2 3' }));
+        if (v != null) svg.appendChild(h('circle', { cx: x, cy: Y(v), r: 4.5, fill: 'var(--surface)', stroke: s.color, 'stroke-width': 2 }));
+        if (mk.label) {
+          const right = x > m.l + iw * 0.55;
+          svg.appendChild(h('text', { x: right ? x - 6 : x + 6, y: m.t + 11, 'text-anchor': right ? 'end' : 'start', style: 'fill:var(--fg-2);font-weight:600' }, mk.label));
         }
       });
       // crosshair layer

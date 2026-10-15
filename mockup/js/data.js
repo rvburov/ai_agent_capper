@@ -36,6 +36,7 @@
   // Рейтинга ATP в базе нет: место по Эло среди игроков с матчами за 52 недели считает код (в макете — среди демо-игроков)
   players.slice().sort((a, b) => b.elo.all - a.elo.all).forEach((p, i) => { p.eloPlace = i + 1; });
   const P = Object.fromEntries(players.map(p => [p.id, p]));
+  const D_match = l => (P[l.p1] ? P[l.p1].short : l.p1) + ' — ' + (P[l.p2] ? P[l.p2].short : l.p2);
 
   // Календарь туров (июль–октябрь 2026)
   // На турнирах Большого шлема матч до трех побед в сетах (best_of = 5), на остальных — до двух
@@ -72,9 +73,13 @@
   const bets = [];
   let bank = 40000;
   const bankHistory = [{ date: '2026-07-01', bank }];
+  // В7 этапа 5: пополнение внутри истории — на «Банке по дням» пунктир «вложено» поднимается ступенькой.
+  // Проверка стоит до генератора случайных чисел: ставки и исходы те же, меняются только суммы после пополнения
+  const DEPOSIT = { date: '2026-09-14', amount: 20000, note: 'Пополнение счета bet365' };
   let date = '2026-07-02', id = 1;
   const allLegs = [];
   while (date < TODAY) {
+    if (date === DEPOSIT.date) { bank += DEPOSIT.amount; bankHistory.push({ date, bank, flow: DEPOSIT.amount }); }
     if (rnd() < 0.72) {
       const t = tourAt(date);
       const nLegs = rnd() < 0.3 ? 1 : rnd() < 0.65 ? 2 : 3;
@@ -142,14 +147,21 @@
     });
   });
 
+  // Этап 5: ставка вчерашнего дня ждет результата — в загруженном файле tennis-data матчи только по 4 окт.
+  // Новости перед анализом уже нашли исходы (player_news, вид «результат») — это подсказка в окне расчета, не расчет (В1)
   // Открытая ставка на сегодня: экспресс по матчам вне демо-анализа #A-0142 (его экспресс создается на экране «Анализ»)
   const openLegs = [
-    [{ p1: 'zverev', p2: 'musetti', market: 'p1', marketLabel: 'П1', odds: 1.48, p: 0.71, surface: 'hard', tournament: 'Шанхай', bestOf: 3 }, { p1: 'alcaraz', p2: 'shelton', market: 'p1', marketLabel: 'П1', odds: 1.30, p: 0.82, surface: 'hard', tournament: 'Шанхай', bestOf: 3 }],
+    { date: '2026-10-06', bookmaker: 'Unibet', legs: [
+      { p1: 'fritz', p2: 'Лехечка', market: 'p1', marketLabel: 'П1', odds: 1.36, p: 0.79, surface: 'hard', tournament: 'Шанхай', bestOf: 3, news: { text: 'Фриц выиграл 6:4 7:6(5)', score: '2:0', source: 'atptour.com', at: '2026-10-06T19:40' } },
+      { p1: 'deminaur', p2: 'Бергс', market: 'p1', marketLabel: 'П1', odds: 1.42, p: 0.76, surface: 'hard', tournament: 'Шанхай', bestOf: 3, news: { text: 'де Минор выиграл 6:3 3:6 6:4', score: '2:1', source: 'tennis.com', at: '2026-10-06T21:15' } }] },
+    { date: TODAY, bookmaker: 'bet365', legs: [
+      { p1: 'zverev', p2: 'musetti', market: 'p1', marketLabel: 'П1', odds: 1.48, p: 0.71, surface: 'hard', tournament: 'Шанхай', bestOf: 3 }, { p1: 'alcaraz', p2: 'shelton', market: 'p1', marketLabel: 'П1', odds: 1.30, p: 0.82, surface: 'hard', tournament: 'Шанхай', bestOf: 3 }] },
   ];
-  openLegs.forEach((legs, k) => {
+  openLegs.forEach(o => {
+    const legs = o.legs;
     const total = round(legs.reduce((a, l) => a * l.odds, 1), 2);
     const stake = Math.round(bank * stakePct(total) / 100 / 10) * 10;
-    bets.push({ id, date: TODAY, tournament: 'Шанхай', surface: 'hard', legs: legs.map(l => Object.assign({ closing: null, result: 'open' }, l)), total, stake, status: 'open', profit: 0, bankAfter: null, clv: null, bookmaker: 'bet365' });
+    bets.push({ id, date: o.date, tournament: 'Шанхай', surface: 'hard', legs: legs.map(l => Object.assign({ closing: null, result: 'open' }, l)), total, stake, status: 'open', profit: 0, bankAfter: null, clv: null, bookmaker: o.bookmaker, awaiting: o.date < TODAY });
     id++;
   });
 
@@ -203,6 +215,62 @@
     l.source = b.source;
     enrichLeg(l, b, i);
   });
+
+  // ---------- Этап 5: авторасчет по архиву tennis-data (В1), закрытие из архива (Т1) ----------
+  // Владелец раз в неделю, по понедельникам, скачивает 2026.xlsx с tennis-data.co.uk и загружает его на сайте:
+  // файл понедельника содержит матчи по прошедшее воскресенье. Последний файл — 5 окт, матчи по 4 окт.
+  const ARCHIVE_TO = '2026-10-04';
+  const UPLOAD_LAST = '2026-10-05';
+  // Понедельник после дня матча — день, когда матч попал в загруженный файл
+  const uploadAfter = d => { let x = addDays(d, 1); while (new Date(x + 'T12:00:00Z').getUTCDay() !== 1) x = addDays(x, 1); return x; };
+  // Часть ставок участник рассчитал сам, не дожидаясь файла: ручной расчет главнее авторасчета (Т3)
+  const MANUAL = b => b.id % 4 === 2 || b.date > ARCHIVE_TO;
+  bets.forEach(b => {
+    if (b.status === 'open') return;
+    if (b.source === 'bot') { b.settledBy = 'legacy'; return; }
+    const up = uploadAfter(b.date);
+    if (!MANUAL(b) && up <= UPLOAD_LAST) { b.settledBy = 'auto'; b.settledAt = up + 'T08:14'; b.archiveFile = up; }
+    else { b.settledBy = 'manual'; b.settledAt = b.date + 'T22:30'; }
+    b.legs.forEach(l => {
+      if (!l.closing) return;
+      // в архиве только кэфы П1/П2 пяти букмекеров, момент снятия не проверен — у фор закрытие вносит участник
+      l.closingSource = b.settledBy === 'auto' && (l.market === 'p1' || l.market === 'p2') ? 'archive' : 'user';
+      if (l.closingSource === 'archive') l.closingBy = 'Pinnacle';
+    });
+  });
+  // Т3: архив разошелся с ручным расчетом — уведомление, деньги не меняются
+  const conflictBet = bets.find(b => b.id === 70);
+  if (conflictBet) conflictBet.conflict = { at: UPLOAD_LAST + 'T08:14', score: '2:1', leg: 0, archiveResult: 'loss' };
+  // Закрытие из архива у ног П1/П2 для «Аналитики»: эталон Pinnacle → Betfair → средний, вероятность без маржи
+  allLegs.forEach(l => {
+    const b = betById[l.betId];
+    if (!b || l.source !== 'app' || l.date > ARCHIVE_TO || (l.market !== 'p1' && l.market !== 'p2')) return;
+    const c = l.closing || round(l.odds * (1 - ((l.betId * 3) % 5 - 1) / 100), 2);
+    l.qArch = round(devig(c, round(1 / (1.03 - 1 / c), 2)), 3);
+  });
+  // Прогнозы без ставки (В3 этапа 4 → этап 5): матчи из анализов, на которые участник не ставил, с исходом из архива.
+  // Свой генератор — основной сид и ставки не меняются
+  let pseed = 42;
+  const prnd = () => { pseed = (pseed * 1103515245 + 12345) % 2147483648; return pseed / 2147483648; };
+  const predictions = [];
+  for (let d = '2026-08-02'; d <= ARCHIVE_TO; d = addDays(d, 1)) {
+    const n = prnd() < 0.45 ? 2 : prnd() < 0.5 ? 1 : 0;
+    for (let k = 0; k < n; k++) {
+      const p = round(0.52 + prnd() * 0.4, 3), q = round(clamp(p - 0.03 + (prnd() - 0.5) * 0.06, 0.4, 0.95), 3);
+      const won = prnd() < p - 0.015;
+      const mk = prnd() < 0.7 ? 'p1' : 'h1m';
+      predictions.push({ pKind: 'final', date: d, p, pb: round(clamp(p - 0.02 + (prnd() - 0.5) * 0.04, 0.4, 0.95), 3), pc: p, q, qArch: mk === 'p1' ? round(clamp(q + (prnd() - 0.5) * 0.03, 0.4, 0.96), 3) : null, result: won ? 'win' : 'loss', market: mk, surface: tourAt(d).surface, source: 'app', noBet: true });
+    }
+  }
+  // Пик банка: пополнение сдвигает пик в той же доле, что и капитал (Р22) — просадка считается только от ставок
+  let peakAdj = 0;
+  bankHistory.forEach(x => { if (x.flow) { const before = x.bank - x.flow; peakAdj = before > 0 ? peakAdj * x.bank / before : x.bank; } peakAdj = Math.max(peakAdj, x.bank); });
+  // Движение банка: стартовый банк и пополнения (журнал в «Банке и стратегии»), «вложено» на любой день
+  const bankFlows = [
+    { at: '2026-07-01T09:00', kind: 'deposit', amount: 40000, start: true, note: 'Стартовый банк' },
+    { at: DEPOSIT.date + 'T10:05', kind: 'deposit', amount: DEPOSIT.amount, note: DEPOSIT.note },
+  ];
+  const investedAt = d => bankFlows.filter(f => f.at.slice(0, 10) <= d).reduce((a, f) => a + (f.kind === 'withdrawal' ? -f.amount : f.amount), 0);
 
   const settled = bets.filter(b => b.status !== 'open');
   const wins = settled.filter(b => b.status === 'win').length;
@@ -274,12 +342,14 @@
   // Расходы ИИ (октябрь). Строка — вызов Claude (agent_runs), как в коде этапа 3 (Т17, Т19):
   // разбор текста — Haiku 5.5; новости перед анализом — Sonnet 5.5 с веб-поиском (2 поиска на матч, кэш 12 часов);
   // оценка матча — Opus 5.5, один вызов на матч: первый пишет общий префикс в кэш, следующие его читают.
-  // Разбора ставки и ночного обновления профилей нет (этап 5). Генератор детерминированный, без сида:
+  // Этап 5: разбор рассчитанной ставки — Sonnet 5.5 через Batch (−50%), один на матч, общая задача на ключе
+  // администратора (В3). Ночного обновления профилей нет (В11 этапа 4). Генератор детерминированный, без сида:
   // расход сходится с «Последними анализами» и бюджетом ключа.
   const runTypes = [
     { id: 'analysis', label: 'Оценка матча', model: 'Opus 5.5', effort: 'medium', what: 'Оценка матча: один вызов на матч' },
     { id: 'news', label: 'Новости перед анализом', model: 'Sonnet 5.5', effort: 'low', what: 'Веб-поиск: 2 поиска на матч, кэш 12 часов' },
     { id: 'parse', label: 'Разбор текста событий', model: 'Haiku 5.5', effort: 'low', what: 'Вставленный текст → список событий' },
+    { id: 'postmortem', label: 'Разбор ставки', model: 'Sonnet 5.5', effort: 'low', what: 'Разбор рассчитанной ставки: один на матч, Batch', batch: true },
   ];
   // $ за 1 млн токенов: вход, выход, чтение кэша; запись в кэш — вход × 1,25 (docs/TOKEN_ECONOMY.md)
   const PRICE_M = { 'Opus 5.5': [4, 20, 0.2], 'Sonnet 5.5': [2, 10, 0.1], 'Haiku 5.5': [0.1, 0.5, 0.01] };
@@ -302,8 +372,8 @@
   const addMin = (iso, m) => { const d = new Date(iso + ':00Z'); d.setUTCMinutes(d.getUTCMinutes() + m); return d.toISOString().slice(0, 16); };
   function makeRun(o) {
     const t = runTypes.find(x => x.id === o.type), p = PRICE_M[t.model];
-    const cost = (o.fresh * p[0] + o.written * p[0] * 1.25 + o.read * p[2] + o.output * p[1]) / 1e6 + o.searches * SEARCH_USD;
-    return Object.assign({ typeLabel: t.label, model: t.model, effort: t.effort, batch: false, status: 'ok' }, o, {
+    const cost = ((o.fresh * p[0] + o.written * p[0] * 1.25 + o.read * p[2] + o.output * p[1]) / 1e6) * (t.batch ? 0.5 : 1) + o.searches * SEARCH_USD;
+    return Object.assign({ typeLabel: t.label, model: t.model, effort: t.effort, batch: !!t.batch, status: 'ok' }, o, {
       input: o.fresh + o.written + o.read, cached: o.read, cost: round(cost, o.type === 'parse' ? 5 : 3),
     });
   }
@@ -332,29 +402,174 @@
     { type: 'news', fresh: 262, written: 32444, read: 4498, output: 1076, searches: 2, duration: 41 },
     { type: 'analysis', fresh: 4100, written: 6100, read: 0, output: 1620, searches: 0, duration: 63 },
   ].forEach((o, k) => aiRuns.push(makeRun(Object.assign({ id: 'run-smoke-' + k, at: addMin('2026-10-02T21:10', k), shared: true, tag: 'Приемка (agent-smoke)', step: 0 }, o))));
+  // Разборы рассчитанных ставок (этап 5, В3): по одному на матч, результат пакета — в течение часа после расчета.
+  // Свои матчи демо-пользователя плюс матчи других участников — общая задача, в лимит участника не входит
+  const pmMatches = [];
+  bets.filter(b => b.source === 'app' && b.status !== 'open' && b.status !== 'void' && b.date >= '2026-10-01')
+    .forEach(b => b.legs.forEach((l, i) => pmMatches.push({ at: addMin(b.settledAt, 50 + i), bet: b.id, match: D_match(l) })));
+  ['Рублев — Коболли', 'Шелтон — Попырин', 'Медведев — Хачанов', 'Дрейпер — Умбер', 'Музетти — Бублик']
+    .forEach((m, k) => pmMatches.push({ at: addMin('2026-10-0' + (2 + k % 4) + 'T08:14', 52 + k), match: m, other: true }));
+  pmMatches.forEach((x, k) => aiRuns.push(makeRun({ id: 'run-pm-' + k, at: x.at, type: 'postmortem', shared: true, tag: 'Разбор ставки', step: 0, match: null, matchLabel: x.match, bet: x.other ? null : x.bet,
+    fresh: 5100 + (k * 137) % 600, written: 0, read: 0, output: 900 + (k * 53) % 220, searches: 0, duration: 9 + k % 5, batchWait: 1800 + (k * 173) % 1500 })));
   aiRuns.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-  // Проверки (eval) — свой бюджет на ключе администратора, $25 в месяц: ни в лимит участника, ни в общий бюджет не входят
+  // Проверки (eval) — свой бюджет на ключе администратора: ни в лимит участника, ни в общий бюджет не входят.
+  // В2 этапа 5: $30 в первый месяц (замер разброса и первая версия), дальше $25. Прогон версии на замороженном наборе
+  // идет пакетами по 100 событий, чтобы худший случай помещался в бюджет (Т8): ≈ $0,11 на событие при 8 тыс. токенов
   const evalRuns = [
-    { at: '2026-10-04T10:02', what: 'smoke-eval: 40 сыгранных матчей, Opus 5.5 через Batch', cost: 0.58 },
-    { at: '2026-10-04T10:41', what: 'parse-eval: 30 текстов, Haiku 5.5', cost: 0.02 },
+    { at: '2026-10-03T02:10', kind: 'eval', version: 'v3', repeat: 1, events: 250, batches: 3, what: 'v3 · прогон 1 на наборе eval-2026-08, 250 событий, 3 пакета', cost: 3.62, worst: 27.5 },
+    { at: '2026-10-04T02:05', kind: 'eval', version: 'v3', repeat: 2, events: 250, batches: 3, what: 'v3 · прогон 2 — порог шума', cost: 3.55, worst: 27.5 },
+    { at: '2026-10-04T10:02', kind: 'smoke', events: 40, what: 'smoke-eval: 40 сыгранных матчей, Opus 5.5 через Batch', cost: 0.58, worst: 4.4 },
+    { at: '2026-10-04T10:41', kind: 'parse', events: 30, what: 'parse-eval: 30 текстов, Haiku 5.5', cost: 0.02, worst: 0.05 },
+    { at: '2026-10-06T02:20', kind: 'eval', version: 'v4', repeat: 1, events: 250, batches: 3, what: 'v4 · прогон 1 на наборе eval-2026-08', cost: 2.48, worst: 27.5 },
   ];
-  const evalBudget = { monthly: 25, spent: round(evalRuns.reduce((a, r) => a + r.cost, 0), 2), runs: evalRuns };
+  const evalBudget = { monthly: 30, next: 25, firstMonth: true, spent: round(evalRuns.reduce((a, r) => a + r.cost, 0), 2), runs: evalRuns, perEventWorst: 0.11, batchSize: 100, quickCheck: 0.6 };
   const aiSpent = round(aiRuns.reduce((a, r) => a + r.cost, 0), 2);
 
+  // ---------- Этап 5: петля обучения ----------
+  // В5: уроки и версии инструкций анализа общие для всех участников, их ведет администратор и проверяет на общем
+  // наборе матчей. Основание урока — матчи и прогнозы; свои ставки-источники видит только их владелец (Т21).
+  // Условие урока — из словаря признаков (Т7): SQL собирает код, а не Claude. Числа (эффект, ДИ, усадка) считает сервер.
+  // status: hypothesis — копит случаи; ready — подтвержден на истории, ждет решения администратора (В4);
+  // confirmed — в инструкциях (inPrompt) или выключен; rejected — на истории хуже; retired — списан при перепроверке
   const lessons = [
-    { id: 'L-014', text: 'Фора −1.5 на фаворита против левши с подачей 210+ км/ч сыграла хуже ожиданий: тай-брейки срезают «сухую» победу.', status: 'confirmed', evidence: 23, effect: '+0,018 к лог-лоссу без урока', scope: 'Фора −1.5 · хард', inPrompt: true, created: '2026-09-12' },
-    { id: 'L-017', text: 'После пятисетового матча за 48 часов до игры вероятность фаворита завышалась в среднем на 6 п.п.', status: 'confirmed', evidence: 21, effect: '+0,006 к Brier без урока', scope: 'Усталость · все покрытия', inPrompt: true, created: '2026-09-21' },
-    { id: 'L-019', text: 'Новости о «легкой травме» из соцсетей без подтверждения турнира не дают предсказательной силы.', status: 'confirmed', evidence: 11, effect: 'нейтрально, экономит 2 поиска', scope: 'Сбор новостей', inPrompt: true, created: '2026-09-28' },
-    { id: 'L-021', text: 'Возможно, на ночных сессиях в Азии аутсайдеры берут сет чаще.', status: 'hypothesis', evidence: 6, effect: 'нужно ≥ 20 случаев', scope: 'Ф(+1.5) · Азия', inPrompt: false, created: '2026-10-03' },
-    { id: 'L-012', text: 'Перевес в личных встречах на другом покрытии переносится на хард.', status: 'rejected', evidence: 19, effect: 'ухудшал калибровку', scope: 'Личные встречи', inPrompt: false, created: '2026-08-30' },
+    { id: 'L-017', kind: 'numeric', status: 'confirmed', inPrompt: true, created: '2026-09-12', decided: '2026-09-22', rechecked: '2026-10-01',
+      text: 'Если фаворит за 48 часов до матча сыграл пять сетов, его вероятность завышается — снижай на 4 п.п.',
+      scope: 'Усталость · все покрытия', cond: [['роль', 'фаворит по модели'], ['сетов за 48 часов', '≥ 5']],
+      own: 21, hist: 412, raw: 6, bias: [2, 10], metric: 'Brier', with: 0.196, without: 0.202, ci: [0.002, 0.010], holdout: '+0,005 на матчах 2026 г. — подтвердился', ownBets: [41, 53, 63] },
+    { id: 'L-019', kind: 'process', status: 'confirmed', inPrompt: true, created: '2026-09-24', decided: '2026-09-28', rechecked: '2026-10-01',
+      text: 'Не ищи и не учитывай новости о травмах из соцсетей без подтверждения турнира или ATP.',
+      scope: 'Новости перед анализом', cond: [['шаг', 'новости'], ['источник', 'соцсети без подтверждения']],
+      own: 11, hist: null, metric: 'Brier', with: 0.199, without: 0.198, saving: '2 поиска на матч, ≈ $0,02', ownBets: [64, 65, 67] },
+    { id: 'L-022', kind: 'numeric', status: 'ready', inPrompt: false, created: '2026-09-27', readyAt: '2026-10-06T03:10',
+      text: 'Фора −1.5 на фаворита на харде при разнице Эло на покрытии меньше 120: победа 2:0 случается реже, чем дает модель — снижай ее вероятность на 4–5 п.п.',
+      scope: 'Фора −1.5 · хард · близкие по Эло', cond: [['рынок', 'Ф1(−1.5) или Ф2(−1.5)'], ['покрытие', 'хард, крытый хард'], ['разница Эло на покрытии', '< 120']],
+      own: 23, hist: 1860, raw: 5, bias: [2, 8], metric: 'Лог-лосс', with: 0.574, without: 0.589, ci: [0.006, 0.024], holdout: '+0,013 на отложенных матчах 2026 г.', ownBets: [55, 57, 69] },
+    { id: 'L-023', kind: 'numeric', status: 'hypothesis', inPrompt: false, created: '2026-10-01',
+      text: 'После перерыва 30+ дней без матчей вероятность игрока завышается.',
+      scope: 'Перерыв · все покрытия', cond: [['дней с последнего матча', '≥ 30']], own: 9, ownBets: [72] },
+    { id: 'L-025', kind: 'numeric', status: 'hypothesis', inPrompt: false, created: '2026-10-05',
+      text: 'На грунте аутсайдер с кэфом 2.60+ берет хотя бы сет чаще, чем дает модель.',
+      scope: 'Фора +1.5 · грунт', cond: [['рынок', 'Ф1(+1.5) или Ф2(+1.5)'], ['покрытие', 'грунт'], ['кэф аутсайдера на победу', '≥ 2.60']], own: 4, ownBets: [] },
+    { id: 'L-012', kind: 'numeric', status: 'rejected', inPrompt: false, created: '2026-08-30', decided: '2026-09-02',
+      text: 'Перевес в личных встречах на другом покрытии переносится на хард.',
+      scope: 'Личные встречи', cond: [['личных встреч на другом покрытии', '≥ 3'], ['покрытие матча', 'хард']],
+      own: 19, hist: 1240, metric: 'Лог-лосс', with: 0.604, without: 0.597, ci: [-0.012, -0.002], ownBets: [] },
+    { id: 'L-009', kind: 'numeric', status: 'retired', inPrompt: false, created: '2026-08-10', decided: '2026-08-24', retired: '2026-10-01',
+      text: 'Игрок, выигравший турнир на прошлой неделе, переоценивается в первом круге следующего.',
+      scope: 'Первый круг после титула', cond: [['титул на прошлой неделе', 'да'], ['круг', 'первый']],
+      own: 22, hist: 640, metric: 'Лог-лосс', with: 0.590, without: 0.592, ci: [-0.004, 0.007], ownBets: [] },
+  ];
+  const LESSONS_MAX = 15, LESSON_MIN = 20, LESSON_MIN_PROC = 10, SHRINK_K = 200;
+
+  // Версии инструкций анализа — общая линия (В5), ведет администратор. Проверка — на замороженном наборе
+  // eval-2026-08: 250 событий после 1 августа 2026 (позже среза знаний модели), 38 трудных, без новостей
+  const evalSet = { code: 'eval-2026-08', frozenAt: '2026-10-02T21:30', n: 250, since: '2026-08-01', to: '2026-09-27', hard: 38, sha: '3f9a07…c21e', marketLL: 0.588 };
+  const strategyVersions = [
+    { id: 'v1', name: 'v1 · инструкции бота', date: '2026-07-01', status: 'archived', changes: ['Инструкции перенесены из старого бота без изменений'] },
+    { id: 'v2', name: 'v2 · + Эло по покрытиям', date: '2026-08-05', status: 'archived', changes: ['В досье — Эло по покрытиям', 'Вероятность базовой модели передается Claude как второе мнение'] },
+    { id: 'v3', name: 'v3 · + уроки L-017, L-019', date: '2026-09-22', status: 'active', tokens: 49, changes: ['В инструкциях — уроки L-017 и L-019, числовой — с усадкой к нулю'],
+      eval: { runs: 2, logloss: 0.583, brier: 0.201, ece: 2.9, fmtErr: 1, noise: 0.003, toMarket: [-0.021, 0.011] } },
+    { id: 'v4', name: 'v4 · сжатое досье', date: '2026-10-05', status: 'candidate', goal: 'saving', parent: 'v3', tokens: 34,
+      changes: ['Инструкции на английском, ответ — по-русски', 'Сжатое досье: 18 ключевых цифр на игрока', 'Уроки и правила те же, что в v3'],
+      eval: { runs: 1, logloss: 0.581, brier: 0.200, ece: 3.1, fmtErr: 0, toMarket: [-0.023, 0.009] },
+      cmp: { base: 'v3', rule: 'non_inferior', dLL: [-0.002, -0.009, 0.005], dBrier: [-0.001, -0.004, 0.002], dEce: [0.2, -0.7, 1.1], tokens: -31, passed: true, at: '2026-10-06T11:40' } },
+  ];
+  // Правила суммы ставки — у каждого участника свои (В5): правка — новой версией, кандидат включается кнопкой
+  const ruleVersions = [
+    { id: 'r1', name: 'r1 · правила этапа 3', date: '2026-07-01', status: 'archived', changes: ['4 диапазона итогового кэфа', 'Все пять адаптаций включены'] },
+    { id: 'r2', name: 'r2 · рост ставки выключен', date: '2026-10-01', status: 'active', changes: ['Выключены «Банк +15% и винрейт от 60%» и «Итог 7 дней +10%» (В7 этапа 4)'] },
+  ];
+  // Базовая модель: Эло по покрытиям + калибровка Платта (Т17). Перекалибровка — по понедельникам после загрузки
+  // файла; включается сама, если на проверке не хуже прежней (В6): Brier не хуже +0,005, лог-лосс не хуже +0,01
+  const mlModels = [
+    { id: 'elo-v1@2026-10-05', at: '2026-10-05T09:02', status: 'active', auto: true, brier: 0.1942, logloss: 0.571, ece: 2.1, matches: 412, prev: 'elo-v1@2026-09-28' },
+    { id: 'elo-v1@2026-09-28', at: '2026-09-28T09:20', status: 'archived', auto: true, brier: 0.1951, logloss: 0.573, ece: 2.3, matches: 398 },
+    { id: 'elo-v1@2026-09-21', at: '2026-09-21T09:35', status: 'rejected', auto: true, brier: 0.2013, logloss: 0.586, ece: 3.4, matches: 377, why: 'хуже прежней на 0,006 по Brier — не включена' },
+    { id: 'elo-v1@2026-09-14', at: '2026-09-14T09:10', status: 'archived', auto: true, brier: 0.1953, logloss: 0.574, ece: 2.4, matches: 361 },
+  ];
+  // Проверка по месяцам (walk-forward): рынок — по кэфам архива tennis-data, момент снятия не проверен (Т1)
+  const walkForward = [
+    { m: 'апр', full: 'Апрель 2026', n: 214, model: 0.204, market: 0.193 },
+    { m: 'май', full: 'Май 2026', n: 248, model: 0.199, market: 0.192 },
+    { m: 'июн', full: 'Июнь 2026', n: 236, model: 0.201, market: 0.195 },
+    { m: 'июл', full: 'Июль 2026', n: 252, model: 0.197, market: 0.193 },
+    { m: 'авг', full: 'Август 2026', n: 241, model: 0.196, market: 0.194 },
+    { m: 'сен', full: 'Сентябрь 2026', n: 187, model: 0.194, market: 0.192 },
+  ];
+  // Калибровка базовой модели после Платта на матчах 2026 г. (основной тур)
+  const mlCalibration = [
+    { lo: 0.5, hi: 0.6, p: 0.553, actual: 0.541, n: 312 }, { lo: 0.6, hi: 0.7, p: 0.651, actual: 0.664, n: 288 },
+    { lo: 0.7, hi: 0.8, p: 0.748, actual: 0.735, n: 241 }, { lo: 0.8, hi: 0.9, p: 0.846, actual: 0.858, n: 163 }, { lo: 0.9, hi: 1, p: 0.928, actual: 0.917, n: 72 },
   ];
 
-  const strategyVersions = [
-    { id: 'v1', name: 'v1 · исходная', date: '2026-07-01', logloss: 0.612, brier: 0.214, roi: -2.1, clv: 0.4, n: 220, status: 'archived' },
-    { id: 'v2', name: 'v2 · + Эло по покрытиям', date: '2026-08-05', logloss: 0.596, brier: 0.207, roi: 1.8, clv: 1.2, n: 220, status: 'archived' },
-    { id: 'v3', name: 'v3 · + уроки L-014, L-017', date: '2026-09-22', logloss: 0.583, brier: 0.201, roi: 4.9, clv: 2.0, n: 220, status: 'active' },
-    { id: 'v4', name: 'v4 · промпт на английском, сжатое досье', date: '2026-10-05', logloss: 0.581, brier: 0.200, roi: 5.2, clv: 2.1, n: 220, status: 'candidate' },
-  ];
+  // Разбор ставки ИИ (postmortem): один на матч, Sonnet 5.5 через Batch, ≈ $0,01. Ответ по схеме проверяет код.
+  // verdict: luck — невезение (рынок был согласен), model_error — ошибка модели, data_gap — не хватило данных,
+  // fine — выигрыш по делу, lucky — выиграли, хотя рынок был против
+  const VERDICTS = { luck: 'Невезение', model_error: 'Ошибка модели', data_gap: 'Не хватило данных', fine: 'Прогноз подтвердился', lucky: 'Повезло' };
+  function postmortemOf(b) {
+    if (!b || b.source !== 'app' || b.status === 'open' || b.status === 'void') return null;
+    const clvOf = l => (l.closing ? (l.odds / l.closing - 1) * 100 : null);
+    const lost = b.legs.filter(l => l.result === 'loss');
+    const leg = lost[0] || b.legs[0];
+    const clv = clvOf(leg);
+    let verdict, lesson = null;
+    if (b.status === 'win') verdict = b.clv != null && b.clv < 0 ? 'lucky' : 'fine';
+    else if ((leg.market === 'h1m' || leg.market === 'h2m') && leg.surface === 'hard') { verdict = 'model_error'; lesson = 'L-022'; }
+    else if (clv != null && clv < 0) { verdict = 'model_error'; lesson = b.id % 2 ? 'L-023' : null; }
+    else if (b.id % 5 === 1) { verdict = 'data_gap'; }
+    else verdict = 'luck';
+    const m = D_match(leg), pp = Math.round((leg.p - (leg.q || 1 / leg.odds)) * 100);
+    const what = b.status === 'win'
+      ? 'Все события сыграли. ' + m + ', ' + leg.marketLabel + ': модель ' + Math.round(leg.p * 100) + '%, рынок без маржи ' + Math.round((leg.q || 1 / leg.odds) * 100) + '%.'
+      : m + ', ' + leg.marketLabel + ' не сыграла. Модель давала ' + Math.round(leg.p * 100) + '%, рынок без маржи ' + Math.round((leg.q || 1 / leg.odds) * 100) + '% (перевес ' + (pp >= 0 ? '+' : '−') + Math.abs(pp) + ' п.п.).';
+    const why = {
+      fine: 'Перевес был, линия к старту пошла в нашу сторону — рынок согласился с оценкой.',
+      lucky: 'Ставка выиграла, но к старту линия ушла против нас: на дистанции такие ставки убыточны.',
+      luck: 'К старту рынок с ценой согласился (CLV не ниже нуля), признаков ошибки в досье нет — исход в пределах случайности.',
+      model_error: lesson === 'L-022' ? 'Соперники близки по Эло на харде, а модель заложила уверенную победу 2:0. Такой же промах был в похожих матчах.' : 'Линия к старту ушла против нас: рынок оценил шансы ниже. В досье был перерыв игрока больше месяца — модель его не учла.',
+      data_gap: 'Новость о травме игрока вышла за 2 часа до матча — анализ шел раньше и ее не видел.',
+    }[verdict];
+    const done = b.settledAt ? b.settledAt.slice(0, 11) + String(Math.min(23, +b.settledAt.slice(11, 13) + 1)).padStart(2, '0') + b.settledAt.slice(13) : b.date + 'T23:30';
+    return { verdict, label: VERDICTS[verdict], what, why, lesson, at: done, cost: 0.01, shared: true };
+  }
+
+  // Еженедельный отчет (В8): неделя пн–вс по поясу участника, приходит в понедельник в 07:00 в центр уведомлений
+  function weekReport(from) {
+    const to = addDays(from, 6);
+    const inWeek = bets.filter(b => b.status !== 'open' && b.date >= from && b.date <= to);
+    const legs = allLegs.filter(l => l.date >= from && l.date <= to && l.q != null);
+    const turnover = inWeek.reduce((a, b) => a + b.stake, 0), prof = inWeek.reduce((a, b) => a + b.profit, 0);
+    const clvB = inWeek.filter(b => b.clv != null && b.source !== 'bot');
+    const y = l => (l.result === 'win' ? 1 : 0);
+    const sentAt = addDays(from, 7) + 'T07:00';
+    return {
+      from, to, sentAt, n: inWeek.length, auto: inWeek.filter(b => b.settledBy === 'auto').length, manual: inWeek.filter(b => b.settledBy === 'manual').length,
+      profit: prof, turnover, roi: turnover ? prof / turnover * 100 : null, clv: clvB.length ? clvB.reduce((a, b) => a + b.clv, 0) / clvB.length : null, clvN: clvB.length,
+      legs: legs.length, brier: legs.length ? legs.reduce((a, l) => a + (l.p - y(l)) ** 2, 0) / legs.length : null, brierMarket: legs.length ? legs.reduce((a, l) => a + (l.q - y(l)) ** 2, 0) / legs.length : null,
+      reviews: inWeek.filter(b => b.source === 'app' && b.status !== 'void').reduce((a, b) => a + b.legs.length, 0),
+      lessonsNew: lessons.filter(l => l.created >= from && l.created <= to).map(l => l.id),
+      evalSpent: round(evalRuns.filter(r => r.at.slice(0, 10) >= addDays(from, 1) && r.at.slice(0, 10) <= addDays(to, 1)).reduce((a, r) => a + r.cost, 0), 2),
+    };
+  }
+  const reportWeeks = ['2026-09-28', '2026-09-21', '2026-09-14', '2026-09-07'];
+
+  // Загрузки файла tennis-data (В1): администратор скачивает 2026.xlsx в браузере и загружает на сайте.
+  // Отчет загрузки: новые матчи, рассчитанные ставки всех участников (без сумм — Р14), непривязанные матчи
+  const lastUpload = bets.filter(b => b.settledAt && b.settledAt.startsWith(UPLOAD_LAST + 'T08'));
+  const archive = {
+    source: 'tennis-data.co.uk', file: '2026.xlsx', lastLoad: UPLOAD_LAST + 'T08:12', by: 'Роман Буров', matchesTo: ARCHIVE_TO, next: '2026-10-12',
+    staleDays: 7, sackmannTo: '2026-05-31', nightly: '05:25 UTC',
+    uploads: [
+      { at: UPLOAD_LAST + 'T08:12', size: '1,9 МБ', rows: 2412, newMatches: 71, to: ARCHIVE_TO, settled: lastUpload.length + 6, people: 3, legs: lastUpload.reduce((a, b) => a + b.legs.length, 0) + 11,
+        closing: lastUpload.reduce((a, b) => a + b.legs.filter(l => l.closingSource === 'archive').length, 0) + 7, linked: 14, unlinked: 2, conflicts: 1, retired: 1 },
+      { at: '2026-09-28T08:40', size: '1,8 МБ', rows: 2341, newMatches: 88, to: '2026-09-27', settled: 11, people: 3, legs: 24, closing: 13, linked: 17, unlinked: 1, conflicts: 0, retired: 0 },
+      { at: '2026-09-21T09:05', size: '1,8 МБ', rows: 2253, newMatches: 64, to: '2026-09-20', settled: 9, people: 3, legs: 19, closing: 11, linked: 13, unlinked: 0, conflicts: 0, retired: 1 },
+    ],
+    unlinked: [
+      { match: 'Мунар — Табило', date: '2026-10-02', why: 'в файле два матча этой пары за 3 дня (квалификация и основа) — нужен выбор' },
+      { match: 'Шан Цзюньчэн — Нисиока', date: '2026-10-03', why: 'в файле нет: турнир вне основного тура (челленджер)' },
+    ],
+  };
 
 
   // ---------- Участники, доступ и уведомления (решения Р1–Р20 в docs/PLAN.md) ----------
@@ -399,6 +614,10 @@
     audit: [
       { at: '2026-10-07T09:20', actor: 'Роман Буров', action: 'reset_code', target: 'Алексей Ковалев', details: 'Код сброса пароля, 24 часа', ip: '95.216.•.•' },
       { at: '2026-10-07T08:00', actor: 'Роман Буров', action: 'message', target: 'Все участники', details: 'В субботу с 10:00 до 10:30 (Хельсинки) сервер обновляется, анализы будут недоступны.', ip: '95.216.•.•' },
+      { at: '2026-10-06T02:00', actor: 'Роман Буров', action: 'eval_run', target: null, details: 'Прогон v4 на наборе eval-2026-08: 250 событий, 3 пакета по ≤ 100, худший случай $27,50 — факт $2,48', ip: '95.216.•.•' },
+      { at: '2026-10-05T08:12', actor: 'Роман Буров', action: 'data_upload', target: null, details: '2026.xlsx, 1,9 МБ: 71 новый матч по 4 окт, рассчитано ставок — 9, не привязано матчей — 2', ip: '95.216.•.•' },
+      { at: '2026-10-02T21:30', actor: 'Роман Буров', action: 'eval_set', target: null, details: 'Заморожен набор eval-2026-08: 250 событий после 1 авг, 38 трудных, sha256 3f9a07…c21e', ip: '95.216.•.•' },
+      { at: '2026-09-28T08:40', actor: 'Роман Буров', action: 'data_upload', target: null, details: '2026.xlsx, 1,8 МБ: 88 новых матчей по 27 сен, рассчитано ставок — 11, не привязано матчей — 1', ip: '95.216.•.•' },
       { at: '2026-10-06T19:40', actor: 'Роман Буров', action: 'invite', target: 'maria@example.com', details: 'Участник, ключ администратора, $10 в месяц', ip: '95.216.•.•' },
       { at: '2026-10-01T10:12', actor: 'Роман Буров', action: 'key_change', target: null, details: 'Ключ администратора заменен: sk-ant-…m9Tq, проверен', ip: '95.216.•.•' },
       { at: '2026-09-20T10:05', actor: 'Роман Буров', action: 'block', target: 'Игорь Нестеров', details: 'Заблокирован, сеансы завершены', ip: '95.216.•.•' },
@@ -410,12 +629,13 @@
     ],
   };
   // Центр уведомлений: у каждой роли свой список. Суммы в тексте подставляются при показе (валюта программы).
-  // data_stale — архив матчей не обновлялся больше 3 дней, только администраторам (PLAN, раздел 6);
+  // data_stale — понедельник: пора загрузить свежий файл tennis-data, только администраторам (В1 этапа 5);
   // ai_alert — оповещение о расходе ИИ по правилам TOKEN_ECONOMY, раздел 6 (одно на правило в сутки, администраторам);
-  // bet_settled — для авторасчета этапа 5 (при ручном расчете уведомления нет, только баннер), ссылка ведет на ставку.
-  const lastSettled = settled[settled.length - 1];
-  // Последняя успешная загрузка архива матчей (ночное обновление в 05:25 UTC); больше 3 дней — data_stale
-  const archive = { lastLoad: '2026-10-03T05:31', source: 'tennis-data.co.uk', staleDays: 3, nightly: '05:25 UTC' };
+  // bet_settled — авторасчет по архиву (при ручном расчете уведомления нет, только баннер), ссылка ведет на ставку;
+  // bet_needs_result — через 3 дня после матча исхода в архиве нет; settle_conflict — архив разошелся с ручным расчетом;
+  // weekly_report — понедельник 07:00 по поясу участника (В8); learning — урок готов, кандидат проверен, модель перекалибрована
+  const autoLast = lastUpload[lastUpload.length - 1];
+  const fmt0 = n => new Intl.NumberFormat('ru-RU').format(n);
   const recent10 = analysesSpec.slice(-10).map(a => a.id);
   const cache10 = (() => { const rs = aiRuns.filter(r => recent10.includes(r.analysis)); return Math.round(rs.reduce((a, r) => a + r.cached, 0) / rs.reduce((a, r) => a + r.input, 0) * 100); })();
   const notifications = {
@@ -423,13 +643,22 @@
       { id: 'n1', kind: 'limit_80', icon: 'coins', tone: 'warn', title: 'Алексей Ковалев израсходовал 91% лимита', body: '$7,28 из $8 за октябрь. На 100% его анализы на вашем ключе остановятся.', at: '2026-10-07T09:31', link: '#admin-limits', read: false },
       { id: 'n2', kind: 'ai_mode_request', icon: 'key', tone: 'info', title: 'Дмитрий Шульц просит вернуть ключ администратора', body: 'Сейчас работает на своем ключе. Вернуть можно только с вашего разрешения.', at: '2026-10-06T21:15', link: '#admin', read: false },
       { id: 'n6', kind: 'ai_alert', icon: 'alert', tone: 'warn', title: 'Расход ИИ: доля кэша ' + cache10 + '%', body: 'По последним 10 анализам из кэша читается ' + cache10 + '% входа, правило — не меньше 50%. Больше всего входа пишут в кэш новости. Проверьте журнал запусков.', at: '2026-10-07T08:00', link: '#costs', read: false },
-      { id: 'n3', kind: 'data_stale', icon: 'database', tone: 'warn', title: 'Архив матчей не обновлялся 4 дня', body: 'Последняя загрузка ' + archive.source + ' — 3 октября. Эло и форма игроков — без матчей после этой даты. Ночное обновление идет в ' + archive.nightly + '.', at: '2026-10-07T05:40', read: false },
-      { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: lastSettled.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + lastSettled.id + ' рассчитана', bet: lastSettled.id, at: lastSettled.date + 'T21:40', link: '#bets-' + lastSettled.id, read: true },
+      { id: 'n9', kind: 'learning', icon: 'layers', tone: 'info', title: 'Кандидат v4 проверен: не хуже v3 и дешевле на 31%', body: 'Правило экономии выполнено на наборе ' + evalSet.code + '. Включить v4 или оставить v3 — решаете вы.', at: '2026-10-06T11:40', link: '#learning-versions', read: false },
+      { id: 'n8', kind: 'learning', icon: 'book', tone: 'info', title: 'Урок L-022 готов к решению', body: 'Подтвержден на ' + fmt0(23) + ' своих случаях и ' + fmt0(1860) + ' из истории. В анализ — после быстрой проверки (≈ $0,60) и вашего подтверждения.', at: '2026-10-06T03:10', link: '#learning-lessons', read: false },
+      { id: 'n10', kind: 'weekly_report', icon: 'calendar', tone: 'info', title: 'Отчет за неделю 28 сен – 4 окт', week: '2026-09-28', at: '2026-10-05T07:00', link: '#learning-reports', read: false },
+      { id: 'n11', kind: 'learning', icon: 'chart', tone: 'good', title: 'Базовая модель перекалибрована', body: 'Brier на проверке 0,1942 (было 0,1951) — не хуже прежней, включена сама. Вернуть прежнюю — в «Обучении модели».', at: '2026-10-05T09:02', link: '#learning-ml', read: true },
+      { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: autoLast.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + autoLast.id + ' рассчитана автоматически', bet: autoLast.id, at: autoLast.settledAt, link: '#bets-' + autoLast.id, read: true },
+      { id: 'n12', kind: 'settle_conflict', icon: 'alert', tone: 'warn', title: 'Архив показывает другой исход ставки №70', body: 'В файле tennis-data счет 2:1 — по нему Ф(−1.5) не сыграла, а вы внесли выигрыш. Банк не меняли: проверьте и при необходимости исправьте результат.', at: '2026-10-05T08:14', link: '#bets-70', read: true },
+      { id: 'n3', kind: 'data_stale', icon: 'database', tone: 'warn', title: 'Пора загрузить файл tennis-data', body: 'Понедельник: в архиве матчи по 27 сен. Скачайте 2026.xlsx на tennis-data.co.uk и загрузите в «Администрирование → Данные» — ставки рассчитаются сами.', at: '2026-10-05T07:00', link: '#admin-data', read: true },
+      { id: 'n13', kind: 'bet_needs_result', icon: 'clock', tone: 'warn', title: 'Ставка №66 ждет результата', body: 'Матч 22 сен, исхода в архиве нет 3 дня. Внесите результат сами — или он появится после загрузки файла.', at: '2026-09-25T09:00', link: '#bets-66', read: true },
       { id: 'n5', kind: 'new_device', icon: 'device', tone: 'info', title: 'Вход с нового устройства', body: 'Safari, iPhone · Хельсинки. Если это не вы — завершите сеанс в личном кабинете.', at: '2026-10-05T19:12', link: '#profile-security', read: true },
     ],
     member: [
       { id: 'n1', kind: 'admin_message', icon: 'megaphone', tone: 'info', title: 'Сообщение администратора', body: 'В субботу с 10:00 до 10:30 (Хельсинки) сервер обновляется, анализы будут недоступны.', at: '2026-10-07T08:00', read: false },
-      { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: lastSettled.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + lastSettled.id + ' рассчитана', bet: lastSettled.id, at: lastSettled.date + 'T21:40', link: '#bets-' + lastSettled.id, read: true },
+      { id: 'n10', kind: 'weekly_report', icon: 'calendar', tone: 'info', title: 'Отчет за неделю 28 сен – 4 окт', week: '2026-09-28', at: '2026-10-05T07:00', link: '#learning-reports', read: false },
+      { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: autoLast.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + autoLast.id + ' рассчитана автоматически', bet: autoLast.id, at: autoLast.settledAt, link: '#bets-' + autoLast.id, read: true },
+      { id: 'n12', kind: 'settle_conflict', icon: 'alert', tone: 'warn', title: 'Архив показывает другой исход ставки №70', body: 'В файле tennis-data счет 2:1 — по нему Ф(−1.5) не сыграла, а вы внесли выигрыш. Банк не меняли: проверьте и при необходимости исправьте результат.', at: '2026-10-05T08:14', link: '#bets-70', read: true },
+      { id: 'n13', kind: 'bet_needs_result', icon: 'clock', tone: 'warn', title: 'Ставка №66 ждет результата', body: 'Матч 22 сен, исхода в архиве нет 3 дня. Внесите результат сами — или он появится после загрузки файла.', at: '2026-09-25T09:00', link: '#bets-66', read: true },
       { id: 'n5', kind: 'new_device', icon: 'device', tone: 'info', title: 'Вход с нового устройства', body: 'Chrome, Windows · Хельсинки. Если это не вы — завершите сеанс в личном кабинете.', at: '2026-10-03T18:02', link: '#profile-security', read: true },
     ],
   };
@@ -528,14 +757,22 @@
       bank, start: 40000, profit, turnover, roi: round(profit / turnover * 100, 1), settled: settled.length, wins, losses, voids,
       winrate: round(wins / (wins + losses) * 100, 1), open: bets.filter(b => b.status === 'open').length,
       streak: { type: streakType, n: streak }, brier: round(brier, 3), brierMarket: round(brierMarket, 3), clvAvg: round(clvAvg, 1), legs: allLegs.length,
-      peak: Math.max(...bankHistory.map(b => b.bank)),
+      peak: Math.round(peakAdj), invested: investedAt(TODAY),
     },
+    bankFlows, investedAt, predictions,
     allLegs, calibration, brierRolling, roiBySurface, roiByMarket, roiByOdds, roiByTotal,
     matchesToday, recentAnalyses,
     ai: { runs: aiRuns, spent: aiSpent, personalSpent, sharedSpent, keySpent, ownSpent, keyUsers, limitOf, budget, forecastOf, access, recordRun, recordSpend, decisions, budgetHint: 15, month: 'октябрь', cacheShare: round(aiRuns.reduce((a, r) => a + r.cached, 0) / aiRuns.reduce((a, r) => a + r.input, 0) * 100, 0), runTypes,
       // общие фоновые задачи — вызовы без участника (r.shared); проверки (eval) — отдельный бюджет; анализы — запуски из вызовов
       isShared: r => !!r.shared, eval: evalBudget, analyses: analysesSpec, searchUsd: SEARCH_USD },
     lessons, strategyVersions,
+    // Этап 5: петля обучения — общие данные экранов «Обучение модели», «Главная», «Ставки», «ИИ и расходы»
+    learning: {
+      lessons, LESSONS_MAX, LESSON_MIN, LESSON_MIN_PROC, SHRINK_K, evalSet, versions: strategyVersions, ruleVersions, mlModels, walkForward, mlCalibration,
+      postmortemOf, VERDICTS, weekReport, reportWeeks, ARCHIVE_TO, nextReport: '2026-10-12T07:00',
+      // события с исходом для калибровки и c: ноги ставок приложения + прогнозы без ставки
+      eventsWithOutcome: () => allLegs.filter(l => l.source === 'app').length + predictions.length, C_MIN: 300,
+    },
     // Стратегия по коду этапа 3 (ml/strategy.py, Т20): 4 диапазона с одним процентом, четвертый — экспресс из 3 событий.
     // adapt — правила адаптации суммы (Р22) и включены ли они по умолчанию: рост и прибыльная неделя выключены (В7)
     strategy: {

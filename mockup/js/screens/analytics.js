@@ -63,12 +63,18 @@
   // ---------- расчеты (формулы как в data.js) ----------
   const won = l => (l.result === 'win' ? 1 : 0);
   // Рынок при прогнозе без маржи (В2): кэфы обеих сторон у вашего букмекера, степенной метод (Т3, ml/market.py)
+  // Этап 5: рынок закрытия — две стороны, внесенные вами (q_close), или кэфы П1/П2 из архива tennis-data (q_arch, Т1)
+  const closeQ = l => (l.qClose != null ? l.qClose : l.qArch != null ? l.qArch : null);
+  const mq = (l, ref) => (ref === 'close' ? closeQ(l) : l.q);
   const marketQ = l => l.q;
   const legClv = l => (l.closing ? (l.odds / l.closing - 1) * 100 : null);
   // «CLV без маржи» = кэф × q_close − 1 — только у событий с двумя сторонами закрытия (В1)
   const fairClv = l => (l.qClose != null ? (l.odds * l.qClose - 1) * 100 : null);
   // События для Brier против рынка — ноги ставок приложения с итоговой вероятностью p_final и рынком при прогнозе
-  const withMarket = legs => legs.filter(l => l.q != null && l.pKind === 'final');
+  const withMarket = (legs, ref) => legs.filter(l => mq(l, ref) != null && l.pKind === 'final');
+  // Калибровка и Brier (этап 5, В3 этапа 4): по умолчанию — все мои прогнозы с исходом, не только ноги ставок
+  let sample = 'all', brierRef = null;
+  try { const v = sessionStorage.getItem('capper.analytics.sample'); if (v === 'legs' || v === 'all') sample = v; } catch (e) { /* ок */ }
 
   // 95% доверительный интервал бутстрэпом с фиксированным сидом (как в коде: B = 10 000, здесь 1 000 — макету хватает)
   function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -83,11 +89,11 @@
   const roiCiBets = bs => boot(bs.length, idx => { let p = 0, st = 0; idx.forEach(i => { p += bs[i].profit; st += bs[i].stake; }); return st ? p / st * 100 : 0; });
   const roiCiLegs = ls => meanCi(ls.map(l => (won(l) ? l.odds - 1 : -1) * 100));
 
-  function brier(legs) {
-    legs = withMarket(legs);
+  function brier(legs, ref) {
+    legs = withMarket(legs, ref);
     if (!legs.length) return { model: null, market: null, n: 0, ci: null };
-    const d = legs.map(l => (l.p - won(l)) ** 2 - (marketQ(l) - won(l)) ** 2);
-    return { model: sum(legs, l => (l.p - won(l)) ** 2) / legs.length, market: sum(legs, l => (marketQ(l) - won(l)) ** 2) / legs.length, n: legs.length, ci: meanCi(d) };
+    const d = legs.map(l => (l.p - won(l)) ** 2 - (mq(l, ref) - won(l)) ** 2);
+    return { model: sum(legs, l => (l.p - won(l)) ** 2) / legs.length, market: sum(legs, l => (mq(l, ref) - won(l)) ** 2) / legs.length, n: legs.length, ci: meanCi(d) };
   }
   function summarize(bets) {
     const wins = bets.filter(b => b.status === 'win').length;
@@ -153,12 +159,12 @@
   }
   // Диапазон, где прогноз дальше всего от факта в любую сторону
   const calibWorst = bins => bins.reduce((w, b) => (!w || Math.abs(b.p - b.actual) > Math.abs(w.p - w.actual) ? b : w), null);
-  function rolling(legs) {
-    legs = withMarket(legs);
+  function rolling(legs, ref) {
+    legs = withMarket(legs, ref);
     const out = [];
     for (let i = 29; i < legs.length; i += 3) {
       const w = legs.slice(i - 29, i + 1);
-      out.push({ date: w[w.length - 1].date, model: sum(w, l => (l.p - won(l)) ** 2) / 30, market: sum(w, l => (marketQ(l) - won(l)) ** 2) / 30 });
+      out.push({ date: w[w.length - 1].date, model: sum(w, l => (l.p - won(l)) ** 2) / 30, market: sum(w, l => (mq(l, ref) - won(l)) ** 2) / 30 });
     }
     return out;
   }
@@ -204,9 +210,14 @@
       if (pa >= firstDate) prev = summarize(SETTLED.filter(b => betOk(b, pa, anchor)));
     }
     // Калибровка (В3): ноги рассчитанных ставок; p_final — только у ставок приложения, у бота — p_claude его ординаров
-    const calibLegs = state.source === 'bot' ? legs : legs.filter(l => l.pKind === 'final');
+    // Прогнозы без ставки (матчи из анализов с исходом из архива) — только у приложения
+    const preds = state.source === 'bot' ? [] : (D.predictions || []).filter(l => l.date > anchor && l.date <= TODAY
+      && (state.market === 'all' || l.market === state.market) && (state.surface === 'all' || l.surface === state.surface));
+    const own = state.source === 'bot' ? legs : legs.filter(l => l.pKind === 'final');
+    const calibLegs = sample === 'all' && state.source !== 'bot' ? own.concat(preds) : own;
+    const evLegs = (sample === 'all' ? legs.concat(preds) : legs).slice().sort((a, b) => a.date.localeCompare(b.date));
     return {
-      p, anchor, legs, bets, prev, calibLegs,
+      p, anchor, legs, bets, prev, calibLegs, preds, evLegs,
       // события экспрессов бота за период, которые не считаются по отдельности (с исходом и без)
       botParlayLegs: D.allLegs.filter(l => botParlayLeg(l) && l.date > anchor && srcOk(l)).length,
       // Разрез по измерению не сужается фильтром этого же измерения — выбранное значение подсвечивается
@@ -517,8 +528,11 @@
     const dates = [];
     for (let d = s.anchor; d <= TODAY; d = addDays(d, 1)) dates.push(d);
     const isBank = !s.filtered;
-    let values, base;
-    if (isBank) { values = dates.map(bankAt); base = bankAt(s.anchor); }
+    let values, base, invested = null;
+    // В7 этапа 5: старт периода — капитал на начало периода (за все время — первое пополнение); пунктир «вложено» —
+    // ступенькой: старт плюс пополнения минус выводы внутри периода
+    const flows = isBank ? D.bankFlows.filter(f => !f.start && f.at.slice(0, 10) > s.anchor && f.at.slice(0, 10) <= TODAY) : [];
+    if (isBank) { values = dates.map(bankAt); base = bankAt(s.anchor); const i0 = D.investedAt(s.anchor); invested = dates.map(d => base + D.investedAt(d) - i0); }
     else {
       const byDate = {};
       s.bets.forEach(b => { byDate[b.date] = (byDate[b.date] || 0) + b.profit; });
@@ -530,13 +544,22 @@
     const num = v => (dec && Math.round(v * 100) % 100 !== 0 ? fmt.dec(v, 2) : fmt.int(v));
     const yf = isBank ? num : (v => (v > 0 ? '+' : '') + num(v));
     let peak = base, maxDD = 0, hi = -Infinity, lo = Infinity;
-    values.forEach(v => { peak = Math.max(peak, v); if (isBank) maxDD = Math.min(maxDD, (v - peak) / peak * 100); hi = Math.max(hi, v); lo = Math.min(lo, v); });
+    values.forEach((v, i) => {
+      // пополнение сдвигает пик в той же доле, что и банк: просадка — только от ставок (Р22)
+      const flow = isBank && i ? invested[i] - invested[i - 1] : 0;
+      if (flow) { const before = v - flow; peak = before > 0 ? peak * v / before : v; }
+      peak = Math.max(peak, v); if (isBank) maxDD = Math.min(maxDD, (v - peak) / peak * 100); hi = Math.max(hi, v); lo = Math.min(lo, v);
+    });
+    const flowSum = flows.reduce((a, f) => a + (f.kind === 'withdrawal' ? -f.amount : f.amount), 0);
+    const flowLabel = (f, short) => fmt.signedMoney(f.kind === 'withdrawal' ? -f.amount : f.amount) + ' · ' + (f.kind === 'withdrawal' ? 'вывод' : 'пополнение') + (short ? '' : ', ' + fmt.date(f.at));
     const c = s.sum;
     const chart = declutterX(UI.lineChart({
       labels: dates,
-      series: [{ name: isBank ? 'Банк' : 'Результат', color: 'var(--s1)', values: values.map(fmt.moneyNum) }],
+      series: [{ name: isBank ? 'Банк' : 'Результат', color: 'var(--s1)', values: values.map(fmt.moneyNum) }]
+        .concat(isBank ? [{ name: 'Вложено', color: 'var(--fg-3)', values: invested.map(fmt.moneyNum), dashed: true, step: true, width: 1.5, noEnd: true }] : []),
       area: true, areaBase: isBank ? null : 0, endLabel: true, height: mobile ? 210 : 270,
-      refLines: [{ value: fmt.moneyNum(base) }], yFormat: yf, xFormat: d => fmt.date(d), tipTitle: d => fmt.dateFull(d),
+      marks: flows.map(f => ({ i: dates.indexOf(f.at.slice(0, 10)), label: flowLabel(f, mobile), series: 0 })),
+      refLines: isBank ? [] : [{ value: 0 }], yFormat: yf, xFormat: d => fmt.date(d), tipTitle: d => fmt.dateFull(d),
       ariaLabel: isBank ? 'Банк по дням ' + s.p.ctx + ': с ' + fmt.money(base) + ' до ' + fmt.money(values[values.length - 1]) : 'Результат отобранных ставок нарастающим итогом: ' + fmt.signedMoney(values[values.length - 1]),
     }));
 
@@ -569,7 +592,7 @@
       }));
     };
     const strip = isBank
-      ? [['Старт периода', fmt.money(base), fmt.date(s.anchor)], ['Пик', fmt.money(peak), null], ['Макс. просадка', maxDD < 0 ? fmt.signedPct(maxDD) : '0%', 'от пика'], ['Оборот', fmt.money(c.turnover), nBets(c.n)]]
+      ? [['Старт периода', fmt.money(base), fmt.date(s.anchor) + (s.p.id === 'all' ? ' · первое пополнение' : '')], ['Пополнения', flowSum ? fmt.signedMoney(flowSum) : 'нет', flows.length ? flows.map(f => fmt.date(f.at)).join(', ') : 'за период'], ['Макс. просадка', maxDD < 0 ? fmt.signedPct(maxDD) : '0%', 'от пика, без пополнений'], ['Оборот', fmt.money(c.turnover), nBets(c.n)]]
       : [['Лучшая точка', fmt.signedMoney(hi), null], ['Худшая точка', fmt.signedMoney(Math.min(0, lo)), null], ['Оборот', fmt.money(c.turnover), nBets(c.n)], ['ROI', c.roi == null ? '—' : fmt.signedPct(c.roi), null]];
     return card({
       class: 'analytics-card',
@@ -578,11 +601,11 @@
       actions: [chip(fmt.signedMoney(c.profit), c.profit > 0 ? 'good' : c.profit < 0 ? 'bad' : 'outline', c.profit > 0 ? 'arrowUp' : c.profit < 0 ? 'arrowDown' : null)],
       body: [
         UI.legend(isBank
-          ? [{ name: 'Банк на конец дня', color: 'var(--s1)' }, { name: 'Банк на начало периода · ' + fmt.money(base), type: 'dash' }]
+          ? [{ name: 'Банк на конец дня', color: 'var(--s1)' }, { name: 'Вложено: старт ' + fmt.money(base) + (flowSum ? ' и пополнения' : ''), type: 'dash' }]
           : [{ name: 'Прибыль нарастающим итогом', color: 'var(--s1)' }, { name: 'Ноль', type: 'dash' }]),
         UI.withTable(chart, tableFactory),
         h('dl', { class: 'analytics-strip' }, strip.map(([k, v, sub]) => h('div', null, h('dt', null, k), h('dd', null, v, sub && h('small', null, sub))))),
-        howto(h('b', null, 'Как читать: '), isBank ? 'линия выше пунктира — вы в плюсе относительно начала периода. ' : 'выше нуля — отобранные ставки в плюсе. ', hover() + (UI.isMobile() ? ' графика' : ' график') + ', чтобы увидеть значение на любой день.'),
+        howto(h('b', null, 'Как читать: '), isBank ? 'линия банка выше пунктира «вложено» — ставки в плюсе на любом участке; пополнение поднимает пунктир ступенькой и в прибыль не входит. Главное число периода — прибыль ставок (вверху справа), а не рост банка. ' : 'выше нуля — отобранные ставки в плюсе. ', hover() + (UI.isMobile() ? ' графика' : ' график') + ', чтобы увидеть значение на любой день.'),
       ],
     });
   }
@@ -683,7 +706,7 @@
             h('div', { class: 'analytics-ins-foot' }, chip('Основание: ' + ins.basis, 'outline'), actionOf(ins))))))
         : UI.empty('Слишком мало событий для выводов — нужно хотя бы 20.'),
       foot: [
-        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 200px' }, 'Это наблюдения по истории, а не гарантии. Гипотезы и подробный разбор периода с ИИ появятся на этапе 5.'),
+        h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 200px' }, 'Это наблюдения по истории, а не гарантии. Гипотезы из разборов ставок и их проверка на архиве — в «Обучении модели».'),
       ],
     });
   }
@@ -809,19 +832,20 @@
   }
 
   // ---------- точность ----------
-  // Калибровка (В3): выборка — ноги рассчитанных ставок; «все мои прогнозы» — когда у матчей появится исход из архива (этап 5).
+  // Калибровка (В3): по умолчанию все мои прогнозы с исходом из архива (этап 5), переключатель — только ноги ставок.
   // На графике — итоговая вероятность p_final, в таблице рядом базовая модель p_base и после поправки Claude p_claude (Т9)
   function calibrationCard(s, mobile) {
     const bot = state.source === 'bot';
     const legs = s.calibLegs;
     const bins = calibration(legs);
-    const sample = h('div', { class: 'segmented analytics-sample', role: 'group', 'aria-label': 'Выборка калибровки' },
-      h('button', { type: 'button', 'aria-pressed': 'true' }, 'Ноги ставок'),
-      h('button', { type: 'button', 'aria-pressed': 'false', disabled: true, title: 'Все мои прогнозы, а не только ноги ставок, — когда у матчей появится исход из архива, этап 5' }, 'Все прогнозы · этап 5'));
-    const head = { class: 'analytics-card', id: 'analytics-calib', title: 'Калибровка прогнозов', subtitle: bot ? 'Старый бот: оценка Claude против доли сыгравших событий' : 'Итоговая вероятность модели против доли сыгравших событий' };
+    const setSample = v => { sample = v; try { sessionStorage.setItem('capper.analytics.sample', v); } catch (e) { /* ок */ } if (UI.rerender) { const y = window.scrollY; UI.rerender(); window.scrollTo(0, y); } };
+    const sampleSeg = bot ? h('div', { class: 'segmented analytics-sample', role: 'group', 'aria-label': 'Выборка калибровки' }, h('button', { type: 'button', 'aria-pressed': 'true' }, 'Ноги ставок'))
+      : UI.segmented({ label: 'Выборка калибровки', items: [{ id: 'all', label: 'Все мои прогнозы · ' + (s.calibLegs.length) }, { id: 'legs', label: 'Только ноги ставок' }], active: sample, onChange: setSample });
+    if (!bot) sampleSeg.classList.add('analytics-sample');
+    const head = { class: 'analytics-card', id: 'analytics-calib', title: 'Калибровка прогнозов', subtitle: bot ? 'Старый бот: оценка Claude против доли сыгравших событий' : sample === 'all' ? 'Все ваши прогнозы с исходом: ноги ставок и матчи из анализов без ставки (' + s.preds.length + '), исход — из архива tennis-data' : 'Итоговая вероятность модели против доли сыгравших событий' };
     // у бота по событиям считаются только ординары; на паре событий график калибровки ничего не говорит
-    if (bot && legs.length < SMALL) return card(Object.assign(head, { actions: [chip(nEv(legs.length), 'outline')], body: [sample, UI.empty('У старого бота по событиям считаются только ординары — за период их ' + legs.length + '. Для калибровки нужно хотя бы ' + SMALL + ' событий. События его экспрессов не считаются: исходы бот записывал только у выигранных экспрессов, и остались бы почти одни выигрыши.')] }));
-    if (!bins.length) return card(Object.assign(head, { body: [sample, UI.empty('Нет событий за период')] }));
+    if (bot && legs.length < SMALL) return card(Object.assign(head, { actions: [chip(nEv(legs.length), 'outline')], body: [sampleSeg, UI.empty('У старого бота по событиям считаются только ординары — за период их ' + legs.length + '. Для калибровки нужно хотя бы ' + SMALL + ' событий. События его экспрессов не считаются: исходы бот записывал только у выигранных экспрессов, и остались бы почти одни выигрыши.')] }));
+    if (!bins.length) return card(Object.assign(head, { body: [sampleSeg, UI.empty('Нет событий за период')] }));
     const vals = bins.flatMap(b => [b.p, b.actual]);
     const d0 = Math.max(0.2, Math.min(0.6, Math.floor(Math.min(...vals) * 10) / 10));
     const chart = UI.calibrationChart({ bins, domain: [d0, 1], height: mobile ? 250 : 280 });
@@ -845,7 +869,7 @@
     return card(Object.assign(head, {
       actions: [chip(nEv(legs.length), 'outline')],
       body: [
-        sample,
+        sampleSeg,
         UI.legend([{ name: (bot ? 'Оценка Claude' : 'Модель') + ' · размер точки — число событий', color: 'var(--s1)' }, { name: 'Идеальная калибровка', type: 'dash' }]),
         UI.withTable(chart, () => tableBox(mtable({
           columns: [
@@ -869,35 +893,41 @@
   // Brier модели против рынка (В2): главный ряд — рынок при прогнозе без маржи; закрытие — отдельной строкой там,
   // где внесены обе стороны закрывающего кэфа. Разница — с 95% ДИ; задевает ноль — «в пределах шума»
   function brierCard(s, mobile) {
-    const pts = rolling(s.legs);
-    const head = { class: 'analytics-card', title: 'Brier: модель против рынка', subtitle: 'Рынок при прогнозе, без маржи · скользящие 30 событий · ниже — лучше' };
-    const n = withMarket(s.legs).length;
+    // Главный ряд — рынок закрытия, когда событий с закрытием больше, чем с рынком при прогнозе (В2 этапа 4)
+    const ev = s.evLegs;
+    const nClose = withMarket(ev, 'close').length, nPred = withMarket(ev, 'pred').length;
+    const ref = brierRef || (nClose > nPred ? 'close' : 'pred');
+    const refName = ref === 'close' ? 'Рынок закрытия' : 'Рынок при прогнозе';
+    const pts = rolling(ev, ref);
+    const refSeg = UI.segmented({ label: 'С каким рынком сравнивать', items: [{ id: 'pred', label: 'При прогнозе · ' + nPred }, { id: 'close', label: 'Закрытие · ' + nClose }], active: ref,
+      onChange: id => { brierRef = id; if (UI.rerender) { const y = window.scrollY; UI.rerender(); window.scrollTo(0, y); } } });
+    const head = { class: 'analytics-card', title: 'Brier: модель против рынка', subtitle: (ref === 'close' ? 'Рынок закрытия без маржи: ваши две стороны или кэфы П1/П2 архива tennis-data (момент снятия не проверен)' : 'Рынок при прогнозе, без маржи') + ' · скользящие 30 событий · ниже — лучше' };
+    const n = withMarket(ev, ref).length;
     if (state.source === 'bot') return card(Object.assign(head, { body: [UI.empty('У ставок старого бота нет итоговой вероятности модели и рынка в момент прогноза — Brier против рынка по ним не считается.')] }));
     if (pts.length < 2) {
       return card(Object.assign(head, { body: [UI.empty('Для скользящего окна нужно хотя бы 33 события с рынком при прогнозе — сейчас ' + n + '. Расширьте период или снимите фильтры.'), howto(h('b', null, 'Как читать: '), 'Brier — средняя квадратичная ошибка прогноза: 0 — идеально, 0,25 — как всегда ставить 50%.')] }));
     }
     const last = pts[pts.length - 1];
     const better = pts.filter(p => p.model < p.market).length;
-    const b = s.brier, diff = b.model - b.market, noise = noisy(b.ci);
+    const b = brier(ev, ref), diff = b.model - b.market, noise = noisy(b.ci);
     const verdict = noise
       ? UI.callout('', 'info', h('b', null, 'За период: '), 'модель ' + fmt.dec(b.model, 3) + ', рынок ' + fmt.dec(b.market, 3) + ' — разница ' + signedDec(diff, 3) + ', 95% ДИ ' + ciDec3(b.ci) + ': в пределах шума на ' + onEv(b.n) + '.')
       : diff < 0
         ? UI.callout('good', 'check', h('b', null, 'За период: '), 'модель ' + fmt.dec(b.model, 3) + ' против ' + fmt.dec(b.market, 3) + ' у рынка (' + nEv(b.n) + '), 95% ДИ разницы ' + ciDec3(b.ci) + ' — целиком ниже нуля. Проверьте, держится ли это на новых событиях.')
         : UI.callout('warn', 'alert', h('b', null, 'За период: '), 'рынок точнее: ' + fmt.dec(b.market, 3) + ' против ' + fmt.dec(b.model, 3) + ' у модели (' + nEv(b.n) + '), 95% ДИ разницы ' + ciDec3(b.ci) + '.');
     // Закрытие: только события, где внесены обе стороны закрывающего кэфа (Т13)
-    const cl = withMarket(s.legs).filter(l => l.qClose != null);
-    const clModel = cl.length ? sum(cl, l => (l.p - won(l)) ** 2) / cl.length : null;
-    const clMarket = cl.length ? sum(cl, l => (l.qClose - won(l)) ** 2) / cl.length : null;
+    const other = ref === 'close' ? 'pred' : 'close', ob = brier(ev, other);
     const chart = declutterX(UI.lineChart({
       labels: pts.map(p => p.date),
-      series: [{ name: 'Модель', color: 'var(--s1)', values: pts.map(p => p.model) }, { name: 'Рынок при прогнозе', color: 'var(--s2)', values: pts.map(p => p.market) }],
+      series: [{ name: 'Модель', color: 'var(--s1)', values: pts.map(p => p.model) }, { name: refName, color: 'var(--s2)', values: pts.map(p => p.market) }],
       height: mobile ? 210 : 280, yFormat: v => fmt.dec(v, 3), xFormat: d => fmt.date(d), tipTitle: d => '30 событий по ' + fmt.date(d),
-      ariaLabel: 'Скользящий Brier: модель ' + fmt.dec(last.model, 3) + ', рынок при прогнозе ' + fmt.dec(last.market, 3),
+      ariaLabel: 'Скользящий Brier: модель ' + fmt.dec(last.model, 3) + ', ' + refName.toLowerCase() + ' ' + fmt.dec(last.market, 3),
     }));
     return card(Object.assign(head, {
       actions: [h('span', { class: ['chip', better * 2 >= pts.length ? 'good' : 'warn'], title: 'В скольких окнах по 30 событий Brier модели ниже рыночного' }, icon(better * 2 >= pts.length ? 'check' : 'alert'), 'Точнее рынка: ' + better + ' из ' + pts.length)],
       body: [
-        UI.legend([{ name: 'Модель · сейчас ' + fmt.dec(last.model, 3), color: 'var(--s1)' }, { name: 'Рынок при прогнозе · ' + fmt.dec(last.market, 3), color: 'var(--s2)' }]),
+        refSeg,
+        UI.legend([{ name: 'Модель · сейчас ' + fmt.dec(last.model, 3), color: 'var(--s1)' }, { name: refName + ' · ' + fmt.dec(last.market, 3), color: 'var(--s2)' }]),
         UI.withTable(chart, () => h('div', { class: 'analytics-scroll' }, mtable({
           columns: [
             { key: 'date', label: 'Окно по', render: p => h('span', { style: 'white-space:nowrap' }, fmt.date(p.date)) },
@@ -908,8 +938,8 @@
         }))),
         verdict,
         h('dl', { class: 'analytics-strip analytics-strip-2' },
-          h('div', null, h('dt', null, 'Рынок при прогнозе'), h('dd', null, fmt.dec(b.market, 3), h('small', null, nEv(b.n) + ' · ваш букмекер'))),
-          h('div', null, h('dt', null, 'Рынок закрытия'), h('dd', null, clMarket == null ? '—' : fmt.dec(clMarket, 3), h('small', null, cl.length ? 'модель ' + fmt.dec(clModel, 3) + ' · ' + nEv(cl.length) + ' с двумя сторонами' : 'нет событий с двумя сторонами закрытия')))),
+          h('div', null, h('dt', null, refName + ' · главный ряд'), h('dd', null, fmt.dec(b.market, 3), h('small', null, 'модель ' + fmt.dec(b.model, 3) + ' · ' + nEv(b.n)))),
+          h('div', null, h('dt', null, ref === 'close' ? 'Рынок при прогнозе' : 'Рынок закрытия'), h('dd', null, ob.market == null ? '—' : fmt.dec(ob.market, 3), h('small', null, ob.n ? 'модель ' + fmt.dec(ob.model, 3) + ' · ' + nEv(ob.n) + (ref === 'pred' ? ' · станет главным, когда закрытий будет больше' : '') : 'нет событий')))),
         howto(h('b', null, 'Как читать: '), 'Brier — средняя квадратичная ошибка прогноза: 0 — идеально, 0,25 — как всегда ставить 50%. Рынок — вероятность по кэфам обеих сторон у вашего букмекера в момент прогноза, маржа снята степенным методом. Каждая точка — последние 30 событий. Ставки старого бота не входят.'),
         button('Brier и CLV простыми словами', { kind: 'ghost', size: 'sm', icon: 'book', onClick: explainModal, attrs: { class: 'btn ghost sm', style: 'align-self:flex-start' } }),
       ],

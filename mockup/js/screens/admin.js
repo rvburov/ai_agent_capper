@@ -1,5 +1,7 @@
 /* Раздел «Администрирование» — кабинет администратора (docs/PLAN.md, раздел 7 «Кабинет администратора»; решения Р4–Р9, Р12–Р17).
-   Вкладки — подмаршруты #admin-<вкладка>: users, invites, access, key, usage, settings, audit, message.
+   Вкладки — подмаршруты #admin-<вкладка>: users, invites, access, key, usage, data, settings, audit, message.
+   Этап 5: «Данные» — загрузка файла tennis-data 2026.xlsx раз в неделю (В1) и отчет загрузки; в «Расходе ИИ» —
+   разборы ставок общей задачей и проверки (eval) по прогонам с ценой и худшим случаем (В2, В3).
    #admin-limits — вкладка «Ключ и бюджет» с прокруткой к лимитам участников (туда ведет уведомление о 80% лимита).
    Действия имитируются: состояние меняется в памяти (DATA.users, DATA.admin), каждое действие пишется в журнал
    DATA.admin.audit. Об участнике администратор видит только расход на ИИ и активность — ставок, банка и стратегии
@@ -88,14 +90,17 @@
     const b = AI.budget(), membersSpent = b.spent - b.shared;
     const SHORT = { analysis: 'Оценка матча', news: 'Новости', parse: 'Разбор текста' };
     const WHAT = { analysis: 'Opus 5.5 · effort medium · один вызов на матч', news: 'Sonnet 5.5 + веб-поиск · effort low · 2 поиска на матч', parse: 'Haiku 5.5 · effort low' };
-    const rows = AI.runTypes.map(t => {
+    const rows = AI.runTypes.filter(t => t.id !== 'postmortem').map(t => {
       const rs = personal.filter(r => r.type === t.id);
       const input = sum(rs, r => r.input), cached = sum(rs, r => r.cached);
       return { id: t.id, label: t.label, short: SHORT[t.id] || t.label, model: t.model, what: WHAT[t.id], cost: sum(rs, r => r.cost) / pCost * membersSpent, cache: input ? cached / input : 0 };
     });
     const sh = runs.filter(r => AI.isShared(r));
     const shIn = sum(sh, r => r.input);
-    rows.push({ id: 'shared', label: 'Общие фоновые задачи', short: 'Без участника', model: 'Sonnet 5.5, Opus 5.5', what: 'вызовы без участника — сейчас приемка (agent-smoke)', shared: true, cost: b.shared, cache: shIn ? sum(sh, r => r.cached) / shIn : 0 });
+    // Разборы ставок (В3) — общая задача: один на матч, Sonnet 5.5 через Batch, из общего бюджета ключа
+    const pm = sh.filter(r => r.type === 'postmortem');
+    rows.push({ id: 'postmortem', label: 'Разбор ставки (общая задача)', short: 'Разбор ставки', model: 'Sonnet 5.5', what: 'Sonnet 5.5 · Batch −50% · ' + pm.length + ' матчей · ≈ $0,01 за матч, в лимиты участников не входит', shared: true, cost: sum(pm, r => r.cost), cache: 0 });
+    rows.push({ id: 'shared', label: 'Общие фоновые задачи', short: 'Приемка', model: 'Sonnet 5.5, Opus 5.5', what: 'вызовы без участника — приемка этапа (agent-smoke)', shared: true, cost: b.shared - sum(pm, r => r.cost), cache: shIn ? sum(sh, r => r.cached) / shIn : 0 });
     return rows.sort((a, b) => b.cost - a.cost);
   }
 
@@ -120,6 +125,11 @@
     settings: ['Изменены настройки программы', 'sliders'],
     message: ['Сообщение участникам', 'megaphone'],
     confirm_failed: ['Неверный код 2FA при подтверждении', 'shield'],
+    data_upload: ['Загружен файл tennis-data', 'upload'],
+    eval_run: ['Запущен прогон на наборе', 'flask'],
+    eval_set: ['Заморожен набор для проверок', 'lock'],
+    version_on: ['Включена версия инструкций', 'layers'],
+    lesson_on: ['Урок включен в анализ', 'book'],
     player_merge: ['Игроки объединены', 'users'],
     player_edit: ['Изменен игрок', 'user'],
   };
@@ -132,6 +142,7 @@
     { id: 'people', label: 'Блокировка, роли, удаление', test: inGroup(['block', 'unblock', 'delete', 'role_change', 'create_admin']) },
     { id: 'money', label: 'Ключ, бюджет и лимиты', test: inGroup(['key_change', 'limit_change', 'budget_change', 'ai_mode']) },
     { id: 'settings', label: 'Валюта, настройки, сообщения', test: inGroup(['set_currency', 'settings', 'message']) },
+    { id: 'learning', label: 'Данные и обучение', test: inGroup(['data_upload', 'eval_run', 'eval_set', 'version_on', 'lesson_on']) },
     { id: 'terminal', label: 'Команды терминала', test: e => e.actor === 'терминал' },
   ];
   const entry = (action, target, details) => ({ at: tick(), actor: D.user.name, action, target: target || null, details, ip: '95.216.•.•' });
@@ -149,6 +160,7 @@
     { id: 'access', label: 'Сброс доступа', short: 'Сброс доступа', icon: 'lock' },
     { id: 'key', label: 'Ключ и бюджет', short: 'Ключ и бюджет', icon: 'key' },
     { id: 'usage', label: 'Расход ИИ', short: 'Расход ИИ', icon: 'coins' },
+    { id: 'data', label: 'Данные', short: 'Данные', icon: 'database' },
     { id: 'settings', label: 'Настройки', short: 'Настройки', icon: 'sliders' },
     { id: 'audit', label: 'Журнал', short: 'Журнал', icon: 'history' },
     { id: 'message', label: 'Сообщение', short: 'Сообщение', icon: 'megaphone' },
@@ -192,6 +204,19 @@
 
     .adm-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; outline: none; }
     .adm-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+    .adm-kv3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0; padding: 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+    .adm-kv3.adm-kv4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .adm-kv3 > div { background: var(--surface); padding: 10px 12px; min-width: 0; }
+    .adm-kv3 dt { font-size: var(--fs-xs); color: var(--fg-3); }
+    .adm-kv3 dd { margin: 2px 0 0; font-weight: 600; }
+    .adm-kv3 dd small { display: block; font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
+    @media (max-width: 720px) { .adm-kv3, .adm-kv3.adm-kv4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .adm-howsteps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); color: var(--fg-2); }
+    .adm-howsteps b { color: var(--fg); }
+    .adm-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); }
+    .adm-steps li { display: flex; gap: 8px; align-items: center; color: var(--fg-3); }
+    .adm-steps li svg { width: 16px; height: 16px; flex: none; }
+    .adm-steps li.done { color: var(--good-ink); } .adm-steps li.run { color: var(--accent-ink); }
     .adm-col > .card.adm-fill { flex: 1 1 auto; }
     .card.adm-fill > .card-body { flex: 1 1 auto; }
     .card.adm-nowrap-head > .card-head { flex-wrap: nowrap; }
@@ -1790,7 +1815,7 @@
           h('li', { class: 'adm-urow' },
             h('div', { class: 'adm-urow-name' }, h('i', { class: 'adm-sw', style: { background: 'var(--fg-3)' } }), 'Общие фоновые задачи'),
             h('div', { class: 'adm-urow-val' }, h('b', null, usd(b.shared)), h('small', null, pctOf(b.shared, b.monthly, 1) + ' бюджета')),
-            h('div', { class: 'adm-urow-meta' }, 'Вызовы на вашем ключе без участника — сейчас приемка этапа (agent-smoke)'),
+            h('div', { class: 'adm-urow-meta' }, 'Вызовы на вашем ключе без участника: разборы рассчитанных ставок (Sonnet 5.5, Batch, ≈ $0,01 за матч) и приемка этапа'),
             h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: (b.shared / max * 100) + '%', background: 'var(--fg-3)' } }))),
           totalRow(b)),
         howto('Длина полосы — расход, справа — доля месячного бюджета ' + usdL(b.monthly) + '. Ставки и банк участников здесь не показываются.'),
@@ -1813,8 +1838,16 @@
         h('div', { class: 'adm-eval' },
           h('div', { class: 'adm-urow-name' }, icon('flask', { width: 16, height: 16 }), 'Проверки (eval)'),
           h('div', { class: 'adm-urow-val' }, h('b', null, usd(E.spent)), h('small', null, 'из ' + usdL(E.monthly) + ' бюджета проверок')),
-          h('div', { class: 'adm-urow-meta' }, E.runs.map(r => r.what + ' — ' + usd(r.cost)).join('; ') + '. В общий бюджет ' + usdL(b.monthly) + ' не входит.'),
+          h('div', { class: 'adm-urow-meta' }, (E.firstMonth ? 'Первый месяц — ' + usdL(E.monthly) + ' (замер разброса и первая версия), с ноября ' + usdL(E.next) + '. ' : '') + 'В общий бюджет ' + usdL(b.monthly) + ' не входит. Прогон идет пакетами по ≤ ' + E.batchSize + ' событий: резерв худшего случая — на пакет.'),
           h('div', { class: 'adm-urow-bar', 'aria-hidden': 'true' }, h('i', { style: { width: Math.min(100, E.spent / E.monthly * 100) + '%', background: 'var(--fg-3)' } }))),
+        h('div', { class: 'adm-bleed' }, UI.table({
+          columns: [
+            { label: 'Прогон', render: r => h('div', null, h('div', null, r.what), h('div', { class: 'xsmall muted' }, when(r.at) + (r.events ? ' · ' + r.events + ' событий' : ''))) },
+            { label: 'Худший случай', align: 'r', hideMobile: true, render: r => (r.worst ? usd(r.worst) : '—') },
+            { label: 'Факт', align: 'r', render: r => h('b', null, usd(r.cost)) },
+          ],
+          rows: E.runs.slice().sort((a, b2) => b2.at.localeCompare(a.at)),
+        })),
         howto('Кэш — какая часть входных токенов читается из кэша: это в 10–20 раз дешевле обычного входа. Новости больше пишут в кэш, чем читают из него, поэтому общая доля невысокая. Разбор ставки ИИ появится на этапе 5; профили игроков ИИ не собирает.'),
       ],
     });
@@ -1953,6 +1986,95 @@
       ],
     });
   }
+  // =====================================================================
+  // ДАННЫЕ (этап 5, В1): файл tennis-data раз в неделю — сайт отдает его только браузеру (программе — 403)
+  // =====================================================================
+  const AR = () => D.archive;
+  function uploadCard() {
+    const ar = AR(), last = ar.uploads[0];
+    const days = Math.floor((toMin(now()) - toMin(ar.lastLoad)) / 1440);
+    const status = h('div', { class: 'adm-upload-status', 'aria-live': 'polite' });
+    const fileIn = h('input', { type: 'file', accept: '.xlsx', id: 'adm-upload-file', class: 'sr-only', on: { change: e => { const f = e.target.files && e.target.files[0]; if (f) runUpload(f.name, (f.size / 1048576).toFixed(1).replace('.', ',') + ' МБ'); } } });
+    function runUpload(name, size) {
+      if (!/\.xlsx$/i.test(name)) { UI.clear(status).appendChild(UI.callout('bad', 'alert', 'Нужен файл .xlsx с tennis-data.co.uk, например 2026.xlsx')); return; }
+      const steps = ['Проверяем файл: формат, лист, колонки', 'Ищем новые матчи основного тура', 'Привязываем матчи из анализов и считаем ставки'];
+      let i = 0;
+      const draw = () => { UI.clear(status).appendChild(h('ol', { class: 'adm-steps' }, steps.map((t, k) => h('li', { class: k < i ? 'done' : k === i ? 'run' : null }, icon(k < i ? 'check' : k === i ? 'refresh' : 'clock'), t)))); };
+      draw();
+      const tm = setInterval(() => {
+        i++;
+        if (i < steps.length) { draw(); return; }
+        clearInterval(tm);
+        const at = tick();
+        log('data_upload', null, name + ', ' + size + ': новых матчей нет — файл тот же, что ' + dateDay(ar.lastLoad));
+        UI.clear(status).appendChild(UI.callout('warn', 'info', h('b', null, 'Новых матчей нет. '), 'В файле матчи по ' + dateDay(ar.matchesTo) + ' — tennis-data еще не обновил его. Сайт обновляет файл не каждый день: попробуйте позже. Ставки и банк не менялись.'));
+        UI.toast('Файл проверен: новых матчей нет — ' + when(at), 'info');
+      }, 700);
+    }
+    return card({
+      title: 'Результаты матчей: файл tennis-data', id: 'adm-upload',
+      subtitle: 'Раз в неделю, по понедельникам, ≈ 2 минуты. По файлу ставки рассчитываются сами',
+      actions: [chip(days <= ar.staleDays ? 'Загружен ' + dateDay(ar.lastLoad) : 'Пора загрузить', days <= ar.staleDays ? 'good' : 'warn', days <= ar.staleDays ? 'check' : 'alert')],
+      body: [
+        h('dl', { class: 'adm-kv3' },
+          h('div', null, h('dt', null, 'В архиве матчи'), h('dd', null, 'по ' + dateDay(ar.matchesTo), h('small', null, 'файл ' + ar.file + ' от ' + dateDay(ar.lastLoad) + ', ' + ar.lastLoad.slice(11, 16)))),
+          h('div', null, h('dt', null, 'Загрузил'), h('dd', null, ar.by, h('small', null, 'нужна только роль администратора'))),
+          h('div', null, h('dt', null, 'Следующая загрузка'), h('dd', null, 'пн ' + dateDay(ar.next), h('small', null, 'напоминание в 07:00')))),
+        h('ol', { class: 'adm-howsteps' },
+          h('li', null, h('b', null, 'Скачайте файл. '), 'На tennis-data.co.uk → «ATP Men» → ', h('span', { class: 'mono' }, ar.file), '. Программе сайт файл не отдает (403), браузеру — отдает.'),
+          h('li', null, h('b', null, 'Загрузите сюда. '), 'Только .xlsx до 10 МБ. Повторная загрузка того же файла ничего не ломает: новых матчей просто не будет.')),
+        h('div', { class: 'row' },
+          h('label', { class: 'btn primary', for: 'adm-upload-file', tabindex: '0', role: 'button', on: { keydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileIn.click(); } } } }, icon('upload'), h('span', null, 'Выбрать файл .xlsx')),
+          fileIn,
+          button('Пример: 2026.xlsx', { kind: 'secondary', icon: 'play', title: 'Только в макете: загрузить пример файла', onClick: () => runUpload(ar.file, last.size) })),
+        status,
+        howto('Задержка результатов — до недели: от матча до загрузки файла. Пока исхода нет, ставка «ждет результата», участник может внести его сам — ручной расчет главнее. Через 3 дня без исхода участнику приходит напоминание.'),
+      ],
+    });
+  }
+  function uploadReportCard() {
+    const ar = AR(), r = ar.uploads[0];
+    const cell = (k, v, sub) => h('div', null, h('dt', null, k), h('dd', null, v, sub && h('small', null, sub)));
+    return card({
+      title: 'Отчет загрузки ' + dateDay(r.at) + ', ' + r.at.slice(11, 16), subtitle: ar.file + ' · ' + r.size + ' · ' + fmt.int(r.rows) + ' строк в файле',
+      body: [
+        h('dl', { class: 'adm-kv3 adm-kv4' },
+          cell('Новых матчей', String(r.newMatches), 'по ' + dateDay(r.to)),
+          cell('Рассчитано ставок', String(r.settled), 'у ' + pl(r.people, 'участника', 'участников', 'участников') + ', ' + r.legs + ' событий'),
+          cell('Закрытие из архива', String(r.closing), 'событий П1/П2 · у фор — вносят сами'),
+          cell('Привязано матчей', String(r.linked), 'из анализов к архиву')),
+        r.unlinked ? h('div', { class: 'stack', style: 'gap:8px' },
+          h('h4', null, 'Не привязано матчей: ' + r.unlinked),
+          h('div', { class: 'adm-list' }, ar.unlinked.map(u => item({ ic: 'link', icKind: 'warn', title: u.match + ' · ' + dateDay(u.date), meta: u.why,
+            side: button('Привязать', { kind: 'ghost', size: 'sm', onClick: () => UI.toast('В рабочей версии — выбор матча из архива или команда matches-merge в терминале', 'link') }) })))) : null,
+        UI.callout('', 'info', h('div', { class: 'stack', style: 'gap:4px' },
+          h('span', null, h('b', null, 'Расхождений с ручным расчетом: ' + r.conflicts + '. '), 'Участнику ушло уведомление, банк не меняли — исправляет он сам.'),
+          h('span', null, h('b', null, 'Снятие или неявка: ' + r.retired + '. '), 'Такие ставки сами не рассчитываются — правила букмекеров разные; участнику напоминание внести исход.'))),
+        howto('Чужие ставки, суммы и исходы здесь не видны (Р14) — только сколько рассчитано и у скольких участников.'),
+      ],
+    });
+  }
+  function uploadsHistoryCard() {
+    const ar = AR();
+    return card({
+      title: 'История загрузок', subtitle: 'Последние ' + ar.uploads.length + ' · полный список — в журнале',
+      body: h('div', { class: 'adm-list' }, ar.uploads.map(u => item({ ic: 'upload', title: when(u.at), meta: 'матчи по ' + dateDay(u.to) + ' · новых ' + u.newMatches + ' · рассчитано ставок ' + u.settled + (u.unlinked ? ' · не привязано ' + u.unlinked : ''), side: h('span', { class: 'xsmall muted' }, u.size) }))),
+    });
+  }
+  function sourcesAdminCard() {
+    const ar = AR();
+    return card({
+      title: 'Другие источники', subtitle: 'Что еще питает базу матчей',
+      body: h('div', { class: 'adm-list' },
+        item({ ic: 'database', title: 'Архив Сакманна', meta: 'Матчи и статистика подачи по ' + dateDay(ar.sackmannTo) + ' 2026 — архив заморожен, загружается ночью в ' + ar.nightly }),
+        item({ ic: 'globe', title: 'Новости перед анализом', meta: 'Находят свежие результаты — в окне расчета это подсказка участнику, а не расчет' }),
+        item({ ic: 'clock', title: 'Платный API результатов', meta: 'Позже (Р10): когда CLV на 100–200 ставках покажет перевес. Результаты и закрытие — за минуты' })),
+    });
+  }
+  PANELS.data = () => h('div', { class: 'adm-main' },
+    h('div', { class: 'adm-col' }, uploadCard(), uploadReportCard()),
+    h('div', { class: 'adm-col' }, uploadsHistoryCard(), sourcesAdminCard()));
+
   PANELS.settings = () => h('div', { class: 'adm-main' },
     h('div', { class: 'adm-col' }, currencyCard()),
     h('div', { class: 'adm-col' }, tzCard(), serverCard()));

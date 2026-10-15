@@ -80,10 +80,15 @@
         if (n.kind === 'bet_settled' && n.bet && (!link || link === '#bets')) link = '#bets-' + n.bet;
         if (n.kind === 'bet_settled') {
           const b = DATA.bets.find(x => x.id === n.bet);
-          body = (b.status === 'win' ? 'Выигрыш ' : b.status === 'loss' ? 'Проигрыш ' : 'Возврат ') + fmt.signedMoney(b.profit) + '. Банк ' + fmt.money(b.bankAfter) + '.';
+          body = (b.status === 'win' ? 'Выигрыш ' : b.status === 'loss' ? 'Проигрыш ' : 'Возврат ') + fmt.signedMoney(b.profit) + (b.settledBy === 'auto' ? ' по архиву tennis-data' : '') + '. Банк ' + fmt.money(b.bankAfter) + '. Разбор ИИ — в деталях ставки.';
+        }
+        // Еженедельный отчет (В8): суммы — в валюте программы, поэтому текст собирается при показе
+        if (n.kind === 'weekly_report' && DATA.learning) {
+          const r = DATA.learning.weekReport(n.week);
+          body = r.n + ' ' + fmt.plural(r.n, 'ставка', 'ставки', 'ставок') + ' (' + r.auto + ' по архиву) · ' + fmt.signedMoney(r.profit) + (r.roi != null ? ', ROI ' + fmt.signedPct(r.roi) : '') + (r.clv != null ? ' · CLV ' + fmt.signedPct(r.clv) : '') + (r.brier != null ? ' · Brier ' + fmt.dec(r.brier, 3) + ' против ' + fmt.dec(r.brierMarket, 3) + ' у рынка' : '') + '.';
         }
         return Object.assign({}, n, { body, link, read: n.read || readState[state.role].has(n.id) });
-      });
+      }).sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)); // сначала новые
     },
     // сколько уведомлений скрыто настройками «Что присылать»
     hidden() { return (DATA.notifications[state.role] || []).filter(n => !allowed(n)).length; },
@@ -131,8 +136,7 @@
           h('span', { class: 'notif-text' },
             h('span', { class: 'notif-title' }, n.title),
             n.body ? h('span', { class: 'notif-body' }, n.body) : null,
-            // на этапе 4 ставки рассчитывает сам участник и уведомления нет — это пример авторасчета этапа 5
-            h('span', { class: 'notif-time' }, whenShort(n.at) + (n.kind === 'bet_settled' ? ' · пример этапа 5: авторасчет' : ''))),
+            h('span', { class: 'notif-time' }, whenShort(n.at))),
           n.read ? null : h('span', { class: 'notif-dot', 'aria-label': 'Не прочитано' })));
       });
     }
@@ -229,6 +233,7 @@
     });
   }
 
+  UI.css('app-tab-badge', '.tab-badge { position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--info-soft); color: var(--info-ink); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }');
   function shell(navId) {
     const S = DATA.stats;
     const sidebar = h('aside', { class: 'sidebar', 'aria-label': 'Основная навигация' },
@@ -261,7 +266,9 @@
     const tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Нижняя навигация' }, TABS.map(t => {
       if (t.id === 'more') return h('button', { class: 'tab', type: 'button', 'aria-current': ['players', 'learning', 'costs', 'profile', 'admin'].includes(navId) ? 'page' : null, on: { click: () => moreSheet(navId) } }, icon(t.icon), t.label);
       if (t.primary) return h('a', { class: 'tab tab-primary', href: '#' + t.id, 'aria-current': navId === t.id ? 'page' : null }, h('span', { class: 'tab-plus' }, icon(t.icon)), t.label);
-      return h('a', { class: 'tab', href: '#' + t.id, 'aria-current': navId === t.id ? 'page' : null }, icon(t.icon), t.label);
+      // счетчик открытых ставок у «Ставок» — и на телефоне (этап 5, хвост этапа 4)
+      const badge = t.id === 'bets' && DATA.stats.open ? h('span', { class: 'tab-badge', 'aria-label': 'открытых ставок: ' + DATA.stats.open }, String(DATA.stats.open)) : null;
+      return h('a', { class: 'tab', href: '#' + t.id, 'aria-current': navId === t.id ? 'page' : null, style: badge ? 'position:relative' : null }, icon(t.icon), t.label, badge);
     }));
 
     const view = h('main', { class: 'view', id: 'view', tabindex: '-1' });

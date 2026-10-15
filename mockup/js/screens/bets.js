@@ -1,6 +1,8 @@
 /* Экран «Ставки»: итоги по фильтрам, открытые ставки с вводом результата и закрывающего кэфа,
-   история (таблица с раскрытием на компьютере, карточки и нижний лист на телефоне), вердикт кодом по CLV,
-   исправление результата (сторно и повторный расчет). Разбор ставки ИИ — этап 5.
+   история (таблица с раскрытием на компьютере, карточки и нижний лист на телефоне), разбор ставки ИИ и вердикт кодом
+   по CLV, исправление результата (сторно и повторный расчет). Этап 5: авторасчет по файлу tennis-data
+   (settled_by = auto, «Исправить результат» остается), «ждет результата», закрытие П1/П2 из архива,
+   подсказка исхода из новостей в окне расчета (подсказка, а не расчет — В1).
    Все цифры — из window.DATA; расчет ставки меняет DATA в памяти (банк, статистика, история банка). */
 (function () {
   'use strict';
@@ -121,7 +123,7 @@
   }
 
   // Вердикт считает код по закрывающей линии (CLV), без вызова Claude: отделяем дисперсию от возможной ошибки модели.
-  // Подробный разбор ставки Claude — этап 5
+  // Разбор ставки ИИ (этап 5) — блок «Разбор ИИ» рядом, этот вердикт остается строкой в нем
   function verdict(b) {
     if (b.status === 'open') return null;
     if (isBot(b)) return { label: 'Без вердикта · старый бот', kind: 'outline', icon: 'info' };
@@ -255,6 +257,15 @@
     }
 
     .bets-banner { align-items: flex-start; }
+    .bets-by { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: var(--fs-xs); color: var(--fg-3); white-space: nowrap; }
+    .bets-by svg { width: 12px; height: 12px; }
+    .bets-by.auto { color: var(--accent-ink); }
+    .bets-news { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 10px 12px; border-radius: var(--r-sm); background: var(--info-soft); color: var(--info-ink); font-size: var(--fs-sm); }
+    .bets-news b { color: var(--fg); }
+    .bets-news small { display: block; font-size: var(--fs-xs); color: var(--fg-2); }
+    @media (max-width: 720px) { .bets-news { grid-template-columns: minmax(0, 1fr); } .bets-news .btn { justify-self: start; } }
+    .bets-review-v { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .bets-review-meta { font-size: var(--fs-xs); color: var(--fg-3); }
     .bets-banner-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
     .bets-banner-body b { color: var(--fg); }
     .bets-banner .row .btn { height: 30px; }
@@ -582,7 +593,7 @@
       h('div', { class: 'bets-banner-body' },
         h('div', null, h('b', null, 'Ставка №' + b.id + (lastSettled.corrected ? ' пересчитана: ' : ' рассчитана: ') + res + '. '), 'Банк — ' + fmt.money(S.bank) + '.' + (lastSettled.corrected ? ' ' + journalOnCorrect(b.correctedFrom) : '')),
         h('div', { class: 'row', style: 'gap:6px' }, h('span', null, 'Вердикт по CLV:'), v && chip(v.label, v.kind, v.icon), h('span', null, reviewNext(b))),
-        h('div', { class: 'xsmall muted' }, 'При ручном расчете уведомление не приходит — только это сообщение. Разбор ставки ИИ появится на этапе 5.'),
+        h('div', { class: 'xsmall muted' }, 'При ручном расчете уведомление не приходит — только это сообщение. Разбор ИИ будет в течение часа (Sonnet 5.5 через Batch, ≈ $0,01 за матч) — в деталях ставки.'),
         h('div', { class: 'row' },
           button('Исправить результат', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: () => correctModal(b) }))),
       button('', { kind: 'ghost', size: 'sm', icon: 'x', title: 'Скрыть', onClick: () => { lastSettled = null; refresh(); } }));
@@ -612,7 +623,7 @@
       h('div', { class: 'bets-open-head' },
         h('div', { style: 'min-width:0' }, h('div', { class: 'bets-open-title' }, betKindLong(b)),
           h('div', { class: 'xsmall muted' }, '№' + b.id + ' · ' + b.bookmaker + ' · ' + b.tournament + ', ' + dateLabel(b.date))),
-        UI.statusChip('open')),
+        b.awaiting ? chip('Ждет результата', 'warn', 'clock') : UI.statusChip('open')),
       h('ul', { class: 'bets-olegs' }, b.legs.map(l => {
         const m = matchOf(l);
         return h('li', { class: 'bets-oleg' },
@@ -626,6 +637,7 @@
         h('div', null, h('dt', null, 'Итоговый кэф'), h('dd', { class: 'odds' }, fmt.odds(b.total))),
         h('div', null, h('dt', null, 'Сумма'), h('dd', null, fmt.money(b.stake))),
         h('div', null, h('dt', null, 'Выплата'), h('dd', null, fmt.money(pay)))),
+      b.awaiting && h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Матчи сыграны ' + fmt.date(b.date) + '. В архиве tennis-data матчи по ' + fmt.date(D.archive.matchesTo) + ': ставка рассчитается сама после загрузки файла ≈ ' + fmt.date(D.archive.next) + '. Не хотите ждать — внесите результат, в окне есть подсказка из новостей.'),
       h('div', { class: 'bets-open-actions' },
         button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => settleModal(b), attrs: { 'data-settle': String(b.id) } }),
         // экран «Анализ» показывает только последний анализ — ссылку даем, если ставка сделана по нему
@@ -735,7 +747,8 @@
     const tr = h('tr', { class: ['bets-row', isExp && 'is-expanded', lastSettled && lastSettled.id === b.id && 'is-new'], 'data-bet': String(b.id) },
       h('td', null, h('div', { class: 'bets-date' }, fmt.date(b.date)),
         h('div', { class: 'bets-sub' }, h('i', { class: 'bets-dot', style: { background: D.surfaces[b.surface].color } }), b.tournament + ' · ' + surfLabel(b.surface).toLowerCase()),
-        isBot(b) && h('span', { class: 'chip outline bets-src', title: 'Перенесена из старого Telegram-бота' }, 'старый бот')),
+        isBot(b) && h('span', { class: 'chip outline bets-src', title: 'Перенесена из старого Telegram-бота' }, 'старый бот'),
+        byTag(b)),
       h('td', null, b.legs.map(l => legLine(b, l))),
       h('td', { class: 'r' }, h('span', { class: 'odds' }, fmt.odds(b.total))),
       h('td', { class: 'r' }, fmt.money(b.stake)),
@@ -766,7 +779,7 @@
           h('td', null, h('div', { style: 'white-space:nowrap;font-weight:500' }, plink(l.p1), ' — ', plink(l.p2)), h('div', { class: 'xsmall muted' }, l.marketLabel + ' · ' + surfLabel(l.surface).toLowerCase() + (l.bestOf === 5 ? ' · до 3 побед' : ''))),
           h('td', { class: 'c' }, h('span', { class: 'mono' }, sc || '—')),
           h('td', { class: 'r' }, h('span', { class: 'odds' }, fmt.odds(l.odds))),
-          h('td', { class: 'r' }, l.closing ? [h('span', { class: 'odds' }, fmt.odds(l.closing)), h('div', { class: 'xsmall muted', style: 'white-space:nowrap' }, closingWho(l))] : isBot(b) ? botDash() : h('span', { class: 'odds' }, '—')),
+          h('td', { class: 'r' }, l.closing ? [h('span', { class: 'odds' }, fmt.odds(l.closing)), h('div', { class: 'xsmall muted', style: 'white-space:nowrap', title: l.closingSource === 'archive' ? ARCH_NOTE : null }, closingWho(l))] : isBot(b) ? botDash() : noClosing(b, l)),
           h('td', { class: 'r' }, isBot(b) ? botDash() : h('span', { class: toneCls(clv) }, clvText(clv))),
           h('td', { class: 'r' }, fmt.prob(l.p)),
           h('td', { class: 'r' }, fmt.prob(implied)),
@@ -811,16 +824,63 @@
         b.status === 'void' && h('div', { class: 'bets-detail-note' }, UI.callout('', 'refresh', 'Букмекер рассчитал ставку возвратом — сумма вернулась на счет. В калибровке и CLV не учитывается.')),
         isBot(b) && h('div', { class: 'bets-detail-note' }, UI.callout('', 'info', botNote(b)))),
       h('div', { class: 'bets-detail-bottom' },
-        h('div', { class: 'bets-detail-box' }, h('span', { class: 'eyebrow' }, 'Расчет'), kvGrid(b), b.corrected && h('p', { class: 'xsmall muted' }, correctedNote(b))),
+        h('div', { class: 'bets-detail-box' }, h('span', { class: 'eyebrow' }, 'Расчет'), kvGrid(b), h('p', { class: 'xsmall muted' }, settledNote(b)), b.corrected && h('p', { class: 'xsmall muted' }, correctedNote(b)), conflictNote(b)),
         h('div', { class: 'bets-detail-box' },
-          h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Вердикт по CLV'), verdictChip(b)),
-          h('p', null, reviewNext(b)),
-          h('p', { class: 'xsmall muted' }, 'Вердикт считает код по закрывающим кэфам, без запроса к ИИ. Разбор ставки ИИ — на этапе 5.'),
+          reviewBlock(b),
           !isBot(b) && h('div', { class: 'row' },
             button(b.legs.some(l => !l.closing && legRes(b, l) !== 'void') ? 'Внести закрытие' : 'Закрывающие кэфы', { kind: 'secondary', size: 'sm', icon: 'bolt', onClick: () => closingModal(b) }),
             button('Исправить результат', { kind: 'ghost', size: 'sm', icon: 'edit', onClick: () => correctModal(b) })))));
   }
-  const closingWho = l => (l.closingBy === D.marketRef || l.closingBy === 'Betfair' || l.closingBy === 'средний' ? 'эталон · ' + l.closingBy : 'свой · ' + l.closingBy);
+  const closingWho = l => (l.closingSource === 'archive' ? 'архив tennis-data · ' + l.closingBy : l.closingBy === D.marketRef || l.closingBy === 'Betfair' || l.closingBy === 'средний' ? 'эталон · ' + l.closingBy : 'свой · ' + l.closingBy);
+  // Т1: в архиве tennis-data кэфы только на победу (П1/П2), момент снятия не проверен; у фор закрытие вносит участник
+  const ARCH_NOTE = 'Кэф из архива tennis-data (эталон Pinnacle → Betfair → средний), момент снятия не проверен';
+  const isMl = l => l.market === 'p1' || l.market === 'p2';
+  const noClosing = (b, l) => (b.status !== 'open' && !isMl(l) && legRes(b, l) !== 'void'
+    ? h('span', { class: 'xsmall muted', style: 'white-space:nowrap', title: 'В архиве tennis-data нет кэфов на форы — закрытие вносите сами' }, 'внесите сами')
+    : h('span', { class: 'odds' }, '—'));
+  // Кто рассчитал ставку: авторасчет по файлу tennis-data, вы или импорт старого бота
+  function byTag(b) {
+    if (b.status === 'open' || isBot(b) || !b.settledBy) return null;
+    return b.settledBy === 'auto'
+      ? h('span', { class: 'bets-by auto', title: 'Рассчитана автоматически по файлу tennis-data от ' + fmt.date(b.archiveFile) }, icon('database'), 'авто · архив ' + fmt.date(b.archiveFile))
+      : h('span', { class: 'bets-by', title: 'Результат внесли вы' }, icon('user'), 'внесено вами');
+  }
+  function settledNote(b) {
+    if (isBot(b)) return 'Перенесена из старого бота.';
+    if (b.settledBy === 'auto') return 'Рассчитана автоматически ' + fmt.date(b.settledAt) + ', ' + b.settledAt.slice(11, 16) + ' по архиву tennis-data (файл от ' + fmt.date(b.archiveFile) + '). Ошибся архив — «Исправить результат», как при ручном расчете.';
+    return 'Результат внесли вы' + (b.settledAt ? ' ' + fmt.date(b.settledAt) : '') + '. Ручной расчет главнее: архив его не меняет, а при расхождении приходит уведомление.';
+  }
+  // Т3: архив разошелся с ручным расчетом — деньги не трогаем, предлагаем проверить
+  function conflictNote(b) {
+    if (!b.conflict || b.status === 'open') return null;
+    const l = b.legs[b.conflict.leg];
+    return UI.callout('warn', 'alert', h('div', { class: 'stack', style: 'gap:6px' },
+      h('span', null, h('b', null, 'Архив показывает другое. '), 'В файле tennis-data счет ' + b.conflict.score + ' — по нему ' + l.marketLabel + ' ' + (b.conflict.archiveResult === 'loss' ? 'не сыграла' : 'сыграла') + ', а вы внесли ' + (l.result === 'win' ? 'выигрыш' : 'проигрыш') + '. Банк не меняли.'),
+      button('Исправить результат', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: () => correctModal(b) })));
+  }
+  // Разбор ставки ИИ (этап 5, В3): Sonnet 5.5 через Batch, один на матч; ответ по схеме проверяет код.
+  // Рядом — вердикт кодом по CLV (без ИИ), как на этапе 4
+  function reviewBlock(b) {
+    const head = h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Разбор ИИ'));
+    if (b.status === 'open') return [head, h('p', null, 'Разбор появится после расчета ставки.')];
+    if (isBot(b)) return [head, h('p', null, 'Ставки старого бота не разбираются: у них нет досье и вероятностей модели на момент ставки.')];
+    if (b.status === 'void') return [head, h('p', null, 'Возврат не разбирается: исхода нет.'), clvLine(b)];
+    if (b.pmPending) return [head, h('p', null, 'Разбор готовится: запрос в пакете Batch, ответ — в течение часа, иногда до суток. Стоимость ≈ $0,01 за матч.'), clvLine(b)];
+    const pm = D.learning.postmortemOf(b);
+    if (!pm) return [head];
+    const tone = { fine: 'good', lucky: 'warn', luck: 'info', model_error: 'serious', data_gap: 'warn' }[pm.verdict];
+    const ls = pm.lesson && D.learning.lessons.find(x => x.id === pm.lesson);
+    const lsState = ls ? { hypothesis: 'гипотеза, ' + ls.own + ' из ' + D.learning.LESSON_MIN + ' случаев', ready: 'подтвержден на истории, ждет решения', confirmed: ls.inPrompt ? 'в инструкциях анализа' : 'подтвержден, выключен', rejected: 'отклонен', retired: 'списан' }[ls.status] : null;
+    return [
+      h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Разбор ИИ'), chip(pm.label, tone, pm.verdict === 'fine' ? 'check' : pm.verdict === 'luck' ? 'info' : 'alert')),
+      h('p', null, h('b', null, 'Что произошло. '), pm.what),
+      h('p', null, h('b', null, 'Почему. '), pm.why),
+      h('p', null, h('b', null, 'Гипотеза. '), ls ? [h('a', { href: '#learning-lessons' }, ls.id), ' — ' + lsState + '. ' + ls.text] : 'Новой гипотезы нет.'),
+      clvLine(b),
+      h('div', { class: 'bets-review-meta' }, 'Sonnet 5.5 · Batch · ≈ ' + fmt.usd(pm.cost) + ' за матч · ' + fmt.date(pm.at) + ', ' + pm.at.slice(11, 16) + ' · один разбор на матч, общий для всех, кто на него ставил'),
+    ];
+  }
+  const clvLine = b => h('div', { class: 'bets-review-v' }, h('span', { class: 'small muted' }, 'По CLV, без ИИ:'), verdictChip(b), h('span', { class: 'small soft' }, reviewNext(b)));
   const botNote = b => 'Ставка перенесена из старого Telegram-бота: у нее есть сумма, кэф и итог, поэтому она входит в банк и ROI. Закрывающих кэфов, итоговой вероятности модели и рынка в момент прогноза бот не записывал, поэтому CLV, Brier против рынка и калибровка модели по ней не считаются.' + (b.legs.some(l => l.noResult) ? ' Исходы событий проигранного экспресса бот тоже не записывал.' : '');
   const correctedNote = b => (b.status === 'open' ? 'Расчет отменен ' : 'Результат исправлен ') + fmt.date(b.corrected) + '. ' + journalOnCorrect(b.correctedFrom)
     + (b.status === 'open' ? ' Внесите новый результат.' : b.status === 'loss' ? ' Новый проигрыш проводки не требует.' : ' Новая ' + (b.status === 'void' ? 'сумма возврата' : 'выплата') + ' записана отдельной проводкой.');
@@ -861,15 +921,15 @@
       title: 'Ставка №' + b.id,
       wide: true,
       body: () => {
-        const v = verdictChip(b);
         return [
           h('div', { class: 'bets-dm-top' },
             h('div', null,
               h('div', { class: 'xsmall muted' }, fmt.dateFull(b.date) + ' · ' + betKind(b) + ' · ' + b.bookmaker),
               h('div', { class: ['bets-dm-profit', toneCls(b.profit)] }, b.status === 'open' ? fmt.money(b.stake) : fmt.signedMoney(b.profit))),
             UI.statusChip(b.status)),
-          v && h('div', { class: 'row' }, h('span', { class: 'small muted' }, 'Вердикт по CLV:'), v),
-          b.status !== 'open' && h('p', { class: 'small soft', style: 'margin:0' }, reviewNext(b)),
+          b.status !== 'open' && !isBot(b) && h('div', { class: 'bets-detail-box' }, reviewBlock(b)),
+          b.status !== 'open' && h('p', { class: 'xsmall muted', style: 'margin:0' }, settledNote(b)),
+          conflictNote(b),
           b.legs.map((l, i) => {
             const clv = legClv(l), sc = legScore(b, l, i);
             return h('div', { class: 'bets-dleg' },
@@ -983,6 +1043,14 @@
       if (saveBtn) saveBtn.disabled = !complete;
     };
 
+    // В1-Г: шаг новостей перед анализом уже нашел исход матча — это подсказка, деньги считаются только по вашему нажатию
+    function newsHint(l, i, apply) {
+      if (!l.news) return null;
+      const n = l.news;
+      return h('div', { class: 'bets-news', role: 'note' },
+        h('div', { style: 'min-width:0' }, h('span', null, 'Найдено в новостях: ', h('b', null, n.text)), h('small', null, n.source + ' · ' + fmt.date(n.at) + ', ' + n.at.slice(11, 16) + ' · подсказка, проверьте перед сохранением')),
+        button('Подставить ' + n.score, { kind: 'secondary', size: 'sm', icon: 'check', onClick: () => apply(n.score) }));
+    }
     function legBlock(l, i) {
       const s = st[i];
       const m = matchOf(l);
@@ -1035,6 +1103,7 @@
         h('div', { class: 'bets-sleg-grid' },
           h('div', { class: 'field bets-sleg-res' }, h('div', { class: 'field-label' }, 'Исход ставки'), seg, autoNote),
           scoreF),
+        newsHint(l, i, sc => { scoreIn.value = sc; scoreIn.dispatchEvent(new Event('input')); }),
         closingFields(b, l, formId + '-close-' + i, s));
     }
 
@@ -1052,7 +1121,8 @@
       wide: true,
       body: close => {
         const form = h('form', { id: formId, class: 'stack', novalidate: true, on: { submit: e => { e.preventDefault(); save(close); } } },
-          h('div', { class: 'bets-settle-intro' }, UI.statusChip('open'), h('span', null, betKindLong(b) + ' · ' + b.bookmaker + ' · сумма ' + fmt.money(b.stake) + ' · кэф ', h('span', { class: 'odds' }, fmt.odds(b.total)))),
+          h('div', { class: 'bets-settle-intro' }, b.awaiting ? chip('Ждет результата', 'warn', 'clock') : UI.statusChip('open'), h('span', null, betKindLong(b) + ' · ' + b.bookmaker + ' · сумма ' + fmt.money(b.stake) + ' · кэф ', h('span', { class: 'odds' }, fmt.odds(b.total)))),
+          b.awaiting && !prefill && UI.callout('info', 'database', h('b', null, 'Матчи сыграны ' + fmt.date(b.date) + '. '), 'В архиве tennis-data матчи по ' + fmt.date(D.archive.matchesTo) + ' — ставка рассчитается сама после загрузки файла ≈ ' + fmt.date(D.archive.next) + ', с закрытием П1/П2 из архива. Внесете сейчас — ручной расчет главнее, архив его не изменит.'),
           prefill && UI.callout('warn', 'edit', h('b', null, b.correctedFrom === 'loss' ? 'Прошлый расчет уже отменен. ' : 'Прошлый расчет уже отменен сторно. '), 'Поля заполнены прежними значениями — исправьте неверное и сохраните. Если закрыть окно, ставка останется открытой.'),
           b.legs.map(legBlock),
           sumHost,
@@ -1104,7 +1174,7 @@
     D.bankHistory.push({ date: TODAY, bank: S.bank });
     D.allLegs = D.allLegs.filter(x => x.betId !== b.id);
     b.correctedFrom = b.status;
-    b.status = 'open'; b.profit = 0; b.bankAfter = null; b.clv = null; b.effTotal = null;
+    b.status = 'open'; b.profit = 0; b.bankAfter = null; b.clv = null; b.effTotal = null; b.conflict = null;
     b.legs.forEach(l => { l.result = 'open'; l.score = null; delete l.noResult; });
     b.corrected = TODAY;
     expanded.delete(b.id);
@@ -1160,7 +1230,7 @@
     b.profit = o.profit;
     b.effTotal = o.eff && o.eff !== b.total ? o.eff : null;
     b.clv = betClv(b);
-    b.settledBy = 'manual';
+    b.settledBy = 'manual'; b.settledAt = TODAY + 'T10:05'; b.pmPending = true; b.awaiting = false;
     S.bank += o.profit;
     b.bankAfter = S.bank;
     S.profit += o.profit; S.turnover += b.stake; S.settled++; S.open = Math.max(0, S.open - 1);

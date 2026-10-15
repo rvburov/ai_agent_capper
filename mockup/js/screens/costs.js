@@ -37,6 +37,7 @@
     analysis: { short: 'Оценка матча', tiny: 'Оценка', bar: 'Оценка матча', prompt: 'analysis v1', per: 'один вызов на матч' },
     news: { short: 'Новости', tiny: 'Новости', bar: 'Новости', prompt: 'news v2', per: '2 поиска на матч' },
     parse: { short: 'Разбор текста', tiny: 'Текст', bar: 'Разбор текста', prompt: 'parse_input v1', per: 'один вызов на ввод' },
+    postmortem: { short: 'Разбор ставки', tiny: 'Разбор', bar: 'Разбор ставки', prompt: 'postmortem v1', per: 'один на матч, Batch −50%' },
   };
   const TYPES = (A.runTypes || []).map(t => Object.assign({ short: t.label, tiny: t.label, bar: t.label, prompt: '—', per: '' }, t, TYPE_UI[t.id] || {}));
   const typeOf = id => TYPES.find(t => t.id === id) || { id, label: id, short: id, tiny: id, bar: id, model: '', effort: null, prompt: '—', per: '' };
@@ -48,6 +49,7 @@
   const isErr = r => r.status === 'error';
   // Матч вызова: по «Последним анализам», если анализ там есть, иначе — номер матча
   function matchOf(r) {
+    if (r.matchLabel) return r.matchLabel + (r.bet ? ' · ставка №' + r.bet : ' · матч другого участника');
     if (r.match == null) return null;
     const ra = RECENT[r.analysis], m = ra && ra.matches && ra.matches[r.match];
     const n = SPEC[r.analysis] ? SPEC[r.analysis].n : null;
@@ -191,7 +193,7 @@
     @media (max-width: 1180px) {
       .costs-main { display: flex; flex-direction: column; align-items: stretch; }
       .costs-col { display: contents; }
-      .costs-o-1 { order: 1; } .costs-o-2 { order: 2; } .costs-o-3 { order: 3; } .costs-o-4 { order: 4; }
+      .costs-o-1 { order: 1; } .costs-o-2 { order: 2; } .costs-o-3 { order: 3; } .costs-o-4 { order: 4; } .costs-o-5 { order: 5; }
     }
     .costs-tiles .stat-hint { line-height: 1.35; }
     .costs-kpi .stat { height: 100%; }
@@ -310,6 +312,7 @@
     analysis: 'Общий префикс: инструкции и стратегия. Его пишет в кэш первый матч анализа, следующие матчи читают — у Opus 5.5 чтение в 20 раз дешевле обычного входа',
     news: 'Инструкции шага новостей. Результаты поиска сервер сам пишет в кэш на продолжениях ответа — поэтому у новостей велика запись в кэш',
     parse: 'Не кэшируется: текст разбирается одним коротким вызовом, повторного чтения нет',
+    postmortem: 'Не кэшируется: разборы идут пакетом Batch раз в час, скидка Batch −50% к входу и выходу',
   };
   function runModal(r) {
     const t = typeOf(r.type), p = PRICE[r.model] || PRICE['Opus 5.5'];
@@ -321,6 +324,7 @@
       { name: 'Выход (с размышлениями)', tokens: r.output, price: p.out, cost: r.output * p.out / 1e6, color: 'var(--s3)' },
       { name: 'Веб-поиски', tokens: null, n: r.searches, cost: r.searches * SEARCH, color: 'var(--s4)' },
     ];
+    if (r.batch) parts.forEach(z => { if (z.tokens != null) { z.cost /= 2; z.price /= 2; } });
     const total = sum(parts, z => z.cost);
     const shown = parts.filter(z => z.cost > 0);
     const n = v => nf(Math.abs(v * 100 - Math.round(v * 100)) < 1e-9 ? 2 : 3).format(v);
@@ -333,7 +337,7 @@
       body: close => [
         h('div', { class: 'costs-modal-chips' }, modelChip(r.model), effortChip(r.effort), r.duration ? chip(fmt.duration(r.duration), null, 'clock') : null,
           isErr(r) ? chip('Ошибка', 'bad', 'x') : r.cached ? chip(pct(r.cached / r.input) + ' входа из кэша', 'good', 'database') : chip('Без чтения кэша', null, 'database'),
-          r.tag ? chip('Приемка', 'info', 'flask') : null),
+          r.tag ? chip(r.tag, 'info', r.type === 'postmortem' ? 'search' : 'flask') : null, r.batch ? chip('Batch · ответ через ' + Math.round((r.batchWait || 1800) / 60) + ' мин', null, 'clock') : null),
         isErr(r) ? UI.callout('bad', 'alert', h('b', null, 'Вызов не прошел: '), r.error + '. Неудачный вызов Anthropic не оплачивается; анализ можно перезапустить с этого шага — выполненные шаги повторно не оплачиваются.') : null,
         h('div', { class: 'row-between', style: 'align-items:flex-end' },
           h('div', { style: 'min-width:0' }, h('div', { class: 'eyebrow' }, 'Цена вызова'), h('div', { class: 'stat-value' }, usdRun(r.cost)))),
@@ -353,7 +357,7 @@
         total > 0 ? h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'eyebrow' }, 'Формула'), h('div', { class: 'costs-formula' }, formula)) : null,
         h('dl', { class: 'kv costs-detail' }, [
           ['Кто платит', payer(r)],
-          ['Анализ', r.analysis ? [anLink(r.analysis, close), RECENT[r.analysis] ? '' : ' · пример журнала'] : r.tag || '—'],
+          [r.type === 'postmortem' ? 'Ставка' : 'Анализ', r.analysis ? [anLink(r.analysis, close), RECENT[r.analysis] ? '' : ' · пример журнала'] : r.bet ? h('a', { href: '#bets-' + r.bet, on: { click: close } }, 'Ставка №' + r.bet) : r.tag || '—'],
           ['Шаг', [stepText(r), m ? ' · ' + m : ''].join('') || '—'],
           ['Что делает', t.what || '—'],
           ['Effort', r.effort ? r.effort + ' — ' + EFFORT_LABEL[r.effort] + ' уровень размышлений' : '—'],
@@ -392,7 +396,7 @@
         UI.kv([
           ['Веб-поиск', '$10 за 1000 поисков'],
           ['Haiku 5.5', 'весь вход запроса больше 100 тыс. токенов — все цены × 5'],
-          ['Batch API', '−50% на токены, поиск не дешевле; сейчас только у проверок (eval)'],
+          ['Batch API', '−50% на токены, поиск не дешевле; у проверок (eval) и разборов ставок, ответ — в течение часа'],
           ['Старый бот (Sonnet 4.6)', '$3 / $15'],
         ]),
       ],
@@ -477,9 +481,9 @@
     };
     const rows = top.map(u => li(h('span', { class: 'costs-who-name' }, u.name, u === V.me ? chip('вы', 'outline') : null), userSub(u), usd(ks(u))));
     if (rest.length) rows.push(li('Еще ' + rest.length + ' ' + fmt.plural(rest.length, 'человек', 'человека', 'человек'), 'на ключе администратора', usd(sum(rest, ks))));
-    rows.push(li('Общие фоновые задачи', 'вызовы без участника: сейчас — приемка этапа (agent-smoke)', usd(B.shared)));
+    rows.push(li('Общие фоновые задачи', 'вызовы без участника: разборы ставок (Sonnet 5.5, Batch, ≈ $0,01 за матч) и приемка этапа', usd(B.shared)));
     rows.push(li('Итого', null, usd(B.spent), 'total'));
-    rows.push(li('Проверки качества (eval)', 'отдельный бюджет ' + usdL(EVAL.monthly) + ' на вашем ключе, в итог не входят', usd(EVAL.spent) + ' из ' + usdL(EVAL.monthly), 'aside'));
+    rows.push(li('Проверки качества (eval)', 'отдельный бюджет ' + usdL(EVAL.monthly) + (EVAL.firstMonth ? ' в первый месяц, с ноября ' + usdL(EVAL.next) : '') + ' на вашем ключе, в итог не входят', usd(EVAL.spent) + ' из ' + usdL(EVAL.monthly), 'aside'));
     const people = D.users.filter(u => u.status !== 'deleted');
     const onOwn = people.filter(u => u.aiMode === 'own');
     const back = people.filter(u => u.aiMode !== 'own' && A.ownSpent(u) > 0);
@@ -595,7 +599,6 @@
     const nAn = done.length + ' ' + fmt.plural(done.length, 'анализ', 'анализа', 'анализов');
     const cls = 'col-3 half-mobile costs-kpi';
     return [
-      // Сравнение со старым ботом — на этапе 5, вместе с «До и после» (В12)
       UI.stat({ class: cls, icon: 'spark', label: 'Цена анализа', value: usd(avg), hint: nAn + ', с новостями', spark: done.map(a => a.cost), sparkColor: 'var(--s1)' }),
       UI.stat({ class: cls, icon: 'database', label: 'Вход из кэша', value: pct(CACHE_SHARE), hint: 'сэкономил ' + usd(cacheSavedWeek), spark: byDay.map(d => { const i = sum(d.runs, r => r.input); return i ? sum(d.runs, r => r.cached) / i : 0; }), sparkColor: 'var(--s1)' }),
       UI.stat({ class: cls, icon: 'layers', label: 'Токенов за месяц', value: fmt.tokens(TOT.input + TOT.output), hint: 'вход ' + fmt.tokens(TOT.input) + ' · выход ' + fmt.tokens(TOT.output), spark: byDay.map(d => d.tokens), sparkColor: 'var(--s1)' }),
@@ -664,27 +667,62 @@
     });
   }
 
-  // Решение В12: блоки, которые зависят от проверки на eval-наборе, ждут этапа 5 — показываем, что они скрыты и почему
-  function laterCard() {
+  // Этап 5: «Где экономим» — меры экономии и их статус. Мера включается, только если на замороженном наборе
+  // качество не хуже с допуском (правило экономии TOKEN_ECONOMY 2.4); экономию считает код по логам вызовов
+  const LV = () => D.learning.versions;
+  function savingsCard() {
+    const v4 = LV().find(v => v.id === 'v4'), v3 = LV().find(v => v.id === 'v3');
+    const anPart = BASE.analysis ? BASE.analysis.cost : 0;
+    const perMonth = x => monthPace(x);
+    const v4Save = v4 && v4.cmp ? anPart * Math.abs(v4.cmp.tokens) / 100 : 0;
+    const items = [
+      { ic: 'layers', t: 'Сжатое досье — инструкции v4', d: v4 && v4.status === 'active' ? 'Включено. Токенов на анализ ' + fmt.signedPct(v4.cmp.tokens, 0) + ', качество не хуже на наборе ' + D.learning.evalSet.code + '.' : 'Токенов на анализ ' + fmt.signedPct(v4 ? v4.cmp.tokens : -31, 0) + ', качество не хуже на наборе ' + D.learning.evalSet.code + ' (ДИ лог-лосса ' + (v4 ? fmt.dec(v4.cmp.dLL[1], 3).replace('-', '−') + '…+' + fmt.dec(v4.cmp.dLL[2], 3) : '') + ').',
+        save: '≈ ' + usd(perMonth(v4Save)) + ' в месяц', st: v4 && v4.status === 'active' ? chip('Включено', 'good', 'check') : chip(V.admin ? 'Ждет вашего решения' : 'Ждет решения', 'accent', 'clock'), href: V.admin && v4 && v4.status !== 'active' ? '#learning-compare' : null },
+      { ic: 'clock', t: 'Разбор ставки через Batch', d: 'Sonnet 5.5 со скидкой −50%: ответ в течение часа, а не сразу. Один разбор на матч, общий для всех.', save: '≈ $0,01 вместо $0,02 за матч', st: chip('Включено', 'good', 'check') },
+      { ic: 'book', t: 'Урок L-019: без «травм» из соцсетей', d: 'Шаг новостей не ищет неподтвержденные слухи — прогноз не хуже на 11 случаях.', save: '2 поиска на матч, ≈ $0,02', st: chip('Включено', 'good', 'check') },
+      { ic: 'flask', t: 'Оценка матча на Sonnet 5.5', d: 'Режим «Сбалансированный» дешевле в ≈ 2 раза, но на наборе еще не проверен.', save: 'проверка ≈ $3 из бюджета проверок', st: chip('Не проверено', 'outline', 'flask') },
+      { ic: 'sliders', t: 'Effort low для оценки матча', d: 'Меньше размышлений — короче ответ. Без проверки на наборе не включаем.', save: '—', st: chip('Не проверено', 'outline', 'flask') },
+    ];
     return card({
-      class: 'costs-card costs-o-3',
-      title: 'Появится на этапе 5',
-      subtitle: 'Скрыто до проверки качества на eval-наборе',
+      class: 'costs-card costs-o-3', title: 'Где экономим',
+      subtitle: 'Мера включается, только если на замороженном наборе качество не хуже с допуском',
       body: [
-        h('ul', { class: 'costs-later' },
-          h('li', null, h('span', { class: 'costs-later-ic' }, icon('flask')), h('span', null, h('b', null, '«Где экономим». '), 'Меры вроде «анализ на Sonnet 5.5» или «effort low» включаются, только если на eval-наборе качество не хуже с допуском. Пока набора нет, обещать экономию рано.')),
-          h('li', null, h('span', { class: 'costs-later-ic' }, icon('history')), h('span', null, h('b', null, '«До и после». '), 'Сравнение со старым ботом — оценка без его логов. Покажем вместе с качеством версий, когда будет с чем сравнивать.')),
-          h('li', null, h('span', { class: 'costs-later-ic' }, icon('sliders')), h('span', null, h('b', null, 'Смена модели и effort из интерфейса. '), 'Сейчас — только командой agent-config на сервере.'))),
+        h('ul', { class: 'costs-later' }, items.map(it => h('li', null, h('span', { class: 'costs-later-ic' }, icon(it.ic)),
+          h('span', { style: 'min-width:0' }, h('span', { class: 'row', style: 'gap:6px;margin-bottom:2px' }, h('b', null, it.t), it.st), h('span', null, it.d), h('span', { class: 'xsmall muted', style: 'display:block' }, 'Экономия: ' + it.save),
+            it.href ? h('a', { class: 'small', href: it.href }, 'Сравнение v3 и v4') : null)))),
+        howto('Экономию считает код по логам вызовов за ' + PERIOD_SHORT + ', качество — прогоном на наборе из бюджета проверок. Модель и effort меняются в настройках, а не в коде.'),
+      ],
+    });
+  }
+  // «До и после»: та же оценка матча до и после изменения инструкций. Со старым ботом не сравниваем — его логов нет
+  function beforeAfterCard() {
+    const v4 = LV().find(v => v.id === 'v4'), v3 = LV().find(v => v.id === 'v3');
+    if (!v3 || !v4 || !v3.eval || !v4.eval) return null;
+    const an = BASE.analysis ? BASE.analysis.avgCost : 0;
+    const rows = [
+      { k: 'Цена оценки матча', a: usdRun(an), b: '≈ ' + usdRun(an * (1 + v4.cmp.tokens / 100)) },
+      { k: 'Токенов на анализ', a: '≈ ' + v3.tokens + ' тыс.', b: '≈ ' + v4.tokens + ' тыс.' },
+      { k: 'Лог-лосс на наборе', a: fmt.dec(v3.eval.logloss, 3), b: fmt.dec(v4.eval.logloss, 3) },
+      { k: 'Brier на наборе', a: fmt.dec(v3.eval.brier, 3), b: fmt.dec(v4.eval.brier, 3) },
+      { k: 'Ошибок формата', a: String(v3.eval.fmtErr), b: String(v4.eval.fmtErr) },
+    ];
+    return card({
+      class: 'costs-card costs-o-5', title: 'До и после', subtitle: 'v3 (сейчас) против v4 (кандидат) на одних и тех же ' + D.learning.evalSet.n + ' матчах',
+      body: [
+        h('div', { class: 'costs-ver' }, UI.table({ columns: [{ label: 'Показатель', render: r => r.k }, { label: 'До · v3', align: 'r', render: r => r.a }, { label: 'После · v4', align: 'r', render: r => h('b', null, r.b) }], rows })),
+        howto('Ниже лог-лосс и Brier — лучше; разница v3 и v4 в пределах шума, зато v4 дешевле. Со старым ботом не сравниваем: его логов цены и качества нет.'),
       ],
     });
   }
 
-  // Решение В12: цена по версиям инструкций — сейчас, качество — пустая колонка до этапа 5
+  // Цена по версиям инструкций — факт за месяц, качество — прогон на замороженном наборе (этап 5)
   function versionsCard(mobile) {
     const rows = TYPES.filter(t => BASE[t.id] && BASE[t.id].n).map(t => ({ t, b: BASE[t.id] }));
-    const quality = () => h('span', { class: 'muted' }, 'этап 5');
+    const v3 = LV().find(v => v.status === 'active');
+    const Q = { analysis: v3 && v3.eval ? 'лог-лосс ' + fmt.dec(v3.eval.logloss, 3) : '—', parse: '0 ошибок из 30', news: 'с оценкой матча', postmortem: 'схема: 40 из 40' };
+    const quality = r => h('span', { class: 'small' }, Q[r.t.id] || '—');
     const body = mobile
-      ? mlist(rows.map(r => ({ title: h('span', { class: 'costs-ver-name' }, h('span', { class: 'mono' }, r.t.prompt), chip('действует', 'good', 'check')), sub: r.t.short + ' · ' + calls(r.b.n) + ' · качество — на этапе 5', value: usdRun(r.b.avgCost) })))
+      ? mlist(rows.map(r => ({ title: h('span', { class: 'costs-ver-name' }, h('span', { class: 'mono' }, r.t.prompt), chip('действует', 'good', 'check')), sub: r.t.short + ' · ' + calls(r.b.n) + ' · ' + (Q[r.t.id] || '—'), value: usdRun(r.b.avgCost) })))
       : h('div', { class: 'costs-ver' }, UI.table({
         columns: [
           { label: 'Инструкции', render: r => h('span', { class: 'costs-ver-name' }, h('span', { class: 'mono' }, r.t.prompt), chip('действует', 'good', 'check')) },
@@ -698,7 +736,7 @@
     return card({
       class: 'costs-card costs-o-4',
       title: 'Версии инструкций: цена и качество',
-      subtitle: 'Цена — факт за ' + PERIOD_SHORT + '. Качество версии (лог-лосс на отложенной выборке) появится на этапе 5: экономию оцениваем только вместе с ним.',
+      subtitle: 'Цена — факт за ' + PERIOD_SHORT + '. Качество оценки матча — лог-лосс на замороженном наборе ' + D.learning.evalSet.code + ' (' + D.learning.evalSet.n + ' матчей); экономию оцениваем только вместе с ним.',
       body: [
         body,
         howto('Опубликованную версию инструкций не правим, а выпускаем следующую: так цена и качество каждой версии сравнимы. Анализ целиком сейчас стоит в среднем ' + usd(avgAnalysis()) + '.'),
@@ -713,12 +751,12 @@
     const shown = showAllRuns ? filtered : filtered.slice(0, LIMIT);
     const filter = UI.segmented({
       label: 'Шаг',
-      items: [{ id: 'all', label: 'Все' }].concat(SCOPE_TYPES.map(t => ({ id: t.id, label: mobile ? t.tiny : t.short }))).concat(hasShared ? [{ id: 'shared', label: 'Приемка' }] : []),
+      items: [{ id: 'all', label: 'Все' }].concat(SCOPE_TYPES.map(t => ({ id: t.id, label: mobile ? t.tiny : t.short }))).concat(hasShared ? [{ id: 'shared', label: 'Общие' }] : []),
       active: runFilter,
       onChange: id => { runFilter = id; showAllRuns = false; redraw('costs-runs'); },
     });
     filter.classList.add('costs-runs-filter');
-    const taskNode = r => h('span', { class: 'costs-task' }, typeOf(r.type).short, r.tag ? chip('Приемка', 'info', 'flask') : null, isErr(r) ? chip('Ошибка', 'bad', 'x') : null);
+    const taskNode = r => h('span', { class: 'costs-task' }, typeOf(r.type).short, r.tag && r.type !== 'postmortem' ? chip('Приемка', 'info', 'flask') : r.batch ? chip('Batch', null, 'clock') : null, isErr(r) ? chip('Ошибка', 'bad', 'x') : null);
     const stepLine = r => [stepText(r), matchOf(r)].filter(Boolean).join(' · ');
     let list;
     if (mobile) {
@@ -753,7 +791,7 @@
       });
     }
     const fCost = sum(filtered, r => r.cost);
-    const label = runFilter === 'all' ? 'Всего' : runFilter === 'shared' ? 'Приемка' : typeOf(runFilter).short;
+    const label = runFilter === 'all' ? 'Всего' : runFilter === 'shared' ? 'Общие задачи' : typeOf(runFilter).short;
     return card({
       id: 'costs-runs',
       class: 'col-12 costs-card',
@@ -766,7 +804,7 @@
         h('span', { class: 'small soft' }, label + ': ' + calls(filtered.length) + ' · ' + usd(fCost, 2) + (shown.length < filtered.length ? ' · показаны последние ' + shown.length : '')),
         filtered.length > LIMIT ? button(showAllRuns ? 'Свернуть' : 'Показать все ' + filtered.length, { kind: 'ghost', size: 'sm', icon: showAllRuns ? 'chevronDown' : 'list', attrs: { style: 'margin-left:auto' }, onClick: () => { showAllRuns = !showAllRuns; redraw('costs-runs'); } }) : null,
         h('span', { class: 'xsmall muted', style: 'flex-basis:100%' }, V.admin
-          ? 'Прогоны приемки помечены «Приемка»: это общие фоновые задачи, в ваш личный расход они не входят. Проверки качества (eval) идут из своего бюджета ' + usdL(EVAL.monthly) + ' и в журнал не попадают — они в «Администрирование → Расход ИИ».'
+          ? 'Разборы ставок и прогоны приемки — общие фоновые задачи (фильтр «Общие»), в ваш личный расход они не входят. Проверки качества (eval) идут из своего бюджета ' + usdL(EVAL.monthly) + ' и в журнал не попадают — они в «Администрирование → Расход ИИ».'
           : 'Общие фоновые задачи и проверки качества (eval) оплачивает администратор — в журнале их нет, в ваш ' + (V.own ? 'счет' : 'лимит') + ' они не входят.'),
         h('span', { class: 'xsmall muted', style: 'flex-basis:100%' }, 'Журнал — пример за ' + PERIOD_SHORT + '. Анализ #' + (D.currentAnalysis || 'A-0142') + ' с экрана «Анализ» — демонстрационный запуск макета; в приложении его вызовы появятся здесь сразу.'),
       ],
@@ -857,7 +895,7 @@
           h('div', { class: 'grid costs-tiles' }, tiles(mobile)),
           h('div', { class: 'costs-main' },
             h('div', { class: 'costs-col' }, dailyCard(mobile), versionsCard(mobile)),
-            h('div', { class: 'costs-col' }, typesCard(pickType), laterCard())),
+            h('div', { class: 'costs-col' }, typesCard(pickType), savingsCard(), beforeAfterCard())),
           h('div', { class: 'grid' }, runsCard(mobile, redraw)),
           settingsCard(),
         ]);

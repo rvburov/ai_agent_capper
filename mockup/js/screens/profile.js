@@ -1055,7 +1055,7 @@
   const moveSigned = m => (m.kind === 'withdrawal' ? -m.amount : m.amount);
   // Как bank_from_entries (services/bank.py): «Вложено» — старт и все движения банка, с корректировками;
   // движение сдвигает капитал (банк со ставками в игре) и пик в одной доле, поэтому просадка от него не меняется (Р22)
-  const invested = () => S.start + st.moves.reduce((a, m) => a + moveSigned(m), 0);
+  const invested = () => (S.invested || S.start) + st.moves.reduce((a, m) => a + moveSigned(m), 0);
   function peakNow() {
     let cap = S.bank, peak = S.peak;
     st.moves.forEach(m => {
@@ -1075,7 +1075,7 @@
     const peak = peakNow();
     const dd = peak > 0 ? Math.min(0, (b - peak) / peak * 100) : 0;
     const tiles = h('div', { class: 'grid profile-tiles' },
-      h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Вложено', icon: 'wallet', value: fmt.money(inv), hint: st.moves.length ? 'старт и движения банка' : 'стартовый банк ' + dateLong(D.bankHistory[0].date) })),
+      h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Вложено', icon: 'wallet', value: fmt.money(inv), hint: 'старт ' + fmt.money(S.start) + ' и пополнения' })),
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'Банк', icon: 'coins', value: fmt.money(b), delta: fmt.signedPct(growth), trend: growth >= 0 ? 'up' : 'down', hint: 'к вложенному · со ставками в игре' })),
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'В игре', icon: 'clock', value: fmt.money(inPlay()), hint: openBets().length + ' ' + pl(openBets().length, 'ставка', 'ставки', 'ставок') + ' · ' + fmt.pct(inPlay() / b * 100) + ' банка' })),
       h('div', { class: 'col-3 half-mobile' }, UI.stat({ label: 'От пика банка', icon: 'arrowDown', value: dd ? fmt.signedPct(dd) : '0%', hint: 'пик ' + fmt.money(peak) + (st.moves.length ? ' · сдвинут вместе с банком' : '') })));
@@ -1087,8 +1087,58 @@
       adaptCard(dd, growth));
   }
 
-  // Правила стратегии — из параметров действующей версии (strategy_versions.params, код этапа 3), только просмотр.
-  // Менять их можно будет через версии стратегии на этапе 5: новая версия сначала проверяется на истории.
+  // Правила суммы ставки — у каждого участника свои (В5 этапа 5) и меняются новой версией: «Предложить изменение» →
+  // кандидат с проверкой на ваших ставках (как изменились бы суммы) → «Включить», откат — в один клик.
+  // Инструкции анализа и уроки общие, их ведет администратор (раздел «Обучение модели»)
+  const RULE_CHANGES = [
+    { value: 'week_loss_off', label: 'Выключить «Итог 7 дней −5% и хуже»', what: 'Выключить правило «итог 7 дней −5% и хуже → ставка не больше 2%»', delta: 'сработало бы 2 раза: суммы двух ставок были бы на ≈ 12% больше, прибыль ' + '−' },
+    { value: 'up15_on', label: 'Включить «Банк +15% и винрейт от 60%»', what: 'Включить правило роста: потолок ставки 4% вместо 3%', delta: 'не сработало бы ни разу: условие не выполнялось' },
+    { value: 'pct_175', label: 'Диапазон 2.21–3.24: 1,75% → 1,5% банка', what: 'Снизить ставку в диапазоне итогового кэфа 2.21–3.24 до 1,5% банка', delta: 'затронуло бы 17 ставок: суммы на ≈ 14% меньше' },
+  ];
+  function proposeRules() {
+    const R = D.learning.ruleVersions;
+    UI.modal({
+      title: 'Предложить изменение правил',
+      body: close => {
+        const sel = UI.field({ id: 'profile-rule-change', label: 'Что изменить', options: RULE_CHANGES.map(c => ({ value: c.value, label: c.label })) });
+        const out = h('div', { 'aria-live': 'polite' });
+        const draw = () => { const c = RULE_CHANGES.find(x => x.value === sel.querySelector('select').value); UI.clear(out).appendChild(UI.callout('info', 'history', h('b', null, 'Проверка на ваших ставках с 1 августа: '), c.delta + '. Это пересчет сумм кодом, без ИИ и бесплатно.')); };
+        sel.querySelector('select').addEventListener('change', draw);
+        draw();
+        return h('div', { class: 'stack', style: 'gap:14px' },
+          h('p', { class: 'small soft', style: 'margin:0' }, 'Правила суммы ставки — только ваши. Изменение станет новой версией: сначала кандидат с проверкой на ваших прошлых ставках, затем вы включаете его кнопкой. Прежняя версия остается в архиве — вернуть можно в один клик.'),
+          sel, out);
+      },
+      actions: close => [
+        button('Отмена', { kind: 'secondary', onClick: close }),
+        button('Создать кандидата', { kind: 'primary', icon: 'flask', onClick: () => {
+          const c = RULE_CHANGES.find(x => x.value === document.getElementById('profile-rule-change').value);
+          R.filter(v => v.status === 'candidate').forEach(v => { v.status = 'archived'; });
+          const n = R.length + 1;
+          R.push({ id: 'r' + n, name: 'r' + n + ' · ' + c.label.toLowerCase(), date: TODAY, status: 'candidate', changes: [c.what], change: c.value });
+          close(); drawPanel();
+          UI.toast('Кандидат r' + n + ' создан. Включить — здесь или в «Обучении модели → Версии стратегии»', 'flask');
+        } }),
+      ],
+    });
+  }
+  // Включение версии правил меняет параметры стратегии участника (в макете — DATA.strategy)
+  function applyRuleChange(v, undo) {
+    const A = k => D.strategy.adapt.find(r => r.key === k);
+    if (v.change === 'week_loss_off') A('week_loss').on = !!undo;
+    if (v.change === 'up15_on') A('up15').on = !undo;
+    if (v.change === 'pct_175') { const t = D.strategy.stakeTable[2]; t.pctNum = undo ? 1.75 : 1.5; t.pct = undo ? '1,75%' : '1,5%'; }
+  }
+  function ruleVersionsBlock() {
+    const R = D.learning.ruleVersions, act = R.find(v => v.status === 'active'), cand = R.find(v => v.status === 'candidate');
+    return h('div', { class: 'stack', style: 'gap:8px' },
+      h('div', { class: 'profile-section-title' }, h('h4', null, 'Версия правил'), h('span', { class: 'xsmall muted' }, 'у каждого участника своя')),
+      UI.kv([['Действует', act ? act.name : '—'], ['Кандидат', cand ? cand.name : 'нет']]),
+      cand && h('div', { class: 'row' },
+        button('Включить ' + cand.id, { kind: 'primary', size: 'sm', icon: 'check', onClick: () => { if (act) { act.status = 'archived'; cand.rollback = act.id; } cand.status = 'active'; applyRuleChange(cand); drawPanel(); UI.toast(cand.id + ' действует со следующего анализа · ' + (act ? act.id : '') + ' в архиве, откат в один клик', 'check'); } }),
+        button('Отклонить', { kind: 'ghost', size: 'sm', onClick: () => { cand.status = 'archived'; drawPanel(); UI.toast('Кандидат ' + cand.id + ' отклонен', 'x'); } })),
+      !cand && act && act.rollback && button('Вернуть ' + act.rollback, { kind: 'ghost', size: 'sm', icon: 'history', onClick: () => { const prev = R.find(v => v.id === act.rollback); act.status = 'archived'; applyRuleChange(act, true); if (prev) prev.status = 'active'; drawPanel(); UI.toast('Снова действует ' + act.rollback, 'history'); } }));
+  }
   function strategyCard() {
     const b = bankNow();
     const step = isRub() ? 10 : 1; // сумма округляется вниз: рубли — до 10, доллары и евро — до целых
@@ -1098,9 +1148,11 @@
     const minStake = isRub() ? fmt.money(50) : fmt.money(fmt.fromMoney(0.5));
     return card({
       id: 'profile-strategy', class: 'profile-anchor', title: 'Правила стратегии',
-      subtitle: h('span', null, 'Действует ', activeVersion ? activeVersion.id : 'v3', ' — стратегия этапа 3 · ИИ не предложит событие вне этих рамок'),
-      actions: [chip('Только просмотр', 'outline', 'lock')],
+      subtitle: h('span', null, 'Инструкции анализа ', activeVersion ? activeVersion.id : 'v3', ' — общие, правила суммы — ваши · ИИ не предложит событие вне этих рамок'),
+      actions: [button('Предложить изменение', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: proposeRules })],
       body: [
+        ruleVersionsBlock(),
+        h('hr', { class: 'divider' }),
         h('div', { class: 'stack', style: 'gap:8px' },
           h('h4', null, 'Отбор событий'),
           h('dl', { class: 'profile-srules' },
@@ -1127,13 +1179,13 @@
           h('div', { class: 'profile-section-title', style: 'margin-top:6px' }, h('h4', null, 'Поправка на валуй'), h('span', { class: 'xsmall muted' }, 'средний перевес ног экспресса')),
           h('dl', { class: 'profile-value', 'aria-label': 'Поправка ставки на валуй, в процентах банка' }, VALUE_ADJ.map(x => h('div', null, h('dt', null, x.t, h('small', null, x.d)), h('dd', null, x.v)))),
           h('p', { class: 'xsmall muted' }, 'Процент из таблицы, затем поправка на валуй и адаптации ниже; потолок — 3% банка. Сумма округляется вниз до ' + fmt.money(fmt.fromMoney(step)) + '; меньше ' + minStake + ' — ставки нет.')),
-        h('p', { class: 'profile-note' }, icon('lock'), h('span', null, 'Правила только для просмотра. Менять их можно будет через версии стратегии на этапе 5: новая версия сначала проверяется на истории, потом вы ее принимаете.')),
+        h('p', { class: 'profile-note' }, icon('history'), h('span', null, 'Правила суммы меняются новой версией: «Предложить изменение» → кандидат с проверкой на ваших ставках → «Включить». Отбор событий и инструкции анализа общие — их меняет администратор в «Обучении модели».')),
       ],
     });
   }
 
-  // Адаптации ставки (Р22): защита банка включена, рост ставки выключен по умолчанию (В7). Переключатели только показывают
-  // состояние: правило меняется новой версией стратегии (этап 5).
+  // Адаптации ставки (Р22): защита банка включена, рост ставки выключен версией r2 (В7 этапа 4). Переключатели только
+  // показывают состояние: правило меняется новой версией правил (этап 5, «Предложить изменение»).
   function adaptCard(dd, growth) {
     const weekPct = weekPctNow();
     const ddAbs = Math.abs(dd), max = 25;
@@ -1158,7 +1210,7 @@
     const offActive = off.filter(r => r.active);
     return card({
       id: 'profile-adapt', class: 'profile-anchor', title: 'Адаптации ставки', subtitle: 'Меняют размер ставки по просадке от пика и итогу недели · правил серий нет',
-      actions: [chip('Только просмотр', 'outline', 'lock')],
+      actions: [button('Предложить изменение', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: proposeRules })],
       body: [
         h('div', { class: 'profile-dd' },
           h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Просадка от пика ' + fmt.money(peakNow())), h('b', { class: 'num' }, fmt.signedPct(dd))),
@@ -1177,12 +1229,9 @@
           off.length ? h('div', { class: 'profile-rule-group', role: 'group', 'aria-labelledby': 'profile-rg-off' },
             h('div', { class: 'profile-rule-group-head' }, h('h4', { id: 'profile-rg-off' }, 'Рост ставки'), chip('Выключены по умолчанию', 'outline', 'pause')),
             off.map(ruleRow),
-            UI.callout('warn', 'alert', h('div', { class: 'stack', style: 'gap:6px' },
-              h('b', null, 'Нужно ваше согласие (решение В7).'),
-              h('span', null, 'В коде этапа 3 эти правила включены. Предлагаем выключить: их нет в согласованных правилах стратегии, а винрейт и итог недели на десятках ставок — шум, и правило поднимает ставку после удачной серии.'),
-              h('span', null, 'Это меняет суммы следующих ставок: при росте банка на 15% и винрейте от 60% потолок останется 3% вместо 4%, а после прибыльной недели ставка не вырастет на 0,5 п.п. ',
-                offActive.length ? 'Сейчас условие выполнено (' + offActive.map(r => lower1(r.label)).join(', ') + '): ближайшие ставки станут меньше.' : 'Сейчас ни одно из условий не выполнено — ближайшие ставки не изменятся.')))) : null),
-        h('p', { class: 'profile-note' }, icon('lock'), h('span', null, 'Переключатели показывают состояние правил. Включить или выключить правило можно будет новой версией стратегии (этап 5).')),
+            UI.callout('info', 'info', h('span', null, 'Выключены версией правил r2 (решение В7 этапа 4): винрейт и итог недели на десятках ставок — шум. ',
+              offActive.length ? 'Сейчас условие выполнено (' + offActive.map(r => lower1(r.label)).join(', ') + '): включенные, они увеличили бы ставки.' : 'Сейчас ни одно из условий не выполнено.'))) : null),
+        h('p', { class: 'profile-note' }, icon('history'), h('span', null, 'Переключатели показывают состояние правил. Включить или выключить правило — «Предложить изменение»: новая версия правил сначала кандидат, потом вы ее включаете.')),
       ],
     });
   }
@@ -1260,13 +1309,14 @@
       hint: st.moveKind === 'withdrawal' ? 'Свободно ' + fmt.money(free) + ': ставки в игре вывести нельзя' : adj ? 'Исправление ошибки учета: минус уменьшает банк' : 'Сколько вы положили на счета букмекеров' });
     const cF = UI.field({ label: 'Комментарий', id: 'profile-move-note', autocomplete: 'off', placeholder: adj ? 'Например: ставка №12 учтена дважды' : 'Необязательно' });
     // Журнал: стартовый банк и движения, новые сверху; банк после — от текущего назад
-    const start = { at: D.bankHistory[0].date + 'T09:00', kind: 'deposit', amount: S.start, note: 'Стартовый банк', start: true };
-    const rows = st.moves.slice().reverse().concat([start]);
+    // Журнал: движения этой сессии, затем пополнения из истории (DATA.bankFlows) и стартовый банк
+    const past = (D.bankFlows || [{ at: D.bankHistory[0].date + 'T09:00', kind: 'deposit', amount: S.start, note: 'Стартовый банк', start: true }]).slice().reverse();
+    const rows = st.moves.slice().reverse().concat(past);
     let after = b;
     const list = rows.map(m => {
       const signed = m.kind === 'withdrawal' ? -m.amount : m.amount;
       const row = item({ ic: MOVE[m.kind].ic, icKind: m.kind === 'withdrawal' ? null : 'good', title: m.start ? 'Стартовый банк' : MOVE[m.kind].t, wrap: true,
-        meta: (m.start ? dateLong(m.at) : when(m.at)) + (m.note && !m.start ? ' · ' + m.note : '') + (m.start ? '' : ' · банк после ' + fmt.money(after)),
+        meta: (m.start ? dateLong(m.at) : when(m.at)) + (m.note && !m.start ? ' · ' + m.note : '') + (m.start ? '' : ' · банк после ' + fmt.money(m.at.slice(0, 10) < TODAY ? (D.bankHistory.find(x => x.date === m.at.slice(0, 10) && x.flow) || { bank: after }).bank : after)),
         side: h('span', { class: 'profile-money' }, fmt.signedMoney(signed)) });
       after -= signed;
       return row;
@@ -1694,7 +1744,7 @@
   // Настройка — по видам уведомлений кода (notifications.kind). Вход с нового устройства, неудачные попытки входа
   // и сообщение администратора приходят всегда. Центр уведомлений в шапке учитывает настройки (UI.notifPrefs).
   const KIND_PREF = {
-    bet_settled: 'bet', limit_80: 'limit', limit_100: 'limit', budget_80: 'budget', budget_100: 'budget',
+    bet_settled: 'bet', bet_needs_result: 'needs', settle_conflict: 'needs', weekly_report: 'weekly', learning: 'learning', limit_80: 'limit', limit_100: 'limit', budget_80: 'budget', budget_100: 'budget',
     ai_key_failed: 'key', ai_mode_request: 'requests', ai_mode_decision: 'decision', data_stale: 'archive', ai_alert: 'alert',
   };
   UI.notifPrefs = {
@@ -1721,7 +1771,9 @@
     const arch = D.archive;
     const archDays = arch ? daysBetween(arch.lastLoad, TODAY) : null;
     const list = [
-      { id: 'bet', kinds: 'bet_settled', t: 'Ставка рассчитана', d: 'Придет, когда ставки начнут рассчитываться сами (этап 5). Результат, который вы вносите на «Ставках», уведомления не шлет' },
+      { id: 'bet', kinds: 'bet_settled', t: 'Ставка рассчитана автоматически', d: 'По файлу tennis-data: исход, прибыль и банк, ссылка на ставку. Результат, который вы вносите сами, уведомления не шлет' },
+      { id: 'needs', kinds: 'bet_needs_result, settle_conflict', isNew: true, t: 'Ставка ждет результата или архив показывает другое', d: 'Через 3 дня после матча исхода в архиве нет — внесите сами. Архив разошелся с вашим расчетом — банк не меняем, просим проверить' },
+      { id: 'weekly', kinds: 'weekly_report', isNew: true, t: 'Еженедельный отчет', d: 'Понедельник, 07:00 по вашему поясу (' + tzName(myTz()) + '): ставки, прибыль, CLV, точность против рынка, новые гипотезы и расход на проверки' },
     ];
     if (!adm && !own) { const L = memberLimit(); list.push({ id: 'limit', kinds: 'limit_80, limit_100', t: 'Лимит ИИ: 80% и остановка', d: 'На 80% (' + usd(L.monthly * B.alertAt / 100, 0) + ' из ' + usd(L.monthly, 0) + ') — предупреждение; когда остатка не хватит на вызов Claude, анализы остановятся до решения администратора' }); }
     if (own) list.push({ id: 'key', kinds: 'ai_key_failed', t: 'Ключ Claude не работает', d: 'Anthropic не принял ваш ключ или на счете нет денег — анализы на вашем ключе остановлены' });
@@ -1731,11 +1783,12 @@
       { id: 'fails', kinds: 'login_failures', t: 'Неудачные попытки входа', d: 'Неверные пароли или коды 2FA подряд: вход с этого адреса закрыт на время', lockSite: true },
       { id: 'msg', kinds: 'admin_message', t: 'Сообщение администратора', d: adm ? 'От других администраторов: работы на сервере, изменения в программе' : 'Работы на сервере, изменения в программе', lockSite: true });
     if (adm) list.push(
+      { id: 'learning', kinds: 'learning', isNew: true, t: 'Обучение модели', d: 'Урок готов к решению, кандидат версии проверен, базовая модель перекалибрована или не включена', admin: true },
       { id: 'requests', kinds: 'ai_mode_request', t: 'Просьбы вернуть ключ администратора', d: 'Участник на своем ключе просит вернуть его на ваш. Сейчас ждут: ' + asks, admin: true },
       { id: 'users', kinds: 'limit_80, limit_100', t: 'Участники у лимита', d: 'Участник израсходовал 80% лимита или ему не хватает на вызов Claude' + (near.length ? '. Сейчас у порога: ' + near.map(u => u.name).join(', ') : ''), admin: true },
       { id: 'budget', kinds: 'budget_80, budget_100', t: 'Бюджет ключа: 80% и остановка', d: 'Общий бюджет ключа администратора — ' + usd(B.monthly, 0) + ' в месяц. Когда остатка не хватит на вызов Claude, анализы на вашем ключе остановятся', admin: true },
       { id: 'key', kinds: 'ai_key_failed', t: 'Ключ администратора не работает', d: 'Anthropic не принял ключ или на счете нет денег — анализы всех на вашем ключе остановлены', admin: true },
-      { id: 'archive', kinds: 'data_stale', t: 'Архив матчей давно не обновлялся', d: 'Больше ' + ((arch && arch.staleDays) || 3) + ' дней без загрузки — Эло, форма и кэфы для анализа устаревают' + (archDays != null ? '. Последняя загрузка — ' + dateDay(arch.lastLoad) + ' (' + archDays + ' ' + pl(archDays, 'день', 'дня', 'дней') + ' назад)' : ''), admin: true },
+      { id: 'archive', kinds: 'data_stale', t: 'Пора загрузить файл tennis-data', d: 'Напоминание по понедельникам, 07:00, и если файл не загружали больше ' + ((arch && arch.staleDays) || 7) + ' дней: без него ставки не рассчитываются сами, Эло и форма устаревают' + (archDays != null ? '. Последняя загрузка — ' + dateDay(arch.lastLoad) + ' (' + archDays + ' ' + pl(archDays, 'день', 'дня', 'дней') + ' назад)' : ''), admin: true },
       { id: 'alert', kinds: 'ai_alert', isNew: true, t: 'Сигналы расхода ИИ', d: 'Доля кэша ниже 50% по 10 анализам, анализ дороже двух медиан за 7 дней, больше 2% обрезанных ответов или отказов, больше 30 поисков в день, модель без цены, серия ответов 429. Одно уведомление на правило в сутки', admin: true });
     return list;
   }
@@ -1836,10 +1889,10 @@
     return card({
       title: 'Откуда берутся данные о матчах', subtitle: 'База игроков, матчей и новостей общая для всех участников',
       body: h('ul', { class: 'profile-bullets' },
-        h('li', null, icon('database'), h('span', null, h('b', null, 'Архивы матчей. '), 'Сакманн — матчи и статистика подачи (копия архива, по май 2026; CC BY-NC-SA 4.0), tennis-data.co.uk — результаты с датами и кэфы. Загрузка каждую ночь, Эло считаем сами.')),
+        h('li', null, icon('database'), h('span', null, h('b', null, 'Архивы матчей. '), 'Сакманн — матчи и статистика подачи (копия архива, по май 2026; CC BY-NC-SA 4.0), tennis-data.co.uk — результаты с датами и кэфы: файл 2026.xlsx администратор загружает раз в неделю, по понедельникам. По нему ставки рассчитываются сами — с задержкой до недели. Эло считаем сами.')),
         h('li', null, icon('globe'), h('span', null, h('b', null, 'Новости. '), 'Ищет Claude (Sonnet 5.5) перед анализом, если по игроку им больше 12 часов, — только на atptour.com, сайтах турниров Большого шлема, tennis.com, tennismajors.com и espn.com. Найденное общее для всех.')),
         h('li', null, icon('edit'), h('span', null, h('b', null, 'Кэфы. '), 'При анализе вводите вы, по своему букмекеру. По ним, без маржи, модель сравнивается с рынком в «Аналитике».')),
-        h('li', null, icon('target'), h('span', null, h('b', null, 'Закрывающий кэф для CLV. '), 'Тоже вносите вы, на «Ставках»: эталона (' + MARKET_RULE + ') или своего букмекера. Закрывающие кэфы из tennis-data подставим на этапе 5.')),
+        h('li', null, icon('target'), h('span', null, h('b', null, 'Закрывающий кэф для CLV. '), 'У П1 и П2 при авторасчете — из архива tennis-data (момент снятия кэфа не проверен), у фор и при ручном расчете — вносите вы на «Ставках»: эталона (' + MARKET_RULE + ') или своего букмекера.')),
         h('li', null, icon('clock'), h('span', null, h('b', null, 'Платный источник '), 'матчей и кэфов подключим позже, когда CLV на 100–200 ставках покажет перевес.'))),
     });
   }

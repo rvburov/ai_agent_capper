@@ -1,172 +1,43 @@
-/* Обучение модели: честно о том, как система учится на ставках.
-   Цикл «ставка → результат → разбор → урок → проверка → в анализ», уроки, версии стратегии,
-   своя ML-модель (Эло + бустинг), датасет и лаборатория дообучения открытой LLM.
-   Общие цифры — из window.DATA; локальные демо-данные экрана (признаки, walk-forward, эксперименты) описаны ниже. */
+/* Обучение модели (этап 5 «Петля обучения»): как система учится на рассчитанных ставках.
+   Цикл «ставка → результат из архива → разбор ИИ → гипотеза → проверка на истории → в анализ по решению»,
+   вкладки «Уроки», «Версии стратегии», «Базовая модель» (Эло по покрытиям + калибровка), «Отчеты».
+   Решения владельца 15 окт 2026: уроки и инструкции общие, их ведет администратор (В5); урок попадает в анализ
+   только по кнопке после быстрой проверки (В4); перекалибровка включается сама, если не хуже (В6); отчет —
+   понедельник 07:00 (В8); лаборатории дообучения в приложении нет (В9). Все числа считает сервер (Т15):
+   в макете они лежат готовыми в DATA.learning, экран только рисует. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
-  const D = DATA, S = DATA.stats, TODAY = DATA.today;
+  const D = DATA, L = DATA.learning, TODAY = DATA.today;
 
   // ---------- константы и утилиты ----------
-  const NEED = 20;                       // числовой урок: проверка начинается с 20 своих случаев
-  const NEED_PROC = 10;                  // процессный урок: «не хуже» хотя бы на 10 случаях
-  const SHRINK_K = 200;                  // усадка эффекта урока к нулю: effect × n / (n + k)
-  const HOLDOUT = (D.strategyVersions[0] || { n: 220 }).n;
-  const MARKET_LL = 0.588;               // лог-лосс закрывающей линии на тех же событиях (демо)
-  // 95% ДИ разницы «версия − рынок» по лог-лоссу на отложенных событиях (демо)
-  const MARKET_CI = { v1: [0.008, 0.040], v2: [-0.008, 0.024], v3: [-0.021, 0.011], v4: [-0.023, 0.009] };
+  const NEED = L.LESSON_MIN, NEED_PROC = L.LESSON_MIN_PROC, SHRINK_K = L.SHRINK_K, MAX_ON = L.LESSONS_MAX;
+  const SET = L.evalSet;
   const MINUS = '−';
   const sgn = (n, s) => (n > 0 ? '+' : n < 0 ? MINUS : '±') + s;
   const signedDec = (n, d = 3) => sgn(Math.round(n * 1e6) / 1e6, fmt.dec(Math.abs(n), d));
-  const pp = n => sgn(Math.round(n * 100) / 100, fmt.dec(Math.abs(n), 1)) + ' п.п.';
+  const ciDec = (ci, d = 3) => signedDec(ci[0], d) + '…' + signedDec(ci[1], d);
   const cases = n => fmt.int(n) + ' ' + fmt.plural(n, 'случай', 'случая', 'случаев');
+  const dec4 = n => n.toFixed(4).replace('.', ','); // Brier версий модели различается в четвертом знаке
   const hhmm = iso => iso.slice(11, 16);
-
-  // ---------- локальные демо-данные ----------
-  const legOf = (date, p2) => D.allLegs.find(l => l.date === date && l.market === 'h1m' && (!p2 || l.p2 === p2));
-  const legLine = l => 'ставка №' + l.betId + ' от ' + fmt.date(l.date) + ': ' + D.match(l) + ', ' + l.marketLabel + ' по кэфу ' + fmt.odds(l.odds) + ' — не сыграла';
-  const leg0912 = legOf('2026-09-12', 'shelton');
-  const leg0927 = legOf('2026-09-27', 'draper');
-
-  // kind: numeric — меняет вероятность (≥ 20 своих + история с ДИ, усадка), process — меняет сбор данных (не хуже на ≥ 10)
-  const LESSON_INFO = {
-    'L-014': {
-      kind: 'numeric', hist: 296, histHow: 'по доле эйсов',
-      ci: '95% ДИ +0,005…+0,031',
-      bias: 'вероятность победы 2:0 завышалась на 8 п.п. (95% ДИ 3…13)', raw: 8,
-      source: leg0912 ? 'Разбор: ' + legLine(leg0912) : 'Разбор проигранной ставки от 12 сен',
-      check: [['Лог-лосс с уроком', '0,571'], ['Лог-лосс без урока', '0,589']],
-      line: 'Фора −1.5 на фаворита против левши с подачей от 210 км/ч: снижай вероятность победы 2:0 на 4–6 п.п. — тай-брейки срезают «сухую» победу.',
-      note: 'Скорости подачи в исторических архивах нет. На истории условие проверено через замену: у соперника-левши ≥ 10% эйсов и ≥ 75% очков на первой подаче. Точное условие «от 210 км/ч» проверено только на своих случаях.',
-    },
-    'L-017': {
-      kind: 'numeric', hist: 412,
-      ci: '95% ДИ +0,002…+0,010',
-      bias: 'вероятность фаворита завышалась на 6 п.п. (95% ДИ 2…10)', raw: 6,
-      source: 'Разборы проигранных ставок US Open: фаворит накануне провел пятисетовый матч',
-      check: [['Brier с уроком', '0,196'], ['Brier без урока', '0,202']],
-      line: 'Если фаворит за последние 48 часов сыграл пять сетов, снижай его вероятность на 4 п.п. — поправка уже с усадкой, больше не добавляй.',
-      note: 'Исторические случаи — пятисетовые матчи Шлемов с 2000 г., даты матчей из tennis-data.co.uk.',
-    },
-    'L-019': {
-      kind: 'process', hist: null,
-      source: 'Разборы трех ставок 24–28 сен: «травма» из соцсетей не подтвердилась',
-      check: [['Качество прогноза', 'не хуже: Brier +0,001 на 11 случаях'], ['Экономия', '2 веб-поиска на матч, ≈ $0,02']],
-      line: 'Не ищи и не учитывай новости о травмах из соцсетей без подтверждения турнира или ATP.',
-      note: 'Урок про сбор данных: вероятности он не меняет, а убирает лишние поиски. Такие уроки принимаются, если прогноз не хуже хотя бы на ' + NEED_PROC + ' случаях и есть выигрыш.',
-    },
-    'L-021': {
-      kind: 'numeric', hist: 0,
-      source: 'Разбор ставки от 3 окт: аутсайдер взял сет в ночной сессии в Шанхае',
-      check: [['Проверка на истории', 'еще не запускалась']],
-      line: 'Ф(+1.5) на аутсайдера в ночных сессиях Азии: повышай вероятность взятого сета на 3–5 п.п.',
-      note: 'В исторических архивах нет времени начала матча, поэтому случаи копятся только из своих ставок. Пока их не наберутся сотни, урок остается гипотезой.',
-    },
-    'L-012': {
-      kind: 'numeric', hist: 1240,
-      ci: '95% ДИ +0,002…+0,012',
-      source: 'Разбор ставки от 30 авг',
-      check: [['Лог-лосс с уроком', '0,604'], ['Лог-лосс без урока', '0,597']],
-      line: 'Перевес в личных встречах на другом покрытии переносится на хард.',
-      note: 'С уроком прогноз хуже: на истории это видно сразу, поэтому урок отклонен, не дожидаясь ' + NEED + ' своих случаев, и в анализ не попадает. Похожие формулировки Claude больше не предлагает.',
-    },
-  };
-  const lessonN = (l, info) => l.evidence + (info.hist || 0);
-  const shrunk = (l, info) => Math.round(info.raw * lessonN(l, info) / (lessonN(l, info) + SHRINK_K));
-
-  const VERSION_INFO = {
-    v1: { tokens: 52, changes: ['Инструкции перенесены из старого бота (папка Tennis-Analytics) без изменений', 'Порог вероятности 65%, кэфы 1.13–1.80, до 3 событий в экспрессе'] },
-    v2: { tokens: 54, changes: ['В досье игрока добавлен Эло по покрытиям', 'Вероятность своей ML-модели передается Claude как второе мнение'] },
-    v3: { tokens: 49, changes: ['В инструкции добавлены уроки L-014 и L-017 — поправки с усадкой к нулю', 'В свою ML-модель добавлены признаки из тех же уроков: «левша против правши» и «сеты за 7 дней»'] },
-    v4: { tokens: 34, goal: 'save', changes: ['Инструкции на английском, ответ — по-русски', 'Сжатое досье: 18 ключевых цифр на игрока вместо полного профиля', 'Уроки и правила те же, что в v3'] },
-  };
-  // Проверка кандидата v4 против v3 по правилу экономии (TOKEN_ECONOMY §2.4)
-  const ECE = { v3: 2.9, v4: 3.1 };
-  const FORMAT_ERR = { v3: 1, v4: 0 };
-  const tokSave = () => Math.round((1 - VERSION_INFO.v4.tokens / VERSION_INFO.v3.tokens) * 100);
-  const SAVE_CHECKS = () => [
-    'Лог-лосс: до +0,005 ≤ +0,01',
-    'Brier: до +0,002 ≤ +0,005',
-    'ECE: до +1,1 п.п. ≤ +2',
-    'Ошибок формата: ' + FORMAT_ERR.v4 + ' (было ' + FORMAT_ERR.v3 + ')',
-    'Токенов −' + tokSave() + '% по логам',
-  ];
-
-  // Своя ML-модель: вклад признаков (gain, %) и проверка walk-forward по месяцам
-  const FEATURES = [
-    { label: 'Разница Эло на покрытии', value: 23 },
-    { label: 'Общий Эло', value: 14 },
-    { label: 'Очки на своей подаче, 52 нед.', value: 12 },
-    { label: 'Очки на приеме второй подачи', value: 9 },
-    { label: 'Усталость: сеты за 7 дней', value: 8, note: 'L-017' },
-    { label: 'Форма: 10 последних матчей', value: 7 },
-    { label: 'Левша против правши', value: 5, note: 'L-014' },
-    { label: 'Личные встречи на покрытии', value: 4 },
-  ];
-  const FEATURES_REST = 100 - FEATURES.reduce((a, f) => a + f.value, 0);
-  // Матчи основного тура ATP (≈ 2,5–3 тыс. в год, в месяц ≈ 180–260)
-  const WF = [
-    { m: 'апр', full: 'Апрель 2026', n: 214, model: 0.204, market: 0.193 },
-    { m: 'май', full: 'Май 2026', n: 248, model: 0.199, market: 0.192 },
-    { m: 'июн', full: 'Июнь 2026', n: 236, model: 0.201, market: 0.195 },
-    { m: 'июл', full: 'Июль 2026', n: 252, model: 0.197, market: 0.193 },
-    { m: 'авг', full: 'Август 2026', n: 241, model: 0.196, market: 0.194 },
-    { m: 'сен', full: 'Сентябрь 2026', n: 187, model: 0.194, market: 0.192 },
-  ];
-  const wfSum = from => WF.slice(WF.findIndex(x => x.m === from)).reduce((a, r) => a + r.n, 0);
-
-  // Датасет: исторический архив (основной тур ATP 2019 – 6 окт 2026, кэфы tennis-data.co.uk, статистика Сакманна) + свои события
-  const HIST_TRAIN = 16896;              // 2019 – 2025
-  const HIST_VAL = 1172;                 // янв – май 2026 (в т.ч. апрель и май из walk-forward)
-  const HIST_OCT = 74;                   // 1–6 окт 2026
-  const HIST_TEST = wfSum('июн') + HIST_OCT;
-  const HIST = HIST_TRAIN + HIST_VAL + HIST_TEST;
-  const OWN = Math.max(144, S.legs);     // своих событий (из ставок + разобранные без ставки)
-  const OWN_NO_BET = OWN - S.legs;
-  const SNAPSHOTS = HIST + OWN;
-  // Тест для LLM — только после среза знаний Opus 5.5 (июнь 2026) плюс месяц запаса
-  const LLM_FROM = '2026-08-01';
-  const LLM_TEST = wfSum('авг') + HIST_OCT + D.allLegs.filter(l => l.date >= LLM_FROM).length + OWN_NO_BET;
-
-  // Деление по времени
-  const SPLIT = [
-    { label: 'Обучение', period: '2019 – 31 дек 2025', n: HIST_TRAIN, color: 'var(--s1)' },
-    { label: 'Валидация', period: 'янв – май 2026', n: HIST_VAL, color: 'var(--s2)' },
-    { label: 'Тест', period: 'с 1 июн 2026', n: HIST_TEST + OWN, color: 'var(--s3)', note: 'в т.ч. ' + OWN + ' своих' },
-  ];
-
-  // Подбор инструкций модели: каждый вариант — быстрая проверка на 40 событиях (Δ лог-лосса к v3), лучший — полный прогон на отложенной выборке
-  const SMOKE = 40, SMOKE_COST = 1.2, FULL_COST = 6.6, EXP_BUDGET = 25;
-  const POPT = [
-    { i: 1, change: 'Исходные инструкции v3 (точка отсчета)', smoke: 0, full: 0.583, tok: 49, base: true },
-    { i: 2, change: 'Сначала цифры, потом новости', smoke: 0.004, tok: 49 },
-    { i: 3, change: 'Инструкции на английском', smoke: -0.003, tok: 41 },
-    { i: 4, change: 'Сжатое досье: 18 цифр на игрока', smoke: -0.006, full: 0.581, tok: 34, best: true },
-    { i: 5, change: 'Сначала шанс без кэфа рынка, потом сравнение', smoke: 0.007, tok: 35 },
-    { i: 6, change: 'Три примера калибровки в инструкции', smoke: 0.002, tok: 38 },
-    { i: 7, change: 'Короче блок про уроки', smoke: null, tok: 33 },
-  ];
-  // Потрачено в этом месяце: быстрые проверки всех посчитанных вариантов + полный прогон лучшего + половина идущей итерации
-  const POPT_SPENT = POPT.filter(p => p.smoke != null).length * SMOKE_COST + FULL_COST + SMOKE_COST / 2;
+  const dayTime = iso => fmt.date(iso) + ', ' + hhmm(iso);
+  const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+  const wday = iso => WD[new Date(iso.slice(0, 10) + 'T12:00:00Z').getUTCDay()];
+  const tzCity = () => D.tzCity(D.user.tz);
+  const isAdmin = () => UI.auth.isAdmin;
+  const E = () => D.ai.eval;
+  const evalLeft = () => Math.max(0, Math.round((E().monthly - E().spent) * 100) / 100);
 
   // ---------- состояние экрана ----------
   const TABS = [
     { id: 'lessons', label: 'Уроки', short: 'Уроки' },
     { id: 'versions', label: 'Версии стратегии', short: 'Версии' },
-    { id: 'ml', label: 'Своя ML-модель', short: 'ML-модель' },
-    { id: 'lab', label: 'Датасет и LLM · лаборатория', short: 'Лаб. LLM' },
+    { id: 'ml', label: 'Базовая модель', short: 'Модель' },
+    { id: 'reports', label: 'Отчеты', short: 'Отчеты' },
   ];
-  const st = {
-    tab: 'lessons',
-    filter: 'all',
-    anon: true,
-    notify: {},                 // id гипотезы → уведомить при 20 случаях
-    ml: { at: '2026-10-05T04:00', brier: 0.194, prev: null, training: false, progress: 0 },
-    popt: 'running',            // running | paused
-  };
+  const st = { tab: 'lessons', filter: 'all', notify: {}, empty: false, recal: null };
   try { const t = sessionStorage.getItem('capper.learning.tab'); if (t && TABS.some(x => x.id === t)) st.tab = t; } catch (e) { /* ок */ }
-
-  let tabsSlot = null, panel = null, tilesSlot = null, mlHeadSlot = null;
+  let tabsSlot = null, panel = null, tilesSlot = null, root = null;
 
   // ---------- стили ----------
   UI.css('learning', `
@@ -316,87 +187,87 @@
     .learning-strip dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
     .learning-strip dd small { display: block; font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
     @media (max-width: 720px) { .learning-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    .learning-feat .hbar { grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) 4.5rem; }
-    .learning-feat .hbar-label { white-space: normal; }
-    .learning-feat .hbar-label .chip { height: 20px; padding: 0 7px; flex: none; }
-    @media (max-width: 720px) {
-      .learning-feat .hbar { grid-template-columns: minmax(0, 1fr) 4.5rem; row-gap: 4px; padding: 6px 0; }
-      .learning-feat .hbar-label { grid-column: 1 / -1; }
-    }
     .learning-train { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); }
-
-    /* лаборатория */
-    .learning-ds-total { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-    .learning-ds-total b { font-family: var(--font-display); font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
-    .learning-ds-parts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
-    .learning-ds-parts > div { padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2); min-width: 0; font-size: var(--fs-sm); color: var(--fg-2); }
-    .learning-ds-parts b { display: block; color: var(--fg); font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
-    @media (max-width: 720px) { .learning-ds-parts { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
-    .learning-split { display: flex; gap: 2px; height: 14px; border-radius: 999px; overflow: hidden; }
-    .learning-split > i { display: block; height: 100%; }
-    .learning-split-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
-    .learning-split-legend > div { min-width: 0; font-size: var(--fs-sm); }
-    .learning-split-legend dt { display: flex; align-items: center; gap: 6px; font-weight: 600; }
-    .learning-split-legend dt i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
-    .learning-split-legend dd { margin: 2px 0 0 16px; color: var(--fg-2); }
-    @media (max-width: 720px) { .learning-split-legend { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
-    .learning-exps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-    @media (max-width: 1180px) { .learning-exps { grid-template-columns: minmax(0, 1fr); } }
-    .learning-exp .card-body { flex: 1; }
-    .learning-exp h3 { font-size: var(--fs-md); margin-top: 8px; }
-    .learning-exp-dl { display: flex; flex-direction: column; gap: 8px; margin: 0; font-size: var(--fs-sm); }
-    .learning-exp-dl dt { font-size: var(--fs-xs); color: var(--fg-3); font-weight: 600; }
-    .learning-exp-dl dd { margin: 2px 0 0; }
-    .learning-note { font-size: var(--fs-xs); color: var(--fg-2); padding: 8px 10px; border-radius: var(--r-sm); background: var(--surface-2); display: flex; gap: 6px; align-items: flex-start; }
-    .learning-note svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }
-    .learning-note.warn { background: var(--warn-soft); color: var(--warn-ink); }
-    .learning-reward { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; font-size: var(--fs-xs); margin: 0; padding: 8px 10px; border-radius: var(--r-sm); background: var(--surface-2); }
-    .learning-reward dt { color: var(--fg-2); }
-    .learning-reward dd { margin: 0; font-family: var(--font-mono); text-align: right; white-space: nowrap; }
+    .learning-feat-none { display: none; }
+    .learning-demo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border: 1px dashed var(--line-strong); border-radius: var(--r-md); font-size: var(--fs-sm); color: var(--fg-2); }
+    .learning-demo .segmented { flex: none; }
+    .learning-cond { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+    .learning-cond .chip { height: auto; min-height: 22px; white-space: normal; text-align: left; }
+    .learning-kind { font-size: var(--fs-xs); color: var(--fg-3); }
+    .learning-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    .learning-steps li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; align-items: start; font-size: var(--fs-sm); }
+    .learning-steps li svg { width: 18px; height: 18px; color: var(--fg-3); margin-top: 1px; }
+    .learning-steps li.done svg { color: var(--good-ink); }
+    .learning-steps li.run svg { color: var(--accent-ink); }
+    .learning-report { display: flex; flex-direction: column; gap: 12px; }
+    .learning-rgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+    .learning-rgrid > div { background: var(--surface); padding: 10px 12px; min-width: 0; }
+    .learning-rgrid dt { font-size: var(--fs-xs); color: var(--fg-3); }
+    .learning-rgrid dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .learning-rgrid dd small { display: block; font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
+    @media (max-width: 720px) { .learning-rgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .learning-rlist { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+    .learning-rrow { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; gap: 4px 12px; align-items: center; width: 100%; min-height: 48px; padding: 10px 14px; background: var(--surface); color: var(--fg); border: 0; border-top: 1px solid var(--line); text-align: left; font: inherit; cursor: pointer; }
+    .learning-rrow:first-child { border-top: 0; }
+    .learning-rrow:hover { background: var(--surface-2); }
+    .learning-rrow > svg { width: 16px; height: 16px; color: var(--fg-3); }
+    .learning-rrow b { font-weight: 600; }
+    .learning-rrow small { display: block; font-size: var(--fs-xs); color: var(--fg-2); }
+    .learning-mlrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+    .learning-mlrow:first-child { border-top: 0; padding-top: 0; }
+    .learning-mlrow .mono { font-weight: 600; font-size: var(--fs-sm); overflow-wrap: anywhere; }
   `);
 
   // ---------- общие кусочки ----------
-  const LESSON_STATUS = { confirmed: ['Подтвержден', 'good', 'check'], hypothesis: ['Гипотеза', 'info', 'flask'], rejected: ['Отклонен', 'bad', 'x'] };
+  const LESSON_STATUS = {
+    confirmed: ['Подтвержден', 'good', 'check'], ready: ['Ждет решения', 'accent', 'clock'], hypothesis: ['Гипотеза', 'info', 'flask'],
+    rejected: ['Отклонен', 'bad', 'x'], retired: ['Списан', 'outline', 'history'],
+  };
   const lessonChip = l => { const [t, k, i] = LESSON_STATUS[l.status] || [l.status, 'outline', 'info']; return chip(t, k, i); };
-  const VERSION_STATUS = { active: ['Активная', 'good', 'check'], candidate: ['Кандидат', 'info', 'flask'], archived: ['Архив', 'outline', 'history'] };
+  const VERSION_STATUS = { active: ['Активная', 'good', 'check'], candidate: ['Кандидат', 'info', 'flask'], archived: ['Архив', 'outline', 'history'], rejected: ['Не включена', 'outline', 'x'] };
   const versionChip = v => { const [t, k, i] = VERSION_STATUS[v.status] || [v.status, 'outline', 'info']; return chip(t, k, i); };
   const verShort = v => v.name.split(' · ').slice(1).join(' · ') || v.name;
   const facts = pairs => h('dl', { class: 'learning-facts' }, pairs.filter(Boolean).map(([k, v]) => [h('dt', null, k), h('dd', null, v)]));
-  const hint = (text) => h('p', { class: 'learning-hint' }, icon('info'), h('span', null, text));
+  const hint = text => h('p', { class: 'learning-hint' }, icon('info'), h('span', null, text));
   const signedPctEl = v => h('span', { class: v > 0 ? 'good-text' : v < 0 ? 'bad-text' : null }, fmt.signedPct(v));
-
-  // Информационные окна: фокус на самом окне, а не на первой кнопке внизу (на телефоне иначе окно прокручивается вниз)
+  const condChips = l => h('div', { class: 'learning-cond' }, (l.cond || []).map(([k, v]) => chip(k + ': ' + v, 'outline')));
   function settleModal() {
     setTimeout(() => {
       const all = document.querySelectorAll('.modal');
       const m = all[all.length - 1];
       if (!m) return;
-      m.setAttribute('tabindex', '-1');
-      m.classList.add('learning-modal');
-      m.focus({ preventScroll: true });
-      m.scrollTop = 0;
+      m.setAttribute('tabindex', '-1'); m.classList.add('learning-modal'); m.focus({ preventScroll: true }); m.scrollTop = 0;
     }, 60);
   }
 
-  const basis = (l, info) => (l.status === 'hypothesis'
-    ? l.evidence + ' из ' + NEED + ' своих'
-    : cases(l.evidence) + (info.hist ? ' + ' + fmt.int(info.hist) + ' из истории' + (info.histHow ? ', ' + info.histHow : '') : ''));
-  const lessons = () => D.lessons;
-  const countLessons = s => lessons().filter(l => l.status === s).length;
-  const inAnalysis = () => lessons().filter(l => l.status === 'confirmed' && l.inPrompt).length;
-  const versions = () => D.strategyVersions;
-  const vById = id => versions().find(v => v.id === id);
+  // Данные с учетом демо-переключателя «пустое состояние» (новая установка: ставок и уроков еще нет)
+  const lessons = () => (st.empty ? [] : L.lessons);
+  const versions = () => (st.empty ? L.versions.filter(v => v.id === 'v3').map(v => Object.assign({}, v, { eval: null })) : L.versions);
+  const byStatus = s => lessons().filter(l => l.status === s);
+  const inPrompt = () => lessons().filter(l => l.status === 'confirmed' && l.inPrompt);
   const activeV = () => versions().find(v => v.status === 'active');
   const candV = () => versions().find(v => v.status === 'candidate');
-  const runningExps = () => (st.popt === 'running' ? 1 : 0);
+  const appSettled = () => (st.empty ? [] : D.bets.filter(b => b.source === 'app' && b.status !== 'open'));
+  const activeMl = () => L.mlModels.find(m => m.status === 'active');
+  const shrunk = l => Math.round(l.raw * (l.own + (l.hist || 0)) / (l.own + (l.hist || 0) + SHRINK_K));
 
   // ---------- верх страницы ----------
   function headBlock() {
+    const s = appSettled(), auto = s.filter(b => b.settledBy === 'auto').length;
+    const legs = s.reduce((a, b) => a + b.legs.length, 0);
     return h('div', { class: 'page-head learning-head' },
       h('div', { style: 'min-width:0' },
         h('h2', null, 'Как модель учится на ставках'),
-        h('p', { class: 'lead' }, 'Что система вынесла из ' + S.settled + ' рассчитанных ставок (' + S.legs + ' ' + fmt.plural(S.legs, 'событие', 'события', 'событий') + '): уроки, версия стратегии, своя ML-модель и лаборатория дообучения.')),
+        h('p', { class: 'lead' }, s.length
+          ? 'Рассчитано ' + s.length + ' ' + fmt.plural(s.length, 'ставка', 'ставки', 'ставок') + ' приложения (' + legs + ' ' + fmt.plural(legs, 'событие', 'события', 'событий') + '): ' + auto + ' — сами по архиву tennis-data, остальные — вами. По каждой есть разбор ИИ, из разборов — гипотезы, из проверенных гипотез — уроки.'
+          : 'Рассчитанных ставок пока нет. Первые разборы появятся, когда ставки рассчитаются — по архиву tennis-data или вашим вводом.')),
       button('Предложить урок', { kind: 'secondary', icon: 'plus', onClick: proposeLesson }));
+  }
+
+  // Только в макете: показать экран новой установки, где ставок, уроков и отчетов еще нет (правка 8)
+  function demoBar() {
+    return h('div', { class: 'learning-demo', role: 'note' }, h('span', { class: 'demo-pill' }, 'Только в макете'), h('span', { style: 'min-width:0;flex:1 1 200px' }, 'Как экран выглядит в первые недели, пока данных нет:'),
+      UI.segmented({ label: 'Состояние экрана', items: [{ id: 'data', label: 'С данными' }, { id: 'empty', label: 'Пусто' }], active: st.empty ? 'empty' : 'data', onChange: id => { st.empty = id === 'empty'; redraw(); } }));
   }
 
   function tile(o) {
@@ -407,42 +278,41 @@
   }
   function drawTiles() {
     if (!tilesSlot) return;
-    const act = activeV(), cand = candV();
-    const hyp = countLessons('hypothesis'), rej = countLessons('rejected');
+    const act = activeV(), cand = candV(), m = activeMl();
+    const hyp = byStatus('hypothesis').length, ready = byStatus('ready').length;
+    const rep = st.empty ? null : L.weekReport(L.reportWeeks[0]);
     UI.clear(tilesSlot);
     UI.append(tilesSlot, [
-      tile({ tab: 'lessons', icon: 'book', label: 'Память уроков', short: 'Уроки', value: String(inAnalysis()), unit: 'в анализе', hint: 'из ' + lessons().length + ' · ' + hyp + ' ' + fmt.plural(hyp, 'гипотеза', 'гипотезы', 'гипотез') + ', ' + rej + ' ' + fmt.plural(rej, 'отклонен', 'отклонены', 'отклонены') }),
-      tile({ tab: 'versions', icon: 'layers', label: 'Версия стратегии', short: 'Стратегия', value: act ? act.id : '—', unit: 'активна', hint: cand ? 'кандидат ' + cand.id + ' ждет решения' : 'кандидатов нет' }),
-      tile({ tab: 'ml', icon: 'chart', label: 'Своя ML-модель', short: 'ML-модель', value: fmt.dec(st.ml.brier, 3), unit: 'Brier', hint: st.ml.training ? 'идет переобучение…' : 'обучена ' + fmt.date(st.ml.at) + ', ' + hhmm(st.ml.at) }),
-      tile({ tab: 'lab', icon: 'flask', label: 'Лаборатория LLM', short: 'Лаборатория', value: fmt.int(SNAPSHOTS), unit: 'снимков', hint: runningExps() ? '1 эксперимент идет · 2 в плане' : 'все на паузе · 2 в плане' }),
+      tile({ tab: 'lessons', icon: 'book', label: 'Уроки в анализе', short: 'Уроки', value: String(inPrompt().length), unit: 'из ' + MAX_ON,
+        hint: lessons().length ? (ready ? ready + ' ждет решения · ' : '') + hyp + ' ' + fmt.plural(hyp, 'гипотеза', 'гипотезы', 'гипотез') : 'гипотез пока нет' }),
+      tile({ tab: 'versions', icon: 'layers', label: 'Инструкции анализа', short: 'Инструкции', value: act ? act.id : '—', unit: 'активна', hint: cand ? 'кандидат ' + cand.id + ' ждет решения' : 'кандидатов нет' }),
+      tile({ tab: 'ml', icon: 'chart', label: 'Базовая модель', short: 'Модель', value: fmt.dec(m.brier, 3), unit: 'Brier', hint: (m.auto ? 'перекалибрована сама ' : 'включена ') + fmt.date(m.at) }),
+      tile({ tab: 'reports', icon: 'calendar', label: 'Отчет недели', short: 'Отчеты', value: rep ? fmt.date(rep.from) + '–' + fmt.date(rep.to).split(' ')[0] : '—', unit: rep ? fmt.date(rep.to).split(' ')[1] : '',
+        hint: 'следующий — ' + wday(L.nextReport) + ' ' + fmt.date(L.nextReport) + ', 07:00' }),
     ]);
   }
 
   const STEPS = [
-    { ic: 'ticket', t: 'Ставка', d: 'Экспресс с вероятностями Claude и своей ML-модели', who: 'вы + ИИ', whoIc: 'user' },
-    { ic: 'trophy', t: 'Результат и закрывающий кэф', d: 'Счет по сетам и закрывающий кэф, который вы внесете: эталона (' + D.marketRefRule + ') или своего букмекера — из него считается CLV', who: 'вы', whoIc: 'user' },
-    { ic: 'search', t: 'Разбор ошибки', d: 'Claude сверяет прогноз с исходом: невезение или систематическая ошибка', who: 'Sonnet 5.5 · ≈ $0,02', whoIc: 'spark' },
-    { ic: 'book', t: 'Гипотеза-урок', d: 'Короткое правило и где оно применимо', who: 'Claude', whoIc: 'spark' },
-    { ic: 'flask', t: 'Проверка на истории', d: 'С ' + NEED + ' своих случаев: прогноз с уроком и без, 95% ДИ на истории и на поздних матчах', who: 'код + Batch API', whoIc: 'bolt' },
-    { ic: 'brain', t: 'В инструкции или в признаки', d: 'Строкой в инструкции анализа; урок про вероятность — еще и признаком своей ML-модели', who: 'вы подтверждаете', whoIc: 'user' },
+    { ic: 'ticket', t: 'Ставка', d: 'Экспресс с вероятностями базовой модели и Claude, досье замораживается', who: 'вы + ИИ', whoIc: 'user' },
+    { ic: 'database', t: 'Результат из архива', d: 'Файл tennis-data раз в неделю: исход, счет и закрытие П1/П2. Не ждете — вносите сами', who: 'код · до 7 дней', whoIc: 'bolt' },
+    { ic: 'search', t: 'Разбор ставки', d: 'Что произошло: невезение, ошибка модели или не хватило данных. Один разбор на матч', who: 'Sonnet 5.5 · Batch · ≈ $0,01', whoIc: 'spark' },
+    { ic: 'book', t: 'Гипотеза', d: 'Короткое правило и условие из словаря признаков — его проверяет код', who: 'Claude + код', whoIc: 'spark' },
+    { ic: 'flask', t: 'Проверка на истории', d: 'С ' + NEED + ' своих случаев: с уроком и без на архиве, 95% ДИ, отложенная часть, усадка', who: 'код, бесплатно', whoIc: 'bolt' },
+    { ic: 'brain', t: 'В инструкции анализа', d: 'Быстрая проверка на 40 матчах (≈ $0,60) и решение. Раз в месяц — перепроверка', who: 'администратор', whoIc: 'user' },
   ];
   function cycleCard() {
     const list = h('ol', { class: 'learning-cycle', 'aria-label': 'Цикл обучения, 6 шагов' }, STEPS.map((s, i) => h('li', { class: 'learning-step' },
       h('div', { class: 'learning-step-mark' }, h('span', { class: 'learning-step-num', 'aria-hidden': 'true' }, String(i + 1)), icon(s.ic)),
-      h('div', { class: 'learning-step-body' },
-        h('h4', null, h('span', { class: 'sr-only' }, 'Шаг ' + (i + 1) + '. '), s.t),
-        h('p', null, s.d),
-        chip(s.who, 'outline', s.whoIc)),
+      h('div', { class: 'learning-step-body' }, h('h4', null, h('span', { class: 'sr-only' }, 'Шаг ' + (i + 1) + '. '), s.t), h('p', null, s.d), chip(s.who, 'outline', s.whoIc)),
       i < STEPS.length - 1 && h('span', { class: 'learning-step-arrow', 'aria-hidden': 'true' }, icon('arrowRight')))));
-    const loop = h('div', { class: 'learning-loop' }, h('span', { class: 'learning-loop-label' }, icon('refresh'), h('span', null, h('b', null, 'Следующая ставка'), ' — цикл повторяется уже с учетом урока')));
+    const loop = h('div', { class: 'learning-loop' }, h('span', { class: 'learning-loop-label' }, icon('refresh'), h('span', null, h('b', null, 'Следующая ставка'), ' — анализ уже с учетом урока')));
     return card({
-      class: 'learning-card',
-      title: 'Как модель учится',
+      class: 'learning-card', title: 'Как модель учится',
       subtitle: 'Один цикл на каждую рассчитанную ставку — и выигранную, и проигранную',
       body: [
         list, loop,
-        UI.callout('info', 'info', h('b', null, 'Веса Claude не меняются. '), 'Учатся три вещи: память уроков, версия стратегии (инструкции и правила отбора) и наша собственная ML-модель. Дообучение открытой LLM — отдельная лаборатория, на ставки она не влияет.'),
-        h('p', { class: 'learning-doc' }, icon('book'), h('span', null, 'Подробнее в документе ', h('span', { class: 'mono' }, 'LLM_LEARNING.md'), ' — там же учебный трек по обучению LLM на данных проекта.')),
+        UI.callout('info', 'info', h('b', null, 'Веса Claude не меняются. '), 'Учатся четыре вещи: уроки и версии инструкций анализа — общие для всех, их ведет администратор; правила суммы ставки — у каждого участника свои; базовая модель — перекалибровка по понедельникам. Поправку к вероятности числом в коде включим после ' + L.C_MIN + ' событий с исходами.'),
+        h('p', { class: 'learning-doc' }, icon('clock'), h('span', null, 'Результаты приходят файлом tennis-data раз в неделю: от матча до разбора может пройти до 7 дней. Внесете результат сами — разбор будет в течение часа.')),
       ],
     });
   }
@@ -450,27 +320,17 @@
   // ---------- вкладки ----------
   function makeTabs() {
     const m = UI.isMobile();
-    // На телефоне четыре вкладки стоят сеткой без прокрутки — короткие подписи, без счетчика
-    const el = UI.tabs({ items: TABS.map(t => ({ id: t.id, label: m ? t.short : t.label + (t.id === 'lessons' ? ' · ' + lessons().length : '') })), active: st.tab, onChange: id => { setTab(id); revealTab(el); } });
+    const el = UI.tabs({ items: TABS.map(t => ({ id: t.id, label: m ? t.short : t.label + (t.id === 'lessons' && lessons().length ? ' · ' + lessons().length : '') })), active: st.tab, onChange: id => setTab(id) });
     el.classList.add('learning-tabs');
     el.setAttribute('aria-label', 'Разделы обучения');
-    revealTab(el);
     return el;
-  }
-  // На телефоне вкладки прокручиваются: держим выбранную в поле зрения
-  function revealTab(el) {
-    requestAnimationFrame(() => {
-      const b = el.querySelector('[aria-selected="true"]');
-      if (b && el.scrollWidth > el.clientWidth) el.scrollLeft = Math.max(0, b.offsetLeft - (el.clientWidth - b.offsetWidth) / 2);
-    });
   }
   function setTab(id, o = {}) {
     st.tab = id;
     try { sessionStorage.setItem('capper.learning.tab', id); } catch (e) { /* ок */ }
     try { history.replaceState(null, '', '#learning-' + id); } catch (e) { /* ок */ }
     if (o.rebuildTabs && tabsSlot) UI.clear(tabsSlot).appendChild(makeTabs());
-    drawPanel();
-    drawTiles();
+    drawPanel(); drawTiles();
     if (o.scroll && tabsSlot) tabsSlot.parentElement.scrollIntoView({ block: 'start' });
   }
   function drawPanel() {
@@ -479,142 +339,224 @@
     UI.clear(panel);
     const t = TABS.find(x => x.id === st.tab) || TABS[0];
     panel.setAttribute('aria-label', t.label);
-    const build = { lessons: lessonsPanel, versions: versionsPanel, ml: mlPanel, lab: labPanel }[t.id];
-    UI.append(panel, [build()]);
+    UI.append(panel, [{ lessons: lessonsPanel, versions: versionsPanel, ml: mlPanel, reports: reportsPanel }[t.id]()]);
   }
+  function redraw() { if (root) { const y = window.scrollY; build(); window.scrollTo(0, y); } }
 
   // ---------- 1. Уроки ----------
+  const FILTERS = [
+    { id: 'all', label: 'Все', test: () => true },
+    { id: 'confirmed', label: 'Подтверждены', test: l => l.status === 'confirmed' },
+    { id: 'ready', label: 'Ждут решения', test: l => l.status === 'ready' },
+    { id: 'hypothesis', label: 'Гипотезы', test: l => l.status === 'hypothesis' },
+    { id: 'off', label: 'Отклонены', test: l => l.status === 'rejected' || l.status === 'retired' },
+  ];
   function lessonsPanel() {
-    const order = { confirmed: 0, hypothesis: 1, rejected: 2 };
+    const order = { ready: 0, confirmed: 1, hypothesis: 2, rejected: 3, retired: 4 };
     const list = h('div', { class: 'learning-lessons', 'aria-live': 'polite' });
-    const cnt = n => ' · ' + n;
-    const filters = [
-      { id: 'all', label: 'Все' + cnt(lessons().length) },
-      { id: 'confirmed', label: 'Подтверждены' + cnt(countLessons('confirmed')) },
-      { id: 'hypothesis', label: 'Гипотезы' + cnt(countLessons('hypothesis')) },
-      { id: 'rejected', label: 'Отклонены' + cnt(countLessons('rejected')) },
-    ];
     function drawList() {
       UI.clear(list);
-      const rows = lessons().filter(l => st.filter === 'all' || l.status === st.filter)
-        .slice().sort((a, b) => (order[a.status] - order[b.status]) || b.created.localeCompare(a.created));
-      if (!rows.length) { list.appendChild(UI.empty('В этой группе уроков пока нет')); return; }
+      const f = FILTERS.find(x => x.id === st.filter) || FILTERS[0];
+      const rows = lessons().filter(f.test).slice().sort((a, b) => (order[a.status] - order[b.status]) || b.created.localeCompare(a.created));
+      if (!rows.length) {
+        list.appendChild(UI.empty(lessons().length ? 'В этой группе уроков нет' : 'Уроков пока нет. Гипотезы появятся из разборов рассчитанных ставок, а проверка урока начинается с ' + NEED + ' своих случаев — при 1–2 ставках в день это несколько недель.'));
+        return;
+      }
       rows.forEach(l => list.appendChild(lessonItem(l)));
     }
     drawList();
-    const filter = UI.segmented({ label: 'Какие уроки показать', items: filters, active: st.filter, onChange: id => { st.filter = id; drawList(); } });
+    const filter = UI.segmented({ label: 'Какие уроки показать', items: FILTERS.map(f => ({ id: f.id, label: f.label + ' · ' + lessons().filter(f.test).length })), active: st.filter, onChange: id => { st.filter = id; drawList(); } });
     filter.classList.add('learning-filter');
     return card({
-      class: 'learning-card',
-      title: 'Уроки',
-      subtitle: 'Выводы из разборов ставок. В анализ попадают только подтвержденные — и только те, что вы не выключили.',
-      actions: [button('Предложить урок вручную', { kind: 'secondary', size: 'sm', icon: 'plus', onClick: proposeLesson })],
+      class: 'learning-card', title: 'Уроки',
+      subtitle: 'Общие для всех участников, ведет администратор. В анализ попадают только подтвержденные — не больше ' + MAX_ON + ', сейчас ' + inPrompt().length + '.',
+      actions: [isAdmin() ? null : chip('Ведет администратор', 'outline', 'admin'), button('Предложить урок', { kind: 'secondary', size: 'sm', icon: 'plus', onClick: proposeLesson })].filter(Boolean),
       body: [
-        filter,
-        list,
-        hint('Эффект — насколько хуже прогноз без урока, с 95% ДИ. Урок, который меняет вероятность, проверяется с ' + NEED + ' своих случаев, подтверждается на истории и применяется с усадкой: чем меньше случаев, тем меньше поправка. Урок про сбор данных принимается, если прогноз не хуже хотя бы на ' + NEED_PROC + ' случаях.'),
+        filter, list,
+        hint('Эффект — насколько хуже прогноз без урока, с 95% ДИ, на архиве матчей (прогнозы базовой модели вне выборки обучения). Урок про вероятность проверяется с ' + NEED + ' своих случаев и применяется с усадкой: чем меньше случаев, тем меньше поправка. Урок про сбор данных принимается, если прогноз не хуже хотя бы на ' + NEED_PROC + ' случаях. Раз в месяц каждый урок перепроверяется на новых матчах.'),
       ],
     });
   }
 
   function lessonItem(l) {
-    const info = LESSON_INFO[l.id] || {};
     const off = l.status === 'confirmed' && !l.inPrompt;
-    const evidence = basis(l, info);
+    const numeric = l.kind === 'numeric';
     const main = h('div', { class: 'learning-lesson-main' },
       h('div', { class: 'learning-lesson-head' },
         h('span', { class: 'chip outline mono' }, l.id), lessonChip(l),
-        l.manual && chip('Добавлен вами', 'outline', 'user'),
+        l.manual && chip('Предложен вручную', 'outline', 'user'),
+        h('span', { class: 'learning-kind' }, numeric ? 'про вероятность' : 'про сбор данных'),
         h('span', { class: 'learning-date' }, 'с ' + fmt.date(l.created))),
       h('p', { class: 'learning-lesson-text' }, l.text),
+      condChips(l),
       h('dl', { class: 'learning-meta' },
-        l.status !== 'hypothesis' && h('div', null, h('dt', null, 'Основание'), h('dd', { class: 'num' }, evidence)),
-        l.status === 'confirmed' && h('div', null, h('dt', null, 'Эффект'), h('dd', null, l.effect + (info.ci ? ' (' + info.ci + ')' : ''))),
-        l.status === 'confirmed' && info.raw && h('div', null, h('dt', null, 'В анализе'), h('dd', null, MINUS + shrunk(l, info) + ' п.п. с усадкой')),
-        l.status === 'hypothesis' && h('div', null, h('dt', null, 'Ждет'), h('dd', null, 'еще ' + cases(Math.max(0, NEED - l.evidence)) + (info.hist === 0 ? ' из своих ставок' : ''))),
-        h('div', null, h('dt', null, 'Где'), h('dd', null, l.scope))));
+        l.status !== 'hypothesis' && h('div', null, h('dt', null, 'Основание'), h('dd', { class: 'num' }, cases(l.own) + (l.hist ? ' + ' + fmt.int(l.hist) + ' из архива' : ''))),
+        l.ci && h('div', null, h('dt', null, 'Эффект'), h('dd', null, l.metric + ' ' + fmt.dec(l.with, 3) + ' с уроком, ' + fmt.dec(l.without, 3) + ' без · ДИ ' + ciDec(l.ci))),
+        l.saving && h('div', null, h('dt', null, 'Выигрыш'), h('dd', null, l.saving)),
+        numeric && l.raw && (l.status === 'confirmed' || l.status === 'ready') && h('div', null, h('dt', null, 'Поправка'), h('dd', null, MINUS + shrunk(l) + ' п.п. с усадкой (сырая ' + l.raw + ')'))));
 
     const side = h('div', { class: 'learning-lesson-side' });
     if (l.status === 'confirmed') {
-      const tg = UI.toggle({
-        id: 'learning-use-' + l.id, label: 'Использовать в анализе', checked: l.inPrompt,
-        hint: l.inPrompt ? 'Урок в инструкциях анализа' : 'Выключен — анализ его не видит',
-        onChange: v => {
-          l.inPrompt = v;
-          const hEl = tg.querySelector('.field-hint');
-          if (hEl) hEl.textContent = v ? 'Урок в инструкциях анализа' : 'Выключен — анализ его не видит';
-          item.classList.toggle('is-off', !v);
-          drawTiles();
-          UI.toast(v ? 'Урок ' + l.id + ' снова в инструкциях — со следующего анализа' : 'Урок ' + l.id + ' выключен — следующий анализ пройдет без него', v ? 'check' : 'eyeOff');
-        },
-      });
-      side.appendChild(tg);
+      if (isAdmin()) {
+        const tg = UI.toggle({
+          id: 'learning-use-' + l.id, label: 'Использовать в анализе', checked: l.inPrompt,
+          hint: l.inPrompt ? 'В инструкциях с ' + fmt.date(l.decided) : 'Выключен — анализ его не видит',
+          onChange: v => {
+            if (v) { tg.querySelector('input').checked = false; enableModal(l); return; }
+            l.inPrompt = false; item.replaceWith(lessonItem(l)); drawTiles();
+            UI.toast('Урок ' + l.id + ' выключен — следующий анализ пройдет без него. Включить снова — с быстрой проверкой', 'eyeOff');
+          },
+        });
+        side.appendChild(tg);
+      } else side.appendChild(l.inPrompt ? chip('В инструкциях анализа', 'good', 'book') : chip('Выключен администратором', 'outline', 'eyeOff'));
+    } else if (l.status === 'ready') {
+      side.appendChild(h('p', { class: 'small soft', style: 'margin:0' }, 'Подтвержден на истории ' + fmt.date(l.readyAt) + '. В анализ — после быстрой проверки на 40 матчах и решения администратора.'));
+      side.appendChild(isAdmin() ? button('Использовать в анализе', { kind: 'primary', size: 'sm', icon: 'check', onClick: () => enableModal(l) }) : chip('Ждет решения администратора', 'outline', 'admin'));
     } else if (l.status === 'hypothesis') {
       side.appendChild(h('div', { class: 'learning-progress' },
-        h('div', { class: 'row-between' }, h('span', { class: 'soft' }, 'Набрано случаев'), h('b', { class: 'num' }, l.evidence + ' из ' + NEED)),
-        UI.meter(l.evidence, NEED),
-        h('span', { class: 'xsmall muted' }, 'Пока не влияет на прогнозы')));
+        h('div', { class: 'row-between' }, h('span', { class: 'soft' }, 'Своих случаев'), h('b', { class: 'num' }, l.own + ' из ' + NEED)),
+        UI.meter(l.own, NEED), h('span', { class: 'xsmall muted' }, 'Пока не влияет на прогнозы')));
       if (st.notify[l.id]) side.appendChild(chip('Сообщим при ' + NEED + ' случаях', 'info', 'bell'));
-      else side.appendChild(button('Сообщить, когда наберется', { kind: 'secondary', size: 'sm', icon: 'bell', onClick: () => { st.notify[l.id] = true; item.replaceWith(lessonItem(l)); UI.toast('Сообщим на сайте и push-уведомлением, когда у ' + l.id + ' будет ' + NEED + ' случаев и пройдет проверка', 'bell'); } }));
+      else side.appendChild(button('Сообщить, когда наберется', { kind: 'secondary', size: 'sm', icon: 'bell', onClick: () => { st.notify[l.id] = true; item.replaceWith(lessonItem(l)); UI.toast('Сообщим в центре уведомлений, когда у ' + l.id + ' будет ' + NEED + ' случаев и пройдет проверка на истории', 'bell'); } }));
+    } else if (l.status === 'rejected') {
+      side.appendChild(h('p', { class: 'small soft', style: 'margin:0' }, 'С уроком прогноз хуже: ' + l.metric.toLowerCase() + ' ' + fmt.dec(l.with, 3) + ' против ' + fmt.dec(l.without, 3) + '. В анализ не попадает, похожие формулировки Claude больше не предлагает.'));
     } else {
-      const n = lessonN(l, info);
-      const chk = info.check && info.check.length > 1 ? ': ' + info.check[0][0].toLowerCase() + ' ' + info.check[0][1] + ', без урока ' + info.check[1][1] : '';
-      side.appendChild(h('p', { class: 'small soft' }, 'Не используется — ' + l.effect + ' на ' + fmt.int(n) + ' ' + fmt.plural(n, 'случае', 'случаях', 'случаях') + chk + (info.ci ? ' (' + info.ci + ')' : '') + '.'));
+      side.appendChild(h('p', { class: 'small soft', style: 'margin:0' }, 'Списан ' + fmt.date(l.retired) + ' при ежемесячной перепроверке: на новых матчах эффект пропал (ДИ ' + ciDec(l.ci) + ' задевает ноль).'));
     }
     side.appendChild(button('Подробнее', { kind: 'ghost', size: 'sm', iconRight: 'chevronRight', onClick: () => lessonModal(l) }));
-    const item = h('article', { class: ['learning-lesson', 'is-' + l.status, off && 'is-off'], 'aria-label': 'Урок ' + l.id }, main, side);
+    const item = h('article', { class: ['learning-lesson', 'is-' + (l.status === 'ready' ? 'confirmed' : l.status === 'retired' ? 'rejected' : l.status), off && 'is-off'], 'aria-label': 'Урок ' + l.id }, main, side);
     return item;
   }
 
   function lessonModal(l) {
-    const info = LESSON_INFO[l.id] || { kind: 'numeric', source: 'Добавлен вами ' + fmt.date(l.created), check: [['Проверка на истории', 'ждет ' + NEED + ' своих случаев']], line: l.text };
-    const kind = info.kind === 'process' ? 'Про сбор данных — вероятность не меняет' : 'Меняет вероятность — нужна проверка на истории с 95% ДИ';
+    const own = (l.ownBets || []).filter(id => D.bets.some(b => b.id === id));
+    const numeric = l.kind === 'numeric';
     UI.modal({
       title: 'Урок ' + l.id,
       body: h('div', { class: 'stack', style: 'gap:14px' },
-        h('div', { class: 'row' }, lessonChip(l), l.status === 'confirmed' && (l.inPrompt ? chip('В инструкциях анализа', 'accent', 'book') : chip('Выключен вами', 'outline', 'eyeOff'))),
+        h('div', { class: 'row' }, lessonChip(l), l.status === 'confirmed' && (l.inPrompt ? chip('В инструкциях анализа', 'accent', 'book') : chip('Выключен', 'outline', 'eyeOff'))),
         h('blockquote', { class: 'learning-quote' }, l.text),
-        facts([['Откуда', info.source], ['Где применяется', l.scope], ['Тип урока', kind], ['Основание', basis(l, info)]].concat(info.check || [], [
-          ['Эффект', l.effect + (info.ci ? ' (' + info.ci + ')' : '')],
-          info.bias && ['Смещение', info.bias],
-          info.raw && l.status === 'confirmed' && ['В анализе', MINUS + shrunk(l, info) + ' п.п. — с усадкой к нулю: ' + info.raw + ' × ' + fmt.int(lessonN(l, info)) + ' / (' + fmt.int(lessonN(l, info)) + ' + ' + SHRINK_K + ')'],
-        ])),
-        info.note && UI.callout(l.status === 'rejected' ? 'bad' : 'info', l.status === 'rejected' ? 'x' : 'info', info.note),
-        info.line && h('div', { class: 'stack', style: 'gap:6px' },
-          h('div', { class: 'eyebrow' }, l.status === 'confirmed' ? 'Строка в инструкции анализа' : 'Как звучала бы строка в инструкции'),
-          h('p', { class: 'learning-code' }, info.line))),
+        facts([
+          ['Откуда', 'Разборы рассчитанных ставок: Claude предложил гипотезу и условие из словаря признаков'],
+          own.length && ['Ваши ставки в основании', own.map(id => '№' + id).join(', ') + ' — видны только вам'],
+          ['Тип урока', numeric ? 'Про вероятность — нужна проверка на архиве с 95% ДИ' : 'Про сбор данных — вероятность не меняет'],
+          ['Основание', cases(l.own) + ' своих' + (l.hist ? ' + ' + fmt.int(l.hist) + ' из архива' : '') + (l.status === 'hypothesis' ? ' · нужно ' + NEED : '')],
+          l.ci && ['Проверка на архиве', l.metric + ' с уроком ' + fmt.dec(l.with, 3) + ', без урока ' + fmt.dec(l.without, 3) + ' · 95% ДИ разницы ' + ciDec(l.ci)],
+          l.holdout && ['Отложенная часть', l.holdout],
+          l.saving && ['Выигрыш', l.saving],
+          numeric && l.raw && ['Поправка в анализе', MINUS + shrunk(l) + ' п.п. — с усадкой к нулю: ' + l.raw + ' × ' + fmt.int(l.own + (l.hist || 0)) + ' / (' + fmt.int(l.own + (l.hist || 0)) + ' + ' + SHRINK_K + ')'],
+          l.rechecked && ['Перепроверка', 'раз в месяц, последняя ' + fmt.date(l.rechecked) + ' — держится'],
+        ]),
+        h('div', { class: 'stack', style: 'gap:6px' },
+          h('div', { class: 'eyebrow' }, 'Условие из словаря — его проверяет код'),
+          h('pre', { class: 'learning-code' }, (l.cond || []).map(([k, v]) => k + ': ' + v).join('\n'))),
+        UI.callout('', 'shield', 'Claude не пишет SQL и не трогает базу: условие собирается из словаря признаков, запрос строит код и выполняет с правами только на чтение. Признаки — только до даты матча.')),
       actions: close => [button('Закрыть', { kind: 'secondary', onClick: close })],
     });
     settleModal();
   }
 
+  // В4: урок попадает в инструкции только по кнопке администратора и после быстрой проверки на 40 матчах набора
+  function enableModal(l) {
+    if (inPrompt().length >= MAX_ON) { UI.toast('В анализе уже ' + MAX_ON + ' уроков — сначала выключите один', 'alert'); return; }
+    const before = E().spent;
+    UI.modal({
+      title: 'Урок ' + l.id + ' в анализ',
+      body: close => {
+        const box = h('div', { class: 'stack', style: 'gap:14px' });
+        const stepsEl = h('ol', { class: 'learning-steps' });
+        const foot = h('div', { class: 'row' });
+        const step = (state, text) => h('li', { class: state }, icon(state === 'done' ? 'check' : state === 'run' ? 'refresh' : 'clock'), h('span', null, text));
+        function intro() {
+          UI.clear(stepsEl); UI.clear(foot);
+          UI.append(stepsEl, [
+            step('wait', 'Быстрая проверка: 40 матчей набора ' + SET.code + ' с уроком и без, Opus 5.5 через Batch'),
+            step('wait', 'Код сравнивает лог-лосс и ошибки формата: урок не должен ухудшать прогноз'),
+            step('wait', 'Если не хуже — урок входит в инструкции анализа со следующего анализа, для всех участников'),
+          ]);
+          UI.append(foot, [
+            button('Отмена', { kind: 'secondary', onClick: close }),
+            button('Запустить проверку · ≈ ' + fmt.usd(E().quickCheck), { kind: 'primary', icon: 'play', onClick: run }),
+          ]);
+        }
+        function run() {
+          UI.clear(stepsEl); UI.clear(foot);
+          UI.append(stepsEl, [step('run', 'Пакет отправлен: 40 запросов, ждем ответ Batch…'), step('wait', 'Сравнение с уроком и без'), step('wait', 'Решение')]);
+          setTimeout(() => {
+            if (!box.isConnected) return;
+            E().runs.push({ at: TODAY + 'T10:12', kind: 'quick', events: 40, what: 'Быстрая проверка урока ' + l.id + ': 40 матчей набора ' + SET.code, cost: 0.61, worst: 4.4 });
+            E().spent = Math.round((before + 0.61) * 100) / 100;
+            UI.clear(stepsEl); UI.clear(foot);
+            UI.append(stepsEl, [
+              step('done', 'Проверено на 40 матчах · потрачено $0,61 из бюджета проверок'),
+              step('done', 'Лог-лосс с уроком ' + signedDec(-0.004) + ' к без урока (95% ДИ ' + ciDec([-0.012, 0.005]) + '), ошибок формата 0 — не хуже'),
+              step('run', 'Ждет вашего решения'),
+            ]);
+            UI.append(foot, [
+              button('Не включать', { kind: 'secondary', onClick: () => { close(); UI.toast('Урок ' + l.id + ' остается в «Ждут решения»', 'clock'); } }),
+              button('Включить в инструкции', { kind: 'primary', icon: 'check', onClick: () => {
+                l.status = 'confirmed'; l.inPrompt = true; l.decided = TODAY;
+                close(); drawPanel(); drawTiles();
+                UI.toast('Урок ' + l.id + ' в инструкциях со следующего анализа · уроков в анализе ' + inPrompt().length + ' из ' + MAX_ON, 'check');
+              } }),
+            ]);
+          }, 1400);
+        }
+        intro();
+        UI.append(box, [
+          h('blockquote', { class: 'learning-quote' }, l.text),
+          UI.kv([['Бюджет проверок', fmt.usd(E().spent) + ' из ' + fmt.usd(E().monthly, 0) + ' · остаток ' + fmt.usd(evalLeft())], ['Худший случай', '≈ $4,40 — 40 × $0,11'], ['Уроков в анализе', inPrompt().length + ' из ' + MAX_ON]]),
+          stepsEl,
+          UI.callout('info', 'info', 'Урок общий: войдет в анализы всех участников, поэтому решение — за администратором. Это меняет версию инструкций (уроки — часть промпта), поэтому повтор оценки Claude для старых досье не используется.'),
+          foot]);
+        return box;
+      },
+    });
+    settleModal();
+  }
+
+  // Ручная гипотеза: условие — только из словаря признаков, проверка — та же, что у гипотез из разборов
   function proposeLesson() {
+    const COND = [
+      { value: '', label: 'Без дополнительного условия' },
+      { value: 'elo', label: 'Разница Эло на покрытии меньше…' },
+      { value: 'sets48', label: 'Сетов за 48 часов не меньше…' },
+      { value: 'rest', label: 'Дней с последнего матча не меньше…' },
+      { value: 'dog', label: 'Кэф аутсайдера на победу не меньше…' },
+    ];
     UI.modal({
       title: 'Предложить урок',
       body: close => {
         const err = h('div', { class: 'field-error', role: 'alert', hidden: true }, 'Опишите наблюдение хотя бы одной фразой — иначе его нечем проверить');
-        const textField = UI.field({ id: 'learning-lesson-text', label: 'Что вы заметили', rows: 3, placeholder: 'Например: на быстром харде в Азии фора +1.5 у аутсайдера-левши проходит чаще, чем дает рынок', hint: 'Одно наблюдение — одно правило: рынок, покрытие, тип игроков.' });
+        const textField = UI.field({ id: 'learning-lesson-text', label: 'Что вы заметили', rows: 3, placeholder: 'Например: на грунте аутсайдер с кэфом 2.60+ берет сет чаще, чем дает модель', hint: 'Одно наблюдение — одно правило.' });
         textField.appendChild(err);
         const ta = textField.querySelector('textarea');
         ta.addEventListener('input', () => { if (ta.value.trim().length >= 10) { err.hidden = true; ta.classList.remove('learning-invalid'); ta.removeAttribute('aria-invalid'); } });
+        const valF = UI.field({ id: 'learning-lesson-val', label: 'Значение', inputmode: 'decimal', placeholder: '120', attrs: { autocomplete: 'off', disabled: true } });
+        const condF = UI.field({ id: 'learning-lesson-cond', label: 'Признак из словаря', options: COND });
+        condF.querySelector('select').addEventListener('change', e => { valF.querySelector('input').disabled = !e.target.value; });
         const form = h('form', { id: 'learning-lesson-form', class: 'stack', style: 'gap:14px', novalidate: true },
           textField,
           h('div', { class: 'learning-form-2' },
             UI.field({ id: 'learning-lesson-market', label: 'Рынок', options: ['Любой', 'П1 / П2', 'Фора −1.5', 'Фора +1.5'] }),
             UI.field({ id: 'learning-lesson-surface', label: 'Покрытие', options: ['Все покрытия', 'Хард', 'Грунт', 'Трава', 'Крытый хард'] })),
-          UI.callout('info', 'flask', 'Ваш урок проходит ту же проверку, что и уроки от Claude: сначала гипотеза, в анализ — только после ' + NEED + ' своих случаев и проверки на истории, где 95% ДИ эффекта не задевает ноль.'));
+          h('div', { class: 'learning-form-2' }, condF, valF),
+          UI.callout('info', 'flask', 'Условие собирается из словаря — так его можно проверить на архиве. Урок проходит ту же проверку, что и гипотезы из разборов: ' + NEED + ' своих случаев, архив с 95% ДИ, затем быстрая проверка и решение администратора.'));
         form.addEventListener('submit', e => {
           e.preventDefault();
           const text = ta.value.trim();
           if (text.length < 10) { err.hidden = false; ta.classList.add('learning-invalid'); ta.setAttribute('aria-invalid', 'true'); ta.focus(); return; }
           const market = form.querySelector('#learning-lesson-market').value, surface = form.querySelector('#learning-lesson-surface').value;
-          const n = Math.max(0, ...lessons().map(x => parseInt(x.id.slice(2), 10) || 0)) + 1;
+          const cv = form.querySelector('#learning-lesson-cond').value, val = form.querySelector('#learning-lesson-val').value.trim();
+          const cond = [['рынок', market.toLowerCase()], ['покрытие', surface.toLowerCase()]];
+          if (cv) cond.push([COND.find(c => c.value === cv).label.replace('…', '').toLowerCase(), val || '—']);
+          const n = Math.max(0, ...L.lessons.map(x => parseInt(x.id.slice(2), 10) || 0)) + 1;
           const id = 'L-' + String(n).padStart(3, '0');
-          D.lessons.push({ id, text: text.replace(/\s+/g, ' '), status: 'hypothesis', evidence: 0, effect: 'нужно ≥ ' + NEED + ' случаев', scope: market + ' · ' + surface.toLowerCase(), inPrompt: false, created: TODAY, manual: true });
+          L.lessons.push({ id, kind: 'numeric', status: 'hypothesis', inPrompt: false, created: TODAY, manual: true, text: text.replace(/\s+/g, ' '), scope: market + ' · ' + surface.toLowerCase(), cond, own: 0, ownBets: [] });
           close();
-          st.filter = 'all';
-          setTab('lessons', { rebuildTabs: true });
-          UI.toast('Урок ' + id + ' добавлен как гипотеза — система начнет копить случаи', 'flask');
+          st.filter = 'all'; st.empty = false;
+          redraw();
+          UI.toast('Урок ' + id + ' добавлен как гипотеза — код начнет копить случаи и сразу посчитает эффект на архиве', 'flask');
         });
         return form;
       },
@@ -626,121 +568,96 @@
   }
 
   // ---------- 2. Версии стратегии ----------
+  // Инструкции анализа — общая линия (В5). Правила суммы ставки — у каждого свои (кабинет → «Банк и стратегия»)
   function versionsPanel() {
     const mobile = UI.isMobile();
-    const V = versions();
-    const best = Math.min(...V.map(v => v.logloss));
-    const A = vById('v3'), B = vById('v4');
-
-    const actions = [
-      A && B && button('Сравнить ' + A.id + ' и ' + B.id, { kind: 'primary', size: 'sm', icon: 'layers', onClick: compareModal }),
-      button('Оценить на истории', { kind: 'secondary', size: 'sm', icon: 'play', onClick: () => UI.toast('Запущено на ' + HOLDOUT + ' событиях · ≈ ' + fmt.usd(FULL_COST) + ' через Batch API (из бюджета экспериментов)', 'clock') }),
-    ];
+    const V = versions().slice().reverse();
+    const A = activeV(), B = candV();
+    const ev = v => v.eval;
+    const llCell = v => (ev(v) ? h('span', null, fmt.dec(ev(v).logloss, 3), h('span', { class: 'xsmall muted' }, ' · ' + ev(v).runs + ' ' + fmt.plural(ev(v).runs, 'прогон', 'прогона', 'прогонов'))) : h('span', { class: 'muted' }, st.empty ? 'не считалась' : 'до набора'));
+    const mkCell = v => (ev(v) ? h('div', null, h('div', null, signedDec(ev(v).logloss - SET.marketLL)), h('div', { class: 'xsmall muted', style: 'white-space:nowrap' }, 'ДИ ' + ciDec(ev(v).toMarket))) : h('span', { class: 'muted' }, '—'));
+    const actions = isAdmin()
+      ? [A && B && button('Сравнить ' + A.id + ' и ' + B.id, { kind: 'primary', size: 'sm', icon: 'layers', onClick: compareModal }), button('Оценить на наборе', { kind: 'secondary', size: 'sm', icon: 'play', disabled: st.empty, onClick: evalModal })].filter(Boolean)
+      : [chip('Ведет администратор', 'outline', 'admin'), A && B && button('Сравнить ' + A.id + ' и ' + B.id, { kind: 'secondary', size: 'sm', icon: 'layers', onClick: compareModal })].filter(Boolean);
     let listNode;
     if (mobile) {
-      listNode = h('div', { class: 'learning-vcards' }, V.slice().reverse().map(v => h('button', { type: 'button', class: 'learning-vcard', 'aria-label': 'Версия ' + v.name + ', подробнее', on: { click: () => versionModal(v) } },
-        h('div', { class: 'learning-vcard-head' },
-          h('div', null, h('div', { class: 'learning-ver-name' }, h('b', { class: 'mono' }, v.id), h('span', { class: 'xsmall muted' }, fmt.date(v.date))), h('div', { class: 'small soft' }, verShort(v))),
-          versionChip(v)),
-        h('dl', { class: 'learning-vgrid' },
-          h('div', null, h('dt', null, 'Лог-лосс'), h('dd', { class: v.logloss === best ? 'learning-best' : null }, fmt.dec(v.logloss, 3))),
-          h('div', null, h('dt', null, 'Brier'), h('dd', null, fmt.dec(v.brier, 3))),
-          h('div', null, h('dt', null, 'ROI'), h('dd', null, signedPctEl(v.roi))),
-          h('div', null, h('dt', null, 'CLV'), h('dd', null, fmt.signedPct(v.clv)))))));
+      listNode = h('div', { class: 'learning-vcards' }, V.map(v => h('button', { type: 'button', class: 'learning-vcard', 'aria-label': 'Версия ' + v.name + ', подробнее', on: { click: () => versionModal(v) } },
+        h('div', { class: 'learning-vcard-head' }, h('div', null, h('div', { class: 'learning-ver-name' }, h('b', { class: 'mono' }, v.id), h('span', { class: 'xsmall muted' }, fmt.date(v.date))), h('div', { class: 'small soft' }, verShort(v))), versionChip(v)),
+        ev(v) && h('dl', { class: 'learning-vgrid' },
+          h('div', null, h('dt', null, 'Лог-лосс'), h('dd', null, fmt.dec(ev(v).logloss, 3))),
+          h('div', null, h('dt', null, 'К рынку'), h('dd', null, signedDec(ev(v).logloss - SET.marketLL))),
+          h('div', null, h('dt', null, 'Brier'), h('dd', null, fmt.dec(ev(v).brier, 3))),
+          h('div', null, h('dt', null, 'Токенов'), h('dd', null, '≈ ' + v.tokens + ' тыс.'))))));
     } else {
       listNode = UI.table({
         columns: [
           { label: 'Версия', render: v => h('div', { class: 'learning-ver-name' }, h('b', null, v.id), h('span', { class: 'soft' }, verShort(v))) },
           { label: 'Дата', render: v => fmt.date(v.date) },
-          { label: 'Лог-лосс', align: 'r', render: v => h('span', { class: v.logloss === best ? 'learning-best' : null }, fmt.dec(v.logloss, 3)) },
-          { label: 'Brier', align: 'r', render: v => fmt.dec(v.brier, 3) },
-          { label: 'ROI', align: 'r', render: v => signedPctEl(v.roi) },
-          { label: 'CLV', align: 'r', render: v => fmt.signedPct(v.clv) },
-          { label: 'Событий', align: 'r', render: v => fmt.int(v.n) },
-          { label: 'Статус', render: v => versionChip(v) },
+          { label: 'Лог-лосс', align: 'r', render: llCell },
+          { label: 'К рынку, 95% ДИ', align: 'r', render: mkCell },
+          { label: 'Brier', align: 'r', render: v => (ev(v) ? fmt.dec(ev(v).brier, 3) : '—') },
+          { label: 'Токенов на анализ', align: 'r', render: v => (v.tokens ? '≈ ' + v.tokens + ' тыс.' : '—') },
+          { label: 'Статус', render: versionChip },
         ],
-        rows: V.slice().reverse(),
-        onRowClick: versionModal,
+        rows: V, onRowClick: versionModal,
       });
     }
+    const setNote = st.empty
+      ? UI.callout('warn', 'database', h('b', null, 'Набор для проверки версий еще не заморожен. '), 'Нужно 200–300 сыгранных матчей после 1 августа 2026 (позже среза знаний модели) — они берутся из архива tennis-data. ' + (isAdmin() ? 'Загрузите свежий файл и заморозьте набор: список матчей и его sha256 больше не меняются.' : 'Это делает администратор.'))
+      : null;
     const tableCard = card({
-      class: 'learning-card',
-      title: 'Версии стратегии',
-      subtitle: 'Стратегия — это инструкции анализа, принятые уроки и правила отбора. Все версии считаются на одной отложенной выборке: ' + HOLDOUT + ' событий, которых ни одна версия не видела при настройке.',
-      actions,
-      flush: !mobile,
-      body: listNode,
-      foot: hint('ROI и CLV здесь — для наблюдения: на ' + HOLDOUT + ' событиях 95% ДИ ROI около ±20 п.п., поэтому версии сравниваются по лог-лоссу и Brier.'),
+      class: 'learning-card', title: 'Инструкции анализа',
+      subtitle: st.empty ? 'Общие для всех участников. Пока одна версия — v3' : 'Общие для всех участников. С v3 версии проверяются на замороженном наборе ' + SET.code + ': ' + SET.n + ' матчей после ' + fmt.date(SET.since) + ' (позже среза знаний модели), ' + SET.hard + ' трудных, без новостей · sha256 ' + SET.sha,
+      actions, flush: !mobile && !st.empty,
+      body: st.empty ? [setNote, isAdmin() ? button('Заморозить набор', { kind: 'secondary', size: 'sm', icon: 'lock', onClick: () => UI.toast('В макете: после загрузки файла набор из 250 матчей замораживается одной кнопкой', 'lock') }) : null] : listNode,
+      foot: st.empty ? null : hint('Рынок — по кэфам архива tennis-data без маржи (лог-лосс ' + fmt.dec(SET.marketLL, 3) + '), момент снятия кэфов не проверен. Два прогона v3 разошлись на ' + fmt.dec(A && A.eval ? A.eval.noise : 0.003, 3) + ' — разница меньше этого порога считается шумом. ROI и CLV версии по 250 матчам не считаем: они шумные и зависят от суммы ставок.'),
     });
-    const toMarket = v => {
-      const ci = MARKET_CI[v.id];
-      return h('div', null, h('div', null, signedDec(v.logloss - MARKET_LL)), ci && h('div', { class: 'xsmall muted', style: 'white-space:nowrap' }, 'ДИ ' + signedDec(ci[0]) + '…' + signedDec(ci[1])));
-    };
-    const vsMarket = V.filter(v => v.logloss < MARKET_LL).map(v => v.logloss - MARKET_LL).sort((a, b) => b - a);
-
-    const chart = UI.lineChart({
-      labels: V.map(v => v.id),
-      series: [{ name: 'Лог-лосс стратегии', color: 'var(--s1)', values: V.map(v => v.logloss) }],
-      refLines: [{ value: MARKET_LL, label: 'рынок · ' + fmt.dec(MARKET_LL, 3) }],
-      yFormat: v => fmt.dec(v, 3), endLabel: true, height: mobile ? 200 : 230,
-      tipTitle: (l, i) => V[i].name,
-      ariaLabel: 'Лог-лосс по версиям стратегии: ' + V.map(v => v.id + ' ' + fmt.dec(v.logloss, 3)).join(', '),
-    });
-    const chartCard = card({
-      class: 'learning-card',
-      title: 'Лог-лосс по версиям',
-      subtitle: 'на отложенной выборке, ' + HOLDOUT + ' событий',
-      body: [
-        UI.legend([{ name: 'Стратегия', color: 'var(--s1)' }, { name: 'Рынок по закрывающим кэфам', type: 'dash' }]),
-        UI.withTable(chart, () => UI.table({
-          columns: [
-            { label: 'Версия', render: v => v.name },
-            { label: 'Лог-лосс', align: 'r', render: v => fmt.dec(v.logloss, 3) },
-            { label: 'К рынку, 95% ДИ', align: 'r', render: toMarket },
-          ],
-          rows: V,
-        })),
-        hint('Ниже — лучше. На ' + HOLDOUT + ' событиях разница с закрывающей линией' + (vsMarket.length ? ' (' + vsMarket.map(d => signedDec(d)).join('…') + ')' : '') + ' в пределах шума: чтобы показать перевес над рынком, нужны тысячи событий. Разница v3 и v4 тоже в пределах шума.'),
-      ],
-    });
-
-    return h('div', { class: 'learning-panel' }, tableCard, h('div', { class: 'learning-two wide-left' }, chartCard, rulesCard()));
+    return h('div', { class: 'learning-panel' }, tableCard, h('div', { class: 'learning-two wide-left' }, rulesCard(), stakeRulesCard()));
   }
 
   function rulesCard() {
-    const A = vById('v3'), B = vById('v4');
-    const pending = B && B.status === 'candidate';
+    const B = candV();
+    const pending = B && B.cmp;
     const rule = (n, title, text, status) => h('li', null, h('span', { 'aria-hidden': 'true' }, String(n)), h('div', null, title && h('b', null, title), h('span', null, text), status));
     return card({
-      class: 'learning-card',
-      title: 'Как принимается новая версия',
-      subtitle: pending ? 'Кандидат ' + B.id + ' нужен ради экономии — его проверяют по правилу 3' : 'Правила для следующих кандидатов',
+      class: 'learning-card', title: 'Как принимается новая версия',
+      subtitle: pending ? 'Кандидат ' + B.id + ' сделан ради экономии — его проверяют по правилу 3' : 'Правила для следующих кандидатов',
       body: [
         h('ol', { class: 'learning-rules' },
-          rule(1, null, 'Кандидат и активная версия считаются на одних и тех же ' + HOLDOUT + ' событиях, без веб-поиска.', pending && chip('Выполнено', 'good', 'check')),
+          rule(1, null, 'Текущую версию прогоняем на наборе дважды — так виден обычный разброс; кандидата — один раз. Пакетами до 100 событий, чтобы худший случай помещался в бюджет проверок.', pending && chip('Выполнено: v3 × 2, ' + B.id + ' × 1', 'good', 'check')),
           rule(2, 'Если версия должна улучшить прогноз', '95% ДИ разницы лог-лосса (новая − текущая) целиком ниже нуля.', pending && chip('К ' + B.id + ' не относится', 'outline', 'info')),
-          rule(3, 'Если версия нужна ради экономии', 'Качество не хуже с допуском: верхняя граница 95% ДИ разницы лог-лосса ≤ +0,01, Brier ≤ +0,005, калибровки (ECE) ≤ +2 п.п.; ошибок формата не больше; расход по логам ниже.',
-            pending && h('div', { class: 'learning-chips' }, SAVE_CHECKS().map(t => chip(t, 'good', 'check')))),
-          rule(4, null, 'ROI и CLV показываем для наблюдения, решения по ним не принимаем: на ' + HOLDOUT + ' событиях 95% ДИ ROI около ±20 п.п. CLV — вторичная проверка.', null),
-          rule(5, null, 'Последнее слово за вами: версия включается кнопкой, откат — в один клик.', null)),
-        A && B && button('Сравнить ' + A.id + ' и ' + B.id, { kind: 'secondary', size: 'sm', iconRight: 'chevronRight', onClick: compareModal }),
+          rule(3, 'Если версия нужна ради экономии', 'Верхняя граница 95% ДИ разницы лог-лосса ≤ +0,01, Brier ≤ +0,005, калибровки (ECE) ≤ +2 п.п., ошибок формата не больше, токенов меньше.',
+            pending && h('div', { class: 'learning-chips' }, ['Лог-лосс: до ' + signedDec(B.cmp.dLL[2]), 'Brier: до ' + signedDec(B.cmp.dBrier[2]), 'ECE: до +' + fmt.dec(B.cmp.dEce[2], 1) + ' п.п.', 'Ошибок формата: ' + B.eval.fmtErr, 'Токенов ' + fmt.signedPct(B.cmp.tokens, 0)].map(t => chip(t, 'good', 'check')))),
+          rule(4, null, 'Ни одна версия не включается сама: кнопка у администратора, откат — в один клик. Кандидат после проверки остается кандидатом.', null)),
       ],
+    });
+  }
+
+  // Правила суммы ставки — свои у каждого (В5): кандидат создается в кабинете и включается здесь или там
+  function stakeRulesCard() {
+    const R = L.ruleVersions.slice().reverse();
+    return card({
+      class: 'learning-card', title: 'Ваши правила суммы ставки',
+      subtitle: 'У каждого участника свои. Меняются новой версией: кандидат → проверка на ваших ставках → включить',
+      actions: [button('Предложить изменение', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#profile-bank' })],
+      body: h('div', { class: 'stack', style: 'gap:0' }, R.map(v => h('div', { class: 'learning-mlrow' },
+        h('div', { style: 'min-width:0' }, h('div', { class: 'learning-ver-name' }, h('b', { class: 'mono' }, v.id), h('span', { class: 'soft small' }, verShort(v))), h('div', { class: 'xsmall muted' }, fmt.date(v.date) + ' · ' + v.changes.join('; '))),
+        h('div', { class: 'row', style: 'gap:6px;justify-content:flex-end' }, versionChip(v),
+          v.status === 'candidate' && button('Включить', { kind: 'primary', size: 'sm', icon: 'check', href: '#profile-bank', title: 'Включается в «Банк и стратегия» — там видно проверку на ваших ставках' }))))),
     });
   }
 
   function compareModal() {
-    const A = vById('v3'), B = vById('v4');
-    if (!A || !B) return;
-    const tA = VERSION_INFO.v3.tokens, tB = VERSION_INFO.v4.tokens;
-    const OK = t => [t, 'good', 'check'], OBS = ['для наблюдения', 'outline', 'eye'];
+    const A = activeV(), B = candV();
+    if (!A || !B || !B.cmp) return;
+    const c = B.cmp;
+    const OK = t => [t, 'good', 'check'];
     const rows = [
-      { k: 'Лог-лосс', a: fmt.dec(A.logloss, 3), b: fmt.dec(B.logloss, 3), d: signedDec(B.logloss - A.logloss), ci: '95% ДИ: −0,009 … +0,005', tol: 'допуск: до +0,01', v: OK('не хуже') },
-      { k: 'Brier', a: fmt.dec(A.brier, 3), b: fmt.dec(B.brier, 3), d: signedDec(B.brier - A.brier), ci: '95% ДИ: −0,004 … +0,002', tol: 'допуск: до +0,005', v: OK('не хуже') },
-      { k: 'Калибровка (ECE)', a: fmt.pct(ECE.v3), b: fmt.pct(ECE.v4), d: pp(ECE.v4 - ECE.v3), ci: '95% ДИ: −0,7 … +1,1 п.п.', tol: 'допуск: до +2 п.п.', v: OK('не хуже') },
-      { k: 'Ошибок формата', a: FORMAT_ERR.v3 + ' из ' + HOLDOUT, b: FORMAT_ERR.v4 + ' из ' + HOLDOUT, d: (FORMAT_ERR.v4 - FORMAT_ERR.v3 < 0 ? MINUS : '+') + Math.abs(FORMAT_ERR.v4 - FORMAT_ERR.v3), v: OK('не больше') },
-      { k: 'Токенов на анализ', a: '≈ ' + tA + ' тыс.', b: '≈ ' + tB + ' тыс.', d: MINUS + tokSave() + '%', ci: 'по логам запусков', v: OK('дешевле') },
-      { k: 'ROI', a: fmt.signedPct(A.roi), b: fmt.signedPct(B.roi), d: pp(B.roi - A.roi), ci: '95% ДИ ROI ≈ ±20 п.п.', v: OBS },
-      { k: 'CLV', a: fmt.signedPct(A.clv), b: fmt.signedPct(B.clv), d: pp(B.clv - A.clv), ci: 'вторичная проверка', v: OBS },
+      { k: 'Лог-лосс', a: fmt.dec(A.eval.logloss, 3), b: fmt.dec(B.eval.logloss, 3), d: signedDec(c.dLL[0]), ci: '95% ДИ ' + ciDec([c.dLL[1], c.dLL[2]]), tol: 'допуск до +0,01', v: OK('не хуже') },
+      { k: 'Brier', a: fmt.dec(A.eval.brier, 3), b: fmt.dec(B.eval.brier, 3), d: signedDec(c.dBrier[0]), ci: '95% ДИ ' + ciDec([c.dBrier[1], c.dBrier[2]]), tol: 'допуск до +0,005', v: OK('не хуже') },
+      { k: 'Калибровка (ECE)', a: fmt.pct(A.eval.ece), b: fmt.pct(B.eval.ece), d: '+' + fmt.dec(c.dEce[0], 1) + ' п.п.', ci: '95% ДИ ' + fmt.dec(c.dEce[1], 1).replace('-', MINUS) + '…+' + fmt.dec(c.dEce[2], 1) + ' п.п.', tol: 'допуск до +2 п.п.', v: OK('не хуже') },
+      { k: 'Ошибок формата', a: A.eval.fmtErr + ' из ' + SET.n, b: B.eval.fmtErr + ' из ' + SET.n, d: String(B.eval.fmtErr - A.eval.fmtErr).replace('-', MINUS), v: OK('не больше') },
+      { k: 'Токенов на анализ', a: '≈ ' + A.tokens + ' тыс.', b: '≈ ' + B.tokens + ' тыс.', d: fmt.signedPct(c.tokens, 0), ci: 'по логам запусков', v: OK('дешевле') },
     ];
     const verdict = r => chip(r.v[0], r.v[1], r.v[2]);
     const cmp = UI.isMobile()
@@ -751,374 +668,211 @@
       : UI.table({
           columns: [
             { label: 'Показатель', render: r => h('b', { style: 'font-weight:600' }, r.k) },
-            { label: A.id + ' · ' + (VERSION_STATUS[A.status] || ['—'])[0].toLowerCase(), align: 'r', render: r => r.a },
-            { label: B.id + ' · ' + (VERSION_STATUS[B.status] || ['—'])[0].toLowerCase(), align: 'r', render: r => r.b },
+            { label: A.id + ' · активная', align: 'r', render: r => r.a },
+            { label: B.id + ' · кандидат', align: 'r', render: r => r.b },
             { label: 'Разница', align: 'r', render: r => h('div', null, h('div', null, r.d), [r.ci, r.tol].filter(Boolean).map(t => h('div', { class: 'xsmall muted', style: 'white-space:nowrap' }, t))) },
             { label: 'Вывод', render: verdict },
           ],
           rows,
         });
-    const accepted = B.status === 'active';
     UI.modal({
-      title: 'Сравнение ' + A.id + ' и ' + B.id,
-      wide: true,
+      title: 'Сравнение ' + A.id + ' и ' + B.id, wide: true,
       body: h('div', { class: 'stack', style: 'gap:14px' },
-        h('p', { class: 'small soft' }, 'Обе версии посчитаны на одних и тех же ' + HOLDOUT + ' событиях отложенной выборки. ' + B.id + ' сделана ради экономии, поэтому проверяется по правилу «не хуже с допуском».'),
+        h('p', { class: 'small soft' }, 'Обе версии посчитаны на одних и тех же ' + SET.n + ' матчах набора ' + SET.code + '. Разницы и ДИ — парный бутстрэп по дням (B = 10 000, seed 2026). ' + B.id + ' сделана ради экономии, поэтому правило — «не хуже с допуском».'),
         cmp,
-        h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'eyebrow' }, 'Что изменилось в ' + B.id), h('ul', { class: 'learning-changes' }, VERSION_INFO.v4.changes.map(c => h('li', null, c)))),
-        UI.callout('accent', 'shield', h('b', null, 'Правило экономии: '), 'качество не хуже с допуском (лог-лосс до +0,01, Brier до +0,005, ECE до +2 п.п.), ошибок формата не больше, а расход по логам ниже. Улучшения прогноза не требуется. ROI и CLV — для наблюдения.'),
-        accepted
-          ? UI.callout('good', 'check', B.id + ' включена вами. ' + A.id + ' в архиве — вернуть можно здесь же.')
-          : UI.callout('good', 'check', h('b', null, 'Вывод: '), B.id + ' проходит правило экономии — качество не хуже в пределах допуска, анализ дешевле на ' + tokSave() + '%. Рекомендуем включить, решение за вами. Точнее ' + A.id + ' она не стала: ДИ разницы захватывает ноль.')),
-      actions: close => accepted
-        ? [button('Вернуть ' + A.id, { kind: 'secondary', icon: 'history', onClick: () => { A.status = 'active'; B.status = 'candidate'; close(); afterVersionChange(); UI.toast('Снова активна ' + A.id + ' · ' + B.id + ' вернулась в кандидаты', 'history'); } }),
-           button('Закрыть', { kind: 'primary', onClick: close })]
-        : [button('Оставить ' + A.id, { kind: 'secondary', onClick: () => { close(); UI.toast('Остается ' + A.id + '. ' + B.id + ' остается кандидатом — включить можно в любой момент', 'clock'); } }),
-           button('Включить ' + B.id, { kind: 'primary', icon: 'check', onClick: () => { B.status = 'active'; A.status = 'archived'; close(); afterVersionChange(); UI.toast(B.id + ' работает со следующего анализа · ' + A.id + ' в архиве, откат в один клик', 'check'); } })],
+        h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'eyebrow' }, 'Что изменилось в ' + B.id), h('ul', { class: 'learning-changes' }, B.changes.map(x => h('li', null, x)))),
+        UI.callout('good', 'check', h('b', null, 'Вывод кода: '), B.id + ' проходит правило экономии — качество не хуже в пределах допуска, анализ дешевле на ' + Math.abs(c.tokens) + '%. Точнее ' + A.id + ' она не стала: ДИ разницы захватывает ноль.'),
+        !isAdmin() && UI.callout('', 'admin', 'Инструкции общие для всех участников — включает версию администратор.')),
+      actions: close => isAdmin()
+        ? [button('Оставить ' + A.id, { kind: 'secondary', onClick: () => { close(); UI.toast('Остается ' + A.id + '. ' + B.id + ' остается кандидатом — включить можно в любой момент', 'clock'); } }),
+           button('Включить ' + B.id, { kind: 'primary', icon: 'check', onClick: () => { B.status = 'active'; A.status = 'archived'; A.rollbackTo = true; close(); drawPanel(); drawTiles(); UI.toast(B.id + ' работает со следующего анализа у всех участников · ' + A.id + ' в архиве, откат в один клик', 'check'); } })]
+        : [button('Закрыть', { kind: 'primary', onClick: close })],
     });
     settleModal();
   }
-  function afterVersionChange() { if (st.tab === 'versions') drawPanel(); drawTiles(); }
 
   function versionModal(v) {
-    const info = VERSION_INFO[v.id] || { changes: [], tokens: null };
+    const A = activeV();
     UI.modal({
       title: 'Версия ' + v.name,
       body: h('div', { class: 'stack', style: 'gap:14px' },
         h('div', { class: 'row' }, versionChip(v), h('span', { class: 'small muted' }, 'создана ' + fmt.dateFull(v.date))),
-        facts([
-          ['Лог-лосс', fmt.dec(v.logloss, 3) + ' · рынок ' + fmt.dec(MARKET_LL, 3) + (MARKET_CI[v.id] ? ' · разница ' + signedDec(v.logloss - MARKET_LL) + ' (95% ДИ ' + signedDec(MARKET_CI[v.id][0]) + '…' + signedDec(MARKET_CI[v.id][1]) + ')' + (MARKET_CI[v.id][0] < 0 && MARKET_CI[v.id][1] > 0 ? ' — в пределах шума' : '') : '')],
-          ['Brier', fmt.dec(v.brier, 3)],
-          ['ROI', h('span', null, signedPctEl(v.roi), h('span', { class: 'muted' }, ' · для наблюдения, ДИ ≈ ±20 п.п.'))],
-          ['CLV', fmt.signedPct(v.clv)],
-          VERSION_INFO[v.id] && VERSION_INFO[v.id].goal === 'save' && ['Цель версии', 'Экономия: ' + MINUS + tokSave() + '% токенов на анализ при качестве не хуже с допуском'],
-          ['Событий в оценке', fmt.int(v.n)],
-          info.tokens && ['Токенов на анализ', '≈ ' + info.tokens + ' тыс.'],
-        ]),
-        h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'eyebrow' }, 'Что изменилось'), h('ul', { class: 'learning-changes' }, info.changes.map(c => h('li', null, c))))),
+        v.eval ? facts([
+          ['Лог-лосс', fmt.dec(v.eval.logloss, 3) + ' · рынок ' + fmt.dec(SET.marketLL, 3) + ' · разница ' + signedDec(v.eval.logloss - SET.marketLL) + ' (95% ДИ ' + ciDec(v.eval.toMarket) + ') — в пределах шума'],
+          ['Brier', fmt.dec(v.eval.brier, 3)], ['Калибровка (ECE)', fmt.pct(v.eval.ece)], ['Ошибок формата', v.eval.fmtErr + ' из ' + SET.n],
+          ['Прогонов на наборе', String(v.eval.runs)], v.tokens && ['Токенов на анализ', '≈ ' + v.tokens + ' тыс.'],
+        ]) : h('p', { class: 'small soft' }, 'Версия старше замороженного набора — на нем не считалась.'),
+        h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'eyebrow' }, 'Что изменилось'), h('ul', { class: 'learning-changes' }, v.changes.map(c => h('li', null, c))))),
       actions: close => [
-        (v.id === 'v4' || v.id === 'v3') && button('Сравнить v3 и v4', { kind: 'secondary', icon: 'layers', onClick: () => { close(); compareModal(); } }),
+        isAdmin() && v.status === 'archived' && v.rollbackTo && A && button('Вернуть ' + v.id, { kind: 'secondary', icon: 'history', onClick: () => { A.status = 'candidate'; v.status = 'active'; v.rollbackTo = false; close(); drawPanel(); drawTiles(); UI.toast('Снова активна ' + v.id + ' · ' + A.id + ' вернулась в кандидаты', 'history'); } }),
+        v.status === 'candidate' && button('Сравнить с ' + (A ? A.id : 'активной'), { kind: 'secondary', icon: 'layers', onClick: () => { close(); compareModal(); } }),
         button('Закрыть', { kind: 'primary', onClick: close }),
       ].filter(Boolean),
     });
     settleModal();
   }
 
-  // ---------- 3. Своя ML-модель ----------
-  function mlHeadCard() {
-    const ml = st.ml;
-    const status = ml.training
-      ? chip('Идет обучение', 'info', 'clock')
-      : chip('Обучена ' + fmt.date(ml.at) + ', ' + hhmm(ml.at), 'good', 'check');
-    const body = [
-      h('dl', { class: 'learning-strip' },
-        h('div', null, h('dt', null, 'Последнее обучение'), h('dd', null, fmt.date(ml.at) + ', ' + hhmm(ml.at), h('small', null, 'по понедельникам и после турниров Шлема'))),
-        h('div', null, h('dt', null, 'Матчей в обучении'), h('dd', null, fmt.int(HIST), h('small', null, 'основной тур ATP с 2019 г.; Эло считается по всей истории с 2000 г.'))),
-        h('div', null, h('dt', null, 'Признаков'), h('dd', null, '14', h('small', null, 'кэфов букмекеров среди них нет'))),
-        h('div', null, h('dt', null, 'Brier, сентябрь'), h('dd', null, fmt.dec(ml.brier, 3), h('small', null, 'рынок ' + fmt.dec(WF[WF.length - 1].market, 3) + ': разница в пределах шума'))),
-        h('div', null, h('dt', null, 'Калибровка, ECE'), h('dd', null, fmt.pct(2.1), h('small', null, 'на валидации; 0% — идеальная калибровка'))),
-        h('div', null, h('dt', null, 'Доверие к поправкам Claude, c'), h('dd', null, '≈ ' + fmt.dec(0.42, 2), h('small', null, 'предварительно: 95% ДИ 0,1…0,7 на ' + OWN + ' событиях; в расчет — с 300')))),
-      hint('Коэффициент c показывает, помогают ли поправки Claude к вероятности модели: c ≈ 0 — информации не несут, c ≈ 1 — берем как есть. Подбирается на валидации по своим снимкам с новостями; пока событий меньше 300, поправка Claude ограничена ±10 п.п.'),
-    ];
-    if (ml.training) {
-      const stage = ml.progress < 35 ? 'Собираем признаки на дату каждого матча' : ml.progress < 80 ? 'Обучаем градиентный бустинг' : 'Проверяем на валидации — заменим, только если не хуже';
-      body.push(h('div', { class: 'learning-train', 'aria-live': 'polite' },
-        h('div', { class: 'row-between' }, h('span', { class: 'soft' }, stage), h('b', { class: 'num' }, Math.round(ml.progress) + '%')),
-        UI.meter(ml.progress, 100)));
-    } else if (ml.prev != null) {
-      body.push(UI.callout('good', 'check', h('div', { class: 'stack', style: 'gap:8px' },
-        h('span', null, 'Переобучена сегодня в ' + hhmm(ml.at) + ': Brier на валидации ' + fmt.dec(ml.brier, 3) + ' (было ' + fmt.dec(ml.prev, 3) + '). Это плановое переобучение той же модели на новых матчах — оно включается само, если на валидации не хуже с допуском (Brier до +0,005). Новые признаки и c — только ' + (UI.auth.isAdmin ? 'с вашего подтверждения.' : 'с подтверждения администратора.')),
-        UI.auth.isAdmin && button('Вернуть прежнюю модель', { kind: 'secondary', size: 'sm', icon: 'history', onClick: () => {
-          ml.brier = ml.prev; ml.prev = null; ml.at = ml.prevAt || ml.at;
-          drawMlHead(); drawTiles();
-          UI.toast('Вернули модель от ' + fmt.date(ml.at) + ', ' + hhmm(ml.at) + ' · Brier ' + fmt.dec(ml.brier, 3), 'history');
-        } }))));
-    }
-    body.push(UI.callout('info', 'info', 'Сама по себе модель чуть уступает рынку — это ожидаемо: букмекер учитывает новости и травмы, а модель видит только статистику. Ее роль — независимое второе мнение: Claude видит ее вероятность, а расхождение больше 8 п.п. анализ подсвечивает и объясняет.'));
-    return card({
-      class: 'learning-card',
-      eyebrow: 'Своя ML-модель',
-      title: 'Эло + градиентный бустинг',
-      subtitle: 'Одна на всех участников. Считается на сервере без ИИ — за миллисекунды и бесплатно',
-      // модель общая (ml_models без user_id): переобучает и откатывает только администратор
-      actions: [status, UI.auth.isAdmin
-        ? button(ml.training ? 'Обучается…' : 'Переобучить', { kind: 'secondary', size: 'sm', icon: 'refresh', disabled: ml.training, onClick: retrain })
-        : chip('Ведет администратор', 'outline', 'admin')],
-      body,
+  // Прогон версии на замороженном наборе: цена по живым числам и худший случай — до запуска, подтверждение кодом 2FA (Т8)
+  function evalModal() {
+    const n = SET.n, batches = Math.ceil(n / E().batchSize), worst = n * E().perEventWorst, perBatch = E().batchSize * E().perEventWorst;
+    UI.modal({
+      title: 'Оценить версию на наборе',
+      body: close => {
+        const verF = UI.field({ id: 'learning-eval-ver', label: 'Что прогнать', options: versions().filter(v => v.status !== 'archived').map(v => ({ value: v.id, label: v.id + ' · ' + (v.status === 'active' ? 'активная, еще прогон для порога шума' : 'кандидат, повтор') })) });
+        const otp = UI.field({ id: 'learning-eval-otp', label: 'Код 2FA', inputmode: 'numeric', placeholder: '000000', attrs: { autocomplete: 'one-time-code', maxlength: '6' } });
+        return h('div', { class: 'stack', style: 'gap:14px' },
+          verF,
+          UI.kv([
+            ['Набор', SET.code + ' · ' + n + ' матчей, без новостей'],
+            ['Как идет', batches + ' ' + fmt.plural(batches, 'пакет', 'пакета', 'пакетов') + ' по ≤ ' + E().batchSize + ' через Batch, следующий — после сбора предыдущего'],
+            ['Цена по прошлым прогонам', '≈ $2,50–3,60'],
+            ['Худший случай', '≈ ' + fmt.usd(worst) + ' (' + n + ' × ' + fmt.usd(E().perEventWorst) + ' при 8 тыс. токенов ответа), резерв на пакет ≤ ' + fmt.usd(perBatch)],
+            ['Бюджет проверок', fmt.usd(E().spent) + ' из ' + fmt.usd(E().monthly, 0) + ' · остаток ' + fmt.usd(evalLeft()) + (E().firstMonth ? ' · с ноября ' + fmt.usd(E().next, 0) + ' в месяц' : '')],
+          ]),
+          perBatch > evalLeft() ? UI.callout('bad', 'alert', 'Остатка не хватает даже на резерв одного пакета — прогон не стартует.') : UI.callout('info', 'info', 'Расход идет из бюджета проверок на вашем ключе: в общий бюджет и в лимиты участников не входит. Ошибка прогона тратит бюджет проверок, но не боевой.'),
+          otp);
+      },
+      actions: close => [
+        button('Отмена', { kind: 'secondary', onClick: close }),
+        button('Запустить прогон', { kind: 'primary', icon: 'play', onClick: () => {
+          const code = (document.getElementById('learning-eval-otp') || {}).value || '';
+          if (!/^\d{6}$/.test(code)) { UI.toast('Введите шестизначный код 2FA', 'alert'); return; }
+          close(); UI.toast('Прогон запущен: ' + batches + ' пакета, результат — через 1–3 часа, придет уведомлением', 'clock');
+        } }),
+      ],
     });
   }
-  function drawMlHead() { if (mlHeadSlot && mlHeadSlot.isConnected) UI.clear(mlHeadSlot).appendChild(mlHeadCard()); }
 
-  function retrain() {
-    if (st.ml.training) return;
-    st.ml.training = true; st.ml.progress = 0;
-    drawMlHead(); drawTiles();
-    const timer = setInterval(() => {
-      st.ml.progress = Math.min(100, st.ml.progress + 10);
-      if (st.ml.progress >= 100) {
-        clearInterval(timer);
-        const now = new Date();
-        st.ml.training = false;
-        st.ml.prev = st.ml.brier;
-        st.ml.prevAt = st.ml.at;
-        st.ml.brier = 0.193;
-        st.ml.at = TODAY + 'T' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-        UI.toast('Модель переобучена на ' + fmt.int(HIST) + ' матчах · Brier на валидации ' + fmt.dec(st.ml.brier, 3) + ' (было ' + fmt.dec(st.ml.prev, 3) + ')', 'check');
-        drawTiles();
-      }
-      drawMlHead();
-    }, 260);
-  }
-
+  // ---------- 3. Базовая модель ----------
   function mlPanel() {
     const mobile = UI.isMobile();
-    mlHeadSlot = h('div', { style: 'min-width:0' }, mlHeadCard());
-    const feat = card({
-      class: 'learning-card',
-      title: 'Что важнее всего для модели',
-      subtitle: 'Вклад признака в прогноз, %',
+    const m = activeMl(), prev = L.mlModels.find(x => x.id === m.prev);
+    const ev = st.empty ? 0 : L.eventsWithOutcome();
+    const head = card({
+      class: 'learning-card', eyebrow: 'Базовая модель', title: 'Эло по покрытиям + калибровка',
+      subtitle: 'Одна на всех участников. Считается на сервере без ИИ — за миллисекунды и бесплатно',
+      actions: [chip('Активна ' + m.id, 'good', 'check'), isAdmin()
+        ? button(st.recal ? 'Перекалибровка…' : 'Перекалибровать', { kind: 'secondary', size: 'sm', icon: 'refresh', disabled: !!st.recal, onClick: recalibrate })
+        : chip('Ведет администратор', 'outline', 'admin')],
       body: [
-        h('div', { class: 'learning-feat' }, UI.hbars({ items: FEATURES.map(f => ({ label: f.label + (f.note ? ', из урока ' + f.note : ''), value: f.value, labelNode: f.note ? [h('span', { style: 'min-width:0' }, f.label), chip('урок ' + f.note, 'outline')] : null, dot: false })), color: 'var(--s1)', valueFormat: v => v + '%', domain: [0, 25] })),
-        h('p', { class: 'small soft' }, 'Еще 6 признаков вместе — ' + FEATURES_REST + '%: возраст, перелет и смена часового пояса, высота над уровнем моря, скорость покрытия, раунд, место по Эло.'),
-        hint('Кэфы букмекеров намеренно не входят в признаки — иначе модель просто повторяла бы рынок. Два признака появились из подтвержденных уроков.'),
+        h('dl', { class: 'learning-strip' },
+          h('div', null, h('dt', null, 'Активная версия'), h('dd', null, dayTime(m.at), h('small', null, m.auto ? 'перекалибрована и включена сама' : 'включена администратором'))),
+          h('div', null, h('dt', null, 'Brier на проверке'), h('dd', null, dec4(m.brier), h('small', null, prev ? 'прежняя ' + dec4(prev.brier) : ''))),
+          h('div', null, h('dt', null, 'Калибровка, ECE'), h('dd', null, fmt.pct(m.ece), h('small', null, '0% — идеальная калибровка'))),
+          h('div', null, h('dt', null, 'Эло'), h('dd', null, 'по покрытиям', h('small', null, 'вся история основного тура с 2000 г.'))),
+          h('div', null, h('dt', null, 'Перекалибровка'), h('dd', null, 'по понедельникам', h('small', null, 'после загрузки файла tennis-data'))),
+          h('div', null, h('dt', null, 'Поправка Claude числом'), h('dd', null, ev + ' из ' + L.C_MIN, h('small', null, 'событий с исходами: подбор веса — с ' + L.C_MIN)))),
+        st.recal && h('div', { class: 'learning-train', 'aria-live': 'polite' }, h('div', { class: 'row-between' }, h('span', { class: 'soft' }, st.recal < 60 ? 'Подбираем калибровку на новых матчах' : 'Проверяем: включим, только если не хуже'), h('b', { class: 'num' }, st.recal + '%')), UI.meter(st.recal, 100)),
+        UI.callout('accent', 'shield', h('b', null, 'Включается сама, если не хуже (В6). '), 'Перекалибровка той же модели на новых матчах: Brier не хуже прежнего +0,005 и лог-лосс не хуже +0,01 — новая версия включается, приходит уведомление, вернуть прежнюю можно в один клик. Новые признаки, другой тип модели и предел поправки Claude (сейчас ±10 п.п.) — только решением администратора.'),
       ],
     });
+    const list = card({
+      class: 'learning-card', title: 'Версии модели', subtitle: 'Каждая перекалибровка — отдельная версия, прогнозы помнят, какой версией сделаны',
+      body: h('div', { class: 'stack', style: 'gap:0' }, L.mlModels.map(x => h('div', { class: 'learning-mlrow' },
+        h('div', { style: 'min-width:0' }, h('div', { class: 'mono' }, x.id), h('div', { class: 'xsmall muted' }, dayTime(x.at) + ' · Brier ' + dec4(x.brier) + ' · лог-лосс ' + fmt.dec(x.logloss, 3) + (x.why ? ' · ' + x.why : ''))),
+        h('div', { class: 'row', style: 'gap:6px;justify-content:flex-end' }, versionChip(x),
+          isAdmin() && x.status === 'archived' && x.id === m.prev && button('Вернуть', { kind: 'ghost', size: 'sm', icon: 'history', onClick: () => { m.status = 'archived'; x.status = 'active'; x.prev = m.id; delete m.prev; drawPanel(); drawTiles(); UI.toast('Вернули модель ' + x.id + ' · Brier ' + dec4(x.brier), 'history'); } }))))),
+    });
+    const WF = L.walkForward, first = WF[0], last = WF[WF.length - 1];
     const wfChart = UI.lineChart({
       labels: WF.map(r => r.m),
-      series: [
-        { name: 'Своя модель', color: 'var(--s1)', values: WF.map(r => r.model) },
-        { name: 'Рынок по закрытию', color: 'var(--s2)', values: WF.map(r => r.market) },
-      ],
-      yFormat: v => fmt.dec(v, 3), height: mobile ? 200 : 230,
-      tipTitle: (l, i) => WF[i].full + ' · ' + WF[i].n + ' матчей',
-      ariaLabel: 'Brier по месяцам: своя модель против рынка',
+      series: [{ name: 'Базовая модель', color: 'var(--s1)', values: WF.map(r => r.model) }, { name: 'Рынок по архиву', color: 'var(--s2)', values: WF.map(r => r.market) }],
+      yFormat: v => fmt.dec(v, 3), height: mobile ? 200 : 230, tipTitle: (l, i) => WF[i].full + ' · ' + WF[i].n + ' матчей', ariaLabel: 'Brier по месяцам: базовая модель против рынка',
     });
-    const first = WF[0], last = WF[WF.length - 1];
     const wf = card({
-      class: 'learning-card',
-      title: 'Скользящая проверка по месяцам',
-      subtitle: 'Brier по месяцам: модель учится только на прошлом и прогнозирует следующий месяц',
+      class: 'learning-card', title: 'Проверка по месяцам', subtitle: 'Brier: модель учится только на прошлом и прогнозирует следующий месяц',
       body: [
-        UI.legend([{ name: 'Своя модель', color: 'var(--s1)' }, { name: 'Рынок по закрытию', color: 'var(--s2)' }]),
-        UI.withTable(wfChart, () => UI.table({
-          columns: [
-            { label: 'Месяц', render: r => r.full },
-            { label: 'Матчей', align: 'r', render: r => fmt.int(r.n) },
-            { label: 'Модель', align: 'r', render: r => fmt.dec(r.model, 3) },
-            { label: 'Рынок', align: 'r', render: r => fmt.dec(r.market, 3) },
-          ],
-          rows: WF,
-        })),
-        hint('Ниже — лучше. Отставание от рынка сократилось с ' + fmt.dec(first.model - first.market, 3) + ' в апреле до ' + fmt.dec(last.model - last.market, 3) + ' в сентябре. Но при ' + Math.min(...WF.map(r => r.n)) + '–' + Math.max(...WF.map(r => r.n)) + ' матчах в месяц разница меньше ≈ 0,005 — шум: обогнать рынок модель не обещает.'),
+        UI.legend([{ name: 'Базовая модель', color: 'var(--s1)' }, { name: 'Рынок по кэфам архива tennis-data, момент снятия не проверен', color: 'var(--s2)' }]),
+        UI.withTable(wfChart, () => UI.table({ columns: [{ label: 'Месяц', render: r => r.full }, { label: 'Матчей', align: 'r', render: r => fmt.int(r.n) }, { label: 'Модель', align: 'r', render: r => fmt.dec(r.model, 3) }, { label: 'Рынок', align: 'r', render: r => fmt.dec(r.market, 3) }], rows: WF })),
+        hint('Ниже — лучше. Отставание от рынка сократилось с ' + fmt.dec(first.model - first.market, 3) + ' в апреле до ' + fmt.dec(last.model - last.market, 3) + ' в сентябре; при ' + Math.min(...WF.map(r => r.n)) + '–' + Math.max(...WF.map(r => r.n)) + ' матчах в месяц разница меньше ≈ 0,005 — шум. Обогнать рынок модель не обещает: ее роль — независимое второе мнение.'),
       ],
     });
-    return h('div', { class: 'learning-panel' }, mlHeadSlot, h('div', { class: 'learning-two' }, feat, wf));
-  }
-
-  // ---------- 4. Датасет и лаборатория ----------
-  function jsonPreview(anon) {
-    const l = leg0927 || { odds: 1.74, closing: 1.70, p: 0.641, betId: 69 };
-    const hl = (a, b) => h('span', { class: ['learning-hl', !anon && 'exposed'] }, anon ? a : b);
-    const pA = D.P.zverev, pB = D.P.draper;
-    const qClose = Math.round(1 / (l.closing || 1.70) * 0.955 * 1000) / 1000;
-    return h('pre', { class: 'learning-code', 'aria-label': 'Пример записи JSONL' },
-      '{"id": "own-', String(l.betId).padStart(4, '0'), '", "date": ', hl('"2026, неделя 39"', '"2026-09-27"'), ', "event": ', hl('"ATP 500 · хард"', '"ATP 500 Пекин"'), ',\n',
-      ' "a": {"name": ', hl('"Игрок A"', '"' + pA.name + '"'), ', "hand": "R", "elo_surface": ', String(pA.elo.hard), ', "sets_7d": 6},\n',
-      ' "b": {"name": ', hl('"Игрок B"', '"' + pB.name + '"'), ', "hand": "L", "elo_surface": ', String(pB.elo.hard), ', "sets_7d": 3},\n',
-      ' "news": "', hl('Игрок A', pA.short), ' накануне сыграл три сета в четвертьфинале",\n',
-      ' "market": "Ф1(−1.5)", "odds": ', fmt.odds(l.odds), ', "odds_close": ', fmt.odds(l.closing || 1.70), ',\n',
-      ' "p_base": ', String(Math.round((l.p - 0.04) * 1000) / 1000), ', "p_claude": ', String(l.p), ', "q_close_novig": ', String(qClose), ',\n',
-      ' "label": {"sets": "2:1", "bet_won": false}}');
-  }
-
-  function datasetCard() {
-    const total = SPLIT.reduce((a, s) => a + s.n, 0);
-    const previewSlot = h('div', { style: 'min-width:0' }, jsonPreview(st.anon));
-    const anonToggle = UI.toggle({
-      id: 'learning-anon', label: 'Анонимизация игроков', checked: st.anon,
-      hint: 'Имена, турниры и точные даты заменяются на «Игрок A / B», категорию и неделю. LLM может помнить исторические результаты из своих обучающих данных — без анонимизации она «вспомнит» исход, и оценка будет нечестно завышена.',
-      onChange: v => {
-        st.anon = v;
-        UI.clear(previewSlot).appendChild(jsonPreview(v));
-        UI.toast(v ? 'Анонимизация включена: имена, турниры и даты скрыты в экспорте' : 'Анонимизация выключена — оценка дообученной LLM может быть завышена', v ? 'shield' : 'alert');
-      },
+    const calib = card({
+      class: 'learning-card', title: 'Калибровка модели', subtitle: 'Матчи основного тура 2026 г. после калибровки Платта',
+      body: [UI.calibrationChart({ bins: L.mlCalibration, domain: [0.5, 1], height: mobile ? 240 : 250 }), hint('Если модель говорит 70%, такие матчи должны выигрываться примерно в 7 из 10 случаев. Точки ниже диагонали — переоценка фаворитов.')],
     });
-    const left = h('div', { class: 'stack', style: 'gap:14px' },
-      h('div', { class: 'learning-ds-total' }, h('b', null, fmt.int(SNAPSHOTS)), h('span', { class: 'soft' }, 'снимков матчей')),
-      h('div', { class: 'learning-ds-parts' },
-        h('div', null, h('b', null, fmt.int(HIST)), 'исторических: все матчи основного тура ATP с 2019 г. по 6 окт 2026 — кэфы tennis-data.co.uk, статистика Сакманна. Новостей и скорости подачи нет'),
-        h('div', null, h('b', null, fmt.int(OWN)), 'своих событий: ' + S.legs + ' из ставок' + (OWN_NO_BET > 0 ? ' и ' + OWN_NO_BET + ' разобраны без ставки' : '') + ' — с замороженным досье, новостями и вероятностью Claude')),
-      h('div', { class: 'stack', style: 'gap:8px' },
-        h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Деление по времени'), h('span', { class: 'xsmall muted' }, 'train / val / test')),
-        h('div', { class: 'learning-split', role: 'img', 'aria-label': SPLIT.map(s => s.label + ' ' + fmt.int(s.n)).join(', ') }, SPLIT.map(s => h('i', { style: { width: (s.n / total * 100).toFixed(2) + '%', background: s.color } }))),
-        h('dl', { class: 'learning-split-legend' }, SPLIT.map(s => h('div', null,
-          h('dt', null, h('i', { style: { background: s.color } }), s.label + ' · ' + fmt.int(s.n)),
-          h('dd', null, s.period + (s.note ? ', ' + s.note : ''))))),
-        hint('Делим по времени, а не случайно: иначе модель «подсмотрит» матчи из будущего, и проверка покажет то, чего в жизни не будет.'),
-        hint('Тест «с 1 июн» — для своей ML-модели. Для LLM тест начинается с ' + fmt.date(LLM_FROM) + ' 2026: срез знаний Opus 5.5 — июнь 2026, плюс месяц запаса, иначе модель может «помнить» исход. Таких событий ' + fmt.int(LLM_TEST) + ', из них ' + HOLDOUT + ' — отложенная выборка для версий стратегии.')),
-      anonToggle);
-    const right = h('div', { class: 'stack', style: 'gap:8px' },
-      h('div', { class: 'row-between' }, h('span', { class: 'eyebrow' }, 'Одна запись в экспорте'), h('span', { class: 'xsmall muted' }, 'подсвечено то, что меняет анонимизация')),
-      previewSlot);
-    return card({
-      class: 'learning-card',
-      title: 'Датасет снимков матчей',
-      subtitle: 'Снимок — все, что было известно до начала матча, плюс исход. Будущее в снимок не попадает.',
-      actions: [button('Экспорт JSONL', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => UI.toast('Экспорт собран: обучающая, проверочная и тестовая части, ' + fmt.int(SNAPSHOTS) + ' строк' + (st.anon ? ', анонимизировано' : ', с именами') + '. В макете файл не скачивается', 'download') })],
-      body: h('div', { class: 'learning-two' }, left, right),
+    const exportCard = isAdmin() && card({
+      class: 'learning-card', title: 'Набор для учебного трека',
+      subtitle: 'Снимки матчей в JSONL: досье до матча, вероятности и исход. Учебный трек живет вне приложения (папка lab/) и на прогнозы не влияет',
+      actions: [button('Выгрузить JSONL', { kind: 'secondary', size: 'sm', icon: 'download', onClick: () => UI.toast('В рабочей версии скачается snapshots.jsonl: архив и свои события, игроки обезличены. В макете файл не скачивается', 'download') })],
     });
+    return h('div', { class: 'learning-panel' }, head, h('div', { class: 'learning-two' }, wf, calib), h('div', { class: 'learning-two' }, list, exportCard || h('div')));
+  }
+  function recalibrate() {
+    if (st.recal) return;
+    st.recal = 5; drawPanel();
+    const timer = setInterval(() => {
+      st.recal = Math.min(100, st.recal + 19);
+      if (st.recal >= 100) {
+        clearInterval(timer); st.recal = null;
+        const m = activeMl();
+        const nv = { id: 'elo-v1@' + TODAY, at: TODAY + 'T10:20', status: 'active', auto: false, brier: 0.1939, logloss: 0.570, ece: 2.0, matches: 74, prev: m.id };
+        m.status = 'archived'; L.mlModels.unshift(nv);
+        UI.toast('Перекалибрована: Brier 0,1939 (было ' + dec4(m.brier) + ') — не хуже, включена. Вернуть прежнюю — в списке версий', 'check');
+        drawTiles();
+      }
+      if (st.tab === 'ml') drawPanel();
+    }, 280);
   }
 
-  function expCard(o) {
-    return h('section', { class: 'card learning-exp', 'aria-label': o.title },
-      h('div', { class: 'card-head' }, h('div', { style: 'min-width:0' }, h('div', { class: 'row', style: 'gap:6px' }, o.status, h('span', { class: 'xsmall muted' }, o.kind)), h('h3', null, o.title))),
-      h('div', { class: 'card-body' },
-        h('dl', { class: 'learning-exp-dl' },
-          h('div', null, h('dt', null, 'Цель'), h('dd', null, o.goal)),
-          h('div', null, h('dt', null, 'Метрика успеха'), h('dd', null, o.metric)),
-          h('div', null, h('dt', null, 'Бюджет'), h('dd', null, o.budget))),
-        o.extra),
-      h('div', { class: 'card-foot' }, o.actions));
+  // ---------- 4. Отчеты ----------
+  // В8: неделя пн–вс по поясу участника, отчет приходит в понедельник 07:00 в центр уведомлений
+  function reportBlock(r) {
+    const legsTxt = r.legs ? fmt.dec(r.brier, 3) + ' против ' + fmt.dec(r.brierMarket, 3) : '—';
+    const cell = (k, v, sub, cls) => h('div', null, h('dt', null, k), h('dd', { class: cls }, v, sub && h('small', null, sub)));
+    return h('div', { class: 'learning-report' },
+      h('dl', { class: 'learning-rgrid' },
+        cell('Рассчитано ставок', String(r.n), r.auto + ' по архиву, ' + r.manual + ' вами'),
+        cell('Прибыль ставок', fmt.signedMoney(r.profit), r.roi == null ? '' : 'ROI ' + fmt.signedPct(r.roi), r.profit > 0 ? 'good-text' : r.profit < 0 ? 'bad-text' : null),
+        cell('Средний CLV', r.clv == null ? '—' : fmt.signedPct(r.clv), r.clvN + ' ' + fmt.plural(r.clvN, 'ставка', 'ставки', 'ставок') + ' с закрытием'),
+        cell('Brier: модель / рынок', legsTxt, r.legs + ' ' + fmt.plural(r.legs, 'событие', 'события', 'событий') + ' · на неделе это шум'),
+        cell('Разборы ИИ', String(r.reviews), 'по матчам, ≈ ' + fmt.usd(r.reviews * 0.01)),
+        cell('Новые гипотезы', r.lessonsNew.length ? r.lessonsNew.join(', ') : 'нет', null),
+        cell('Проверки (eval)', fmt.usd(r.evalSpent), 'из бюджета проверок'),
+        cell('Калибровка', 'в «Аналитике»', 'по всем прогонам')),
+      hint('Неделя — с понедельника по воскресенье по вашему поясу. Точность за одну неделю почти всегда в пределах шума: смотрите тренд за месяц в «Аналитике».'));
   }
-
-  function experiments() {
-    const slot = h('div', { class: 'learning-exps' });
-    function draw() {
-      UI.clear(slot);
-      const running = st.popt === 'running';
-      const done = POPT.filter(p => p.smoke != null).length;
-      slot.appendChild(expCard({
-        status: running ? chip('Идет', 'accent', 'refresh') : chip('На паузе', 'warn', 'pause'),
-        kind: 'без дообучения',
-        title: 'Подбор инструкций модели',
-        goal: 'Автоматически переписывать инструкции Claude и оставлять варианты, которые снижают лог-лосс.',
-        metric: 'Лог-лосс: быстрая проверка на ' + SMOKE + ' событиях отсеивает явно плохие варианты, лучший проходит полный прогон на ' + HOLDOUT + '. Плюс токены на анализ.',
-        budget: fmt.usd(POPT_SPENT) + ' из ' + fmt.usd(EXP_BUDGET, 0) + ' в месяц · отдельный ключ администратора, Batch API ночью',
-        extra: h('div', { class: 'stack', style: 'gap:6px' },
-          h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Итерация ' + POPT.length + ' из 12'), h('span', { class: 'num', style: 'font-weight:600' }, done + ' посчитано')),
-          UI.meter(POPT.length, 12),
-          h('p', { class: 'learning-note' }, icon('spark'), h('span', null, 'Лучший вариант (итерация 4) стал кандидатом v4 — см. «Версии стратегии».'))),
-        actions: [
-          // эксперимент идет на отдельном ключе и бюджете администратора — управляет им только он
-          UI.auth.isAdmin ? button(running ? 'Пауза' : 'Продолжить', { kind: 'secondary', size: 'sm', icon: running ? 'pause' : 'play', onClick: () => {
-            st.popt = running ? 'paused' : 'running'; draw(); drawTiles();
-            UI.toast(running ? 'На паузе: итерация 7 досчитается, новые не начнутся' : 'Продолжаем: следующая итерация ночью через Batch API', running ? 'pause' : 'play');
-          } }) : chip('Ведет администратор', 'outline', 'admin'),
-          button('Журнал итераций', { kind: 'ghost', size: 'sm', icon: 'list', onClick: poptModal }),
-        ],
-      }));
-      slot.appendChild(expCard({
-        status: chip('Запланирован', 'info', 'calendar'),
-        kind: 'дообучение · шаг 7',
-        title: 'SFT + LoRA открытой модели 0,5–3B: досье → обоснование и p',
-        goal: 'Освоить дообучение: модель учится выдавать вероятность своей ML-модели (учителя) в формате JSON. Цель — откалиброванная p уровня 4 или рынка без маржи.',
-        metric: 'Валидный JSON ≥ 99%; лог-лосс на тесте хуже учителя не больше чем на 0,01.',
-        budget: '$0 — Colab с T4, ≈ 2–4 ч: для модели 0,5–3B этого хватает',
-        extra: h('div', { class: 'stack', style: 'gap:8px' },
-          h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Обучающих примеров'), h('span', { class: 'row', style: 'gap:6px' }, h('span', { class: 'num', style: 'font-weight:600' }, fmt.int(HIST_TRAIN)), chip('хватает', 'good', 'check'))),
-          h('p', { class: 'learning-note' }, icon('info'), h('span', null, 'Примеры собираются из исторических снимков без Claude: цель p — своя ML-модель, обоснование — шаблон из признаков.')),
-          h('p', { class: 'learning-note warn' }, icon('alert'), h('span', null, 'Рассуждения Claude как образцы не берем: условия Anthropic ограничивают обучение других моделей на его ответах.'))),
-        actions: [button('План эксперимента', { kind: 'secondary', size: 'sm', icon: 'list', onClick: sftModal })],
-      }));
-      slot.appendChild(expCard({
-        status: chip('Идея', 'outline', 'spark'),
-        kind: 'дообучение',
-        title: 'RL (GRPO) с наградой = лог-скор вероятности',
-        goal: 'Награждать модель за точную вероятность, а не за угаданного победителя.',
-        metric: 'Лог-лосс лучше той же модели после SFT; обогнать рынок не ожидаем.',
-        budget: '≈ $30–100 аренды GPU · только после SFT',
-        extra: h('div', { class: 'stack', style: 'gap:8px' },
-          h('dl', { class: 'learning-reward', 'aria-label': 'Пример награды' },
-            h('dt', null, 'Прогноз 70%, игрок выиграл'), h('dd', null, 'ln 0,70 = −0,36'),
-            h('dt', null, 'Прогноз 70%, игрок проиграл'), h('dd', null, 'ln 0,30 = −1,20')),
-          h('p', { class: 'learning-note' }, icon('info'), h('span', null, 'Риск: исход одного матча во многом случаен, награда шумная — нужны тысячи матчей.'))),
-        actions: [button('Подробнее', { kind: 'ghost', size: 'sm', icon: 'book', onClick: () => UI.toast('Разбор GRPO и лог-скора — в документе LLM_LEARNING.md, папка docs в репозитории', 'book') })],
-      }));
-    }
-    draw();
-    return slot;
-  }
-
-  function poptModal() {
-    const mobile = UI.isMobile();
-    const smokeEl = r => r.smoke == null ? h('span', { class: 'muted' }, 'считается')
-      : r.base ? h('span', { class: 'muted' }, 'база')
-      : h('span', { class: r.best ? 'learning-best' : null }, signedDec(r.smoke));
-    const fullEl = r => r.full == null ? h('span', { class: 'muted' }, '—') : h('span', { class: r.best ? 'learning-best' : null }, fmt.dec(r.full, 3));
-    const list = mobile
-      ? h('div', { class: 'learning-cmp-list' }, POPT.map(r => h('div', { class: 'learning-cmp-item' },
-          h('div', { class: 'learning-cmp-top' }, h('b', null, r.i + '. ' + r.change), r.best && chip('кандидат v4', 'info', 'flask')),
-          h('div', { class: 'small num soft' }, 'Быстрая проверка, Δ к v3: ', smokeEl(r), ' · полный: ', fullEl(r), ' · ≈ ' + r.tok + ' тыс. токенов'))))
-      : UI.table({
-          columns: [
-            { label: '№', render: r => String(r.i), width: '40px' },
-            { label: 'Что изменили', render: r => h('span', null, r.change, r.best && [' ', chip('кандидат v4', 'info', 'flask')]) },
-            { label: 'Быстрая проверка · ' + SMOKE + ', Δ к v3', align: 'r', render: smokeEl },
-            { label: 'Полный · ' + HOLDOUT, align: 'r', render: fullEl },
-            { label: 'Токенов', align: 'r', render: r => '≈ ' + r.tok + ' тыс.' },
-          ],
-          rows: POPT,
-        });
-    UI.modal({
-      title: 'Подбор инструкций модели: журнал',
-      wide: true,
-      body: h('div', { class: 'stack' },
-        h('p', { class: 'small soft' }, 'Каждый вариант — быстрая проверка на ' + SMOKE + ' событиях (≈ ' + fmt.usd(SMOKE_COST) + '), лучший — полный прогон на ' + HOLDOUT + ' (≈ ' + fmt.usd(FULL_COST) + '). Все через Batch API, из отдельного бюджета экспериментов. Ниже лог-лосс — лучше.'),
-        list,
-        hint('На ' + SMOKE + ' событиях разница меньше ±0,02 — шум: быстрая проверка только отсеивает явно плохие правки. Решение по варианту — по полному прогону и правилу приема версий.')),
-      actions: close => [button('Закрыть', { kind: 'primary', onClick: close })],
+  function reportsPanel() {
+    if (st.empty) return card({ class: 'learning-card', title: 'Еженедельные отчеты', subtitle: 'Понедельник, 07:00 по времени ' + tzCity() + ' · в центре уведомлений', body: UI.empty('Отчетов пока нет. Первый придет в понедельник ' + fmt.date(L.nextReport) + ' в 07:00 — даже если за неделю не было ставок, в нем будет расход и состояние модели.') });
+    const reps = L.reportWeeks.map(w => L.weekReport(w));
+    const last = reps[0];
+    const lastCard = card({
+      class: 'learning-card', eyebrow: 'Последний отчет', title: 'Неделя ' + fmt.date(last.from) + ' – ' + fmt.date(last.to),
+      subtitle: 'Пришел ' + wday(last.sentAt) + ' ' + dayTime(last.sentAt) + ' по времени ' + tzCity() + ' · следующий — ' + wday(L.nextReport) + ' ' + fmt.date(L.nextReport) + ', 07:00',
+      actions: [button('Настроить', { kind: 'ghost', size: 'sm', icon: 'sliders', href: '#profile-notifications' })],
+      body: reportBlock(last),
     });
+    const older = card({
+      class: 'learning-card', title: 'Прошлые недели', subtitle: 'Хранятся все отчеты, они же в экспорте данных',
+      body: h('div', { class: 'learning-rlist' }, reps.slice(1).map(r => h('button', { type: 'button', class: 'learning-rrow', on: { click: () => reportModal(r) } },
+        h('span', { style: 'min-width:0' }, h('b', null, fmt.date(r.from) + ' – ' + fmt.date(r.to)), h('small', null, r.n + ' ' + fmt.plural(r.n, 'ставка', 'ставки', 'ставок') + ' · ROI ' + (r.roi == null ? '—' : fmt.signedPct(r.roi)) + ' · CLV ' + (r.clv == null ? '—' : fmt.signedPct(r.clv)))),
+        h('span', { class: ['small', r.profit > 0 ? 'good-text' : r.profit < 0 ? 'bad-text' : 'muted'], style: 'font-weight:600;white-space:nowrap' }, fmt.signedMoney(r.profit)),
+        icon('chevronRight')))),
+    });
+    return h('div', { class: 'learning-panel' }, lastCard, older);
+  }
+  function reportModal(r) {
+    UI.modal({ title: 'Отчет: ' + fmt.date(r.from) + ' – ' + fmt.date(r.to), wide: true, body: reportBlock(r), actions: close => [button('Закрыть', { kind: 'primary', onClick: close })] });
     settleModal();
-  }
-
-  function sftModal() {
-    const steps = [
-      ['Собрать примеры из снимков', 'Вход — обезличенное досье, цель p — вероятность своей ML-модели (или рынка без маржи), обоснование — шаблон из признаков. Claude не нужен, $0.'],
-      ['Анонимизировать и разделить по времени', 'Как в датасете выше: обучающая, проверочная и тестовая части без пересечений по датам, игроки — «A / B».'],
-      ['Дообучить LoRA', 'r = 16 на открытой модели 0,5–3B (сверить лицензию) в Colab с T4, ≈ 2–4 часа.'],
-      ['Сравнить на тесте', 'Доля валидного JSON, лог-лосс и калибровка — против учителя и той же модели без дообучения.'],
-      ['Отдельным экспериментом — рассуждения Claude', 'Только после проверки актуальных условий Anthropic: они ограничивают обучение других моделей на его ответах.'],
-    ];
-    UI.modal({
-      title: 'План: SFT + LoRA',
-      body: h('div', { class: 'stack', style: 'gap:14px' },
-        h('ol', { class: 'learning-rules' }, steps.map(([t, d], i) => h('li', null, h('span', { 'aria-hidden': 'true' }, String(i + 1)), h('div', null, h('b', null, t), h('span', { class: 'soft' }, d))))),
-        UI.callout('info', 'info', 'Честно: такая модель повторит учителя, но не обгонит ни его, ни рынок. Цель — ваш опыт: SFT, LoRA и честная оценка. На ставки она не влияет.'),
-        UI.callout('warn', 'alert', 'Ответы Claude в обучающие данные по умолчанию не попадают: условия использования Anthropic ограничивают обучение других моделей на них.')),
-      actions: close => [button('Понятно', { kind: 'primary', onClick: close })],
-    });
-    settleModal();
-  }
-
-  function labPanel() {
-    return h('div', { class: 'learning-panel' },
-      UI.callout('warn', 'flask', h('b', null, 'Лаборатория — учебная зона. '), 'Результаты отсюда не влияют на ставки, пока эксперимент не обгонит активную стратегию на отложенной выборке по тем же правилам, что и версии стратегии.'),
-      datasetCard(),
-      h('div', { class: 'row-between' }, h('div', { style: 'min-width:0' }, h('h3', null, 'Эксперименты'), h('p', { class: 'small muted' }, 'Сначала дешевое и без дообучения, потом — свое обучение LLM'))),
-      experiments(),
-      h('p', { class: 'learning-doc' }, icon('book'), h('span', null, 'Подробнее в документе ', h('span', { class: 'mono' }, 'LLM_LEARNING.md'), ': как собрать датасет, почему делить по времени, SFT → оценка → RL.')));
   }
 
   // ---------- регистрация ----------
+  function build() {
+    UI.clear(root);
+    tilesSlot = h('div', { class: 'learning-tiles', role: 'group', 'aria-label': 'Что учится сейчас' });
+    tabsSlot = h('div', { style: 'min-width:0' }, makeTabs());
+    panel = h('div', { class: 'learning-panel', id: 'learning-panel', role: 'tabpanel' });
+    drawTiles(); drawPanel();
+    UI.append(root, [headBlock(), demoBar(), tilesSlot, cycleCard(), h('section', { class: 'learning-sections', 'aria-label': 'Разделы обучения' }, tabsSlot, panel)]);
+  }
   UI.register('learning', {
     title: 'Обучение модели',
-    render(root, param) {
+    render(host, param) {
+      root = host;
       const p = param === 'compare' ? 'versions' : param;
-      if (p && TABS.some(t => t.id === p)) {
-        st.tab = p;
-        try { sessionStorage.setItem('capper.learning.tab', p); } catch (e) { /* ок */ }
-      }
-      tilesSlot = h('div', { class: 'learning-tiles', role: 'group', 'aria-label': 'Что учится сейчас' });
-      tabsSlot = h('div', { style: 'min-width:0' }, makeTabs());
-      panel = h('div', { class: 'learning-panel', id: 'learning-panel', role: 'tabpanel' });
-      drawTiles();
-      drawPanel();
-      UI.append(root, [
-        headBlock(),
-        tilesSlot,
-        cycleCard(),
-        h('section', { class: 'learning-sections', 'aria-label': 'Разделы обучения' }, tabsSlot, panel),
-      ]);
+      if (param === 'empty') st.empty = true;
+      if (p && TABS.some(t => t.id === p)) { st.tab = p; try { sessionStorage.setItem('capper.learning.tab', p); } catch (e) { /* ок */ } }
+      build();
       if (param === 'compare') setTimeout(compareModal, 0);
     },
   });
