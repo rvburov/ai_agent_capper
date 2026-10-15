@@ -213,8 +213,8 @@ async def test_update_from_folders_and_repeat(
 
     # Ход работы и итог — по-русски, с каждым шагом
     text_out = "\n".join(said)
-    assert "== Шаг 1 из 4. Архив Сакманна: годы 2023, 2024, из папки" in text_out
-    assert "== Шаг 4 из 4. Пересчет Эло" in text_out
+    assert "== Шаг 1 из 5. Архив Сакманна: годы 2023, 2024, из папки" in text_out
+    assert "== Шаг 4 из 5. Пересчет Эло" in text_out
     assert "Данные: Jeff Sackmann / Tennis Abstract, CC BY-NC-SA 4.0" in text_out
     # Ход работы шагов — с отступом, по файлу и по этапу, сразу, а не только в итоге
     assert any(line.startswith("  atp_players.csv: получен, ") for line in said)
@@ -301,6 +301,7 @@ async def test_tennis_data_blocked_does_not_stop_other_steps(
         ("tennis_data", "failed"),
         ("players_link", "ok"),
         ("elo", "ok"),
+        ("settle", "ok"),
     ]
     error = step(result, "tennis_data").error or ""
     assert "ответ 403" in error
@@ -312,10 +313,16 @@ async def test_tennis_data_blocked_does_not_stop_other_steps(
     assert any(line.startswith("  tennis-data.co.uk — ошибка за ") for line in lines)
     assert lines[-1].startswith(
         "Есть ошибки: tennis-data.co.uk. Выполнены шаги: Архив Сакманна, Привязка старого "
-        "бота, Пересчет Эло."
+        "бота, Пересчет Эло, Расчет по архиву."
     )
     runs = dict((await db.execute(select(IngestionRun.source, IngestionRun.status))).all())
-    assert runs == {"sackmann": "ok", "tennis_data": "failed", "players_link": "ok", "elo": "ok"}
+    assert runs == {
+        "sackmann": "ok",
+        "tennis_data": "failed",
+        "players_link": "ok",
+        "elo": "ok",
+        "settle": "ok",
+    }
     assert (await db.scalar(select(func.count()).select_from(PlayerRating)) or 0) > 0
 
 
@@ -376,7 +383,7 @@ async def test_skip_elo_and_busy(
     )
     assert result.ok
     assert step(result, "elo").status == "skipped"
-    assert "--skip-elo" in summary_lines(result)[-2]
+    assert "--skip-elo" in summary_lines(result)[-3]
     assert await db.scalar(select(func.count()).select_from(PlayerRating)) == 0
 
     # Другое обновление держит блокировку: второе не начинается

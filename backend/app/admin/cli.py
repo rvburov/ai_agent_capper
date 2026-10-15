@@ -34,6 +34,10 @@ Claude (этап 3):
     python -m app.admin.cli matches-merge --from 40 --into 41 [--yes]
     python -m app.admin.cli elo-current
 
+Данные (этап 5, app/services/data_uploads.py):
+
+    python -m app.admin.cli data-upload ФАЙЛ.xlsx
+
 Пароль и ключ вводятся без отображения (getpass) или одной строкой из stdin
 (--password-stdin, --key-stdin) — так их не видно в истории команд и в списке процессов.
 Каждая команда, которая меняет пользователей, игроков или настройки агента, пишет
@@ -54,6 +58,7 @@ import re
 import sys
 from collections.abc import Callable, Sequence
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
@@ -74,11 +79,11 @@ from app.core.errors import AppError
 from app.core.i18n import t
 from app.core.security.passwords import check_new_password, hash_password_async
 from app.db.models import BetLeg, Match, OddsSnapshot, Player, Tournament, User
-from app.db.session import get_session
+from app.db.session import create_engine, create_sessionmaker, get_session
 from app.ingest import players_link
 from app.ingest.runs import IngestError, update_lock
 from app.ml import elo
-from app.services import access_codes, admin_key, admin_users, agent_smoke, players
+from app.services import access_codes, admin_key, admin_users, agent_smoke, data_uploads, players
 from app.services.app_settings import get_app_settings
 
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -810,6 +815,53 @@ async def _elo_current(args: argparse.Namespace) -> None:
     _say(t("cli.elo_current_done", players=players_count, ranked=ranked))
 
 
+async def _data_upload(args: argparse.Namespace) -> None:
+    """Файл tennis-data тем же кодом, что кнопка на сайте: загрузка в data_uploads, журнал
+    (data_upload, source = terminal) и обработка сразу, без очереди воркера."""
+    path = Path(args.file)
+    if not await asyncio.to_thread(path.is_file):
+        raise CliError("data_upload.not_found", path=str(path))
+    content = await asyncio.to_thread(path.read_bytes)
+    engine = create_engine()
+    try:
+        factory = create_sessionmaker(engine)
+        async with factory() as db:
+            upload = await data_uploads.create_upload(
+                db, actor=None, ip=None, filename=path.name, content=content
+            )
+        _say(t("cli.data_upload.accepted", filename=upload.filename, id=upload.id))
+        status = await data_uploads.process_upload(factory, upload.id)
+        async with factory() as db:
+            if status == "busy":
+                await data_uploads.mark_failed(db, upload.id, t("cli.data_upload.busy"))
+                raise CliError("data_upload.busy")
+            out = await data_uploads.get_upload(db, upload.id)
+    finally:
+        await engine.dispose()
+    report = out.report
+    if report is not None and report.unchanged:
+        _say(t("cli.data_upload.unchanged"))
+    if report is not None:
+        _say(
+            t(
+                "cli.data_upload.result",
+                year=out.year,
+                rows=report.file_rows,
+                new=report.new_matches,
+                updated=report.updated_matches,
+                matches_to=report.matches_to or "—",
+                settled=report.settled_bets,
+                people=report.people,
+                closing=report.closing,
+                linked=report.linked,
+                unlinked=report.unlinked,
+                waiting=report.waiting,
+            )
+        )
+    if out.status == "failed":
+        raise CliError("data_upload.failed", error=out.error or "")
+
+
 def _add_player_commands(command: Callable[[str, str], argparse.ArgumentParser]) -> None:
     find = command("players-find", "players_find")
     find.add_argument("query", help=t("cli.help.players_query"))
@@ -855,6 +907,10 @@ def _add_player_commands(command: Callable[[str, str], argparse.ArgumentParser])
 
     current = command("elo-current", "elo_current")
     current.set_defaults(handler=_elo_current)
+
+    upload = command("data-upload", "data_upload")
+    upload.add_argument("file", help=t("cli.help.data_upload_file"))
+    upload.set_defaults(handler=_data_upload)
 
 
 # --- разбор аргументов ---

@@ -74,6 +74,7 @@ from app.schemas.analyses import TextKey
 from app.schemas.analytics import (
     AnalyticsFiltersIn,
     AnalyticsOut,
+    BankFlowOut,
     BrierOut,
     BrierPointOut,
     CalibrationBinOut,
@@ -110,7 +111,9 @@ from app.services.app_settings import get_app_settings
 from app.services.bank import (
     PERIOD_DAYS,
     DayCapital,
+    DayFlow,
     daily_capital,
+    daily_flows,
     local_today,
     period_start,
     user_zone,
@@ -542,6 +545,8 @@ class Inputs:
     double_max: Decimal
     with_ci: bool = True
     bootstrap: int = BOOTSTRAP_SAMPLES
+    # Пополнения, выводы и корректировки по дням и видам (ряд банка, В7)
+    flows: tuple[DayFlow, ...] = ()
 
 
 async def gather_inputs(
@@ -571,9 +576,11 @@ async def gather_inputs(
         await db.scalars(select(Bet.id).where(*selected_conds, Bet.status != "open"))
     )
     equity: list[DayCapital] | None = None
+    flows: tuple[DayFlow, ...] = ()
     if not filters.filtered:
         anchor = window.first - timedelta(days=1) if window.first is not None else None
         equity = await daily_capital(db, user, anchor, window.last)
+        flows = tuple(await daily_flows(db, user))
     params: StrategyParams = params_of(await active_version(db, user.id))
     return Inputs(
         filters=filters,
@@ -588,6 +595,7 @@ async def gather_inputs(
         bands=params.stake_bands,
         double_max=params.double_total[1],
         with_ci=with_ci,
+        flows=flows,
     )
 
 
@@ -1177,28 +1185,73 @@ def max_drawdown(points: Sequence[DayCapital]) -> float:
     return worst
 
 
+@dataclass(frozen=True)
+class _Start:
+    """Старт периода ряда банка: день, сумма, изменение за период долей от нее; opening —
+    день первого пополнения, когда старт считается от первого дня банка (иначе None);
+    opening_flow — само это пополнение (оно — старт, а не отметка)."""
+
+    day: date
+    amount: Decimal
+    change: float | None
+    opening: date | None = None
+    opening_flow: DayFlow | None = None
+
+
 def _period_start(
     inputs: Inputs, points: Sequence[tuple[date, Decimal]], kind: str, base: Decimal
-) -> tuple[date, Decimal, float | None]:
-    """Старт периода: день, сумма и изменение за период долей от нее (главная и
+) -> _Start:
+    """Старт периода (В7, Р25): день, сумма и изменение за период долей от нее (главная и
     «Аналитика» показывают их как есть).
 
     Обычно старт — капитал на конец дня перед периодом (base), изменение — прибыль
     периода к нему. Если банк появился внутри периода (капитал перед ним — 0) или выбрано
-    «все время», старт — первый день банка, сумма — вложенное (пополнения минус выводы с
-    корректировками), изменение — капитал на конец периода к вложенному. Так в макете: до
-    начала истории банк равен стартовому. У ряда результата (kind = result) старт — ноль."""
+    «все время», старт — первый день банка, сумма — первое пополнение (пополнения его дня
+    по поясу участника; если пополнений нет — капитал первого дня), изменение — капитал на
+    конец периода к вложенному (пополнения минус выводы с корректировками). Вывод или
+    корректировка в день первого пополнения и пополнения позже двигают пунктир «вложено» и
+    в старт не входят. У ряда результата (kind = result) старт — ноль."""
     start = points[0][0]
     if kind != "bank" or inputs.equity is None:
-        return start, base, None
+        return _Start(start, base, None)
     first = next((index for index, (_, value) in enumerate(points) if value != 0), None)
     if first is not None and (inputs.window.first is None or base == 0):
         day = points[first][0]
-        invested = sum((point.flows for point in inputs.equity[first:]), _ZERO)
-        if invested > 0:
-            return day, invested, float((points[-1][1] - invested) / invested)
-        return day, points[first][1], None
-    return start, base, float(inputs.current.profit / base) if base > 0 else None
+        tail = inputs.equity[first:]
+        invested = sum((point.flows for point in tail), _ZERO)
+        opening = next(
+            (flow for flow in inputs.flows if flow.kind == "deposit" and flow.day >= day), None
+        )
+        amount = opening.amount if opening is not None else points[first][1]
+        change = float((points[-1][1] - invested) / invested) if invested > 0 else None
+        return _Start(day, amount, change, opening.day if opening is not None else day, opening)
+    return _Start(start, base, float(inputs.current.profit / base) if base > 0 else None)
+
+
+def _bank_steps(inputs: Inputs, begin: _Start) -> tuple[dict[date, Decimal], list[BankFlowOut]]:
+    """Пунктир «вложено» по дням и отметки движения банка (В7). От первого дня банка —
+    пополнения нарастающим итогом (до первого пополнения — 0), отметки — все движения
+    после первого пополнения, в том числе вывод в его день; иначе — капитал на начало
+    периода плюс пополнения и минус выводы внутри периода."""
+    equity = inputs.equity or []
+    level = _ZERO if begin.opening is not None else begin.amount
+    steps: dict[date, Decimal] = {}
+    for point in equity:
+        if begin.opening is not None:
+            if point.day >= begin.day:
+                level += point.flows
+        elif point.day > begin.day:
+            level += point.flows
+        steps[point.day] = level
+    after = begin.opening if begin.opening is not None else begin.day
+    marks = [
+        BankFlowOut(day=flow.day, kind=flow.kind, amount=flow.amount)  # type: ignore[arg-type]
+        for flow in inputs.flows
+        if flow.day <= inputs.window.last
+        and (after < flow.day or (flow.day == after and begin.opening_flow is not None))
+        and flow is not begin.opening_flow
+    ]
+    return steps, marks
 
 
 def series_block(inputs: Inputs, chosen: Sequence[BetRow]) -> SeriesOut:
@@ -1235,10 +1288,15 @@ def series_block(inputs: Inputs, chosen: Sequence[BetRow]) -> SeriesOut:
     if not points:
         points = [(window.last, _ZERO)]
     start, base = points[0]
-    start_day, start_amount, change_share = _period_start(inputs, points, kind, base)
+    begin = _period_start(inputs, points, kind, base)
+    start_day, start_amount, change_share = begin.day, begin.amount, begin.change
+    marks: list[BankFlowOut] = []
+    invested: list[Decimal | None] = [None] * len(points)
     if kind == "bank":
         # Дни до первой записи журнала (банка еще не было) не рисуются
         points = [point for point in points if point[0] >= start_day] or points[-1:]
+        steps, marks = _bank_steps(inputs, begin)
+        invested = [steps.get(day, start_amount) for day, _ in points]
     values = [value for _, value in points]
     rows_from = window.first if window.first is not None else start
     by_day = dict(points)
@@ -1285,8 +1343,13 @@ def series_block(inputs: Inputs, chosen: Sequence[BetRow]) -> SeriesOut:
         max_drawdown=drawdown,
         best=max(values),
         worst=min(values),
-        points=[SeriesPointOut(day=day, value=value) for day, value in points],
+        points=[
+            SeriesPointOut(day=day, value=value, invested=level)
+            for (day, value), level in zip(points, invested, strict=True)
+        ],
         rows=rows,
+        flows=marks,
+        flows_total=sum((mark.amount for mark in marks), _ZERO),
     )
 
 

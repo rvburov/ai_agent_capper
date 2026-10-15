@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     SmallInteger,
     String,
     Table,
@@ -48,6 +49,8 @@ ODDS_KINDS = ("user", "opening", "closing", "api", "archive")
 # user — турнир из ввода участника (этап 3)
 TOURNAMENT_SOURCES = ("sackmann", "tennis_data", "legacy", "user")
 INGESTION_STATUSES = ("running", "ok", "failed")
+# Загрузка файла tennis-data с сайта (этап 5, В1): ждет воркера, идет, готова, ошибка
+UPLOAD_STATUSES = ("queued", "running", "done", "failed")
 
 
 # Формы имени игрока для поиска (app/services/players.py): как есть, с «е» вместо «е с
@@ -401,7 +404,38 @@ class IngestionRun(Base):
     details: Mapped[dict[str, Any]] = mapped_column(server_default=text("'{}'::jsonb"))
 
 
+class DataUpload(CreatedAtMixin, Base):
+    """Файл tennis-data ГОД.xlsx, загруженный администратором на сайте (этап 5, В1):
+    обрабатывает воркер (app/services/data_uploads.py). content — сам файл, пока его не
+    разобрали (потом стирается); year — год из имени файла (нет в имени — воркер берет его
+    по датам строк); step — шаг в работе; report — отчет загрузки без сумм и имен
+    участников (Р14); run_ids — запуски шагов в ingestion_runs."""
+
+    __tablename__ = "data_uploads"
+    __table_args__ = (
+        check_in("status", UPLOAD_STATUSES, "status"),
+        CheckConstraint("size_bytes >= 0", name="size_non_negative"),
+    )
+
+    id: Mapped[BigIntPK]
+    uploaded_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    filename: Mapped[str] = mapped_column(String(255))
+    size_bytes: Mapped[int]
+    sha256: Mapped[Hash64]
+    year: Mapped[int | None] = mapped_column(SmallInteger)
+    status: Mapped[str] = mapped_column(String(16), server_default="queued")
+    step: Mapped[str | None] = mapped_column(String(32))
+    content: Mapped[bytes | None] = mapped_column(LargeBinary)
+    report: Mapped[dict[str, Any]] = mapped_column(server_default=text("'{}'::jsonb"))
+    error: Mapped[str | None]
+    started_at: Mapped[datetime | None]
+    finished_at: Mapped[datetime | None]
+
+
 Index("ix_ingestion_runs_source_started_at", IngestionRun.source, IngestionRun.started_at.desc())
+Index("ix_data_uploads_created_at", DataUpload.created_at.desc())
 Index(
     "ix_player_news_player_id_published_at",
     PlayerNews.player_id,

@@ -443,6 +443,37 @@ async def daily_capital(
     return points
 
 
+# Пополнения, выводы и корректировки по дням пояса участника и виду записи (без пар
+# «запись и ее сторно»): отметки на «Банке по дням» (В7, Р25)
+_FLOWS_SQL = (
+    _EVENTS_SQL
+    + """
+SELECT (at AT TIME ZONE :tz)::date AS day, kind, sum(amount) AS amount
+FROM live WHERE bet_id IS NULL GROUP BY 1, 2 ORDER BY 1, 2
+"""
+)
+
+
+@dataclass(frozen=True)
+class DayFlow:
+    """Пополнения, выводы или корректировки одного дня: вид записи и сумма со знаком."""
+
+    day: date
+    kind: str
+    amount: Decimal
+
+
+async def daily_flows(db: AsyncSession, user: User) -> list[DayFlow]:
+    """Движение банка по дням пояса участника и видам (deposit, withdrawal, correction)."""
+    zone = user_zone(user.tz)
+    rows = await db.execute(text(_FLOWS_SQL), {"user_id": user.id, "tz": zone.key})
+    return [
+        DayFlow(day=row.day, kind=row.kind, amount=Decimal(row.amount))
+        for row in rows
+        if Decimal(row.amount) != 0
+    ]
+
+
 async def daily_equity(
     db: AsyncSession, user: User, first: date | None, last: date
 ) -> list[BankPointOut]:

@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core.deps import CurrentUser, DbSession
 from app.schemas.bets import (
+    BetCountsOut,
     BetFiltersIn,
     BetIn,
     BetItemOut,
@@ -62,6 +63,13 @@ async def bets_summary(
     """Итоги по тем же фильтрам: рассчитано, выигрыш · проигрыш · возврат, оборот,
     прибыль, ROI (возвраты — отдельно), средний CLV без ставок старого бота."""
     return await bets_service.bets_summary(db, user, filters)
+
+
+@router.get("/bets/counts")
+async def bet_counts(user: CurrentUser, db: DbSession) -> BetCountsOut:
+    """Счетчики для меню: открытых ставок и из них ждущих результата (все матчи уже
+    прошли по поясу участника)."""
+    return await bets_service.bet_counts(db, user)
 
 
 @router.get(

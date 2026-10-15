@@ -341,6 +341,7 @@ async def test_closing_and_clv(member: Signed, maker: BetMaker, db: AsyncSession
         "bookmaker": None,
         "source": "user",
         "q_close": pytest.approx(q),
+        "unverified": False,
     }
     assert leg["clv"] == pytest.approx(1.85 / 1.75 - 1)
     assert leg["clv_fair"] == pytest.approx(1.85 * q - 1)

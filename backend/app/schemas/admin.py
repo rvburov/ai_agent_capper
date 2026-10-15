@@ -62,6 +62,12 @@ AuditAction = Literal[
     "budget_change",
     "agent_config_change",
     "settings_change",
+    "data_upload",
+    "eval_set",
+    "eval_run",
+    "version_on",
+    "lesson_on",
+    "model_on",
 ]
 
 

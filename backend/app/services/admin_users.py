@@ -50,6 +50,7 @@ from app.db.models import (
     Notification,
     NotificationPref,
     PlayLimit,
+    Postmortem,
     Prediction,
     PushSubscription,
     RecoveryCode,
@@ -58,6 +59,7 @@ from app.db.models import (
     User,
     UserSecret,
     UserSession,
+    WeeklyReport,
 )
 from app.schemas.admin import (
     AdminUserDetailOut,
@@ -513,6 +515,10 @@ async def _erase_personal_data(db: AsyncSession, user: User) -> None:
         delete(Bet).where(Bet.user_id == uid),
         delete(Analysis).where(Analysis.user_id == uid),
         delete(Lesson).where(Lesson.user_id == uid),
+        # Этап 5: разбор матча общий (В3) — остается без пути к участнику; еженедельные
+        # отчеты — личные
+        update(Postmortem).where(Postmortem.user_id == uid).values(user_id=None, bet_id=None),
+        delete(WeeklyReport).where(WeeklyReport.user_id == uid),
         # Прогоны eval этих стратегий удаляются каскадом
         delete(StrategyVersion).where(StrategyVersion.user_id == uid),
         delete(UserSecret).where(UserSecret.user_id == uid),

@@ -1350,6 +1350,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/data/tennis-data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Tennis Data
+         * @description Загрузить файл tennis-data ГОД.xlsx (до 10 МБ): быстрая проверка сразу, разбор
+         *     таблицы и обработка — задачей воркера. Ответ — загрузка в очереди; ход и отчет — GET
+         *     …/uploads/{id}. Файл больше 10 МБ — 413; не xlsx, распакованный больше 100 МБ, больше
+         *     20 000 строк или год вне архива — 422. Нет нужных колонок — загрузка failed с текстом.
+         */
+        post: operations["upload_tennis_data_api_admin_data_tennis_data_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/data/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Uploads
+         * @description Свежесть файла tennis-data и последние 20 загрузок, новые сверху.
+         */
+        get: operations["list_uploads_api_admin_data_uploads_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/data/uploads/{upload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Upload
+         * @description Загрузка: статус, шаг в работе и отчет (когда готов). Нет такой — 404.
+         */
+        get: operations["get_upload_api_admin_data_uploads__upload_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analyses": {
         parameters: {
             query?: never;
@@ -1536,6 +1599,27 @@ export interface paths {
          *     прибыль, ROI (возвраты — отдельно), средний CLV без ставок старого бота.
          */
         get: operations["bets_summary_api_bets_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bets/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bet Counts
+         * @description Счетчики для меню: открытых ставок и из них ждущих результата (все матчи уже
+         *     прошли по поясу участника).
+         */
+        get: operations["bet_counts_api_bets_counts_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2824,6 +2908,24 @@ export interface components {
             clv: components["schemas"]["ClvOut"];
         };
         /**
+         * ArchiveFileStatusOut
+         * @description Свежесть файла tennis-data: последняя успешная загрузка архива (любым путем) и
+         *     последний день матча в нем; stale — не загружали дольше stale_days дней (тогда
+         *     приходит напоминание); max_mb — предел размера файла.
+         */
+        ArchiveFileStatusOut: {
+            /** Last Load */
+            last_load: string | null;
+            /** Matches To */
+            matches_to: string | null;
+            /** Stale Days */
+            stale_days: number;
+            /** Stale */
+            stale: boolean;
+            /** Max Mb */
+            max_mb: number;
+        };
+        /**
          * ArchiveInfoOut
          * @description Свежесть архива матчей: data_to — последний день матча с результатом в базе,
          *     last_load — последняя успешная загрузка, stale — архив устарел (правило уведомления
@@ -2920,7 +3022,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change";
+            action: "invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change" | "data_upload" | "eval_set" | "eval_run" | "version_on" | "lesson_on" | "model_on";
             /** Target User Id */
             target_user_id: number | null;
             /** Target Name */
@@ -2997,6 +3099,25 @@ export interface components {
             reversed_by: number | null;
             /** Balance After */
             balance_after: string;
+        };
+        /**
+         * BankFlowOut
+         * @description Отметка на ряду банка (В7): пополнение, вывод или корректировка за день, сумма со
+         *     знаком.
+         */
+        BankFlowOut: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "deposit" | "withdrawal" | "correction";
+            /** Amount */
+            amount: string;
         };
         /** BankHistoryOut */
         BankHistoryOut: {
@@ -3080,6 +3201,17 @@ export interface components {
             legs: components["schemas"]["BetLegBrief"][];
         };
         /**
+         * BetCountsOut
+         * @description Счетчики ставок участника для меню: открытых и из них ждущих результата (все матчи
+         *     уже прошли).
+         */
+        BetCountsOut: {
+            /** Open */
+            open: number;
+            /** Awaiting Result */
+            awaiting_result: number;
+        };
+        /**
          * BetIn
          * @description currency — валюта суммы в форме (FormCurrency): сменили валюту, пока форма была
          *     открыта, — 409 common.currency_changed, сумма в старой валюте не запишется.
@@ -3106,7 +3238,10 @@ export interface components {
          *     капитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у
          *     открытой), то же число, что equity_after в последних ставках главной. updated_at —
          *     версия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,
-         *     app/services/bet_versions.py).
+         *     app/services/bet_versions.py). Этап 5: archive_to — у рассчитанной по архиву
+         *     (settled_by = auto) последний день матчей в архиве на момент расчета («авто · архив
+         *     ‹дата›»); awaiting_result — открытая ставка, все матчи которой уже прошли (по поясу
+         *     участника): ждет результата из архива или от участника.
          */
         BetItemOut: {
             /** Id */
@@ -3161,6 +3296,10 @@ export interface components {
             verdict: ("legacy" | "void" | "no_closing" | "edge_confirmed" | "won_against_market" | "variance" | "model_error") | null;
             /** Legs */
             legs: components["schemas"]["BetLegItemOut"][];
+            /** Archive To */
+            archive_to: string | null;
+            /** Awaiting Result */
+            awaiting_result: boolean;
         };
         /** BetLegBrief */
         BetLegBrief: {
@@ -3187,7 +3326,9 @@ export interface components {
          *     edge — вероятность прогноза минус 1/кэф (пусто — прогноза нет). score_outcomes — у
          *     открытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для
          *     окна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все
-         *     равно за участником (В16).
+         *     равно за участником (В16). archive_result и archive_score — исход и счет (первым —
+         *     игрок 1) по архиву, когда он разошелся с расчетом ставки (этап 5, Т3): банк не
+         *     меняли, участник проверяет сам.
          */
         BetLegItemOut: {
             /** Id */
@@ -3229,6 +3370,10 @@ export interface components {
             score_outcomes: {
                 [key: string]: "win" | "loss" | "void";
             } | null;
+            /** Archive Result */
+            archive_result: ("win" | "loss" | "void") | null;
+            /** Archive Score */
+            archive_score: string | null;
         };
         /** BetLegOut */
         BetLegOut: {
@@ -3577,6 +3722,7 @@ export interface components {
          * ClosingOut
          * @description Закрывающий кэф ноги: на свой исход и обратный, чей он (by; bookmaker — название
          *     своего букмекера), откуда, вероятность своего исхода без маржи при двух сторонах.
+         *     unverified — момент снятия кэфа не проверен (закрытие из архива tennis-data, Т1).
          */
         ClosingOut: {
             /** Odds */
@@ -3597,6 +3743,8 @@ export interface components {
             source: "user" | "archive";
             /** Q Close */
             q_close: number | null;
+            /** Unverified */
+            unverified: boolean;
         };
         /**
          * ClosingUpdateIn
@@ -3885,7 +4033,8 @@ export interface components {
          * DashboardOut
          * @description Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,
          *     пик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,
-         *     до OPEN_LIMIT; всего — open_count на open_stake); admin — только у администратора.
+         *     до OPEN_LIMIT; всего — open_count на open_stake), из них awaiting_count ждут результата
+         *     (все матчи прошли, этап 5); admin — только у администратора.
          */
         DashboardOut: {
             /**
@@ -3931,9 +4080,107 @@ export interface components {
             open_count: number;
             /** Open Stake */
             open_stake: string;
+            /** Awaiting Count */
+            awaiting_count: number;
             /** My Matches */
             my_matches: components["schemas"]["MyMatchOut"][];
             admin: components["schemas"]["AdminAttentionOut"] | null;
+        };
+        /**
+         * DataUploadOut
+         * @description Загрузка файла: кто и когда загрузил, размер, год (None — в имени файла его нет, и
+         *     воркер еще не взял его по датам строк), статус и шаг в работе, отчет (когда готов) и
+         *     ошибка.
+         */
+        DataUploadOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Filename */
+            filename: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Year */
+            year: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed";
+            /** Step */
+            step: ("tennis_data" | "players_link" | "elo" | "settle") | null;
+            /** Uploaded By */
+            uploaded_by: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Error */
+            error: string | null;
+            report: components["schemas"]["DataUploadReportOut"] | null;
+        };
+        /**
+         * DataUploadReportOut
+         * @description Отчет загрузки. file_rows — строк матчей в файле; unchanged — файл тот же, что в
+         *     прошлый раз (новых матчей нет); new_matches, updated_matches — матчи архива;
+         *     matches_to — последний день матча в архиве после загрузки. settled_bets у people
+         *     участников (legs событий); closing — событий П1/П2 с закрытием из архива; linked,
+         *     waiting, unlinked — матчи из анализов: привязаны, ждут следующего файла, не
+         *     привязаны; из непривязанных not_found — нет в архиве (только числом), остальные (до
+         *     50) — в unlinked_matches; conflicts — расхождения архива с ручным расчетом (деньги не
+         *     меняли); manual — снятие, неявка, неполный счет или нога на прошлой встрече пары
+         *     (исход вносит участник); legacy_legs — исходы событий экспрессов старого бота.
+         */
+        DataUploadReportOut: {
+            /** File Rows */
+            file_rows: number | null;
+            /** Unchanged */
+            unchanged: boolean;
+            /** New Matches */
+            new_matches: number;
+            /** Updated Matches */
+            updated_matches: number;
+            /** Matches To */
+            matches_to: string | null;
+            /** Settled Bets */
+            settled_bets: number;
+            /** People */
+            people: number;
+            /** Legs */
+            legs: number;
+            /** Closing */
+            closing: number;
+            /** Linked */
+            linked: number;
+            /** Waiting */
+            waiting: number;
+            /** Unlinked */
+            unlinked: number;
+            /** Not Found */
+            not_found: number;
+            /** Unlinked Matches */
+            unlinked_matches: components["schemas"]["UnlinkedMatchOut"][];
+            /** Conflicts */
+            conflicts: number;
+            /** Manual */
+            manual: number;
+            /** Legacy Legs */
+            legacy_legs: number;
+            /** Steps */
+            steps: components["schemas"]["UploadStepOut"][];
+        };
+        /**
+         * DataUploadsOut
+         * @description «Администрирование → Данные»: свежесть архива и последние загрузки, новые сверху.
+         */
+        DataUploadsOut: {
+            archive: components["schemas"]["ArchiveFileStatusOut"];
+            /** Uploads */
+            uploads: components["schemas"]["DataUploadOut"][];
         };
         /**
          * DecisionIn
@@ -4177,7 +4424,8 @@ export interface components {
          *     события — ноги всех ставок, свои вызовы Claude. legacy_period и legacy_no_result —
          *     для статуса импорта истории бота: период его ставок (null — ставок бота нет) и ноги
          *     рассчитанных экспрессов бота без исхода (бот не записывал исходы ног проигранных
-         *     экспрессов).
+         *     экспрессов); legacy_from_archive — ноги ставок бота, исход которых взят из архива
+         *     (этап 5, app/services/legacy_results.py).
          */
         ExportSummaryOut: {
             /** Bets */
@@ -4193,6 +4441,8 @@ export interface components {
             legacy_period: components["schemas"]["LegacyPeriodOut"] | null;
             /** Legacy No Result */
             legacy_no_result: number;
+            /** Legacy From Archive */
+            legacy_from_archive: number;
         };
         /** ExpressLeg */
         ExpressLeg: {
@@ -5236,7 +5486,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert";
+            kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert" | "bet_needs_result" | "settle_conflict" | "weekly_report" | "learning";
             /** On Site */
             on_site: boolean;
         };
@@ -5251,7 +5501,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert";
+            kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert" | "bet_needs_result" | "settle_conflict" | "weekly_report" | "learning";
             /** Group */
             group: string;
             /** On Site */
@@ -5404,6 +5654,10 @@ export interface components {
             verdict: ("legacy" | "void" | "no_closing" | "edge_confirmed" | "won_against_market" | "variance" | "model_error") | null;
             /** Legs */
             legs: components["schemas"]["BetLegItemOut"][];
+            /** Archive To */
+            archive_to: string | null;
+            /** Awaiting Result */
+            awaiting_result: boolean;
             /** Implied */
             implied: number[];
         };
@@ -6473,6 +6727,10 @@ export interface components {
          *     Р22: пополнение, вывод и корректировка — не просадка; best и worst — лучшая и худшая
          *     точка (у result худшая не выше нуля). rows — по неделям (период до 31 дня) или по
          *     месяцам.
+         *
+         *     В7 (Р25): у ряда банка points[].invested — пунктир «вложено» ступенькой, flows —
+         *     пополнения, выводы и корректировки внутри периода (отметки на линии), flows_total —
+         *     их сумма. Главное число периода — прибыль ставок и ROI (kpi), а не рост капитала.
          */
         SeriesOut: {
             /**
@@ -6515,8 +6773,17 @@ export interface components {
             points: components["schemas"]["SeriesPointOut"][];
             /** Rows */
             rows: components["schemas"]["SeriesRowOut"][];
+            /** Flows */
+            flows: components["schemas"]["BankFlowOut"][];
+            /** Flows Total */
+            flows_total: string;
         };
-        /** SeriesPointOut */
+        /**
+         * SeriesPointOut
+         * @description Точка ряда: значение на конец дня; invested — «вложено» ступенькой (у ряда банка:
+         *     старт периода плюс пополнения и минус выводы с корректировками внутри периода по
+         *     этот день; у ряда результата — null).
+         */
         SeriesPointOut: {
             /**
              * Day
@@ -6525,6 +6792,8 @@ export interface components {
             day: string;
             /** Value */
             value: string;
+            /** Invested */
+            invested: string | null;
         };
         /**
          * SeriesRowOut
@@ -7183,6 +7452,48 @@ export interface components {
             line_no: number;
             /** Text */
             text: string;
+        };
+        /**
+         * UnlinkedMatchOut
+         * @description Матч из анализов, который не привязан к архиву и ждет разбора командой
+         *     matches-merge: id матча, игроки, день ввода и причина (несколько кандидатов, конфликт
+         *     слияния).
+         */
+        UnlinkedMatchOut: {
+            /** Match Id */
+            match_id: number;
+            /** Player1 */
+            player1: string;
+            /** Player2 */
+            player2: string;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "ambiguous" | "conflict";
+        };
+        /**
+         * UploadStepOut
+         * @description Шаг обработки файла и его итог; error — текст ошибки шага.
+         */
+        UploadStepOut: {
+            /**
+             * Step
+             * @enum {string}
+             */
+            step: "tennis_data" | "players_link" | "elo" | "settle";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "failed" | "skipped";
+            /** Error */
+            error: string | null;
         };
         /**
          * UsageDayOut
@@ -9085,7 +9396,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 before_id?: number | null;
-                action?: ("invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change")[] | null;
+                action?: ("invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change" | "data_upload" | "eval_set" | "eval_run" | "version_on" | "lesson_on" | "model_on")[] | null;
             };
             header?: never;
             path?: never;
@@ -9864,6 +10175,102 @@ export interface operations {
             };
         };
     };
+    upload_tennis_data_api_admin_data_tennis_data_post: {
+        parameters: {
+            query: {
+                filename: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataUploadOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_uploads_api_admin_data_uploads_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataUploadsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_upload_api_admin_data_uploads__upload_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataUploadOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     list_analyses_api_analyses_get: {
         parameters: {
             query?: {
@@ -10228,6 +10635,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BetsSummaryOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    bet_counts_api_bets_counts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetCountsOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

@@ -180,6 +180,61 @@ def name_score(legacy_names: Iterable[str], archive_names: Iterable[str]) -> flo
     return _score(_forms(legacy_names, archive=False), _forms(archive_names, archive=True))
 
 
+class ArchiveNames:
+    """Игроки архива для поиска по имени при импорте старого бота (этап 5, Т23): то же
+    сходство фамилий, что у привязки (name_score). Формы имен игроков архива считаются один
+    раз; кандидаты для имени — те, у кого есть общие с ним триграммы."""
+
+    def __init__(self, players: Iterable[tuple[int, Sequence[str]]]) -> None:
+        self.forms: dict[int, list[_Form]] = {}
+        self.by_gram: dict[str, set[int]] = defaultdict(set)
+        for player_id, names in players:
+            forms = _forms([name for name in names if name], archive=True)
+            self.forms[player_id] = forms
+            for form in forms:
+                for gram in form.grams:
+                    self.by_gram[gram].add(player_id)
+
+    def find(self, names: Iterable[str]) -> tuple[int | None, bool]:
+        """Игрок архива для имен старого бота: (id, False) — явный лидер (оценка не ниже
+        STRONG_SCORE и на LEADER_MARGIN выше следующего); (None, True) — похожих
+        несколько, нужно решение человека (players-merge); (None, False) — похожих нет."""
+        legacy = _forms([name for name in names if name], archive=False)
+        candidates: set[int] = set()
+        for form in legacy:
+            for gram in form.grams:
+                candidates |= self.by_gram.get(gram, set())
+        scored = sorted(
+            ((_score(legacy, self.forms[pid]), pid) for pid in candidates),
+            key=lambda item: (-item[0], item[1]),
+        )
+        plausible = [(score, pid) for score, pid in scored if score >= NAME_THRESHOLD]
+        if not plausible:
+            return None, False
+        top, player_id = plausible[0]
+        second = plausible[1][0] if len(plausible) > 1 else 0.0
+        if top >= STRONG_SCORE and top - second >= LEADER_MARGIN:
+            return player_id, False
+        return None, True
+
+
+async def archive_names(db: AsyncSession) -> ArchiveNames:
+    """Игроки архива (есть sackmann_id или матч архива) с именами и псевдонимами."""
+    in_archive = or_(
+        Player.sackmann_id.is_not(None),
+        exists().where(
+            Match.source.in_(ARCHIVE_SOURCES),
+            or_(Match.player1_id == Player.id, Match.player2_id == Player.id),
+        ),
+    )
+    rows = await db.execute(
+        select(Player.id, Player.name, Player.name_ru, Player.aliases).where(in_archive)
+    )
+    return ArchiveNames(
+        (int(pid), [name, name_ru or "", *(aliases or [])]) for pid, name, name_ru, aliases in rows
+    )
+
+
 # --- привязка ---
 
 

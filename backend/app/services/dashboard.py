@@ -62,7 +62,7 @@ from app.services.admin_users import month_usage
 from app.services.ai_access import call_need_usd, limits_of, runs_out_on, threshold_level
 from app.services.app_settings import get_app_settings
 from app.services.bank import day_start, equity_after_bets, local_today, user_zone
-from app.services.bets import bank_out, bet_items
+from app.services.bets import bank_out, bet_counts, bet_items
 from app.services.data_status import (
     DATA_UPDATE_MINUTE,
     STALE_AFTER,
@@ -447,6 +447,7 @@ async def dashboard(
         open_bets=open_bets,
         open_count=open_count,
         open_stake=open_stake,
+        awaiting_count=(await bet_counts(db, user, moment)).awaiting_result,
         my_matches=await my_matches(db, user, zone, today, moment),
         admin=await admin_attention(db, moment) if user.role == "admin" else None,
     )

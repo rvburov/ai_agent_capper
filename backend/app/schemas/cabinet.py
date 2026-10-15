@@ -28,6 +28,10 @@ NotificationKind = Literal[
     "budget_80",
     "budget_100",
     "ai_alert",
+    "bet_needs_result",
+    "settle_conflict",
+    "weekly_report",
+    "learning",
 ]
 Currency = Literal["RUB", "USD", "EUR"]
 
@@ -226,7 +230,8 @@ class ExportSummaryOut(BaseModel):
     события — ноги всех ставок, свои вызовы Claude. legacy_period и legacy_no_result —
     для статуса импорта истории бота: период его ставок (null — ставок бота нет) и ноги
     рассчитанных экспрессов бота без исхода (бот не записывал исходы ног проигранных
-    экспрессов)."""
+    экспрессов); legacy_from_archive — ноги ставок бота, исход которых взят из архива
+    (этап 5, app/services/legacy_results.py)."""
 
     bets: int
     open_bets: int
@@ -235,3 +240,4 @@ class ExportSummaryOut(BaseModel):
     ai_runs: int
     legacy_period: LegacyPeriodOut | None
     legacy_no_result: int
+    legacy_from_archive: int

@@ -1,5 +1,6 @@
 """Обновление данных одной командой: архив Сакманна → tennis-data → привязка матчей старого
-бота → пересчет Эло.
+бота → пересчет Эло → расчет по архиву (этап 5: привязка матчей из анализов, закрытие из
+архива, авторасчет ставок, app/services/archive_settlement.py).
 
     python -m app.ingest.update [--full] [--years 2024-2026] [--sackmann-dir ПАПКА]
                                 [--tennis-data-dir ПАПКА] [--skip-elo]
@@ -15,7 +16,9 @@
   файлы скачиваются в браузере (http://www.tennis-data.co.uk/alldata.php).
 
 Шаги идут строго по очереди: загрузка Сакманна повышает матчи tennis-data, а привязка
-старого бота ищет матчи обоих архивов. Одновременно идет только одно обновление
+старого бота ищет матчи обоих архивов; расчет по архиву идет последним, по тому, что
+загружено. Загрузка файла на сайте (app/services/data_uploads.py) запускает те же шаги без
+Сакманна (only). Одновременно идет только одно обновление
 (блокировка в PostgreSQL на все время команды, runs.update_lock); ту же блокировку
 берут отдельные команды шагов (загрузчики, привязка и слияния игроков и матчей).
 Ошибка шага не останавливает следующие: Эло пересчитается по тому, что есть, но код
@@ -44,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.i18n import t
-from app.db.models import IngestionRun, Match, MlModel, Tournament
+from app.db.models import Bet, IngestionRun, Match, MlModel, Tournament
 from app.db.session import create_engine, create_sessionmaker
 from app.ingest import players_link, sackmann, tennis_data
 from app.ingest.fetch import DataSource, public_url
@@ -53,8 +56,8 @@ from app.ml import elo
 
 log = structlog.get_logger(__name__)
 
-Step = Literal["sackmann", "tennis_data", "players_link", "elo"]
-STEPS: tuple[Step, ...] = ("sackmann", "tennis_data", "players_link", "elo")
+Step = Literal["sackmann", "tennis_data", "players_link", "elo", "settle"]
+STEPS: tuple[Step, ...] = ("sackmann", "tennis_data", "players_link", "elo", "settle")
 StepStatus = Literal["ok", "failed", "skipped"]
 # Ключ блокировки на все время обновления (см. runs.update_lock): ее берут и отдельные
 # команды шагов, поэтому ночная задача не идет одновременно ни с одной из них
@@ -140,6 +143,8 @@ class StepResult:
     reason: str | None = None
     # Подробный отчет шага (строки загрузчика)
     details: list[str] = field(default_factory=list)
+    # Строка шага в ingestion_runs (последняя, которую он записал)
+    run_id: int | None = None
 
     @property
     def title(self) -> str:
@@ -231,7 +236,11 @@ class _Updater:
         skip_elo: bool,
         transport: httpx.AsyncBaseTransport | None,
         echo: Echo | None,
+        only: Sequence[Step] | None = None,
+        on_step: Callable[[Step], Awaitable[None]] | None = None,
     ) -> None:
+        self.only = set(only) if only is not None else None
+        self.on_step = on_step
         self.factory = factory
         self.plan = plan
         self.sackmann_dir = sackmann_dir
@@ -267,6 +276,7 @@ class _Updater:
             "tennis_data": self._tennis_data,
             "players_link": self._players_link,
             "elo": self._elo,
+            "settle": self._settle,
         }
         for number, step in enumerate(STEPS, start=1):
             result = StepResult(step=step, status="ok")
@@ -275,6 +285,8 @@ class _Updater:
             if reason is not None:
                 result.status, result.reason = "skipped", reason
                 continue
+            if self.on_step is not None:
+                await self.on_step(step)
             self._say(
                 t(
                     "ingest_update.progress.start",
@@ -291,6 +303,8 @@ class _Updater:
     def _skip_reason(self, step: Step, first_tennis_year: int) -> str | None:
         if self.db_down:
             return t("ingest_update.skip.db")
+        if self.only is not None and step not in self.only:
+            return t("ingest_update.skip.not_requested")
         if step == "sackmann" and not self.plan.sackmann_years:
             return t("ingest_update.skip.no_years")
         if step == "tennis_data" and not self.plan.tennis_data_years:
@@ -336,6 +350,7 @@ class _Updater:
                 log.exception("ingest.update_step_failed", step=result.step)
             await self._counts_from_journal(result, last_run)
         result.seconds = time.monotonic() - started
+        result.run_id = await self._run_after(result.step, last_run)
         result.freshness = await self._freshness(result.step)
         for line in result.details:
             self._say(line)
@@ -353,6 +368,21 @@ class _Updater:
         except (DBAPIError, *_DB_DOWN):
             return 0
         return int(found or 0)
+
+    async def _run_after(self, step: Step, after: int) -> int | None:
+        """Строка ingestion_runs, которую записал шаг (новее after)."""
+        if self.db_down:
+            return None
+        try:
+            async with self.factory() as db:
+                found = await db.scalar(
+                    select(func.max(IngestionRun.id)).where(
+                        IngestionRun.source == step, IngestionRun.id > after
+                    )
+                )
+        except (DBAPIError, *_DB_DOWN):
+            return None
+        return int(found) if found is not None else None
 
     async def _counts_from_journal(self, result: StepResult, after: int) -> None:
         """Упавший шаг: сколько успел записать — из его строки ingestion_runs."""
@@ -387,6 +417,8 @@ class _Updater:
             return ""
         if step == "players_link":
             return t("ingest_update.freshness.players_link", count=int(value or 0))
+        if step == "settle":
+            return t("ingest_update.freshness.settle", count=int(value or 0))
         if value is None:
             return t("ingest_update.freshness.empty")
         return t(f"ingest_update.freshness.{step}", date=value)
@@ -433,6 +465,14 @@ class _Updater:
         result.skipped = sum(summary.skipped.values())
         result.details = elo.summary_lines(summary)
 
+    async def _settle(self, result: StepResult) -> None:
+        # Сервисный модуль тянет аналитику и уведомления: грузится, только когда нужен
+        from app.services.archive_settlement import settle_from_archive, summary_lines
+
+        report, _ = await settle_from_archive(self.factory)
+        _from_report(result, report)
+        result.details = summary_lines(report)
+
 
 _FRESHNESS: dict[Step, Any] = {
     "sackmann": select(func.max(Tournament.start_date)).where(Tournament.source == "sackmann"),
@@ -443,6 +483,10 @@ _FRESHNESS: dict[Step, Any] = {
     # Последний день расчета, а не max(as_of): строки матчей без даты стоят на последнем
     # возможном дне матча (elo.reveal_days), он бывает и позже сегодняшнего
     "elo": select(MlModel.train_to).where(MlModel.id == elo.MODEL_ID),
+    # Открытых ставок приложения: их рассчитает следующий файл архива или участник
+    "settle": select(func.count())
+    .select_from(Bet)
+    .where(Bet.status == "open", Bet.source == "app"),
 }
 
 
@@ -457,12 +501,16 @@ async def run_update(
     today: date | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     echo: Echo | None = None,
+    only: Sequence[Step] | None = None,
+    on_step: Callable[[Step], Awaitable[None]] | None = None,
 ) -> UpdateResult:
     """Все шаги обновления по очереди (см. docstring модуля).
 
     db_factory — фабрика сеансов БД (воркер передает свою); без нее открывается свой
     движок по настройкам. transport — для тестов: ответы HTTP без сети. echo — куда
-    печатать ход работы (команда терминала); без него — только лог.
+    печатать ход работы (команда терминала); без него — только лог. only — только эти
+    шаги (остальные skipped), on_step — вызывается перед каждым шагом (ход загрузки файла
+    на сайте).
     """
     if db_factory is None:
         engine = create_engine()
@@ -477,6 +525,8 @@ async def run_update(
                 today=today,
                 transport=transport,
                 echo=echo,
+                only=only,
+                on_step=on_step,
             )
         finally:
             await engine.dispose()
@@ -489,6 +539,8 @@ async def run_update(
         skip_elo=skip_elo,
         transport=transport,
         echo=echo,
+        only=only,
+        on_step=on_step,
     )
     try:
         async with update_lock(db_factory):

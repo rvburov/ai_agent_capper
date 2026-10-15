@@ -17,10 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security.tokens import hash_token, new_token
 from app.db.models import (
     AgentRun,
+    BetLeg,
     Bookmaker,
     LoginEvent,
     NotificationPref,
     PlayLimit,
+    Postmortem,
     RecoveryCode,
     TrustedDevice,
     User,
@@ -70,6 +72,21 @@ async def _fill(db: AsyncSession, maker: BetMaker, made: MadeUser, tag: str) -> 
         )
     )
     codes = await issue_recovery_codes(db, made.id)
+    # Разбор прогноза, который вызвала ставка (этап 5, В3): связь со ставкой — личная
+    leg = await db.scalar(
+        select(BetLeg).where(BetLeg.bet_id == bet.id, BetLeg.prediction_id.is_not(None))
+    )
+    assert leg is not None and leg.prediction_id is not None
+    db.add(
+        Postmortem(
+            match_id=leg.match_id,
+            prediction_id=leg.prediction_id,
+            bet_id=bet.id,
+            user_id=made.id,
+            status="done",
+            summary=f"Summary-{tag}",
+        )
+    )
     await db.commit()
     user = await db.get_one(User, made.id)
     await set_own_key(db, user)
@@ -154,6 +171,9 @@ async def test_json_export_is_own_and_without_secrets(
     assert tables["login_events"][0]["user_agent"] == "UA-mine"
     assert tables["trusted_devices"][0]["device_label"] == "Phone-mine"
     assert len(tables["analyses"]) == 1 and len(tables["predictions"]) == 2
+    [postmortem] = tables["postmortems"]
+    assert postmortem["bet_id"] == mine["bet_id"] and postmortem["summary"] == "Summary-mine"
+    assert "agent_run_id" not in postmortem and "batch_job_id" not in postmortem
     # Чужого нет
     text = raw.decode()
     for foreign in (
@@ -162,6 +182,7 @@ async def test_json_export_is_own_and_without_secrets(
         "UA-theirs",
         "Device-theirs",
         "Phone-theirs",
+        "Summary-theirs",
     ):
         assert foreign not in text
     assert str(theirs["bet_id"]) not in {str(bet["id"]) for bet in tables["bets"]}

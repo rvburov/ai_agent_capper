@@ -53,11 +53,13 @@ from app.db.models import (
     NotificationPref,
     Player,
     PlayLimit,
+    Postmortem,
     Prediction,
     StrategyVersion,
     TrustedDevice,
     User,
     UserSession,
+    WeeklyReport,
 )
 from app.schemas.cabinet import ExportSummaryOut, LegacyPeriodOut
 from app.services.app_settings import get_app_settings
@@ -306,6 +308,34 @@ def _lessons(uid: int) -> _Query:
     )
 
 
+def _weekly_reports(uid: int) -> _Query:
+    return (
+        select(WeeklyReport.week_start, WeeklyReport.payload, WeeklyReport.created_at)
+        .where(WeeklyReport.user_id == uid)
+        .order_by(WeeklyReport.week_start)
+    )
+
+
+def _postmortems(uid: int) -> _Query:
+    """Разборы прогнозов, которые вызвали ставки участника (этап 5, В3): разбор общий для
+    матча, но связь со ставкой — личная (Т21). Служебные ссылки (пакет, вызов ИИ) — нет."""
+    return (
+        select(
+            Postmortem.id,
+            Postmortem.created_at,
+            Postmortem.bet_id,
+            Postmortem.match_id,
+            Postmortem.status,
+            Postmortem.verdict,
+            Postmortem.summary,
+            Postmortem.hypothesis,
+            Postmortem.scope,
+        )
+        .where(Postmortem.user_id == uid)
+        .order_by(Postmortem.id)
+    )
+
+
 def _ai_limit(uid: int) -> _Query:
     return select(
         AiLimit.monthly_usd,
@@ -421,6 +451,8 @@ TABLES: tuple[_Table, ...] = (
     _Table("analyses", _analyses),
     _Table("predictions", _predictions),
     _Table("lessons", _lessons),
+    _Table("postmortems", _postmortems),
+    _Table("weekly_reports", _weekly_reports),
     _Table("ai_runs", _agent_runs),
     _Table("ai_limit", _ai_limit),
     _Table("notification_prefs", _notification_prefs),
@@ -491,6 +523,7 @@ async def summary(db: AsyncSession, user: User) -> ExportSummaryOut:
             select(
                 func.count(),
                 func.count().filter(is_legacy, ~is_open, BetLeg.result.is_(None)),
+                func.count().filter(is_legacy, BetLeg.result_source == "auto"),
             )
             .select_from(BetLeg)
             .join(Bet, Bet.id == BetLeg.bet_id)
@@ -513,6 +546,7 @@ async def summary(db: AsyncSession, user: User) -> ExportSummaryOut:
         ai_runs=int(runs or 0),
         legacy_period=period,
         legacy_no_result=int(legs[1]),
+        legacy_from_archive=int(legs[2]),
     )
 
 

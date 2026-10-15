@@ -153,6 +153,13 @@ docker compose run --rm -v /home/deploy/tennis-data:/tennis-data:ro api \
   python -m app.ingest.update --full --tennis-data-dir /tennis-data
 ```
 
+**Раз в неделю — файл текущего года (этап 5, В1).** По понедельникам скачайте `2026.xlsx` в браузере и загрузите его в «Администрирование → Данные» (кнопка «Выбрать файл .xlsx», до 10 МБ). Программа сама добавит новые матчи, пересчитает Эло, привяжет матчи из анализов к архиву, внесет закрывающие кэфы П1/П2 и рассчитает ставки; отчет загрузки — там же. Тот же файл второй раз ничего не меняет. Если файл не загружали больше 7 дней, в понедельник в 07:00 по поясу администратора приходит уведомление «Пора загрузить файл tennis-data». Без сайта — той же командой:
+
+```bash
+docker compose exec -T api sh -c 'cat > /tmp/2026.xlsx' < 2026.xlsx
+docker compose exec api python -m app.admin.cli data-upload /tmp/2026.xlsx
+```
+
 Бэктест модели: `docker compose exec -T api python -m app.ml.backtest --report - > backtest-$(date +%F).md` — отчет в файл, короткий вывод на экран.
 
 ## 8. Бэкапы
@@ -260,6 +267,7 @@ bash deploy/local.sh cli set-admin-key             # ключ Claude админ�
 bash deploy/local.sh cli agent-smoke               # проверка на живом ключе, ≈ $0,36
 bash deploy/local.sh cli agent-smoke --only news   # только новости одного игрока, ≈ $0,01–0,13
 bash deploy/local.sh import you@example.com История-ставок.json Игроки --dry-run
+bash deploy/local.sh upload ~/Downloads/2026.xlsx  # файл tennis-data: матчи, Эло, авторасчет ставок
 bash deploy/local.sh backup                        # бэкап и проверка восстановления
 bash deploy/local.sh restore --list                # копии для восстановления
 bash deploy/local.sh restore latest                # восстановить рабочую базу из копии

@@ -190,7 +190,8 @@ class LegMatchOut(BaseModel):
 
 class ClosingOut(BaseModel):
     """Закрывающий кэф ноги: на свой исход и обратный, чей он (by; bookmaker — название
-    своего букмекера), откуда, вероятность своего исхода без маржи при двух сторонах."""
+    своего букмекера), откуда, вероятность своего исхода без маржи при двух сторонах.
+    unverified — момент снятия кэфа не проверен (закрытие из архива tennis-data, Т1)."""
 
     odds: DecimalOut
     opp_odds: DecimalOut | None
@@ -198,6 +199,7 @@ class ClosingOut(BaseModel):
     bookmaker: str | None
     source: ClosingSource
     q_close: float | None
+    unverified: bool
 
 
 class BetLegItemOut(BaseModel):
@@ -207,7 +209,9 @@ class BetLegItemOut(BaseModel):
     edge — вероятность прогноза минус 1/кэф (пусто — прогноза нет). score_outcomes — у
     открытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для
     окна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все
-    равно за участником (В16)."""
+    равно за участником (В16). archive_result и archive_score — исход и счет (первым —
+    игрок 1) по архиву, когда он разошелся с расчетом ставки (этап 5, Т3): банк не
+    меняли, участник проверяет сам."""
 
     id: int
     match: LegMatchOut
@@ -227,6 +231,8 @@ class BetLegItemOut(BaseModel):
     clv: float | None
     clv_fair: float | None
     score_outcomes: dict[str, LegResult] | None
+    archive_result: LegResult | None
+    archive_score: str | None
 
 
 class BetItemOut(BaseModel):
@@ -236,7 +242,10 @@ class BetItemOut(BaseModel):
     капитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у
     открытой), то же число, что equity_after в последних ставках главной. updated_at —
     версия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,
-    app/services/bet_versions.py)."""
+    app/services/bet_versions.py). Этап 5: archive_to — у рассчитанной по архиву
+    (settled_by = auto) последний день матчей в архиве на момент расчета («авто · архив
+    ‹дата›»); awaiting_result — открытая ставка, все матчи которой уже прошли (по поясу
+    участника): ждет результата из архива или от участника."""
 
     id: int
     analysis_id: int | None
@@ -258,6 +267,16 @@ class BetItemOut(BaseModel):
     clv_fair: float | None
     verdict: Verdict | None
     legs: list[BetLegItemOut]
+    archive_to: date | None
+    awaiting_result: bool
+
+
+class BetCountsOut(BaseModel):
+    """Счетчики ставок участника для меню: открытых и из них ждущих результата (все матчи
+    уже прошли)."""
+
+    open: int
+    awaiting_result: int
 
 
 class BetPageOut(BaseModel):

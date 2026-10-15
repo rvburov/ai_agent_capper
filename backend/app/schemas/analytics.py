@@ -214,8 +214,25 @@ class BrierOut(BaseModel):
 
 
 class SeriesPointOut(BaseModel):
+    """Точка ряда: значение на конец дня; invested — «вложено» ступенькой (у ряда банка:
+    старт периода плюс пополнения и минус выводы с корректировками внутри периода по
+    этот день; у ряда результата — null)."""
+
     day: date
     value: DecimalOut
+    invested: DecimalOut | None
+
+
+FlowKind = Literal["deposit", "withdrawal", "correction"]
+
+
+class BankFlowOut(BaseModel):
+    """Отметка на ряду банка (В7): пополнение, вывод или корректировка за день, сумма со
+    знаком."""
+
+    day: date
+    kind: FlowKind
+    amount: DecimalOut
 
 
 class SeriesRowOut(BaseModel):
@@ -239,15 +256,20 @@ class SeriesOut(BaseModel):
     max_drawdown (доля от −1 до 0, только у bank) — наибольшая просадка от пика по правилу
     Р22: пополнение, вывод и корректировка — не просадка; best и worst — лучшая и худшая
     точка (у result худшая не выше нуля). rows — по неделям (период до 31 дня) или по
-    месяцам."""
+    месяцам.
+
+    В7 (Р25): у ряда банка points[].invested — пунктир «вложено» ступенькой, flows —
+    пополнения, выводы и корректировки внутри периода (отметки на линии), flows_total —
+    их сумма. Главное число периода — прибыль ставок и ROI (kpi), а не рост капитала."""
 
     kind: Literal["bank", "result"]
     group: Literal["week", "month"]
     start: date
     base: DecimalOut
-    # Старт периода для экрана: день, сумма и изменение за период долей от нее. Банк
-    # появился внутри периода или выбрано «все время» — первый день банка, вложенное и
-    # рост капитала к вложенному; иначе — start, base и прибыль периода к base
+    # Старт периода для экрана (В7): день, сумма и изменение за период долей от нее. Банк
+    # появился внутри периода или выбрано «все время» — первый день банка и первое
+    # пополнение (движение банка в тот день), изменение — капитал к вложенному на конец
+    # периода; иначе — start, капитал на начало периода (base) и прибыль периода к нему
     start_day: date
     start_amount: DecimalOut
     change_share: float | None
@@ -258,6 +280,8 @@ class SeriesOut(BaseModel):
     worst: DecimalOut
     points: list[SeriesPointOut]
     rows: list[SeriesRowOut]
+    flows: list[BankFlowOut]
+    flows_total: DecimalOut
 
 
 class SliceOut(BaseModel):

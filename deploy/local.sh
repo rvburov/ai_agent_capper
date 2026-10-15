@@ -11,6 +11,9 @@
 #                                           архивы матчей и кэфов, привязка старого бота, Эло;
 #                                           первый раз — с --full. tennis-data.co.uk закрыт от
 #                                           программ: файлы ГОД.xlsx скачать в браузере в папку
+#   bash deploy/local.sh upload ФАЙЛ.xlsx  файл tennis-data ГОД.xlsx, как кнопка «Администрирование →
+#                                           Данные»: новые матчи, Эло, привязка матчей из анализов,
+#                                           закрытие из архива и авторасчет ставок (раз в неделю)
 #   bash deploy/local.sh backtest [--test-years 2024,2025]
 #                                           бэктест модели: отчет в deploy/reports/backtest-ДАТА.md
 #   bash deploy/local.sh acceptance-runs [--count 20] [--yes]
@@ -214,6 +217,19 @@ cmd_data() {
   dc exec -T api python -m app.ingest.update ${args[@]+"${args[@]}"}
 }
 
+cmd_upload() {
+  [[ $# -eq 1 ]] || die "укажите файл: bash deploy/local.sh upload 2026.xlsx"
+  [[ -f "$1" ]] || die "нет файла $1"
+  local name
+  name="$(basename "$1")"
+  DATA_TMP="$(dc exec -T api mktemp -d /tmp/data.XXXXXX)"
+  [[ "$DATA_TMP" == /tmp/data.* ]] || die "не удалось создать временную папку в контейнере api"
+  trap data_cleanup EXIT
+  # /tmp контейнера — tmpfs, docker cp туда не пишет: файл передается через stdin
+  dc exec -T api sh -c 'cat > "$1"' sh "$DATA_TMP/$name" < "$1"
+  dc exec -T api python -m app.admin.cli data-upload "$DATA_TMP/$name"
+}
+
 cmd_backtest() {
   local report
   report="$DEPLOY_DIR/reports/backtest-$(date +%F).md"
@@ -390,6 +406,7 @@ case "${1:-}" in
   cli) shift; dc exec api python -m app.admin.cli "$@" ;;
   import) shift; cmd_import "$@" ;;
   data) shift; cmd_data "$@" ;;
+  upload) shift; cmd_upload "$@" ;;
   backtest) shift; cmd_backtest "$@" ;;
   acceptance-runs|smoke-eval) name="$1"; shift; cmd_acceptance "$name" "$@" ;;
   parse-eval) shift; cmd_parse_eval "$@" ;;
@@ -401,5 +418,5 @@ case "${1:-}" in
   logs) shift; dc logs -f --tail 200 "$@" ;;
   down) dc down ;;
   wipe) cmd_wipe ;;
-  *) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

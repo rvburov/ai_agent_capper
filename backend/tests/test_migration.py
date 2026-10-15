@@ -3,7 +3,8 @@
 данные этапа 1 (турниры старого бота получают source = legacy), миграция этапа 3 —
 данные этапа 2 (откат переводит новые статусы анализов в старые и не теряет строк),
 миграция этапа 4 — данные этапа 3 (история бота помечена, букмекеры собраны из ставок,
-правила роста ставки выключены у версий в работе).
+правила роста ставки выключены у версий в работе), миграция этапа 5 — данные этапа 4
+(версии модели, общие уроки и версии инструкций, новые виды уведомлений и журнала).
 
 Расхождение моделей и миграции ловится двумя способами:
 - compare_metadata, как alembic check: таблицы, колонки, типы, DEFAULT, индексы, FK;
@@ -81,6 +82,13 @@ EXPECTED_TABLES = {
     "bookmakers",
     "notification_prefs",
     "play_limits",
+    "data_uploads",
+    "batch_jobs",
+    "postmortems",
+    "eval_sets",
+    "eval_set_items",
+    "eval_comparisons",
+    "weekly_reports",
 }
 
 
@@ -94,7 +102,7 @@ async def test_all_tables_exist(engine: AsyncEngine) -> None:
         extension = (
             await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'"))
         ).scalar()
-    assert len(EXPECTED_TABLES) == 38
+    assert len(EXPECTED_TABLES) == 45
     assert names == EXPECTED_TABLES | {"alembic_version"}
     assert set(Base.metadata.tables) == EXPECTED_TABLES
     assert extension == 1
@@ -989,5 +997,145 @@ async def test_settings_change_audit_migration(settings: Settings) -> None:
                 assert list(actions) == ["message"]
                 assert await _refused(conn, insert)
                 await conn.run_sync(run_alembic_upgrade, "head")
+        finally:
+            await engine.dispose()
+
+
+async def test_stage5_migration_keeps_stage4_data(settings: Settings) -> None:
+    """0007 → 0008: ставки, уроки, версии стратегии и модели не теряются; у прежних строк
+    модели одного вида активна самая новая. Новые ограничения действуют: одна активная
+    общая версия инструкций, коды общих уроков уникальны, новые виды уведомлений и действия
+    журнала. Откат до 0007 удаляет общие уроки и версии, уведомления новых видов, статусы
+    ready и rejected возвращает в прежние; повторный upgrade проходит."""
+    async with _temp_database(settings, "stage5") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0007")
+                await conn.execute(text("INSERT INTO users (email) VALUES ('m@example.com')"))
+                await conn.execute(
+                    text("INSERT INTO players (name) VALUES ('Sinner J.'), ('Alcaraz C.')")
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO matches (player1_id, player2_id, source, source_ref)"
+                        " VALUES (1, 2, 'user', 'u1')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO bets (user_id, placed_at, bookmaker, stake, currency,"
+                        " total_odds, status) VALUES (1, now(), 'Fonbet', 100, 'RUB', 1.8,"
+                        " 'open')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO bet_legs (bet_id, match_id, market, selection, odds_taken)"
+                        " VALUES (1, 1, 'ML', 1, 1.8)"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO lessons (user_id, code, text, kind, status) VALUES"
+                        " (1, 'L-001', 'Грунт', 'numeric', 'hypothesis')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO strategy_versions (user_id, code, status) VALUES"
+                        " (1, 'v3', 'active'), (1, 'v2', 'archived')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO ml_models (id, kind, created_at) VALUES"
+                        " ('elo-v0', 'elo', now() - interval '1 day'), ('elo-v1', 'elo', now()),"
+                        " ('platt-v1', 'calibrator', now())"
+                    )
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                models = await conn.execute(text("SELECT id, status FROM ml_models ORDER BY id"))
+                assert [tuple(row) for row in models] == [
+                    ("elo-v0", "archived"),
+                    ("elo-v1", "active"),
+                    ("platt-v1", "active"),
+                ]
+                lesson = (
+                    await conn.execute(text("SELECT user_id, scope, n_hist FROM lessons"))
+                ).one()
+                assert tuple(lesson) == (1, None, 0)
+                bet = (
+                    await conn.execute(
+                        text("SELECT settle_run_id, result_reminded_at, reversed_at FROM bets")
+                    )
+                ).one()
+                assert tuple(bet) == (None, None, None)
+                assert await conn.scalar(text("SELECT count(*) FROM strategy_versions")) == 2
+                await conn.execute(
+                    text(
+                        "INSERT INTO strategy_versions (user_id, code, status, goal) VALUES"
+                        " (NULL, 'v3', 'active', 'quality'), (NULL, 'v4', 'candidate', 'saving'),"
+                        " (1, 'r3', 'rejected', 'rules')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO lessons (user_id, code, text, kind, status) VALUES"
+                        " (NULL, 'L-022', 'Хард', 'numeric', 'ready')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO notifications (user_id, kind, title) VALUES"
+                        " (1, 'bet_needs_result', 'Ждет'), (1, 'new_device', 'Вход')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO admin_audit_log (action, details) VALUES ('data_upload', '{}')"
+                    )
+                )
+                for sql in (
+                    "INSERT INTO strategy_versions (user_id, code, status) VALUES"
+                    " (NULL, 'v9', 'active')",
+                    "INSERT INTO lessons (user_id, code, text, kind) VALUES"
+                    " (NULL, 'L-022', 'x', 'process')",
+                    "INSERT INTO ml_models (id, kind) VALUES ('elo-v2', 'elo')",
+                    "UPDATE bet_legs SET archive_result = 'maybe'",
+                    "INSERT INTO notifications (user_id, kind, title) VALUES (1, 'nope', 'x')",
+                    "INSERT INTO data_uploads (filename, size_bytes, sha256, year, status)"
+                    " VALUES ('2026.xlsx', 1, 'x', 2026, 'lost')",
+                    "INSERT INTO postmortems (match_id, prediction_id, verdict) VALUES (1, 1, 'x')",
+                    "INSERT INTO batch_jobs (kind) VALUES ('report')",
+                ):
+                    assert await _refused(conn, sql), sql
+                assert not await _refused(
+                    conn,
+                    "INSERT INTO ml_models (id, kind, status)"
+                    " VALUES ('elo-v2', 'elo', 'candidate')",
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0007")
+            async with engine.begin() as conn:
+                versions = await conn.execute(
+                    text("SELECT user_id, code, status FROM strategy_versions ORDER BY id")
+                )
+                assert [tuple(row) for row in versions] == [
+                    (1, "v3", "active"),
+                    (1, "v2", "archived"),
+                    (1, "r3", "archived"),
+                ]
+                assert await conn.scalar(text("SELECT count(*) FROM lessons")) == 1
+                kinds = await conn.execute(text("SELECT kind FROM notifications"))
+                assert list(kinds.scalars()) == ["new_device"]
+                assert await conn.scalar(text("SELECT count(*) FROM admin_audit_log")) == 0
+                assert await conn.scalar(text("SELECT count(*) FROM bets")) == 1
+                assert await conn.scalar(text("SELECT count(*) FROM ml_models")) == 3
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+                assert await conn.scalar(text("SELECT count(*) FROM bet_legs")) == 1
         finally:
             await engine.dispose()

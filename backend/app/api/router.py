@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     admin,
     admin_ai,
+    admin_data,
     admin_messages,
     admin_settings,
     ai,
@@ -45,6 +46,7 @@ api_router.include_router(ai.router)
 api_router.include_router(admin_ai.router)
 api_router.include_router(admin_settings.router)
 api_router.include_router(admin_messages.router)
+api_router.include_router(admin_data.router)
 api_router.include_router(analyses.router)
 api_router.include_router(bets.router)
 api_router.include_router(bank.router)

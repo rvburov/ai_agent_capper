@@ -80,7 +80,9 @@ freshness. Нет файла прошлого года на сайте (там �
 import argparse
 import asyncio
 import hashlib
+import re
 import sys
+import zipfile
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -149,6 +151,19 @@ ACTIVE_YEARS = 2
 BATCH = 2000
 # Строку заголовков ищем среди первых строк листа
 HEADER_ROWS = 10
+# Пределы листа: файл из Excel с «форматированием до конца листа» или чужой файл не
+# должен занять память и процессор. В файле года около 2 700 матчей и 50 колонок
+MAX_ROWS = 20_000
+MAX_COLUMNS = 64
+# Распакованный xlsx: файл года в несколько раз меньше
+MAX_UNPACKED_MB = 100
+MAX_UNPACKED_BYTES = MAX_UNPACKED_MB * 2**20
+# Подряд столько пустых строк — конец данных: дальше только оформление
+EMPTY_TAIL_ROWS = 1000
+# Строка листа в XML: <row …>, в том числе с префиксом пространства имен (<x:row …>)
+_SHEET_ROW = re.compile(rb"<(?:[A-Za-z_][\w.-]*:)?row[\s/>]")
+_SHEET_PART = re.compile(r"^xl/worksheets/[^/]+\.xml$")
+_CHUNK = 2**20
 ODDS_MIN = Decimal("1.01")
 ODDS_MAX = Decimal("999.999")
 ODDS_STEP = Decimal("0.001")
@@ -405,13 +420,78 @@ def _looks_like_html(content: bytes) -> bool:
     return head.startswith((b"<!doctype", b"<html", b"<head", b"<body")) or b"<html" in head
 
 
-def read_sheet(content: bytes, path: str) -> Sheet:
-    """Первый лист файла xlsx: строка заголовков и строки данных. Файл не xlsx, нет
-    заголовков или нужных колонок — IngestError."""
+def _check_signature(content: bytes, path: str) -> None:
     if not content.startswith(b"PK"):
         if _looks_like_html(content):
             raise IngestError("ingest_tennis_data.errors.not_xlsx", path=path, page=MANUAL_PAGE)
         raise IngestError("ingest_tennis_data.errors.bad_file", path=path, error="not xlsx")
+
+
+def _count_rows(archive: zipfile.ZipFile, info: zipfile.ZipInfo, budget: int) -> tuple[int, int]:
+    """Строк в листе (по тегам <row>) и сколько байт распаковано. Распаковка — частями и
+    обрывается, когда вышла за budget: размер в оглавлении архива может быть неверным."""
+    rows = 0
+    size = 0
+    pending = b""
+    with archive.open(info) as stream:
+        while chunk := stream.read(_CHUNK):
+            size += len(chunk)
+            if size > budget:
+                break
+            data = pending + chunk
+            # Хвост — следующей порции: тег может быть разрезан границей
+            cut = max(0, len(data) - 32)
+            rows += sum(1 for found in _SHEET_ROW.finditer(data) if found.start() < cut)
+            pending = data[cut:]
+    rows += len(_SHEET_ROW.findall(pending))
+    return rows, size
+
+
+def inspect_xlsx(content: bytes, path: str) -> None:
+    """Быстрая проверка xlsx без разбора таблицы (процесс API): архив zip, распакованный
+    размер не больше MAX_UNPACKED_MB, есть лист и в нем не больше MAX_ROWS строк данных.
+    Иначе — IngestError (too_big_unpacked, too_many_rows, bad_file)."""
+    _check_signature(content, path)
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            infos = archive.infolist()
+            if sum(info.file_size for info in infos) > MAX_UNPACKED_BYTES:
+                raise IngestError(
+                    "ingest_tennis_data.errors.too_big_unpacked", path=path, limit=MAX_UNPACKED_MB
+                )
+            sheets = [info for info in infos if _SHEET_PART.match(info.filename)]
+            if not sheets:
+                raise IngestError(
+                    "ingest_tennis_data.errors.bad_file", path=path, error="no worksheet"
+                )
+            budget = MAX_UNPACKED_BYTES
+            for info in sheets:
+                rows, size = _count_rows(archive, info, budget)
+                budget -= size
+                if budget < 0:
+                    raise IngestError(
+                        "ingest_tennis_data.errors.too_big_unpacked",
+                        path=path,
+                        limit=MAX_UNPACKED_MB,
+                    )
+                if rows > MAX_ROWS + HEADER_ROWS:
+                    raise IngestError(
+                        "ingest_tennis_data.errors.too_many_rows", path=path, limit=MAX_ROWS
+                    )
+    except IngestError:
+        raise
+    except Exception as exc:
+        # Битый архив, неверное сжатие, CRC: BadZipFile, zlib.error, EOFError и др.
+        error = type(exc).__name__
+        raise IngestError("ingest_tennis_data.errors.bad_file", path=path, error=error) from None
+
+
+def read_sheet(content: bytes, path: str) -> Sheet:
+    """Первый лист файла xlsx: строка заголовков и строки данных (первые MAX_COLUMNS
+    колонок). Файл не xlsx, больше пределов (inspect_xlsx, MAX_ROWS строк данных), нет
+    заголовков или нужных колонок — IngestError. Подряд EMPTY_TAIL_ROWS пустых строк —
+    конец данных."""
+    inspect_xlsx(content, path)
     try:
         workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
     except Exception as exc:
@@ -425,7 +505,9 @@ def read_sheet(content: bytes, path: str) -> Sheet:
         if isinstance(sheet, ReadOnlyWorksheet):
             # Размер листа в файле бывает записан неверно: читаем до конца
             sheet.reset_dimensions()
-        for number, values in enumerate(sheet.iter_rows(values_only=True), start=1):
+        empty = 0
+        cells = sheet.iter_rows(max_col=MAX_COLUMNS, values_only=True)
+        for number, values in enumerate(cells, start=1):
             if columns is None:
                 found = {
                     key: index
@@ -438,7 +520,18 @@ def read_sheet(content: bytes, path: str) -> Sheet:
                     break
                 continue
             if any(value is not None and value != "" for value in values):
+                if len(rows) >= MAX_ROWS:
+                    raise IngestError(
+                        "ingest_tennis_data.errors.too_many_rows", path=path, limit=MAX_ROWS
+                    )
                 rows.append((number, tuple(values)))
+                empty = 0
+                continue
+            empty += 1
+            if empty >= EMPTY_TAIL_ROWS:
+                break
+    except IngestError:
+        raise
     except IndexError:
         columns = None
     except Exception as exc:

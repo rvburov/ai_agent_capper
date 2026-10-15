@@ -75,6 +75,7 @@ async def test_export_summary_counts_only_own(
         "ai_runs": 2,
         "legacy_period": {"first": "2025-03-02", "last": "2025-09-10"},
         "legacy_no_result": 2,
+        "legacy_from_archive": 0,
     }
 
 

@@ -21,7 +21,10 @@ CAPPER_DATA_UPDATE_HOUR_UTC (по умолчанию 5) и 25 минут: пос
 ставит API после изменения ставок и банка, одна задача на участника; тем, у кого по их
 поясу начались новые сутки, — воркер сам, каждый час на 9-й минуте (warm_new_day).
 Удаление аккаунтов по запросу участников — раз в сутки в 03:45 UTC (после очистки),
-сигналы расхода ИИ — каждый час на 41-й минуте.
+сигналы расхода ИИ — каждый час на 41-й минуте. Этап 5: загруженный файл tennis-data
+(process_data_upload) ставит API, у задачи предел часа и повторы, пока идет ночное
+обновление; напоминания «ставка ждет результата» и «пора загрузить файл» (в понедельник в
+07:04 по поясу администратора) и уборка зависших загрузок файла — каждый час на 4-й минуте.
 """
 
 import argparse
@@ -46,12 +49,15 @@ from app.agent.client import close_client
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.db.session import create_engine, create_sessionmaker
+from app.services import data_uploads
 from app.services.data_status import DATA_UPDATE_MINUTE
 from app.workers.jobs import (
     check_ai_alerts,
     cleanup_auth_records,
     delete_requested_accounts,
+    process_data_upload,
     reap_stuck_analyses,
+    remind_unsettled,
     run_analysis,
     update_data,
     warm_analytics,
@@ -84,6 +90,14 @@ AI_ALERTS_MINUTE = 41
 # Прогрев аналитики тем, у кого по их поясу начались новые сутки, — раз в час
 WARM_NEW_DAY_MINUTE = 9
 WARM_NEW_DAY_TIMEOUT_SECONDS = 1800
+# Файл tennis-data: загрузка, привязка, Эло по всей истории и расчет — до часа; повторы,
+# пока идет ночное обновление (каждые 2 минуты, до часа ожидания), и после падения
+# воркера (загрузку берет повтор задачи, app/services/data_uploads.py)
+UPLOAD_TIMEOUT_SECONDS = data_uploads.PROCESS_TIMEOUT_SECONDS
+UPLOAD_MAX_TRIES = 30
+# Напоминания — раз в час, на 4-й минуте: свободная от других задач минута в начале часа,
+# «пора загрузить файл» приходит в понедельник в 07:04 по поясу администратора
+REMIND_MINUTE = 4
 
 
 # Имена ключей arq. В arq 0.28 они — константы модулей (arq.constants), настройки
@@ -227,6 +241,7 @@ def build_cron_jobs(settings: Settings) -> tuple[CronJob, ...] | None:
             max_tries=1,
             timeout=WARM_NEW_DAY_TIMEOUT_SECONDS,
         ),
+        cron(remind_unsettled, minute=REMIND_MINUTE, max_tries=1, timeout=300),
     )
 
 
@@ -241,6 +256,10 @@ class WorkerSettings:
         job_function(warm_analytics, timeout=WARM_TIMEOUT_SECONDS, max_tries=1, keep_result=0),
         delete_requested_accounts,
         check_ai_alerts,
+        job_function(
+            process_data_upload, timeout=UPLOAD_TIMEOUT_SECONDS, max_tries=UPLOAD_MAX_TRIES
+        ),
+        remind_unsettled,
     )
     cron_jobs: Sequence[CronJob] | None = build_cron_jobs(get_settings())
     on_startup: StartupShutdown | None = startup

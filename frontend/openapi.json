@@ -2259,7 +2259,13 @@
                       "ai_mode_change",
                       "budget_change",
                       "agent_config_change",
-                      "settings_change"
+                      "settings_change",
+                      "data_upload",
+                      "eval_set",
+                      "eval_run",
+                      "version_on",
+                      "lesson_on",
+                      "model_on"
                     ],
                     "type": "string"
                   }
@@ -3296,6 +3302,145 @@
         }
       }
     },
+    "/api/admin/data/tennis-data": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Upload Tennis Data",
+        "description": "Загрузить файл tennis-data ГОД.xlsx (до 10 МБ): быстрая проверка сразу, разбор\nтаблицы и обработка — задачей воркера. Ответ — загрузка в очереди; ход и отчет — GET\n…/uploads/{id}. Файл больше 10 МБ — 413; не xlsx, распакованный больше 100 МБ, больше\n20 000 строк или год вне архива — 422. Нет нужных колонок — загрузка failed с текстом.",
+        "operationId": "upload_tennis_data_api_admin_data_tennis_data_post",
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataUploadOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/data/uploads": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Uploads",
+        "description": "Свежесть файла tennis-data и последние 20 загрузок, новые сверху.",
+        "operationId": "list_uploads_api_admin_data_uploads_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataUploadsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/data/uploads/{upload_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Upload",
+        "description": "Загрузка: статус, шаг в работе и отчет (когда готов). Нет такой — 404.",
+        "operationId": "get_upload_api_admin_data_uploads__upload_id__get",
+        "parameters": [
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Upload Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataUploadOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analyses": {
       "post": {
         "tags": [
@@ -4165,6 +4310,38 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BetsSummaryOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bets/counts": {
+      "get": {
+        "tags": [
+          "bets"
+        ],
+        "summary": "Bet Counts",
+        "description": "Счетчики для меню: открытых ставок и из них ждущих результата (все матчи уже\nпрошли по поясу участника).",
+        "operationId": "bet_counts_api_bets_counts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetCountsOut"
                 }
               }
             }
@@ -8179,6 +8356,56 @@
         "title": "AnalyticsOut",
         "description": "Все блоки «Аналитики» одним ответом (Т5). period null — заданы даты; date_from —\nпервый день (null — все время), date_to — последний (сегодня или to). filtered —\nвыбран рынок, покрытие или источник (ряд — результат отобранных ставок, а не банк).\nprev и change — null у «всего времени», без начала периода и если в прошлом периоде\nнет рассчитанных ставок."
       },
+      "ArchiveFileStatusOut": {
+        "properties": {
+          "last_load": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Load"
+          },
+          "matches_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matches To"
+          },
+          "stale_days": {
+            "type": "integer",
+            "title": "Stale Days"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "max_mb": {
+            "type": "integer",
+            "title": "Max Mb"
+          }
+        },
+        "type": "object",
+        "required": [
+          "last_load",
+          "matches_to",
+          "stale_days",
+          "stale",
+          "max_mb"
+        ],
+        "title": "ArchiveFileStatusOut",
+        "description": "Свежесть файла tennis-data: последняя успешная загрузка архива (любым путем) и\nпоследний день матча в нем; stale — не загружали дольше stale_days дней (тогда\nприходит напоминание); max_mb — предел размера файла."
+      },
       "ArchiveInfoOut": {
         "properties": {
           "data_to": {
@@ -8444,7 +8671,13 @@
               "ai_mode_change",
               "budget_change",
               "agent_config_change",
-              "settings_change"
+              "settings_change",
+              "data_upload",
+              "eval_set",
+              "eval_run",
+              "version_on",
+              "lesson_on",
+              "model_on"
             ],
             "title": "Action"
           },
@@ -8696,6 +8929,36 @@
         "title": "BankEntryOut",
         "description": "Строка журнала банка. amount — со знаком; balance_after — баланс по учету после\nэтой строки (по времени записи); reversed_by — сторно, которое ее отменило."
       },
+      "BankFlowOut": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "deposit",
+              "withdrawal",
+              "correction"
+            ],
+            "title": "Kind"
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "kind",
+          "amount"
+        ],
+        "title": "BankFlowOut",
+        "description": "Отметка на ряду банка (В7): пополнение, вывод или корректировка за день, сумма со\nзнаком."
+      },
       "BankHistoryOut": {
         "properties": {
           "currency": {
@@ -8908,6 +9171,25 @@
         ],
         "title": "BetBrief",
         "description": "Сохраненная ставка по анализу: после перезагрузки экран показывает ее сумму и кэфы,\nа не рекомендацию анализа."
+      },
+      "BetCountsOut": {
+        "properties": {
+          "open": {
+            "type": "integer",
+            "title": "Open"
+          },
+          "awaiting_result": {
+            "type": "integer",
+            "title": "Awaiting Result"
+          }
+        },
+        "type": "object",
+        "required": [
+          "open",
+          "awaiting_result"
+        ],
+        "title": "BetCountsOut",
+        "description": "Счетчики ставок участника для меню: открытых и из них ждущих результата (все матчи\nуже прошли)."
       },
       "BetIn": {
         "properties": {
@@ -9160,6 +9442,22 @@
             },
             "type": "array",
             "title": "Legs"
+          },
+          "archive_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive To"
+          },
+          "awaiting_result": {
+            "type": "boolean",
+            "title": "Awaiting Result"
           }
         },
         "type": "object",
@@ -9183,10 +9481,12 @@
           "clv",
           "clv_fair",
           "verdict",
-          "legs"
+          "legs",
+          "archive_to",
+          "awaiting_result"
         ],
         "title": "BetItemOut",
-        "description": "Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если\nзакрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги\nсчитается с кэфом 1.00), payout — выплата (у открытой — возможная). bank_after —\nкапитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у\nоткрытой), то же число, что equity_after в последних ставках главной. updated_at —\nверсия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,\napp/services/bet_versions.py)."
+        "description": "Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если\nзакрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги\nсчитается с кэфом 1.00), payout — выплата (у открытой — возможная). bank_after —\nкапитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у\nоткрытой), то же число, что equity_after в последних ставках главной. updated_at —\nверсия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,\napp/services/bet_versions.py). Этап 5: archive_to — у рассчитанной по архиву\n(settled_by = auto) последний день матчей в архиве на момент расчета («авто · архив\n‹дата›»); awaiting_result — открытая ставка, все матчи которой уже прошли (по поясу\nучастника): ждет результата из архива или от участника."
       },
       "BetLegBrief": {
         "properties": {
@@ -9429,6 +9729,33 @@
               }
             ],
             "title": "Score Outcomes"
+          },
+          "archive_result": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "win",
+                  "loss",
+                  "void"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Result"
+          },
+          "archive_score": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Score"
           }
         },
         "type": "object",
@@ -9450,10 +9777,12 @@
           "closing",
           "clv",
           "clv_fair",
-          "score_outcomes"
+          "score_outcomes",
+          "archive_result",
+          "archive_score"
         ],
         "title": "BetLegItemOut",
-        "description": "Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда\nрассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),\nвероятности прогноза (p_final; у ставок бота — только p_claude) и перевес над рынком\nedge — вероятность прогноза минус 1/кэф (пусто — прогноза нет). score_outcomes — у\nоткрытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для\nокна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все\nравно за участником (В16)."
+        "description": "Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда\nрассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),\nвероятности прогноза (p_final; у ставок бота — только p_claude) и перевес над рынком\nedge — вероятность прогноза минус 1/кэф (пусто — прогноза нет). score_outcomes — у\nоткрытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для\nокна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все\nравно за участником (В16). archive_result и archive_score — исход и счет (первым —\nигрок 1) по архиву, когда он разошелся с расчетом ставки (этап 5, Т3): банк не\nменяли, участник проверяет сам."
       },
       "BetLegOut": {
         "properties": {
@@ -10447,6 +10776,10 @@
               }
             ],
             "title": "Q Close"
+          },
+          "unverified": {
+            "type": "boolean",
+            "title": "Unverified"
           }
         },
         "type": "object",
@@ -10456,10 +10789,11 @@
           "by",
           "bookmaker",
           "source",
-          "q_close"
+          "q_close",
+          "unverified"
         ],
         "title": "ClosingOut",
-        "description": "Закрывающий кэф ноги: на свой исход и обратный, чей он (by; bookmaker — название\nсвоего букмекера), откуда, вероятность своего исхода без маржи при двух сторонах."
+        "description": "Закрывающий кэф ноги: на свой исход и обратный, чей он (by; bookmaker — название\nсвоего букмекера), откуда, вероятность своего исхода без маржи при двух сторонах.\nunverified — момент снятия кэфа не проверен (закрытие из архива tennis-data, Т1)."
       },
       "ClosingUpdateIn": {
         "properties": {
@@ -11331,6 +11665,10 @@
             "type": "string",
             "title": "Open Stake"
           },
+          "awaiting_count": {
+            "type": "integer",
+            "title": "Awaiting Count"
+          },
           "my_matches": {
             "items": {
               "$ref": "#/components/schemas/MyMatchOut"
@@ -11370,11 +11708,285 @@
           "open_bets",
           "open_count",
           "open_stake",
+          "awaiting_count",
           "my_matches",
           "admin"
         ],
         "title": "DashboardOut",
-        "description": "Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,\nпик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,\nдо OPEN_LIMIT; всего — open_count на open_stake); admin — только у администратора."
+        "description": "Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,\nпик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,\nдо OPEN_LIMIT; всего — open_count на open_stake), из них awaiting_count ждут результата\n(все матчи прошли, этап 5); admin — только у администратора."
+      },
+      "DataUploadOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "tennis_data",
+                  "players_link",
+                  "elo",
+                  "settle"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "uploaded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded By"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DataUploadReportOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "filename",
+          "size_bytes",
+          "year",
+          "status",
+          "step",
+          "uploaded_by",
+          "started_at",
+          "finished_at",
+          "error",
+          "report"
+        ],
+        "title": "DataUploadOut",
+        "description": "Загрузка файла: кто и когда загрузил, размер, год (None — в имени файла его нет, и\nворкер еще не взял его по датам строк), статус и шаг в работе, отчет (когда готов) и\nошибка."
+      },
+      "DataUploadReportOut": {
+        "properties": {
+          "file_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Rows"
+          },
+          "unchanged": {
+            "type": "boolean",
+            "title": "Unchanged"
+          },
+          "new_matches": {
+            "type": "integer",
+            "title": "New Matches"
+          },
+          "updated_matches": {
+            "type": "integer",
+            "title": "Updated Matches"
+          },
+          "matches_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matches To"
+          },
+          "settled_bets": {
+            "type": "integer",
+            "title": "Settled Bets"
+          },
+          "people": {
+            "type": "integer",
+            "title": "People"
+          },
+          "legs": {
+            "type": "integer",
+            "title": "Legs"
+          },
+          "closing": {
+            "type": "integer",
+            "title": "Closing"
+          },
+          "linked": {
+            "type": "integer",
+            "title": "Linked"
+          },
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting"
+          },
+          "unlinked": {
+            "type": "integer",
+            "title": "Unlinked"
+          },
+          "not_found": {
+            "type": "integer",
+            "title": "Not Found"
+          },
+          "unlinked_matches": {
+            "items": {
+              "$ref": "#/components/schemas/UnlinkedMatchOut"
+            },
+            "type": "array",
+            "title": "Unlinked Matches"
+          },
+          "conflicts": {
+            "type": "integer",
+            "title": "Conflicts"
+          },
+          "manual": {
+            "type": "integer",
+            "title": "Manual"
+          },
+          "legacy_legs": {
+            "type": "integer",
+            "title": "Legacy Legs"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/UploadStepOut"
+            },
+            "type": "array",
+            "title": "Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_rows",
+          "unchanged",
+          "new_matches",
+          "updated_matches",
+          "matches_to",
+          "settled_bets",
+          "people",
+          "legs",
+          "closing",
+          "linked",
+          "waiting",
+          "unlinked",
+          "not_found",
+          "unlinked_matches",
+          "conflicts",
+          "manual",
+          "legacy_legs",
+          "steps"
+        ],
+        "title": "DataUploadReportOut",
+        "description": "Отчет загрузки. file_rows — строк матчей в файле; unchanged — файл тот же, что в\nпрошлый раз (новых матчей нет); new_matches, updated_matches — матчи архива;\nmatches_to — последний день матча в архиве после загрузки. settled_bets у people\nучастников (legs событий); closing — событий П1/П2 с закрытием из архива; linked,\nwaiting, unlinked — матчи из анализов: привязаны, ждут следующего файла, не\nпривязаны; из непривязанных not_found — нет в архиве (только числом), остальные (до\n50) — в unlinked_matches; conflicts — расхождения архива с ручным расчетом (деньги не\nменяли); manual — снятие, неявка, неполный счет или нога на прошлой встрече пары\n(исход вносит участник); legacy_legs — исходы событий экспрессов старого бота."
+      },
+      "DataUploadsOut": {
+        "properties": {
+          "archive": {
+            "$ref": "#/components/schemas/ArchiveFileStatusOut"
+          },
+          "uploads": {
+            "items": {
+              "$ref": "#/components/schemas/DataUploadOut"
+            },
+            "type": "array",
+            "title": "Uploads"
+          }
+        },
+        "type": "object",
+        "required": [
+          "archive",
+          "uploads"
+        ],
+        "title": "DataUploadsOut",
+        "description": "«Администрирование → Данные»: свежесть архива и последние загрузки, новые сверху."
       },
       "DecisionIn": {
         "properties": {
@@ -12161,6 +12773,10 @@
           "legacy_no_result": {
             "type": "integer",
             "title": "Legacy No Result"
+          },
+          "legacy_from_archive": {
+            "type": "integer",
+            "title": "Legacy From Archive"
           }
         },
         "type": "object",
@@ -12171,10 +12787,11 @@
           "events",
           "ai_runs",
           "legacy_period",
-          "legacy_no_result"
+          "legacy_no_result",
+          "legacy_from_archive"
         ],
         "title": "ExportSummaryOut",
-        "description": "Что войдет в экспорт (кабинет «Данные»): ставки (из них в игре и из старого бота),\nсобытия — ноги всех ставок, свои вызовы Claude. legacy_period и legacy_no_result —\nдля статуса импорта истории бота: период его ставок (null — ставок бота нет) и ноги\nрассчитанных экспрессов бота без исхода (бот не записывал исходы ног проигранных\nэкспрессов)."
+        "description": "Что войдет в экспорт (кабинет «Данные»): ставки (из них в игре и из старого бота),\nсобытия — ноги всех ставок, свои вызовы Claude. legacy_period и legacy_no_result —\nдля статуса импорта истории бота: период его ставок (null — ставок бота нет) и ноги\nрассчитанных экспрессов бота без исхода (бот не записывал исходы ног проигранных\nэкспрессов); legacy_from_archive — ноги ставок бота, исход которых взят из архива\n(этап 5, app/services/legacy_results.py)."
       },
       "ExpressLeg": {
         "properties": {
@@ -14993,7 +15610,11 @@
               "ai_mode_decision",
               "budget_80",
               "budget_100",
-              "ai_alert"
+              "ai_alert",
+              "bet_needs_result",
+              "settle_conflict",
+              "weekly_report",
+              "learning"
             ],
             "title": "Kind"
           },
@@ -15027,7 +15648,11 @@
               "ai_mode_decision",
               "budget_80",
               "budget_100",
-              "ai_alert"
+              "ai_alert",
+              "bet_needs_result",
+              "settle_conflict",
+              "weekly_report",
+              "learning"
             ],
             "title": "Kind"
           },
@@ -15521,6 +16146,22 @@
             "type": "array",
             "title": "Legs"
           },
+          "archive_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive To"
+          },
+          "awaiting_result": {
+            "type": "boolean",
+            "title": "Awaiting Result"
+          },
           "implied": {
             "items": {
               "type": "number"
@@ -15551,6 +16192,8 @@
           "clv_fair",
           "verdict",
           "legs",
+          "archive_to",
+          "awaiting_result",
           "implied"
         ],
         "title": "OpenBetOut",
@@ -18742,6 +19385,17 @@
             },
             "type": "array",
             "title": "Rows"
+          },
+          "flows": {
+            "items": {
+              "$ref": "#/components/schemas/BankFlowOut"
+            },
+            "type": "array",
+            "title": "Flows"
+          },
+          "flows_total": {
+            "type": "string",
+            "title": "Flows Total"
           }
         },
         "type": "object",
@@ -18759,10 +19413,12 @@
           "best",
           "worst",
           "points",
-          "rows"
+          "rows",
+          "flows",
+          "flows_total"
         ],
         "title": "SeriesOut",
-        "description": "Ряд по дням. kind = bank — капитал (баланс + ставки в игре) на конец дня, когда\nфильтров рынка, покрытия и источника нет; result — прибыль отобранных ставок\nнарастающим итогом по дню расчета (по поясу участника). Первая точка — день перед\nпериодом (start, значение base), у «всего времени» — первый день; у ряда банка дни до\nпервой записи журнала в points не входят. peak — наибольшее значение ряда;\nmax_drawdown (доля от −1 до 0, только у bank) — наибольшая просадка от пика по правилу\nР22: пополнение, вывод и корректировка — не просадка; best и worst — лучшая и худшая\nточка (у result худшая не выше нуля). rows — по неделям (период до 31 дня) или по\nмесяцам."
+        "description": "Ряд по дням. kind = bank — капитал (баланс + ставки в игре) на конец дня, когда\nфильтров рынка, покрытия и источника нет; result — прибыль отобранных ставок\nнарастающим итогом по дню расчета (по поясу участника). Первая точка — день перед\nпериодом (start, значение base), у «всего времени» — первый день; у ряда банка дни до\nпервой записи журнала в points не входят. peak — наибольшее значение ряда;\nmax_drawdown (доля от −1 до 0, только у bank) — наибольшая просадка от пика по правилу\nР22: пополнение, вывод и корректировка — не просадка; best и worst — лучшая и худшая\nточка (у result худшая не выше нуля). rows — по неделям (период до 31 дня) или по\nмесяцам.\n\nВ7 (Р25): у ряда банка points[].invested — пунктир «вложено» ступенькой, flows —\nпополнения, выводы и корректировки внутри периода (отметки на линии), flows_total —\nих сумма. Главное число периода — прибыль ставок и ROI (kpi), а не рост капитала."
       },
       "SeriesPointOut": {
         "properties": {
@@ -18774,14 +19430,27 @@
           "value": {
             "type": "string",
             "title": "Value"
+          },
+          "invested": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invested"
           }
         },
         "type": "object",
         "required": [
           "day",
-          "value"
+          "value",
+          "invested"
         ],
-        "title": "SeriesPointOut"
+        "title": "SeriesPointOut",
+        "description": "Точка ряда: значение на конец дня; invested — «вложено» ступенькой (у ряда банка:\nстарт периода плюс пополнения и минус выводы с корректировками внутри периода по\nэтот день; у ряда результата — null)."
       },
       "SeriesRowOut": {
         "properties": {
@@ -20640,6 +21309,87 @@
           "text"
         ],
         "title": "UnknownLineOut"
+      },
+      "UnlinkedMatchOut": {
+        "properties": {
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "player1": {
+            "type": "string",
+            "title": "Player1"
+          },
+          "player2": {
+            "type": "string",
+            "title": "Player2"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "ambiguous",
+              "conflict"
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "match_id",
+          "player1",
+          "player2",
+          "day",
+          "reason"
+        ],
+        "title": "UnlinkedMatchOut",
+        "description": "Матч из анализов, который не привязан к архиву и ждет разбора командой\nmatches-merge: id матча, игроки, день ввода и причина (несколько кандидатов, конфликт\nслияния)."
+      },
+      "UploadStepOut": {
+        "properties": {
+          "step": {
+            "type": "string",
+            "enum": [
+              "tennis_data",
+              "players_link",
+              "elo",
+              "settle"
+            ],
+            "title": "Step"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed",
+              "skipped"
+            ],
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step",
+          "status",
+          "error"
+        ],
+        "title": "UploadStepOut",
+        "description": "Шаг обработки файла и его итог; error — текст ошибки шага."
       },
       "UsageDayOut": {
         "properties": {

@@ -40,6 +40,14 @@
 		defer
 	}
 
+	# Файл tennis-data ГОД.xlsx (этап 5): до 10 МБ, тот же предел проверяет API
+	handle /api/admin/data/tennis-data {
+		request_body {
+			max_size 11MB
+		}
+		reverse_proxy api:8000
+	}
+
 	handle /api/* {
 		request_body {
 			max_size 5MB

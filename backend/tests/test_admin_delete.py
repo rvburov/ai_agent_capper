@@ -3,7 +3,7 @@
 обезличена."""
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -31,6 +31,7 @@ from app.db.models import (
     NotificationPref,
     Player,
     PlayLimit,
+    Postmortem,
     Prediction,
     PushSubscription,
     RecoveryCode,
@@ -38,6 +39,7 @@ from app.db.models import (
     TrustedDevice,
     User,
     UserSecret,
+    WeeklyReport,
 )
 from app.services import admin_users
 from app.services.sessions import utcnow
@@ -82,6 +84,7 @@ class Personal:
     eval_prediction_id: int
     agent_run_id: int
     bet_id: int
+    postmortem_id: int
 
 
 async def _fill_personal_data(db: AsyncSession, user: User, *, suffix: str) -> Personal:
@@ -177,6 +180,7 @@ async def _fill_personal_data(db: AsyncSession, user: User, *, suffix: str) -> P
                 user_id=uid, kind="stake", amount=Decimal("-100"), currency="RUB", bet_id=bet.id
             ),
             Lesson(user_id=uid, code="L-001", text="Фавориты на грунте", kind="numeric"),
+            WeeklyReport(user_id=uid, week_start=date(2026, 10, 12), payload={"bets": 3}),
             UserSecret(
                 user_id=uid, kind="anthropic_key", ciphertext=b"x", key_version=1, last4="abcd"
             ),
@@ -218,6 +222,11 @@ async def _fill_personal_data(db: AsyncSession, user: User, *, suffix: str) -> P
             ),
         ]
     )
+    # Разбор матча общий (В3): после удаления остается без пути к участнику
+    postmortem = Postmortem(
+        match_id=match.id, prediction_id=first.id, bet_id=bet.id, user_id=uid, status="done"
+    )
+    db.add(postmortem)
     await db.commit()
     return Personal(
         match_id=match.id,
@@ -225,6 +234,7 @@ async def _fill_personal_data(db: AsyncSession, user: User, *, suffix: str) -> P
         eval_prediction_id=eval_prediction.id,
         agent_run_id=run.id,
         bet_id=bet.id,
+        postmortem_id=postmortem.id,
     )
 
 
@@ -336,8 +346,13 @@ async def test_delete_member_erases_personal_data(
             assert p.user_id is None and p.agent_run_id is None
             assert p.analysis_id is None and p.strategy_version_id is None
             assert await _reaches_user(db, prediction_table, p.id, member_id) == []
+        postmortem = await db.get_one(Postmortem, data.postmortem_id, populate_existing=True)
+        assert postmortem.user_id is None and postmortem.bet_id is None
+        postmortems = Base.metadata.tables["postmortems"]
+        assert await _reaches_user(db, postmortems, postmortem.id, member_id) == []
     else:
         assert predictions == []
+        assert await db.get(Postmortem, data.postmortem_id, populate_existing=True) is None
     # Ставка и ее событие удалены, матч (общие данные) остался
     assert await db.get(Bet, data.bet_id, populate_existing=True) is None
     assert await db.get(Match, data.match_id) is not None
@@ -378,6 +393,13 @@ async def test_set_null_references_are_only_expected_tables() -> None:
         "app_settings.updated_by",
         "predictions.user_id",
         "strategy_versions.approved_by",
+        # Этап 5: кто загрузил файл, решил по уроку, версии стратегии и модели — действия
+        # администратора; разбор матча общий (обнуляется в _erase_personal_data)
+        "data_uploads.uploaded_by",
+        "lessons.decided_by",
+        "strategy_versions.decided_by",
+        "ml_models.activated_by",
+        "postmortems.user_id",
     }
     found = {f"{table.name}.{column}" for table, column in _user_fk_columns("SET NULL")}
     assert found == expected

@@ -44,7 +44,17 @@ from app.db.models.betting import (
     Prediction,
     StrategyVersion,
 )
-from app.db.models.learning import EvalRun, Lesson, MlModel
+from app.db.models.learning import (
+    BatchJob,
+    EvalComparison,
+    EvalRun,
+    EvalSet,
+    EvalSetItem,
+    Lesson,
+    MlModel,
+    Postmortem,
+    WeeklyReport,
+)
 from app.db.models.tennis import (
     MATCH_SOURCES,
     MATCH_STATUSES,
@@ -52,6 +62,7 @@ from app.db.models.tennis import (
     ODDS_KINDS,
     SURFACES,
     TOURNAMENT_SOURCES,
+    DataUpload,
     Dossier,
     IngestionRun,
     Match,
@@ -104,11 +115,16 @@ __all__ = [
     "Analysis",
     "AppSettings",
     "BankrollLedger",
+    "BatchJob",
     "Bet",
     "BetLeg",
     "Bookmaker",
+    "DataUpload",
     "Dossier",
+    "EvalComparison",
     "EvalRun",
+    "EvalSet",
+    "EvalSetItem",
     "IngestionRun",
     "Lesson",
     "LoginEvent",
@@ -126,6 +142,7 @@ __all__ = [
     "PlayerNews",
     "PlayerProfile",
     "PlayerRating",
+    "Postmortem",
     "Prediction",
     "PushSubscription",
     "RecoveryCode",
@@ -135,4 +152,5 @@ __all__ = [
     "User",
     "UserSecret",
     "UserSession",
+    "WeeklyReport",
 ]

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes import admin as admin_routes
 from app.api.routes import admin_ai as admin_ai_routes
+from app.api.routes import admin_data as admin_data_routes
 from app.api.routes import admin_messages as admin_messages_routes
 from app.api.routes import admin_settings as admin_settings_routes
 from app.db.models import User
@@ -44,6 +45,7 @@ def test_every_admin_router_route_is_in_schema() -> None:
         *admin_ai_routes.router.routes,
         *admin_settings_routes.router.routes,
         *admin_messages_routes.router.routes,
+        *admin_data_routes.router.routes,
     ]:
         assert isinstance(route, APIRoute)
         for method in route.methods or set():

@@ -64,6 +64,7 @@ from app.db.models import (
     BankrollLedger,
     Bet,
     BetLeg,
+    IngestionRun,
     Match,
     Player,
     Prediction,
@@ -77,6 +78,7 @@ from app.ml.strategy import StrategyParams
 from app.schemas.bets import (
     AdaptationOut,
     BankOut,
+    BetCountsOut,
     BetFiltersIn,
     BetIn,
     BetItemOut,
@@ -732,22 +734,31 @@ def _closing_out(leg: BetLeg) -> ClosingOut | None:
         bookmaker=name,
         source=leg.closing_source or "user",  # type: ignore[arg-type]
         q_close=leg.q_close,
+        unverified=leg.closing_source == "archive",
     )
 
 
-def effective_odds(bet: Bet, legs: Sequence[BetLeg]) -> Decimal | None:
-    """Кэф расчета выигранной ставки: возврат ноги — кэф 1.00, остальное — произведение
-    кэфов выигравших ног (до 0.001, как итоговый кэф при ставке). Без возвратов —
-    итоговый кэф ставки (у ставок бота он мог отличаться от произведения)."""
-    if bet.status != "won":
+def settle_odds(
+    status: str, total_odds: Decimal, legs: Sequence[tuple[Decimal, str | None]]
+) -> Decimal | None:
+    """Кэф расчета по итогу ставки и (кэф ноги, исход ноги): у выигрыша возврат ноги — кэф
+    1.00, остальное — произведение кэфов выигравших ног (до 0.001, как итоговый кэф при
+    ставке); без возвратов — итоговый кэф ставки (у ставок бота он мог отличаться от
+    произведения). Не выигрыш — None."""
+    if status != "won":
         return None
-    if not any(leg.result == "void" for leg in legs):
-        return bet.total_odds
+    if not any(result == "void" for _, result in legs):
+        return total_odds
     product = Decimal(1)
-    for leg in legs:
-        if leg.result == "win":
-            product *= leg.odds_taken
+    for odds, result in legs:
+        if result == "win":
+            product *= odds
     return product.quantize(ODDS_STEP, rounding=ROUND_HALF_UP)
+
+
+def effective_odds(bet: Bet, legs: Sequence[BetLeg]) -> Decimal | None:
+    """Кэф расчета выигранной ставки по ее ногам (settle_odds)."""
+    return settle_odds(bet.status, bet.total_odds, [(leg.odds_taken, leg.result) for leg in legs])
 
 
 def verdict(bet: Bet, legs: Sequence[BetLeg], bet_clv: float | None) -> Verdict | None:
@@ -815,7 +826,16 @@ def _leg_out(context: LegContext, players: dict[int, Player], *, open_bet: bool)
             if open_bet
             else None
         ),
+        archive_result=leg.archive_result,  # type: ignore[arg-type]
+        archive_score=score_from_own(leg.archive_score, leg.selection),
     )
+
+
+def awaiting_result(contexts: Sequence[LegContext], today: date) -> bool:
+    """Открытая ставка ждет результата: все ее матчи уже прошли (день матча раньше
+    сегодняшнего по поясу участника), а исхода нет."""
+    days = [context.day for context in contexts]
+    return bool(days) and all(day is not None and day < today for day in days)
 
 
 def _payout(bet: Bet) -> Decimal | None:
@@ -833,6 +853,9 @@ def bet_item(
     contexts: Sequence[LegContext],
     players: dict[int, Player],
     bank_after: Decimal | None = None,
+    *,
+    today: date | None = None,
+    archive_to: date | None = None,
 ) -> BetItemOut:
     legs = [context.leg for context in contexts]
     live = [leg for leg in legs if leg.result != "void"]
@@ -861,7 +884,36 @@ def bet_item(
         clv_fair=bet_fair,
         verdict=verdict(bet, legs, bet_clv),
         legs=[_leg_out(context, players, open_bet=bet.status == "open") for context in contexts],
+        archive_to=archive_to if bet.settled_by == "auto" else None,
+        awaiting_result=(
+            bet.status == "open" and today is not None and awaiting_result(contexts, today)
+        ),
     )
+
+
+async def _archive_days(db: AsyncSession, bets: Sequence[Bet]) -> dict[int, date]:
+    """Последний день архива на момент расчета ставки (отчет запуска settle)."""
+    run_ids = {bet.settle_run_id for bet in bets if bet.settle_run_id is not None}
+    if not run_ids:
+        return {}
+    rows = await db.execute(
+        select(IngestionRun.id, IngestionRun.details["freshness"]["archive_to"].astext).where(
+            IngestionRun.id.in_(run_ids)
+        )
+    )
+    found: dict[int, date] = {}
+    for run_id, value in rows:
+        if not value:
+            continue
+        try:
+            found[int(run_id)] = date.fromisoformat(value)
+        except ValueError:
+            continue
+    return {
+        bet.id: found[bet.settle_run_id]
+        for bet in bets
+        if bet.settle_run_id is not None and bet.settle_run_id in found
+    }
 
 
 async def bet_items(
@@ -900,7 +952,33 @@ async def bet_items(
         after = await equity_after_bets(
             db, user.id, [bet.id for bet in bets if bet.status != "open"]
         )
-    return [bet_item(bet, contexts[bet.id], players, after.get(bet.id)) for bet in bets]
+    today = local_today(user_zone(user.tz))
+    archive = await _archive_days(db, bets)
+    return [
+        bet_item(
+            bet,
+            contexts[bet.id],
+            players,
+            after.get(bet.id),
+            today=today,
+            archive_to=archive.get(bet.id),
+        )
+        for bet in bets
+    ]
+
+
+async def bet_counts(db: AsyncSession, user: User, now: datetime | None = None) -> BetCountsOut:
+    """Счетчики для меню: открытые ставки и из них ждущие результата (все матчи прошли по
+    поясу участника)."""
+    bets = list(
+        await db.scalars(
+            select(Bet).where(Bet.user_id == user.id, Bet.status == "open").order_by(Bet.id)
+        )
+    )
+    contexts = await leg_contexts(db, user, bets)
+    today = local_today(user_zone(user.tz), now)
+    waiting = sum(1 for bet in bets if awaiting_result(contexts.get(bet.id, []), today))
+    return BetCountsOut(open=len(bets), awaiting_result=waiting)
 
 
 async def bet_detail(db: AsyncSession, user: User, bet_id: int) -> BetItemOut:

@@ -487,6 +487,8 @@ EXPECTED_MATCH_REFS = {
     "dossiers": ("match_id",),
     "predictions": ("match_id",),
     "bet_legs": ("match_id",),
+    "postmortems": ("match_id",),
+    "eval_set_items": ("match_id",),
 }
 
 

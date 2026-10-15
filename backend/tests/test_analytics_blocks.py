@@ -28,7 +28,7 @@ from app.services.analytics import (
     max_drawdown,
     window_of,
 )
-from app.services.bank import DayCapital
+from app.services.bank import DayCapital, DayFlow
 
 D = Decimal
 ZONE = ZoneInfo("Europe/Helsinki")
@@ -413,6 +413,9 @@ def test_period_start_from_server() -> None:
     assert (series.start_day, series.start_amount) == (before, D(10000))
     assert series.change_share == float(week.current.profit / D(10000))
     assert len(series.points) == 8
+    # Без пополнений пунктир «вложено» ровный, отметок нет
+    assert {point.invested for point in series.points} == {D(10000)}
+    assert series.flows == [] and series.flows_total == 0
     # Банк появился на третий день периода: 5 000 вложено, к концу — 5 250
     late = [DayCapital(day, D(0), D(0)) for day in days[:3]]
     late.append(DayCapital(days[3], D(5000), D(5000)))
@@ -431,9 +434,23 @@ def test_period_start_from_server() -> None:
         DayCapital(day, value, flow)
         for day, value, flow in zip(all_days, values, flows, strict=True)
     ]
-    series = analytics.series_block(replace(whole, equity=capital), rows)
-    assert (series.start_day, series.start_amount) == (all_days[0], D(3000))
+    deposits = (
+        DayFlow(all_days[0], "deposit", D(2000)),
+        DayFlow(all_days[1], "deposit", D(1500)),
+        DayFlow(all_days[1], "withdrawal", D(-500)),
+    )
+    series = analytics.series_block(replace(whole, equity=capital, flows=deposits), rows)
+    # В7: старт «всего времени» — первое пополнение; дальше пунктир «вложено» ступенькой,
+    # отметки — пополнения и выводы после старта; изменение — капитал к вложенному
+    assert (series.start_day, series.start_amount) == (all_days[0], D(2000))
     assert series.change_share == -0.1
-    # Ряд результата — от нуля, без доли
+    assert [point.invested for point in series.points] == [D(2000), D(3000), D(3000)]
+    assert [(flow.day, flow.kind, flow.amount) for flow in series.flows] == [
+        (all_days[1], "deposit", D(1500)),
+        (all_days[1], "withdrawal", D(-500)),
+    ]
+    assert series.flows_total == D(1000)
+    # Ряд результата — от нуля, без доли и без «вложено»
     result = analytics.series_block(_inputs(rows, AnalyticsFiltersIn(source="app")), rows)
     assert result.kind == "result" and result.start_amount == 0 and result.change_share is None
+    assert all(point.invested is None for point in result.points) and result.flows == []

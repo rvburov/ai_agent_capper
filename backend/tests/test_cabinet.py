@@ -30,6 +30,9 @@ async def test_member_prefs_by_key_mode(
     body = (await member.client.get("/api/me/notification-prefs")).json()
     assert _kinds(body) == [
         "bet_settled",
+        "bet_needs_result",
+        "settle_conflict",
+        "weekly_report",
         "limit_80",
         "limit_100",
         "ai_mode_decision",
@@ -55,6 +58,7 @@ async def test_admin_prefs_include_archive_and_ai_alert(
     body = (await admin.client.get("/api/me/notification-prefs")).json()
     admin_kinds = [item["kind"] for item in body["items"] if item["admin"]]
     assert admin_kinds == [
+        "learning",
         "ai_mode_request",
         "limit_80",
         "limit_100",

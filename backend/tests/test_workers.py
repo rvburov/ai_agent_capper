@@ -39,7 +39,7 @@ from app.db.models import (
 )
 from app.db.session import create_sessionmaker
 from app.ingest import update
-from app.services import analysis_run
+from app.services import analysis_run, data_uploads
 from app.services.data_status import DATA_UPDATE_MINUTE, STALE_AFTER
 from app.services.sessions import create_session, get_active_session
 from app.workers import jobs
@@ -62,6 +62,8 @@ from app.workers.main import (
     CLEANUP_HOUR_UTC,
     CLEANUP_MINUTE,
     REAP_MINUTES,
+    REMIND_MINUTE,
+    UPLOAD_TIMEOUT_SECONDS,
     WARM_NEW_DAY_MINUTE,
     WorkerSettings,
     apply_redis_prefix,
@@ -252,9 +254,17 @@ async def test_cabinet_jobs_use_sessionmaker_from_context(
 def test_worker_settings(settings: Settings) -> None:
     assert WorkerSettings.queue_name == f"{settings.redis_prefix}arq:queue"
     functions = WorkerSettings.functions
-    cleanup_job, update_job, analysis_job, reaper_job, warm_job, deletion_job, alerts_job = (
-        functions
-    )
+    (
+        cleanup_job,
+        update_job,
+        analysis_job,
+        reaper_job,
+        warm_job,
+        deletion_job,
+        alerts_job,
+        upload_job,
+        remind_job,
+    ) = functions
     assert (cleanup_job, update_job, reaper_job, deletion_job, alerts_job) == (
         cleanup_auth_records,
         update_data,
@@ -274,8 +284,22 @@ def test_worker_settings(settings: Settings) -> None:
     assert analysis_job.max_tries == 1
     # Свой предел анализа короче: анализ кончается своим failed, а не снятием задачи
     assert analysis_run.RUN_DEADLINE_SECONDS < ANALYSIS_TIMEOUT_SECONDS
+    # Этап 5: файл tennis-data — предел часа и повторы, пока идет ночное обновление
+    assert isinstance(upload_job, arq.worker.Function)
+    assert upload_job.coroutine is jobs.process_data_upload
+    assert upload_job.name == "process_data_upload" == data_uploads.UPLOAD_JOB
+    assert upload_job.timeout_s == UPLOAD_TIMEOUT_SECONDS and upload_job.max_tries == 30
+    assert remind_job is jobs.remind_unsettled
     assert WorkerSettings.cron_jobs is not None
-    cleanup, data, reaper, deletion, alerts, new_day = WorkerSettings.cron_jobs
+    cleanup, data, reaper, deletion, alerts, new_day, remind = WorkerSettings.cron_jobs
+    # Напоминания — раз в час, без повтора, не в минуты соседних задач
+    assert remind.coroutine is jobs.remind_unsettled and remind.max_tries == 1
+    assert remind.hour is None and remind.minute == REMIND_MINUTE
+    assert REMIND_MINUTE not in {CLEANUP_MINUTE, DATA_UPDATE_MINUTE, 0} | REAP_MINUTES | {
+        ACCOUNT_DELETION_MINUTE,
+        AI_ALERTS_MINUTE,
+        WARM_NEW_DAY_MINUTE,
+    }
     # Уборщик зависших анализов — каждые 5 минут, не в минуты соседних задач
     assert reaper.coroutine is reap_stuck_analyses and reaper.max_tries == 1
     assert reaper.minute == set(REAP_MINUTES) and len(REAP_MINUTES) == 12
@@ -318,7 +342,7 @@ def test_worker_cron_can_be_turned_off(settings: Settings) -> None:
     # CAPPER_WORKER_CRON=false (стек сквозных тестов): только задачи из очереди, без
     # ночной загрузки архивов и уборщика
     jobs_on = build_cron_jobs(settings)
-    assert jobs_on is not None and len(jobs_on) == 6
+    assert jobs_on is not None and len(jobs_on) == 7
     assert build_cron_jobs(settings.model_copy(update={"worker_cron": False})) is None
     assert Settings.model_fields["worker_cron"].default is True
 
@@ -580,7 +604,13 @@ async def test_update_data_job_runs_all_steps_and_checks_freshness(
     assert summary == {
         "ok": True,
         "busy": False,
-        "steps": {"sackmann": "ok", "tennis_data": "ok", "players_link": "ok", "elo": "ok"},
+        "steps": {
+            "sackmann": "ok",
+            "tennis_data": "ok",
+            "players_link": "ok",
+            "elo": "ok",
+            "settle": "ok",
+        },
         "data_stale_notified": 0,
     }
     assert (await db.scalar(select(func.count()).select_from(PlayerRating)) or 0) > 0

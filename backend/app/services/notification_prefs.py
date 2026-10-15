@@ -8,8 +8,10 @@
 Какие виды человек может получать, зависит от роли и режима ключа (макет, «О чем
 сообщать»): участнику на ключе администратора — лимит ИИ, на своем ключе — сбой ключа;
 администратору — просьбы вернуть ключ, участники у лимита, бюджет ключа, архив матчей и
-сигналы расхода ИИ. group — строка экрана: limit_80 и limit_100 (и budget_80 с budget_100)
-показываются одной строкой.
+сигналы расхода ИИ. group — строка экрана: limit_80 и limit_100 (и budget_80 с budget_100,
+bet_needs_result с settle_conflict) показываются одной строкой. Этап 5: ставка ждет
+результата или архив показывает другое, еженедельный отчет; администратору — обучение
+модели.
 
 notifications.notify спрашивает is_enabled перед записью уведомления.
 """
@@ -52,7 +54,12 @@ def available_kinds(user: User) -> list[PrefKind]:
     notifEvents)."""
     admin = user.role == "admin"
     own = user.ai_mode == "own"
-    kinds = [PrefKind("bet_settled", "bet")]
+    kinds = [
+        PrefKind("bet_settled", "bet"),
+        PrefKind("bet_needs_result", "needs"),
+        PrefKind("settle_conflict", "needs"),
+        PrefKind("weekly_report", "weekly"),
+    ]
     if not admin:
         if own:
             kinds.append(PrefKind("ai_key_failed", "key"))
@@ -66,6 +73,7 @@ def available_kinds(user: User) -> list[PrefKind]:
     ]
     if admin:
         kinds += [
+            PrefKind("learning", "learning", admin=True),
             PrefKind("ai_mode_request", "requests", admin=True),
             PrefKind("limit_80", "users", admin=True),
             PrefKind("limit_100", "users", admin=True),

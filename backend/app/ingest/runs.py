@@ -34,7 +34,7 @@ from app.db.models import IngestionRun
 
 log = structlog.get_logger(__name__)
 
-INGEST_SOURCES = ("sackmann", "tennis_data", "players_link", "elo")
+INGEST_SOURCES = ("sackmann", "tennis_data", "players_link", "elo", "settle")
 MAX_EXAMPLES = 200
 # Ключ pg_try_advisory_lock на все время обновления данных. Его берут команда update и
 # ночная задача воркера, а также отдельные команды, которые меняют архив матчей:

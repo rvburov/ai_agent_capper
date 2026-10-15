@@ -38,7 +38,10 @@ from app.db.base import (
 )
 from app.db.models.ai import KEY_SOURCES
 
-STRATEGY_STATUSES = ("candidate", "active", "archived")
+# rejected — кандидат, которого отклонили (этап 5)
+STRATEGY_STATUSES = ("candidate", "active", "archived", "rejected")
+# Зачем версия (этап 5): качество анализа, экономия токенов, правила суммы ставки
+STRATEGY_GOALS = ("quality", "saving", "rules")
 # created и running — статусы до этапа 3 (импорт старого бота пишет done); путь анализа
 # этапа 3: needs_confirmation → queued → building_dossier → modelling → llm_review →
 # composing → done, плюс failed и cancelled (PLAN.md, раздел 3)
@@ -77,22 +80,29 @@ def _user_fk(ondelete: str = "CASCADE") -> ForeignKey:
 class StrategyVersion(CreatedAtMixin, Base):
     """Версия стратегии участника: пороги (params), версия промпта, уроки в промпте,
     метрики последнего eval. Активная версия у участника одна. У истории старого бота
-    своя версия с code = 'legacy'."""
+    своя версия с code = 'legacy'.
+
+    Этап 5 (Р25): user_id пустой — общая линия инструкций анализа (ведет администратор),
+    у нее тоже одна активная версия; правила суммы ставки — версии участника. parent_id —
+    от какой версии кандидат, goal — зачем, changes — что изменилось, decided_by — кто
+    включил или отклонил, archived_at — когда версия перестала действовать."""
 
     __tablename__ = "strategy_versions"
     __table_args__ = (
-        UniqueConstraint("user_id", "code"),
+        UniqueConstraint("user_id", "code", postgresql_nulls_not_distinct=True),
         Index(
             "uq_strategy_versions_user_id_active",
             "user_id",
             unique=True,
             postgresql_where=text("status = 'active'"),
+            postgresql_nulls_not_distinct=True,
         ),
         check_in("status", STRATEGY_STATUSES, "status"),
+        check_in("goal", STRATEGY_GOALS, "goal"),
     )
 
     id: Mapped[BigIntPK]
-    user_id: Mapped[int] = mapped_column(BigInteger, _user_fk())
+    user_id: Mapped[int | None] = mapped_column(BigInteger, _user_fk())
     code: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(100), server_default="")
     params: Mapped[dict[str, Any]] = mapped_column(server_default=text("'{}'::jsonb"))
@@ -104,6 +114,13 @@ class StrategyVersion(CreatedAtMixin, Base):
     metrics: Mapped[dict[str, Any]] = mapped_column(server_default=text("'{}'::jsonb"))
     approved_by: Mapped[int | None] = mapped_column(BigInteger, _user_fk("SET NULL"))
     approved_at: Mapped[datetime | None]
+    parent_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("strategy_versions.id", ondelete="SET NULL")
+    )
+    goal: Mapped[str | None] = mapped_column(String(16))
+    changes: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
+    decided_by: Mapped[int | None] = mapped_column(BigInteger, _user_fk("SET NULL"))
+    archived_at: Mapped[datetime | None]
 
 
 class Analysis(CreatedAtMixin, UpdatedAtMixin, Base):
@@ -276,6 +293,10 @@ class Bet(CreatedAtMixin, UpdatedAtMixin, Base):
     settled_by — кто рассчитал: manual (участник), auto (авторасчет, этап 5; ручной расчет
     он не трогает), legacy (импорт бота). updated_at — версия ставки для защиты от гонки:
     расчет и сторно приходят с ожидаемым updated_at (409, если ставка уже изменилась).
+    settle_run_id — запуск расчета по архиву (ingestion_runs, source = settle), которым
+    рассчитана ставка; result_reminded_at — когда ушло напоминание «ставка ждет
+    результата» (одно на ставку); reversed_at — когда участник последний раз исправил
+    результат: такую ставку авторасчет больше не трогает, ручной расчет главнее (Т3).
     """
 
     __tablename__ = "bets"
@@ -312,6 +333,11 @@ class Bet(CreatedAtMixin, UpdatedAtMixin, Base):
     settled_by: Mapped[str | None] = mapped_column(String(8))
     source: Mapped[str] = mapped_column(String(8), server_default="app")
     source_ref: Mapped[str | None] = mapped_column(String(64))
+    settle_run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("ingestion_runs.id", ondelete="SET NULL")
+    )
+    result_reminded_at: Mapped[datetime | None]
+    reversed_at: Mapped[datetime | None]
 
 
 class BetLeg(Base):
@@ -327,6 +353,10 @@ class BetLeg(Base):
     betfair_ex, avg) или название своего букмекера; closing_source — ввел участник или
     архив. q_close — вероятность своего исхода без маржи, только при двух сторонах.
     clv — кэф / закрывающий − 1.
+
+    archive_result и archive_score — исход и счет (со стороны выбранного игрока) по архиву,
+    когда он разошелся с ручным расчетом (Т3): деньги не меняются, участнику уведомление
+    settle_conflict. Совпал или ставка снова открыта — пусто.
     """
 
     __tablename__ = "bet_legs"
@@ -338,6 +368,7 @@ class BetLeg(Base):
         check_in("result", LEG_RESULTS, "result"),
         check_in("result_source", SETTLED_BY, "result_source"),
         check_in("closing_source", CLOSING_SOURCES, "closing_source"),
+        check_in("archive_result", LEG_RESULTS, "archive_result"),
         check_probability("q_close"),
         CheckConstraint("odds_taken >= 1", name="odds_taken_min"),
         CheckConstraint("closing_odds >= 1", name="closing_odds_min"),
@@ -364,6 +395,8 @@ class BetLeg(Base):
     closing_bookmaker: Mapped[str | None] = mapped_column(String(64))
     closing_source: Mapped[str | None] = mapped_column(String(8))
     q_close: Mapped[float | None]
+    archive_result: Mapped[str | None] = mapped_column(String(8))
+    archive_score: Mapped[str | None] = mapped_column(String(32))
 
 
 class BankrollLedger(CreatedAtMixin, Base):

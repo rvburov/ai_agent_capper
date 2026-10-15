@@ -161,7 +161,8 @@ class AdminAttentionOut(BaseModel):
 class DashboardOut(DashboardCoreOut):
     """Главная одним ответом. bank — как GET /me/bank (капитал «с учетом ставок в игре»,
     пик, просадка, адаптации Р22 со статусом); open_bets — открытые ставки (новые сверху,
-    до OPEN_LIMIT; всего — open_count на open_stake); admin — только у администратора."""
+    до OPEN_LIMIT; всего — open_count на open_stake), из них awaiting_count ждут результата
+    (все матчи прошли, этап 5); admin — только у администратора."""
 
     currency: str
     tz: str
@@ -172,5 +173,6 @@ class DashboardOut(DashboardCoreOut):
     open_bets: list[OpenBetOut]
     open_count: int
     open_stake: DecimalOut
+    awaiting_count: int
     my_matches: list[MyMatchOut]
     admin: AdminAttentionOut | None

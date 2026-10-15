@@ -249,15 +249,22 @@ async def test_series_bank_and_result(
     assert D(series["base"]) == reference[start] and D(series["last"]) == reference[today]
     bank = (await member.client.get("/api/me/bank")).json()
     assert D(series["last"]) == D(bank["equity"])
-    # Старт периода — первый день банка и вложенное, изменение — рост капитала к нему
+    # В7: старт периода — первый день банка и первое пополнение (здесь банк начался с
+    # рассчитанной ставки, пополнение — позже); пунктир «вложено» — пополнения нарастающим
+    # итогом, отметки — движение банка после первого пополнения; изменение — рост капитала
+    # к вложенному
     assert series["start_day"] == first_day.isoformat()
-    assert D(series["start_amount"]) == D(bank["invested"])
+    invested = [D(item["invested"]) for item in series["points"]]
+    assert invested[0] == 0 and invested[-1] == D(bank["invested"])
+    assert D(series["start_amount"]) + D(series["flows_total"]) == D(bank["invested"])
+    assert [flow["kind"] for flow in series["flows"]] == ["correction", "withdrawal"]
     assert abs(series["change_share"] - float(D(bank["growth"]))) < 1e-4
     assert sum(D(row["profit"]) for row in series["rows"]) == D(data["kpi"]["profit"])
     assert -1 <= series["max_drawdown"] <= 0
 
     result = (await _analytics(member, period="30d", source="app"))["series"]
     assert result["kind"] == "result" and D(result["base"]) == 0
+    assert all(point["invested"] is None for point in result["points"])
     app_profit = D((await member.client.get(
         "/api/bets/summary", params={"period": "30d", "source": "app"}
     )).json()["profit"])  # fmt: skip

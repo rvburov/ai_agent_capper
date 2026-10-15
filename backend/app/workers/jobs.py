@@ -36,6 +36,16 @@ startup в app.workers.main. Логика задачи — отдельной ф
 
 Сигналы расхода ИИ (check_ai_alerts, раз в час): правила TOKEN_ECONOMY.md, раздел 6, —
 администраторам уведомление ai_alert, одно на правило в сутки (app/services/ai_alerts.py).
+
+Этап 5. Ночное обновление заканчивается расчетом по архиву (шаг settle: привязка матчей из
+анализов, закрытие из архива, авторасчет). Файл tennis-data, загруженный на сайте,
+обрабатывает process_data_upload (app/services/data_uploads.py): если идет другое
+обновление, задача повторится через BUSY_RETRY_SECONDS. Раз в час remind_unsettled:
+участникам — «ставка ждет результата» (матчи прошли 3 дня назад, исхода нет; одно на
+ставку), администраторам в понедельник в 07:00 по их поясу — «пора загрузить файл
+tennis-data», если его не загружали больше 7 дней (одно в сутки; время последней загрузки
+и год файла — по поясу администратора), и уборка загрузок файла, которые уже никто не
+доделает (data_uploads.reap_stuck_uploads).
 """
 
 from dataclasses import asdict, dataclass
@@ -43,16 +53,28 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
+from arq import Retry
 from redis.asyncio import Redis
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
+from app.core.formatting import format_moment
 from app.core.redis import create_redis
 from app.db.models import LoginEvent, Notification, TrustedDevice, User, UserSession
 from app.ingest.update import run_update
 from app.schemas.analytics import AnalyticsFiltersIn
-from app.services import account, ai_alerts, analysis_run, analytics, analytics_cache, dashboard
+from app.services import (
+    account,
+    ai_alerts,
+    analysis_run,
+    analytics,
+    analytics_cache,
+    auto_settlement,
+    dashboard,
+    data_uploads,
+)
+from app.services.bank import user_zone
 from app.services.data_status import STALE_AFTER, is_stale, last_ok_loads
 from app.services.notifications import notify
 
@@ -321,3 +343,91 @@ async def check_ai_alerts(ctx: dict[Any, Any]) -> list[str]:
     if fired:
         log.warning("worker.ai_alerts", rules=fired)
     return fired
+
+
+# --- расчет по архиву (этап 5) ---
+
+# Напоминание «пора загрузить файл»: понедельник, 07:00 по поясу администратора
+UPLOAD_REMINDER_WEEKDAY = 0
+UPLOAD_REMINDER_HOUR = 7
+# Куда ведет «пора загрузить файл»: пока «Администрирование → Обзор» (дело «Архив матчей не
+# обновлялся»); с вкладкой «Данные» (волна 2) — "/admin/data"
+UPLOAD_LINK = "/admin"
+# Тексты «пора загрузить файл»: была загрузка и еще не было ни одной
+UPLOAD_VARIANTS = ("upload", "upload_first")
+
+
+async def process_data_upload(ctx: dict[Any, Any], upload_id: int) -> str:
+    """Задача arq: обработать загруженный файл tennis-data. Идет другое обновление —
+    повтор позже (Retry), загрузка ждет в очереди."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    status = await data_uploads.process_upload(sessionmaker, upload_id)
+    log.info("worker.process_data_upload", upload_id=upload_id, status=status)
+    if status == "busy":
+        raise Retry(defer=data_uploads.BUSY_RETRY_SECONDS)
+    return status
+
+
+async def notify_upload_due(db: AsyncSession, *, now: datetime | None = None) -> list[int]:
+    """Понедельник, 07:00 по поясу администратора, файл tennis-data не загружали больше
+    STALE_DAYS дней — data_stale (повод upload), не чаще раза в сутки каждому. Делает
+    commit. Возвращает id администраторов, кому ушло."""
+    moment = now or datetime.now(UTC)
+    archive = await data_uploads.archive_status(db, moment)
+    if not archive.stale:
+        return []
+    admins = list(
+        await db.scalars(
+            select(User).where(User.role == "admin", User.status == "active").order_by(User.id)
+        )
+    )
+    recent = set(
+        (
+            await db.scalars(
+                select(Notification.user_id).where(
+                    Notification.kind == "data_stale",
+                    Notification.created_at > moment - STALE_NOTIFY_EVERY,
+                    Notification.params["variant"].astext.in_(UPLOAD_VARIANTS),
+                )
+            )
+        ).all()
+    )
+    sent: list[int] = []
+    for admin in admins:
+        zone = user_zone(admin.tz)
+        local = moment.astimezone(zone)
+        if local.weekday() != UPLOAD_REMINDER_WEEKDAY or local.hour != UPLOAD_REMINDER_HOUR:
+            continue
+        if admin.id in recent:
+            continue
+        # Время — по поясу администратора; загрузок еще не было — свой текст
+        params: dict[str, Any] = {"year": local.year}
+        if archive.last_load is not None:
+            params["last"] = format_moment(archive.last_load, zone, now=moment)
+        await notify(
+            db,
+            user_id=admin.id,
+            kind="data_stale",
+            variant="upload" if archive.last_load is not None else "upload_first",
+            link=UPLOAD_LINK,
+            **params,
+        )
+        sent.append(admin.id)
+    await db.commit()
+    return sent
+
+
+async def remind_unsettled(ctx: dict[Any, Any]) -> dict[str, int]:
+    """Задача arq (cron раз в час): «ставка ждет результата» участникам, «пора загрузить
+    файл» администраторам и уборка зависших загрузок файла (см. docstring модуля)."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        bets = await auto_settlement.remind_unsettled(db)
+    async with sessionmaker() as db:
+        admins = await notify_upload_due(db)
+    async with sessionmaker() as db:
+        stuck = await data_uploads.reap_stuck_uploads(db)
+    summary = {"bets": bets, "admins": len(admins), "stuck_uploads": len(stuck)}
+    if bets or admins or stuck:
+        log.info("worker.remind_unsettled", **summary)
+    return summary

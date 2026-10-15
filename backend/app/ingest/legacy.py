@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, text
@@ -84,6 +84,9 @@ from app.services import bookmakers as bookmakers_service
 from app.services.app_settings import get_app_settings
 from app.services.audit import write_audit
 from app.services.bank import lock_member_money
+
+if TYPE_CHECKING:
+    from app.ingest.players_link import ArchiveNames
 
 SOURCE = "legacy"
 STRATEGY_CODE = "legacy"
@@ -697,8 +700,15 @@ class _Importer:
         self.matches_created: set[int] = set()
         self.matches_found: set[int] = set()
         self.ambiguous_warned: set[str] = set()
+        # Игроки архива для имен, которых нет в базе (Т23): без них импорт создал бы
+        # двойника «Синнер Я.» рядом с Jannik Sinner, и анализ не узнал бы игрока
+        self.archive: ArchiveNames | None = None
 
     async def load_indexes(self, days: set[date]) -> None:
+        # Привязка старого бота импортирует этот модуль (общая блокировка): здесь — позже
+        from app.ingest.players_link import archive_names
+
+        self.archive = await archive_names(self.db)
         rows = await self.db.execute(
             select(Player.id, Player.name, Player.name_ru, Player.aliases).order_by(Player.id)
         )
@@ -730,12 +740,40 @@ class _Importer:
             self.report.warnings.append(_tr("issue.player_ambiguous", name=key, id=ids[0]))
         return ids[0]
 
+    async def _archive_player(self, names: Sequence[str], shown: str) -> tuple[int | None, bool]:
+        """Игрок архива для имени, которого нет в базе (сходство фамилий, как у привязки
+        старого бота): найден явно — ему добавляются имена бота; похожих несколько — в
+        отчет (решить командой players-merge). Возвращает id и «неоднозначно»."""
+        if self.archive is None:
+            return None, False
+        found, ambiguous = self.archive.find(names)
+        if ambiguous:
+            key = f"archive:{shown}"
+            if key not in self.ambiguous_warned:
+                self.ambiguous_warned.add(key)
+                self.report.warnings.append(_tr("issue.player_archive_ambiguous", name=shown))
+            return None, True
+        if found is None:
+            return None, False
+        player = await self.db.get(Player, found)
+        if player is not None:
+            missing = [name for name in names if name and name not in player.aliases]
+            if missing:
+                player.aliases = [*player.aliases, *missing]
+        for name in names:
+            self._index_player(name, found)
+        self.players_used.add(found)
+        return found, False
+
     async def player(self, raw: str) -> int:
         found = self._known_player(name_key(raw))
         if found is not None:
             self.players_used.add(found)
             return found
         name = clean_name(raw)[:200]
+        in_archive, _ = await self._archive_player([name], name)
+        if in_archive is not None:
+            return in_archive
         player = Player(name=name, name_ru=name, aliases=[name])
         self.db.add(player)
         await self.db.flush()
@@ -971,6 +1009,11 @@ class _Importer:
                 continue
             names = _profile_names(folder.name, folder.parts.get("01"))
             player_id = await self._profile_player(names)
+            if player_id is None:
+                report.profile_issues.append(
+                    _tr("issue.profile_player_unsure", folder=folder.name, name=names[0])
+                )
+                continue
             if player_id in done:
                 report.profile_issues.append(
                     _tr("issue.profile_duplicate", folder=folder.name, other=done[player_id])
@@ -995,10 +1038,12 @@ class _Importer:
                 report.profiles_updated += 1
         await self.db.flush()
 
-    async def _profile_player(self, names: list[str]) -> int:
+    async def _profile_player(self, names: list[str]) -> int | None:
         """Игрок профиля: сначала по полному имени, потом по короткому «Фамилия И.»,
-        как его писал бот в истории. Найденному добавляются псевдонимы, иначе создается
-        заготовка с полным и коротким именем."""
+        как его писал бот в истории, потом среди игроков архива по фамилии (Т23).
+        Найденному добавляются псевдонимы. Похожих в архиве несколько — None: профиль в
+        отчет, а не новый игрок-двойник. Никого похожего — заготовка с полным и коротким
+        именем."""
         found = next(
             (pid for full in names if (pid := self._known_player(name_key(full))) is not None),
             None,
@@ -1014,6 +1059,10 @@ class _Importer:
                 None,
             )
         aliases = list(dict.fromkeys([*names, *filter(None, map(short_name, names))]))
+        if found is None:
+            found, ambiguous = await self._archive_player(aliases, names[0])
+            if ambiguous:
+                return None
         if found is None:
             player = Player(name=names[0], name_ru=names[0], aliases=aliases)
             self.db.add(player)
