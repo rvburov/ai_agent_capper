@@ -134,13 +134,13 @@ describe('Аналитика: банк на начало периода', () => 
     expect(start.points).toHaveLength(4);
     expect(start.share).toBeCloseTo(2860 / 48000, 6);
     // банк появился внутри периода: сервер присылает первый день банка, вложенное и рост
-    const late = seriesOut({ start: '2026-09-13', base: '0.00', start_day: '2026-09-23', start_amount: '20000.00', change_share: 0.015, points: [{ day: '2026-09-23', value: '20350.00' }, { day: '2026-10-13', value: '20300.00' }] });
+    const late = seriesOut({ start: '2026-09-13', base: '0.00', start_day: '2026-09-23', start_amount: '20000.00', change_share: 0.015, points: [{ day: '2026-09-23', value: '20350.00', invested: null }, { day: '2026-10-13', value: '20300.00', invested: null }] });
     expect(periodStart(late)).toMatchObject({ day: '2026-09-23', amount: '20000.00', share: 0.015 });
     expect(periodStart(late).points.map((point) => point.day)).toEqual(['2026-09-23', '2026-10-13']);
   });
 
   it('ряд результата — с нуля, без процента', () => {
-    const result = seriesOut({ kind: 'result', base: '0.00', start_amount: '0.00', change_share: null, points: [{ day: '2026-08-31', value: '0.00' }, { day: '2026-10-13', value: '860.00' }] });
+    const result = seriesOut({ kind: 'result', base: '0.00', start_amount: '0.00', change_share: null, points: [{ day: '2026-08-31', value: '0.00', invested: null }, { day: '2026-10-13', value: '860.00', invested: null }] });
     expect(periodStart(result)).toMatchObject({ day: '2026-08-31', amount: '0.00', share: null });
   });
 });

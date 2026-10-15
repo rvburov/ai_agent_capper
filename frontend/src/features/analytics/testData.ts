@@ -60,8 +60,45 @@ export function brierOut(over: Partial<Brier> = {}): Brier {
   };
 }
 
-export function seriesOut(over: Partial<Series> = {}): Series {
+/**
+ * Ряд банка с пополнением внутри периода (В7 этапа 5, как в макете): старт 40 000 ₽ 13 сен,
+ * пополнение 20 000 ₽ 14 сен, банк на конец периода 70 485 ₽. «Вложено» по дням и движения
+ * банка — поля ряда, которые сервер добавляет в этапе 5 (points[].invested, flows, flows_total).
+ */
+const FLOW_POINTS: Series['points'] = [
+  { day: '2026-09-13', value: '40000.00', invested: '40000.00' },
+  { day: '2026-09-14', value: '60400.00', invested: '60000.00' },
+  { day: '2026-10-01', value: '68100.00', invested: '60000.00' },
+  { day: '2026-10-13', value: '70485.00', invested: '60000.00' },
+].map((point) => ({ ...point }));
+
+export function seriesWithFlows(over: Partial<Series> = {}): Series {
   return {
+    ...seriesOut({
+      group: 'week',
+      start: '2026-09-13',
+      base: '40000.00',
+      start_day: '2026-09-13',
+      start_amount: '40000.00',
+      change_share: null,
+      last: '70485.00',
+      peak: '70485.00',
+      best: '70485.00',
+      worst: '40000.00',
+      max_drawdown: -0.012,
+      points: FLOW_POINTS,
+      ...over,
+    }),
+    flows: [{ day: '2026-09-14', kind: 'deposit', amount: '20000.00' }],
+    flows_total: '20000.00',
+  };
+}
+
+export function seriesOut(over: Partial<Series> = {}): Series {
+  // В7: движений внутри периода нет — «вложено» ровно на старте
+  return {
+    flows: [],
+    flows_total: '0.00',
     kind: 'bank',
     group: 'month',
     start: '2026-08-31',
@@ -75,10 +112,10 @@ export function seriesOut(over: Partial<Series> = {}): Series {
     best: '51200.00',
     worst: '47100.00',
     points: [
-      { day: '2026-08-31', value: '48000.00' },
-      { day: '2026-09-15', value: '49500.00' },
-      { day: '2026-10-01', value: '51200.00' },
-      { day: '2026-10-13', value: '50860.00' },
+      { day: '2026-08-31', value: '48000.00', invested: '48000.00' },
+      { day: '2026-09-15', value: '49500.00', invested: '48000.00' },
+      { day: '2026-10-01', value: '51200.00', invested: '48000.00' },
+      { day: '2026-10-13', value: '50860.00', invested: '48000.00' },
     ],
     rows: [
       { date_from: '2026-09-01', date_to: '2026-09-30', bets: 26, profit: '2100.00', roi: 0.064, end: '50100.00' },

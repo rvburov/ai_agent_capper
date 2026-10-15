@@ -45,6 +45,8 @@ export function betLeg(over: Partial<BetLeg> = {}): BetLeg {
     clv_fair: null,
     score_outcomes: { ...OUTCOMES_BO3 },
     edge: null,
+    archive_result: null,
+    archive_score: null,
     ...over,
   };
   // Перевес над рынком, как на сервере: прогноз ноги минус 1/кэф, если его не задали явно
@@ -99,6 +101,8 @@ export function betOpen(over: Partial<BetItem> = {}): BetItem {
     clv: null,
     clv_fair: null,
     verdict: null,
+    archive_to: null,
+    awaiting_result: false,
     legs: [betLeg(), betLeg2()],
     ...over,
   };
@@ -106,7 +110,7 @@ export function betOpen(over: Partial<BetItem> = {}): BetItem {
 
 /** Рассчитанная выигранная ставка №5 с закрытием на обеих ногах. */
 export function betWon(over: Partial<BetItem> = {}): BetItem {
-  const closing = { odds: '1.250', opp_odds: '4.200', by: 'pinnacle' as const, bookmaker: null, source: 'user' as const, q_close: 0.7865 };
+  const closing = { odds: '1.250', opp_odds: '4.200', by: 'pinnacle' as const, bookmaker: null, source: 'user' as const, q_close: 0.7865, unverified: false };
   return betOpen({
     id: 5,
     placed_at: '2026-10-05T09:00:00Z',

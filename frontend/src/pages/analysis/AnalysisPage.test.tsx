@@ -58,6 +58,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setEventSourceFactory(null);
+  vi.useRealTimers();
 });
 
 function routes(analysis: Analysis | (() => Analysis), extra: Record<string, Handler> = {}): Record<string, Handler> {
@@ -193,6 +194,9 @@ describe('Анализ готов: итог и экспресс', () => {
   });
 
   it('ответственная игра: лимит суммы и пауза — понятный текст «до какого времени» в окне ставки', async () => {
+    // «21 дек» без года — только пока на часах 2026 год
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-10-15T09:00:00Z'));
     const user = userEvent.setup();
     let posts = 0;
     mockFetch(

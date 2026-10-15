@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { ADMIN_TABS, PLAYER_TABS, PROFILE_TABS, paths } from '../../src/app/paths';
+import { ADMIN_TABS, LEARNING_TABS, PLAYER_TABS, PROFILE_TABS, paths } from '../../src/app/paths';
 
 /*
  * Все адреса приложения — из списка маршрутов src/app/router.tsx, а не вручную: общая проверка
@@ -51,7 +51,7 @@ const ROUTE_URLS: Record<string, (ctx: RouteContext) => { who: Audience; urls: s
     urls: PLAYER_TABS.filter((tab) => tab !== 'profile').map((tab) => paths.player(ctx.playerId, tab)),
   }),
   analytics: () => ({ who: 'member', urls: [paths.analytics] }),
-  learning: () => ({ who: 'member', urls: [paths.learning] }),
+  'learning/:tab?': () => ({ who: 'member', urls: LEARNING_TABS.map((tab) => paths.learning(tab)) }),
   costs: () => ({ who: 'member', urls: [paths.costs] }),
   'profile/:tab?': () => ({ who: 'member', urls: PROFILE_TABS.map((tab) => paths.profile(tab)) }),
   'admin/:tab?': () => ({ who: 'admin', urls: ADMIN_TABS.map((tab) => paths.admin(tab)) }),

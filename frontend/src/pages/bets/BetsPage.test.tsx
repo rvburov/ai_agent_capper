@@ -159,7 +159,7 @@ describe('Ставки: экран', () => {
   it('гонка: 409 — текст ошибки, карточка перечитана, повтор с новой версией и без чужого закрытия', async () => {
     let version = 0;
     // в другой вкладке внесли закрытие первого события (расчет там отменили — ставка открыта)
-    const otherClosing = { odds: '1.800', opp_odds: '2.100', by: 'pinnacle' as const, bookmaker: null, source: 'user' as const, q_close: 0.54 };
+    const otherClosing = { odds: '1.800', opp_odds: '2.100', by: 'pinnacle' as const, bookmaker: null, source: 'user' as const, q_close: 0.54, unverified: false };
     const fresh = betOpen({ updated_at: '2026-10-13T09:00:00Z', legs: [betLeg({ closing: otherClosing }), betLeg2()] });
     const { user, calls } = renderBets(
       '/bets',

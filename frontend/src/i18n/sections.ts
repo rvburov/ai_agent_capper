@@ -15,7 +15,6 @@ export const CORE_TEXTS: readonly string[] = [
   'shell',
   'pages',
   'crumbs',
-  'stub',
   'notifications',
   'notFound',
   'common',
@@ -51,6 +50,7 @@ export const SCREEN_SECTIONS = [
   'analytics',
   'players',
   'costs',
+  'learning',
   'profile',
   'admin',
 ] as const;
@@ -69,6 +69,7 @@ export const SCREEN_TEXTS = {
     'dashboard',
     'admin.left',
     'admin.months',
+    'analytics.flows',
     'analytics.markets',
     'analytics.period',
     'bets.botClv',
@@ -99,6 +100,7 @@ export const SCREEN_TEXTS = {
     'profile.key.limit',
     'profile.key.reason',
   ],
+  'learning/LearningPage': ['learning'],
   'profile/ProfilePage': ['profile', 'admin.left', 'admin.limitShort', 'admin.limitText', 'admin.months', 'bets.count'],
   'profile/deletion/DeletionPendingScreen': ['profile.deletion'],
   'admin/AdminPage': [

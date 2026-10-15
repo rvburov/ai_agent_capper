@@ -7,6 +7,7 @@ import { decisionsCount, useAdminAttention } from '../../features/admin/useAdmin
 import { paths } from '../paths';
 import { BrandMark } from './BrandMark';
 import { NAV_GROUPS, NAV_ITEMS, type NavId } from './nav';
+import { OpenBetsBadge } from './OpenBetsBadge';
 import { ThemeNavButton } from './ThemeNavButton';
 
 interface SidebarProps {
@@ -58,6 +59,7 @@ export function Sidebar({ navId, isAdmin, onLogout }: SidebarProps) {
               <Icon name={item.icon} />
               {t(`nav.${item.id}`)}
               {item.id === 'admin' && isAdmin && <AdminBadge />}
+              {item.id === 'bets' && <OpenBetsBadge place="sidebar" />}
             </Link>
           ))}
         </Fragment>

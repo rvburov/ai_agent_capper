@@ -239,6 +239,113 @@ export function areaPath(points: readonly (Point | null)[], baseY: number): stri
 }
 
 /**
+ * Линия ступенькой (пунктир «вложено», В7 этапа 5): от точки к точке сначала по горизонтали,
+ * потом по вертикали — значение меняется ровно в день события (пополнения), а не плавно между
+ * днями. Пропуск (null) — разрыв, как у обычной линии.
+ */
+export function stepPath(points: readonly (Point | null)[]): string {
+  let d = '';
+  let prev: Point | null = null;
+  for (const p of points) {
+    if (!p) {
+      prev = null;
+      continue;
+    }
+    d += prev ? `H${px(p[0])}V${px(p[1])}` : `M${px(p[0])} ${px(p[1])}`;
+    prev = p;
+  }
+  return d;
+}
+
+/** Подпись отметки события над графиком: где начинается, как прижата и в каком ряду. */
+export interface MarkLabelPlace {
+  x: number;
+  anchor: 'start' | 'end';
+  /** Ряд подписей сверху вниз: 0 — у верхнего края области построения. */
+  row: number;
+}
+
+/**
+ * Где подписать отметки событий («+20 000 ₽ · пополнение, 14 сен»). Подписи стоят в своей полосе
+ * над областью построения (рядами сверху вниз), поэтому линия данных, деления и конечная метка
+ * их не задевают; полоса — во всю ширину [min, max]. Пунктир подписанной отметки доходит до
+ * ряда своей подписи, пунктир неподписанной — только до области построения.
+ *
+ * Подпись стоит справа от отметки, а правее split (по умолчанию 55% от [min, max]; график
+ * передает 55% области построения, как в макете) — слева от нее. Если на своей стороне она
+ * налезает на соседнюю подпись, уходит во второй ряд с той же стороны; на другую сторону —
+ * только если со своей не влезает в [min, max] или пересекла бы пунктир другого дня. Пунктир
+ * чужой подписи не пересекается никогда (иначе подпись читается как подпись не к той дате);
+ * сначала ищется место, где над подписью нет и неподписанных отметок. У отметок одного дня
+ * пунктир общий. Не влезает нигде — подписи нет (null): событие остается отметкой на графике,
+ * в подсказке и в тексте для читалки. Отметки — в любом порядке, ответ — в том же.
+ */
+export function placeMarkLabels(
+  marks: readonly { x: number; width: number }[],
+  {
+    min,
+    max,
+    split = min + (max - min) * 0.55,
+    gap = 8,
+    offset = 6,
+    rows = 2,
+  }: { min: number; max: number; split?: number; gap?: number; offset?: number; rows?: number },
+): (MarkLabelPlace | null)[] {
+  const out: (MarkLabelPlace | null)[] = marks.map(() => null);
+  const ends: number[] = [];
+  const placed: { x: number; row: number; a: number; b: number }[] = [];
+  const order = marks.map((_, i) => i).sort((a, b) => (marks[a]?.x ?? 0) - (marks[b]?.x ?? 0));
+  // пунктир ближе 2 px к краю подписи — уже «под» ней; у отметок одного дня пунктир общий
+  const under = (x: number, a: number, b: number) => x >= a - 2 && x <= b + 2;
+  const other = (x: number, own: number) => Math.abs(x - own) > 0.5;
+  const fits = (x: number, a: number, b: number, row: number, strict: boolean) =>
+    (ends[row] ?? -Infinity) + gap <= a &&
+    // пунктир подписанной отметки идет от ряда своей подписи вниз: не через эту подпись,
+    // и пунктир этой отметки — не через подписи рядов ниже
+    !placed.some((p) => other(p.x, x) && ((p.row <= row && under(p.x, a, b)) || (p.row >= row && under(x, p.a, p.b)))) &&
+    !(strict && marks.some((m) => other(m.x, x) && under(m.x, a, b)));
+  for (const i of order) {
+    const mark = marks[i];
+    if (!mark) continue;
+    const spans: Record<'start' | 'end', [number, number]> = {
+      start: [mark.x + offset, mark.x + offset + mark.width],
+      end: [mark.x - offset - mark.width, mark.x - offset],
+    };
+    const sides: ('start' | 'end')[] = mark.x > split ? ['end', 'start'] : ['start', 'end'];
+    let place: { anchor: 'start' | 'end'; row: number } | null = null;
+    for (const strict of [true, false]) {
+      for (const anchor of sides) {
+        const [a, b] = spans[anchor];
+        if (a < min || b > max) continue;
+        const row = Array.from({ length: rows }, (_, r) => r).find((r) => fits(mark.x, a, b, r, strict));
+        if (row !== undefined) {
+          place = { anchor, row };
+          break;
+        }
+      }
+      if (place) break;
+    }
+    if (!place) continue;
+    const [a, b] = spans[place.anchor];
+    ends[place.row] = b;
+    placed.push({ x: mark.x, row: place.row, a, b });
+    out[i] = { x: place.anchor === 'start' ? a : b, anchor: place.anchor, row: place.row };
+  }
+  return out;
+}
+
+/**
+ * Полоса подписей отметок над областью построения: базовая линия ряда row, верх ряда (до него
+ * доходит пунктир отметки) и верхний отступ области построения при rows рядах (0 — полосы нет,
+ * отступ обычный, 10 px).
+ */
+export const markBand = {
+  baseline: (row: number) => 13 + row * 14,
+  top: (row: number) => 4 + row * 14,
+  plotTop: (rows: number) => (rows > 0 ? 12 + rows * 14 : 10),
+};
+
+/**
  * Столбец от базовой линии y0 до значения y1 шириной w: скругление 4 px только на конце
  * данных (сверху у положительного, снизу у отрицательного), у основания углы прямые.
  * Нулевое значение — полоска в 1 px, чтобы столбец было видно и на него можно было навести.

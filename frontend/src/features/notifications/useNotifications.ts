@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 
 import { api, unwrap } from '../../api/client';
 import { notificationsQueryKey } from '../../api/keys';
-import { markAllRead, markOneRead, staleQueriesFor, type NotificationsOut } from './notifications';
+import { markAllRead, markOneRead, staleQueriesFor, uniqueQueryKeys, type NotificationsOut } from './notifications';
 
 const LIMIT = 50;
 const POLL_MS = 60_000;
@@ -33,7 +33,8 @@ export function useNotifications() {
     const seen = newest.current;
     newest.current = items.reduce((max, item) => Math.max(max, item.id), seen ?? 0);
     if (seen === null) return;
-    const keys = items.filter((item) => item.id > seen).flatMap((item) => staleQueriesFor(item.kind));
+    // пачка уведомлений (после загрузки файла tennis-data — N «рассчитана») — один сброс на ключ
+    const keys = uniqueQueryKeys(items.filter((item) => item.id > seen).flatMap((item) => staleQueriesFor(item.kind)));
     for (const queryKey of keys) void client.invalidateQueries({ queryKey });
   }, [items, client]);
 

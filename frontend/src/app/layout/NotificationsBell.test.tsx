@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -69,6 +69,7 @@ function setup({ items = ITEMS as readonly Item[], prefs = memberPrefsOut() }: {
       { path: '/', element: <NotificationsBell /> },
       { path: '/profile/:tab', element: <p>Безопасность</p> },
       { path: '/bets', element: <p>Ставки</p> },
+      { path: '/learning/:tab?', element: <p>Обучение модели</p> },
       { path: '/analysis/:id', element: <p>Анализ</p> },
     ],
     { initialEntries: ['/'] },
@@ -209,5 +210,36 @@ describe('колокольчик', () => {
     dialog = screen.getByRole('dialog', { name: 'Уведомления' });
     await user.click(within(dialog).getByRole('button', { name: /Доля кэша упала до 31%/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/analysis/42'));
+  });
+
+  it('этап 5: авторасчет со ссылкой на ставку, «ждет результата», расхождение с архивом, отчет недели', async () => {
+    const { router } = setup({
+      items: [
+        { id: 24, kind: 'weekly_report', title: 'Отчет за неделю 5 – 11 окт', body: '3 ставки (2 по архиву).', link: null, created_at: '2026-10-12T04:00:00Z', read_at: null },
+        { id: 23, kind: 'settle_conflict', title: 'Архив показывает другой исход ставки №70', body: 'Банк не меняли.', link: '/bets?bet=70', created_at: '2026-10-11T08:00:00Z', read_at: null },
+        { id: 22, kind: 'bet_needs_result', title: 'Ставка №66 ждет результата', body: 'Исхода в архиве нет 3 дня.', link: '/bets?bet=66', created_at: '2026-10-10T08:00:00Z', read_at: null },
+        { id: 21, kind: 'bet_settled', title: 'Ставка №73 рассчитана автоматически', body: 'По архиву tennis-data.', link: '/bets?bet=73', created_at: '2026-10-09T08:00:00Z', read_at: null },
+      ],
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Уведомления: непрочитанных 4' }));
+    const dialog = screen.getByRole('dialog', { name: 'Уведомления' });
+    // сначала новые; у каждого вида свой значок и цвет
+    const rows = within(dialog).getAllByRole('button', { name: /Отчет|Архив|ждет|рассчитана/ });
+    expect(rows.map((row) => row.querySelector('.notif-ic')?.className)).toEqual([
+      'notif-ic info',
+      'notif-ic warn',
+      'notif-ic warn',
+      'notif-ic',
+    ]);
+    // ставка рассчитана сама — ссылка на саму ставку
+    await user.click(within(dialog).getByRole('button', { name: /Ставка №73 рассчитана автоматически/ }));
+    await waitFor(() => expect(router.state.location.search).toBe('?bet=73'));
+    expect(router.state.location.pathname).toBe('/bets');
+    // отчет недели без ссылки с сервера — вкладка «Отчеты» (колокольчик — на главной)
+    await act(() => router.navigate('/'));
+    await user.click(await screen.findByRole('button', { name: /Уведомления: непрочитанных 3/ }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Уведомления' })).getByRole('button', { name: /Отчет за неделю/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/learning/reports'));
   });
 });

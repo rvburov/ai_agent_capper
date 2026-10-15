@@ -21,7 +21,7 @@ function summary(request: Request) {
 
 // Числа «Данных» — с сервера (GET /api/me/export/summary)
 function exportSummary(over: Partial<ExportSummary> = {}): ExportSummary {
-  return { bets: 4, open_bets: 1, legacy_bets: 1, events: 9, ai_runs: 128, legacy_period: null, legacy_no_result: 0, ...over };
+  return { bets: 4, open_bets: 1, legacy_bets: 1, events: 9, ai_runs: 128, legacy_period: null, legacy_no_result: 0, legacy_from_archive: 0, ...over };
 }
 
 function api(over: Record<string, Handler> = {}): Record<string, Handler> {

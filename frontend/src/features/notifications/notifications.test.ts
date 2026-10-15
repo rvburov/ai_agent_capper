@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { badgeText, internalLink, markAllRead, markOneRead, notificationLook, type NotificationsOut } from './notifications';
+import {
+  badgeText,
+  internalLink,
+  markAllRead,
+  markOneRead,
+  notificationLink,
+  notificationLook,
+  staleQueriesFor,
+  type NotificationsOut,
+} from './notifications';
 
 const item = (id: number, read: boolean) => ({
   id,
@@ -58,5 +67,31 @@ describe('центр уведомлений', () => {
     expect(next?.unread).toBe(0);
     expect(next?.items.every((n) => n.read_at)).toBe(true);
     expect(next?.items[2]?.read_at).toBe('2026-10-08T10:00:00Z');
+  });
+});
+
+describe('уведомления этапа 5', () => {
+  it('вид: ждет результата и расхождение — предупреждение, отчет и обучение — сведения, архив — база данных', () => {
+    expect(notificationLook('bet_needs_result')).toEqual({ icon: 'clock', tone: 'warn' });
+    expect(notificationLook('settle_conflict')).toEqual({ icon: 'alert', tone: 'warn' });
+    expect(notificationLook('weekly_report')).toEqual({ icon: 'calendar', tone: 'info' });
+    expect(notificationLook('learning')).toEqual({ icon: 'brain', tone: 'info' });
+    expect(notificationLook('data_stale')).toEqual({ icon: 'database', tone: 'warn' });
+  });
+
+  it('ссылка без своей с сервера: ставки, отчеты, обучение', () => {
+    expect(notificationLink({ kind: 'bet_needs_result', link: null })).toBe('/bets');
+    expect(notificationLink({ kind: 'settle_conflict', link: null })).toBe('/bets');
+    expect(notificationLink({ kind: 'bet_needs_result', link: '/bets?bet=66' })).toBe('/bets?bet=66');
+    expect(notificationLink({ kind: 'weekly_report', link: null })).toBe('/learning/reports');
+    expect(notificationLink({ kind: 'learning', link: null })).toBe('/learning');
+    expect(notificationLink({ kind: 'learning', link: '/learning/versions' })).toBe('/learning/versions');
+  });
+
+  it('что перечитать: деньги не менялись — ставки и главная; обучение — его сводка', () => {
+    expect(staleQueriesFor('bet_needs_result')).toEqual([['bets'], ['dashboard']]);
+    expect(staleQueriesFor('settle_conflict')).toEqual([['bets'], ['dashboard']]);
+    expect(staleQueriesFor('weekly_report')).toEqual([['learning'], ['dashboard']]);
+    expect(staleQueriesFor('learning')).toEqual([['learning'], ['dashboard']]);
   });
 });

@@ -2,7 +2,6 @@ import { Suspense, type ReactNode } from 'react';
 import { createBrowserRouter, type RouteObject } from 'react-router';
 
 import { NotFoundPage } from '../pages/not-found/NotFoundPage';
-import { StubPage } from '../pages/stub/StubPage';
 import { RequireAdmin } from './guards/RequireAdmin';
 import { RequireAuth } from './guards/RequireAuth';
 import { AppShell } from './layout/AppShell';
@@ -12,7 +11,6 @@ import type { RouteMeta } from './routeMeta';
 import { RouteError } from './RouteError';
 
 // Адреса — как в макете, путями вместо #хеша. Один экран — одна папка в src/pages.
-// Этапы заглушек — по дорожной карте (docs/PLAN.md, раздел 10).
 function meta(value: RouteMeta): RouteMeta {
   return value;
 }
@@ -20,7 +18,7 @@ function meta(value: RouteMeta): RouteMeta {
 // Каждый экран — свой файл сборки: грузится, когда его открывают (src/app/lazyPage.ts),
 // вместе со своими текстами (SCREEN_TEXTS, src/i18n/sections.ts).
 // Экраны в оболочке ждут загрузки внутри AppShell (Suspense вокруг Outlet), вход и
-// регистрация — на весь экран. Заглушки и «Такой страницы нет» — маленькие, в общем файле.
+// регистрация — на весь экран. «Такой страницы нет» — маленькая, в общем файле.
 const LoginPage = lazyPage(
   () => import('../pages/auth/LoginPage').then((m) => m.LoginPage),
   () => import('virtual:capper-texts/screen/auth/LoginPage'),
@@ -68,6 +66,10 @@ const PlayersPage = lazyPage(
 const PlayerPage = lazyPage(
   () => import('../pages/players/PlayerPage').then((m) => m.PlayerPage),
   () => import('virtual:capper-texts/screen/players/PlayerPage'),
+);
+const LearningPage = lazyPage(
+  () => import('../pages/learning/LearningPage').then((m) => m.LearningPage),
+  () => import('virtual:capper-texts/screen/learning/LearningPage'),
 );
 const CostsPage = lazyPage(
   () => import('../pages/costs/CostsPage').then((m) => m.CostsPage),
@@ -128,8 +130,8 @@ export const routes: RouteObject[] = [
         handle: meta({ title: 'analytics', nav: 'analytics' }),
       },
       {
-        path: 'learning',
-        element: <StubPage screen="learning" stage={5} />,
+        path: 'learning/:tab?',
+        element: <LearningPage />,
         handle: meta({ title: 'learning', nav: 'learning' }),
       },
       {

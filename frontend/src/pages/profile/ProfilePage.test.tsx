@@ -274,7 +274,8 @@ describe('Личный кабинет: безопасность', () => {
     }
     const text = await files[0]?.text();
     expect(text).toContain('Аккаунт: anna@example.com');
-    expect(text).toMatch(new RegExp(`Созданы: \\d+ \\S+ ${new Date().getFullYear()}, \\d\\d:\\d\\d`));
+    // год — по поясу участника (в новогоднюю ночь по UTC он уже другой), поэтому любой
+    expect(text).toMatch(/Созданы: \d+ \S+ \d{4}, \d\d:\d\d/);
     expect(text).toContain(CODES[7]);
 
     // Коды больше не покажут: ни Esc, ни «Готово» не закрывают окно без отметки «сохранил»

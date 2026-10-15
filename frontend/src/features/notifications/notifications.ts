@@ -8,6 +8,7 @@ import { adminKeys } from '../admin/keys';
 import { aiKeys } from '../ai/keys';
 import { analysisKeys } from '../analysis/keys';
 import { MONEY_QUERIES } from '../bank/currency';
+import { learningKeys } from '../learning/keys';
 import { ANALYTICS_PREFIX, betKeys, DASHBOARD_PREFIX } from '../bets/keys';
 
 // Центр уведомлений (колокольчик, Р3): вид уведомления, ссылки и отметка прочитанного в кэше.
@@ -40,8 +41,9 @@ export function notificationLook(kind: string): { icon: IconName; tone: Notifica
       return { icon: 'key', tone: 'info' };
     case 'ai_mode_decision':
       return { icon: 'key', tone: 'info' };
+    // Архив устарел — «Пора загрузить файл tennis-data» (этап 5, В1)
     case 'data_stale':
-      return { icon: 'clock', tone: 'warn' };
+      return { icon: 'database', tone: 'warn' };
     case 'admin_message':
       return { icon: 'megaphone', tone: 'info' };
     case 'bet_settled':
@@ -49,6 +51,17 @@ export function notificationLook(kind: string): { icon: IconName; tone: Notifica
     // Этап 4: сигнал расхода ИИ администратору (текст правила с числами — с сервера)
     case 'ai_alert':
       return { icon: 'alert', tone: 'warn' };
+    // Этап 5: ставка ждет результата (архива по матчу нет N дней), архив разошелся с ручным
+    // расчетом (банк не меняли), отчет недели, обучение модели (урок готов, кандидат проверен,
+    // модель перекалибрована)
+    case 'bet_needs_result':
+      return { icon: 'clock', tone: 'warn' };
+    case 'settle_conflict':
+      return { icon: 'alert', tone: 'warn' };
+    case 'weekly_report':
+      return { icon: 'calendar', tone: 'info' };
+    case 'learning':
+      return { icon: 'brain', tone: 'info' };
     default:
       return { icon: 'bell', tone: null };
   }
@@ -85,10 +98,36 @@ export function staleQueriesFor(kind: string): readonly QueryKey[] {
       return MONEY_QUERIES;
     // Ставка рассчитана сама (этап 5): ставки, банк, главная и аналитика
     case 'bet_settled':
-      return [betKeys.all, analysisKeys.bank, DASHBOARD_PREFIX, ANALYTICS_PREFIX];
+      return [betKeys.all, analysisKeys.bank, DASHBOARD_PREFIX, ANALYTICS_PREFIX, learningKeys.all];
+    // Ставка ждет результата или архив показывает другое: деньги не менялись, меняется
+    // метка ставки и «Требует внимания» на главной
+    case 'bet_needs_result':
+    case 'settle_conflict':
+      return [betKeys.all, DASHBOARD_PREFIX];
+    case 'weekly_report':
+    case 'learning':
+      return [learningKeys.all, DASHBOARD_PREFIX];
     default:
       return [];
   }
+}
+
+/**
+ * Ключи для перечитывания пачки уведомлений — без повторов: каждый invalidateQueries отменяет
+ * запрос, который еще идет, и запускает его заново, поэтому пачка из N «рассчитана» иначе
+ * перечитывает главную и ставки N раз. Ключ, у которого в списке уже есть префикс, тоже
+ * лишний: префикс накрывает его сам.
+ */
+export function uniqueQueryKeys(keys: readonly QueryKey[]): QueryKey[] {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const covers = (prefix: QueryKey, key: QueryKey) => prefix.length <= key.length && prefix.every((part, i) => same(part, key[i]));
+  const out: QueryKey[] = [];
+  for (const key of keys) {
+    if (out.some((kept) => covers(kept, key))) continue;
+    for (let i = out.length - 1; i >= 0; i -= 1) if (covers(key, out[i]!)) out.splice(i, 1);
+    out.push(key);
+  }
+  return out;
 }
 
 /** Ссылка уведомления — только путь этого сайта («/profile/security»), иначе без перехода. */
@@ -98,18 +137,25 @@ export function internalLink(link: string | null | undefined): string | null {
 }
 
 /**
- * Куда ведет уведомление без ссылки с сервера: «Ставка рассчитана» — на «Ставки» (ставку
- * откроет ссылка /bets?bet=ID, когда сервер ее пришлет), архив матчей — на «Обзор»
- * администрирования, где видно, когда была последняя загрузка.
+ * Куда ведет уведомление без ссылки с сервера: «Ставка рассчитана», «ждет результата» и
+ * «архив показывает другое» — на «Ставки» (саму ставку откроет ссылка /bets?bet=ID с
+ * сервера), архив матчей — на «Обзор» администрирования, где видно, когда была последняя
+ * загрузка; отчет недели — на вкладку «Отчеты», обучение — на «Обучение модели».
  */
 export function notificationLink(item: Pick<NotificationItem, 'kind' | 'link'>): string | null {
   const own = internalLink(item.link);
   if (own) return own;
   switch (item.kind) {
     case 'bet_settled':
+    case 'bet_needs_result':
+    case 'settle_conflict':
       return paths.bets;
     case 'data_stale':
       return paths.admin();
+    case 'weekly_report':
+      return paths.learning('reports');
+    case 'learning':
+      return paths.learning();
     default:
       return null;
   }

@@ -11,7 +11,16 @@ import type { AuditAction, AuditEntry, Role } from './types';
  * Подробности сервер отдает словарем details; здесь из него собирается строка, как в макете.
  */
 
-export const AUDIT_GROUPS = ['all', 'invite', 'access', 'people', 'money', 'settings', 'import'] as const;
+export const AUDIT_GROUPS = [
+  'all',
+  'invite',
+  'access',
+  'people',
+  'money',
+  'settings',
+  'import',
+  'learning',
+] as const;
 export type AuditGroup = (typeof AUDIT_GROUPS)[number];
 
 // Группа «Команды терминала» из макета не сделана: сервер не фильтрует журнал по автору,
@@ -26,6 +35,8 @@ const GROUP_ACTIONS: Record<Exclude<AuditGroup, 'all'>, readonly AuditAction[]> 
   settings: ['currency_change', 'settings_change', 'message', 'agent_config_change'],
   // Правка игроков — тоже команды терминала с общими данными, как импорт (этап 2)
   import: ['import', 'player_merge', 'player_edit'],
+  // Этап 5: загрузка файла tennis-data, наборы и прогоны проверок, включение версий
+  learning: ['data_upload', 'eval_set', 'eval_run', 'version_on', 'lesson_on', 'model_on'],
 };
 
 /** Действия группы для запроса ?action=...; для «Все действия» — без фильтра. */

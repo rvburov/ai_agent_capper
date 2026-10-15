@@ -4,6 +4,7 @@ import { paths } from '../../app/paths';
 import { Button, Icon, Stat } from '../../components';
 import { Sparkline } from '../../components/charts';
 import { brierDiff, brierText, periodStart, signedPct, trendOf } from '../../features/analytics/display';
+import { bankSteps, flowsText } from '../../features/analytics/flows';
 import type { Bank } from '../../features/bank/types';
 import { currencyOf } from '../../features/bets/display';
 import type { Dashboard } from '../../features/dashboard/types';
@@ -21,10 +22,9 @@ interface HeroProps {
 
 /**
  * Банк (капитал «с учетом ставок в игре») со спарклайном, стартом периода, «в игре» и «от пика».
- * Изменение за период — прибыль периода с сервера (kpi.profit, та же, что у «Динамики банка»):
- * пополнения, выводы и стартовый банк в него не входят (движение банка в прибыль не входит), а
- * процент — от банка на начало периода (periodStart: если банк появился внутри периода или
- * выбрано «все время» — от стартового банка, рост с сервера).
+ * Главное число периода (В7 этапа 5) — прибыль ставок и ROI с сервера (kpi.profit и kpi.roi, те
+ * же, что у «Динамики банка»), а не рост капитала: пополнения и выводы в него не входят. У старта
+ * периода — сумма пополнений внутри периода, если они были.
  */
 export function HeroCard({ data, bank, ctx }: HeroProps) {
   const { t } = useTranslation();
@@ -48,8 +48,9 @@ export function HeroCard({ data, bank, ctx }: HeroProps) {
   }
   const currency = currencyOf(data.currency);
   const start = periodStart(data.series);
+  const steps = bankSteps(data.series, start);
   const delta = data.kpi.profit;
-  const pct = start.share;
+  const roi = data.kpi.roi;
   const trend = trendOf(Number(delta), 2);
   const drawdown = Number(bank.drawdown);
   const values = start.points.map((point) => Number(point.value));
@@ -65,11 +66,11 @@ export function HeroCard({ data, bank, ctx }: HeroProps) {
         <div className="row">
           <span className={cx('delta', trend === 'flat' ? 'flat' : trend === 'up' ? 'up-good' : 'down-bad')}>
             {trend !== 'flat' && <Icon name={trend === 'up' ? 'arrowUp' : 'arrowDown'} />}
-            {pct === null
+            {roi === null
               ? formatMoney(delta, currency, { signed: true })
-              : t('dashboard.hero.delta', { money: formatMoney(delta, currency, { signed: true }), pct: formatPercent(pct, { signed: true }) })}
+              : t('dashboard.hero.deltaRoi', { money: formatMoney(delta, currency, { signed: true }), roi: signedPct(roi) })}
           </span>
-          <span className="stat-hint">{ctx}</span>
+          <span className="stat-hint">{t('dashboard.hero.betsProfit', { ctx })}</span>
         </div>
       </div>
       {values.length > 1 && (
@@ -85,11 +86,15 @@ export function HeroCard({ data, bank, ctx }: HeroProps) {
         </div>
       )}
       <dl className="dashboard-hero-kv">
-        <div>
+        <div {...(steps.flows.length ? { title: t('dashboard.hero.startFlowsTitle', { text: flowsText(t, steps.flows, currency) }) } : {})}>
           <dt>{t('dashboard.hero.start')}</dt>
           <dd>
             {formatMoney(start.amount, currency)}
-            <small>{formatDate(start.day)}</small>
+            <small>
+              {steps.flowSum === null
+                ? formatDate(start.day)
+                : t('dashboard.hero.startFlows', { date: formatDate(start.day), money: formatMoney(steps.flowSum, currency, { signed: true }) })}
+            </small>
           </dd>
         </div>
         <div>

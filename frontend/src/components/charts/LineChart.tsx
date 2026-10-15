@@ -10,9 +10,12 @@ import {
   linePath,
   lineYDomain,
   linearScale,
+  markBand,
   nearestIndex,
   pickAxisLabels,
+  placeMarkLabels,
   px,
+  stepPath,
   textWidth,
   type Margins,
   type Point,
@@ -29,6 +32,26 @@ export interface LineSeries {
   /** Значение на каждую подпись X; null — нет значения (разрыв линии). */
   values: readonly (number | null)[];
   dashed?: boolean;
+  /** Ступенькой: значение меняется в день события (пунктир «вложено», В7 этапа 5). */
+  step?: boolean;
+  /** Тонкая линия (1,5 px) — вспомогательный ряд рядом с главным. */
+  thin?: boolean;
+  /** Без точки и конечной метки в конце: вспомогательный ряд не спорит с главным числом. */
+  noEnd?: boolean;
+}
+
+/**
+ * Отметка события на день index (пополнение или вывод банка): вертикальный пунктир, полая
+ * точка на ряду series (по умолчанию — первом) и подпись у верхнего края; в подсказке этого
+ * дня — строка tip (или подпись).
+ */
+export interface ChartMark {
+  index: number;
+  label: string;
+  /** Строка подсказки этого дня: подпись и значение («Пополнение», «+20 000 ₽»). */
+  tip?: { name: string; value: string };
+  /** Ключ ряда, на котором точка; по умолчанию — первый ряд. */
+  series?: string;
 }
 
 export interface RefLine {
@@ -64,6 +87,8 @@ export interface LineChartProps {
    * метка, которой справа не хватает места, встает над точкой, внутри рисунка.
    */
   endLabel?: boolean;
+  /** Отметки событий (пополнения и выводы банка). */
+  marks?: readonly ChartMark[];
   /** Деления оси Y целые (счетчики); по умолчанию — если все значения целые. */
   integer?: boolean;
   /** Ширина, px; по умолчанию — ширина контейнера. */
@@ -96,6 +121,7 @@ export function LineChart({
   yMax,
   refLines = [],
   endLabel = false,
+  marks = [],
   integer,
   width: fixedWidth,
 }: LineChartProps) {
@@ -118,6 +144,7 @@ export function LineChart({
   });
   const tickText = (tick: number) => yFormat(tick, { step });
   const lastValues = series
+    .filter((s) => !s.noEnd)
     .map((s) => s.values[s.values.length - 1])
     .filter((v): v is number => v !== null && v !== undefined);
   const yLabelW = Math.max(0, ...ticks.map((tick) => textWidth(tickText(tick)))) + 10;
@@ -127,8 +154,27 @@ export function LineChart({
   const endInside = endText > W * 0.35;
   const m: Margins = { t: 10, r: endText && !endInside ? endText : 10, b: 26, l: yLabelW };
   const iw = Math.max(1, W - m.l - m.r);
-  const ih = Math.max(1, H - m.t - m.b);
   const X = (i: number) => m.l + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
+  // отметки вне ряда (день за пределами подписей) не рисуются
+  const shownMarks = marks.filter((mark) => mark.index >= 0 && mark.index < n);
+  // подписи отметок — в полосе над областью построения (X от верхнего отступа не зависит):
+  // линия, деления и конечная метка в нее не заходят, поэтому полоса во всю ширину рисунка;
+  // сторона подписи — по 55% области построения, как в макете
+  const markLabels = placeMarkLabels(
+    shownMarks.map((mark) => ({ x: X(mark.index), width: textWidth(mark.label) })),
+    { min: 0, max: W, split: m.l + iw * 0.55 },
+  );
+  const markRows = Math.max(0, ...markLabels.map((place) => (place ? place.row + 1 : 0)));
+  m.t = markBand.plotTop(markRows);
+  // пунктир дня — один на все отметки дня (вывод и корректировка в один день) и доходит до
+  // верхней из их подписей; неподписанный — только до области построения
+  const dashTop = new Map<number, number>();
+  shownMarks.forEach((mark, i) => {
+    const place = markLabels[i];
+    const top = place ? markBand.top(place.row) : m.t;
+    dashTop.set(mark.index, Math.min(top, dashTop.get(mark.index) ?? top));
+  });
+  const ih = Math.max(1, H - m.t - m.b);
   const Y = linearScale([lo, hi], [m.t + ih, m.t]);
   const xLabels = pickAxisLabels(
     labels.map((_, i) => X(i)),
@@ -137,11 +183,15 @@ export function LineChart({
   );
   const title = tipTitle ?? xFormat;
 
-  const rowsAt = (index: number): TooltipRow[] =>
-    series.map((s) => {
+  const rowsAt = (index: number): TooltipRow[] => [
+    ...series.map((s) => {
       const v = s.values[index];
       return { key: s.key, name: s.name, color: s.color, value: v === null || v === undefined ? '—' : yFormat(v) };
-    });
+    }),
+    ...shownMarks
+      .filter((mark) => mark.index === index)
+      .map((mark, i) => ({ key: `mark-${i}`, name: mark.tip?.name ?? mark.label, value: mark.tip?.value ?? '' })),
+  ];
 
   function pointAt(event: PointerEvent<SVGSVGElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -236,15 +286,15 @@ export function LineChart({
             <g key={s.key} className="series">
               {area && si === 0 && <path className="area" d={areaPath(points, base)} fill={s.color} />}
               <path
-                className="line"
-                d={linePath(points)}
+                className={s.thin ? 'line thin' : 'line'}
+                d={s.step ? stepPath(points) : linePath(points)}
                 stroke={s.color}
                 strokeDasharray={s.dashed ? '5 4' : undefined}
               />
-              {last && (
+              {last && !s.noEnd && (
                 <circle className="dot" cx={px(last[0])} cy={px(last[1])} r={4} fill={s.color} />
               )}
-              {last && endLabel && lastValue !== null && lastValue !== undefined && (
+              {last && !s.noEnd && endLabel && lastValue !== null && lastValue !== undefined && (
                 <text
                   className="end-label"
                   x={px(last[0]) + (endInside ? 0 : 8)}
@@ -253,6 +303,25 @@ export function LineChart({
                   textAnchor={endInside ? 'end' : undefined}
                 >
                   {yFormat(lastValue)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        {shownMarks.map((mark, i) => {
+          const x = px(X(mark.index));
+          const on = series.find((s) => s.key === mark.series) ?? series[0];
+          const v = on?.values[mark.index];
+          const place = markLabels[i];
+          return (
+            <g key={i} className="mark">
+              {shownMarks.findIndex((other) => other.index === mark.index) === i && (
+                <line className="mark-line" x1={x} x2={x} y1={dashTop.get(mark.index) ?? m.t} y2={m.t + ih} />
+              )}
+              {on && v !== null && v !== undefined && <circle className="mark-dot" cx={x} cy={px(Y(v))} r={4.5} stroke={on.color} />}
+              {place && (
+                <text className="mark-label" x={px(place.x)} y={markBand.baseline(place.row)} textAnchor={place.anchor}>
+                  {mark.label}
                 </text>
               )}
             </g>

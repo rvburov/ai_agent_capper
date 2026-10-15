@@ -15,19 +15,38 @@ import { markSpa, navTo, placeBet, rub, settleWon, START, wonProfit } from './da
 /**
  * Фамилии-ссылки на телефоне: зона нажатия не меньше 40×40 и ровно на 10 px шире текста с каждой
  * стороны — текст не сдвинут, перед тире нет пустого места (как давал min-width у короткой фамилии).
+ * Короткой фамилии («Ли») ширину до 40 px добирает невидимый ::before — он тоже зона нажатия.
  */
 async function expectPlayerLinks(page: Page): Promise<void> {
-  const boxes = await page.locator('#view .dashboard-player').evaluateAll((links) =>
-    links.flatMap((link) => {
+  const boxes = await page.locator('#view .dashboard-player').evaluateAll((links) => {
+    const measure = (link: Element) => {
       const box = link.getBoundingClientRect();
-      if (!box.width && !box.height) return [];
       const range = document.createRange();
       range.selectNodeContents(link);
       const text = range.getBoundingClientRect();
-      return [{ name: link.textContent ?? '', left: text.left - box.left, right: box.right - text.right, width: box.width, height: box.height }];
-    }),
-  );
-  expect(boxes.length).toBeGreaterThan(0);
+      const pseudo = getComputedStyle(link, '::before');
+      const zone = pseudo.position === 'absolute' ? [parseFloat(pseudo.width) || 0, parseFloat(pseudo.height) || 0] : [0, 0];
+      return {
+        name: link.textContent ?? '',
+        left: text.left - box.left,
+        right: box.right - text.right,
+        width: Math.max(box.width, zone[0] ?? 0),
+        height: Math.max(box.height, zone[1] ?? 0),
+      };
+    };
+    const shown = links.filter((link) => link.getBoundingClientRect().width > 0);
+    const all = shown.map(measure);
+    // короткая настоящая фамилия: та же ссылка с текстом «Ли»
+    const first = shown[0];
+    if (first) {
+      const saved = first.textContent;
+      first.textContent = 'Ли';
+      all.push(measure(first));
+      first.textContent = saved;
+    }
+    return all;
+  });
+  expect(boxes.length).toBeGreaterThan(1);
   for (const box of boxes) {
     expect(box.width, box.name).toBeGreaterThanOrEqual(40);
     expect(box.height, box.name).toBeGreaterThanOrEqual(40);
@@ -75,13 +94,14 @@ test('главная: открытая ставка → «Внести резу�
   await expect(hero).toContainText(rub(profit, { signed: true }));
   // банк появился в этом периоде: старт — стартовый банк (пополнение), а не «0 ₽» дня перед периодом
   await expect(hero.locator('.dashboard-hero-kv > div').filter({ hasText: 'Старт периода' })).toContainText(rub(START));
-  await expect(page.locator('.dashboard-card').filter({ hasText: 'Динамика банка' })).toContainText(new RegExp(`Банк на начало периода · ${rub(START).source}`));
+  // В7: пунктир «вложено» от старта периода; пополнение — стартовое, внутри периода движений нет
+  await expect(page.locator('.dashboard-card').filter({ hasText: 'Динамика банка' })).toContainText(new RegExp(`Вложено: старт ${rub(START).source}`));
   await expect(page.locator('.topbar .bank-pill')).toContainText(rub(START + profit));
   await expect(page.getByText('Открытых ставок нет. Запустите анализ матчей дня — ИИ предложит экспресс.')).toBeVisible();
   await expect(page.getByRole('status').filter({ hasText: 'всего 1 ставка' })).toBeVisible();
   const strip = page.locator('.dashboard-strip');
   await expect(strip).toContainText(rub(profit, { signed: true }));
-  await expect(strip.locator('div').filter({ hasText: 'Ставок рассчитано' })).toContainText('1');
+  await expect(strip.locator('div').filter({ hasText: 'Прибыль ставок' })).toContainText(rub(profit, { signed: true }));
   await expect(page.getByText('1 В · 0 П')).toBeVisible();
   await page.getByRole('button', { name: 'Показать таблицей' }).click();
   const table = page.getByRole('table', { name: 'Последние рассчитанные ставки' });

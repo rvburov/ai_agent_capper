@@ -5,6 +5,7 @@ import { pausePreviewDay } from '../../../features/bank/playLimits';
 import { playLimitsOut } from '../../../features/bank/testData';
 import type { PlayLimitsIn } from '../../../features/bank/types';
 import { formatDateLong } from '../../../lib/format';
+import { fixClock } from '../../../test/clock';
 import { apiError, json } from '../../../test/fetchMock';
 import { bodyOf } from '../../../test/renderPage';
 import { bankTabApi, renderBankTab } from './testApi';
@@ -21,6 +22,9 @@ const LIMITS = playLimitsOut({
 async function card() {
   return (await screen.findByRole('heading', { name: 'Ответственная игра' })).closest('section') as HTMLElement;
 }
+
+// даты образцов — октябрь 2026 (см. fixClock)
+fixClock('2026-10-15T09:00:00Z');
 
 describe('Кабинет: ответственная игра', () => {
   it('лимиты и сколько поставлено сегодня — с сервера; поля заполнены', async () => {

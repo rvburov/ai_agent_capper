@@ -129,10 +129,12 @@ export function dashboardOut(over: Partial<Schemas['DashboardOut']> = {}): Schem
       best: '48000.00',
       worst: '48000.00',
       points: [
-        { day: '2026-09-13', value: '48000.00' },
-        { day: '2026-10-13', value: '48000.00' },
+        { day: '2026-09-13', value: '48000.00', invested: '48000.00' },
+        { day: '2026-10-13', value: '48000.00', invested: '48000.00' },
       ],
       rows: [],
+      flows: [],
+      flows_total: '0.00',
     },
     recent: [],
     small_sample: true,
@@ -154,6 +156,7 @@ export function dashboardOut(over: Partial<Schemas['DashboardOut']> = {}): Schem
     bank: bankOut(),
     open_bets: [],
     open_count: 0,
+    awaiting_count: 0,
     open_stake: '0.00',
     my_matches: [],
     admin: null,
@@ -288,7 +291,17 @@ export function playersApi(): Record<string, MockReply> {
  * 48 000 ₽. Смоук оболочки открывает /bets из меню — без них экран ловил бы 404.
  */
 export function betsApi(): Record<string, MockReply> {
-  const summary: Schemas['BetsSummaryOut'] = {
+  const page: Schemas['BetPageOut'] = { items: [], next_before: null };
+  return {
+    'GET /api/bets': page,
+    'GET /api/bets/summary': betsSummaryOut(),
+    'GET /api/me/bank': bankOut(),
+  };
+}
+
+/** Нулевые итоги ставок: «Ставки» участника без ставок. */
+function betsSummaryOut(): Schemas['BetsSummaryOut'] {
+  return {
     currency: 'RUB',
     settled: 0,
     won: 0,
@@ -305,12 +318,6 @@ export function betsApi(): Record<string, MockReply> {
     clv_positive: 0,
     clv_n: 0,
     legacy_settled: 0,
-  };
-  const page: Schemas['BetPageOut'] = { items: [], next_before: null };
-  return {
-    'GET /api/bets': page,
-    'GET /api/bets/summary': summary,
-    'GET /api/me/bank': bankOut(),
   };
 }
 
@@ -358,6 +365,11 @@ export async function mockApi(page: Page, me: Me | null, api: Record<string, Moc
     // плашка «Банк» в шапке — тоже
     if (url.pathname === '/api/me/bank' && me) {
       await route.fulfill({ json: bankOut() });
+      return;
+    }
+    // счетчик открытых ставок у «Ставок» в меню (этап 5) — ставок в игре нет
+    if (url.pathname === '/api/bets/counts' && me) {
+      await route.fulfill({ json: { open: 0, awaiting_result: 0 } });
       return;
     }
     if (url.pathname === '/api/auth/csrf') {

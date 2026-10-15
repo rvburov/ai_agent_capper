@@ -8,6 +8,7 @@ export type BetItem = Schemas['BetItemOut'];
 export type BetLeg = Schemas['BetLegItemOut'];
 export type BetPage = Schemas['BetPageOut'];
 export type BetsSummary = Schemas['BetsSummaryOut'];
+export type BetCounts = Schemas['BetCountsOut'];
 export type Closing = Schemas['ClosingOut'];
 export type ClosingIn = Schemas['ClosingIn'];
 export type SettleIn = Schemas['SettleIn'];

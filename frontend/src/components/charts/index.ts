@@ -7,7 +7,7 @@ export { ChartTooltip, tooltipText, type ChartTooltipProps, type TooltipRow } fr
 export { ChartWithTable, type ChartWithTableProps } from './ChartWithTable';
 export { ColumnChart, type ColumnChartProps, type ColumnItem } from './ColumnChart';
 export { HBars, type HBarItem, type HBarsProps } from './HBars';
-export { LineChart, type LineChartProps, type LineSeries, type RefLine } from './LineChart';
+export { LineChart, type ChartMark, type LineChartProps, type LineSeries, type RefLine } from './LineChart';
 export { Sparkline, type SparklineProps } from './Sparkline';
 export { CHART_COLORS, CHART_MUTED } from './colors';
 export { defaultValueFormat } from './defaultFormat';

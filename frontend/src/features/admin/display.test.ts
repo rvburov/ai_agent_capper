@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { lowerFirst, maskIp, spendMonth, timeLeft, utcDayInline } from './display';
 
@@ -30,9 +30,16 @@ describe('подписи раздела «Администрирование»',
 
   it('день, когда кончится лимит (UTC), внутри фразы: «сегодня», «завтра», иначе дата', () => {
     const now = new Date('2026-10-13T23:30:00Z');
-    expect(utcDayInline('2026-10-13', now)).toBe('сегодня');
-    expect(utcDayInline('2026-10-14', now)).toBe('завтра');
-    expect(utcDayInline('2026-10-16', now)).toBe('16 окт');
+    // год у даты formatDate сверяет с часами: «16 окт» без года — пока на часах 2026 год
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+    try {
+      expect(utcDayInline('2026-10-13', now)).toBe('сегодня');
+      expect(utcDayInline('2026-10-14', now)).toBe('завтра');
+      expect(utcDayInline('2026-10-16', now)).toBe('16 окт');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('время внутри фразы — со строчной буквы', () => {

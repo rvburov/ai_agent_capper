@@ -78,6 +78,7 @@ describe('уведомления этапа 4', () => {
   });
 
   it('ставка рассчитана — перечитать ставки, банк, главную и аналитику', () => {
-    expect(staleQueriesFor('bet_settled')).toEqual([['bets'], ['bank'], ['dashboard'], ['analytics']]);
+    // этап 5: и сводку «Обучения модели» (рассчитано ставок)
+    expect(staleQueriesFor('bet_settled')).toEqual([['bets'], ['bank'], ['dashboard'], ['analytics'], ['learning']]);
   });
 });

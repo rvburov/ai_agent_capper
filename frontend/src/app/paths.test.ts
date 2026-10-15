@@ -10,6 +10,9 @@ describe('адреса', () => {
     expect(paths.admin('overview')).toBe('/admin');
     expect(paths.admin('invites')).toBe('/admin/invites');
     expect(paths.player('sinner jannik')).toBe('/players/sinner%20jannik');
+    expect(paths.learning()).toBe('/learning');
+    expect(paths.learning('lessons')).toBe('/learning');
+    expect(paths.learning('reports')).toBe('/learning/reports');
   });
 
   it('loginPath запоминает, откуда пришли', () => {

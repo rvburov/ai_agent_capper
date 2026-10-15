@@ -61,6 +61,145 @@ describe('LineChart', () => {
     expect(xs.map((x) => x.getAttribute('text-anchor'))).toEqual(Array(5).fill('middle'));
   });
 
+  it('ступенька «вложено» и отметка пополнения: пунктир, полая точка, подпись, строка подсказки', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <LineChart
+        labels={DAYS}
+        series={[
+          { key: 'bank', name: 'Банк', color: 'var(--s1)', values: [40_000, 40_500, 60_400, 61_000, 60_800] },
+          { key: 'invested', name: 'Вложено', color: 'var(--fg-3)', values: [40_000, 40_000, 60_000, 60_000, 60_000], dashed: true, step: true, thin: true, noEnd: true },
+        ]}
+        marks={[
+          { index: 2, label: '+20 000 ₽ · пополнение, 03 окт', tip: { name: 'Пополнение', value: '+20 000 ₽' } },
+          // день вне ряда не рисуется
+          { index: 9, label: 'вне ряда' },
+        ]}
+        ariaLabel="Банк"
+        yFormat={(v) => formatNumber(v)}
+        xFormat={(d) => d.slice(8)}
+        endLabel
+        width={640}
+      />,
+    );
+    const lines = [...container.querySelectorAll('.line')];
+    // ступенька: только горизонтальные и вертикальные отрезки, тонкая
+    expect(lines[1]?.getAttribute('d')).toMatch(/^M[\d.]+ [\d.]+(H[\d.]+V[\d.]+)+$/);
+    expect(lines[1]).toHaveClass('thin');
+    expect(lines[1]).toHaveAttribute('stroke-dasharray', '5 4');
+    // у вспомогательного ряда нет точки и конечной метки: одна метка — у банка
+    expect(container.querySelectorAll('.series .dot')).toHaveLength(1);
+    expect(container.querySelectorAll('.end-label')).toHaveLength(1);
+    expect(container.querySelector('.end-label')).toHaveTextContent(num(60_800));
+    // отметка: пунктир на третий день, полая точка на линии банка, подпись справа (левая часть)
+    expect(container.querySelectorAll('.mark')).toHaveLength(1);
+    const markLine = container.querySelector('.mark-line')!;
+    const dot = container.querySelector('.mark-dot')!;
+    expect(markLine.getAttribute('x1')).toBe(dot.getAttribute('cx'));
+    expect(dot).toHaveAttribute('stroke', 'var(--s1)');
+    const label = container.querySelector('.mark-label')!;
+    expect(label).toHaveTextContent('+20 000 ₽ · пополнение, 03 окт');
+    expect(label).toHaveAttribute('text-anchor', 'start');
+    expect(Number(label.getAttribute('x'))).toBeGreaterThan(Number(markLine.getAttribute('x1')));
+    // в подсказке дня пополнения — строка события
+    screen.getByRole('img').focus();
+    await user.keyboard('{Home}{ArrowRight}{ArrowRight}');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Пополнение+20 000 ₽');
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tooltip')).not.toHaveTextContent('Пополнение');
+  });
+
+  // Случай проверки волны 1: пополнения в соседние дни у середины, вывод и корректировка
+  // в один день справа, банк после пополнения у верха шкалы, конечная метка справа
+  it.each([
+    [313, '₽ · пополнение', ''],
+    [682, '₽ · пополнение', ', 1 окт'],
+    [1366, '₽ · пополнение', ', 1 окт'],
+  ])('подписи отметок на %i px: в полосе над графиком, в пределах рисунка, не задевают линию, конечную метку и чужой пунктир', (width, kind, date) => {
+    const days = Array.from({ length: 31 }, (_, i) => new Date(Date.UTC(2026, 8, 15 + i)).toISOString().slice(0, 10));
+    const bank = days.map((_, i) => (i < 16 ? 48_800 : i === 16 ? 68_800 : i < 27 ? 75_200 : i === 27 ? 72_350 : 72_035));
+    const invested = days.map((_, i) => (i < 16 ? 48_800 : i < 27 ? 73_800 : 70_950));
+    const { container } = render(
+      <LineChart
+        labels={days}
+        series={[
+          { key: 'bank', name: 'Банк', color: 'var(--s1)', values: bank },
+          { key: 'invested', name: 'Вложено', color: 'var(--fg-3)', values: invested, dashed: true, step: true, thin: true, noEnd: true },
+        ]}
+        marks={[
+          { index: 16, label: `+20 000 ${kind}${date}` },
+          { index: 17, label: `+5 000 ${kind}${date && ', 2 окт'}` },
+          { index: 27, label: `+150 ₽ · корректировка${date && ', 12 окт'}` },
+          { index: 27, label: `−3 000 ₽ · вывод${date && ', 12 окт'}` },
+        ]}
+        ariaLabel="Банк"
+        yFormat={(v) => formatNumber(v)}
+        endLabel
+        area
+        width={width}
+      />,
+    );
+    const attr = (el: Element, name: string) => Number(el.getAttribute(name));
+    const plotTop = Math.min(...[...container.querySelectorAll('.grid-line')].map((line) => attr(line, 'y1')));
+    const dashes = [...container.querySelectorAll('.mark-line')].map((line) => ({ x: attr(line, 'x1'), top: attr(line, 'y1') }));
+    // пунктир дня один: вывод и корректировка 12 окт — на одной линии
+    expect(dashes).toHaveLength(3);
+    const labels = [...container.querySelectorAll('.mark')].flatMap((mark) => {
+      const text = mark.querySelector('.mark-label');
+      if (!text) return [];
+      const w = textWidth(text.textContent ?? '');
+      const x = attr(text, 'x');
+      const x0 = text.getAttribute('text-anchor') === 'end' ? x - w : x;
+      const y = attr(text, 'y');
+      const own = attr(mark.querySelector('.mark-dot')!, 'cx');
+      return [{ own, dash: dashes.find((dash) => dash.x === own)?.top ?? Infinity, x0, x1: x0 + w, top: y - 9, bottom: y + 3 }];
+    });
+    // у пополнений соседних дней подписи есть: одна слева, другая справа от своих пунктиров
+    expect(labels.length).toBeGreaterThanOrEqual(2);
+    expect(labels.find((label) => label.own === dashes[0]!.x)?.x1).toBeLessThan(dashes[0]!.x);
+    expect(labels.find((label) => label.own === dashes[1]!.x)?.x0).toBeGreaterThan(dashes[1]!.x);
+    const end = container.querySelector('.end-label')!;
+    const endBox = { x0: attr(end, 'x'), x1: attr(end, 'x') + textWidth(end.textContent ?? ''), top: attr(end, 'y') - 9 };
+    // линия банка и заливка — только в области построения, ниже полосы подписей
+    const ys = [...container.querySelectorAll('.series path')].flatMap((path) =>
+      [...(path.getAttribute('d') ?? '').matchAll(/[ML][\d.]+ ([\d.]+)|V([\d.]+)/g)].map((m) => Number(m[1] ?? m[2])),
+    );
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(plotTop - 0.1);
+    for (const label of labels) {
+      // в пределах рисунка
+      expect(label.x0).toBeGreaterThanOrEqual(0);
+      expect(label.x1).toBeLessThanOrEqual(width);
+      // над областью построения: ни линия, ни деления, ни конечная метка сюда не заходят
+      expect(label.bottom).toBeLessThan(plotTop - 4);
+      expect(label.bottom).toBeLessThan(endBox.top);
+      // пунктир другого дня через подпись не проходит; свой пунктир доходит до подписи
+      for (const dash of dashes) {
+        if (Math.abs(dash.x - label.own) > 0.5 && dash.top < label.bottom) expect(dash.x < label.x0 - 2 || dash.x > label.x1 + 2).toBe(true);
+      }
+      expect(label.dash).toBeLessThanOrEqual(label.top + 1);
+      // подписи одного ряда не налезают друг на друга
+      for (const other of labels) {
+        if (other === label || other.top !== label.top) continue;
+        expect(other.x1 <= label.x0 || other.x0 >= label.x1).toBe(true);
+      }
+    }
+  });
+
+  it('отметка на телефоне: подпись, которой нет места, не рисуется — пунктир и точка остаются', () => {
+    const { container } = render(
+      <LineChart
+        labels={DAYS}
+        series={[{ key: 'bank', name: 'Банк', color: 'var(--s1)', values: [1, 2, 3, 4, 5] }]}
+        marks={[{ index: 2, label: '+20 000 000 ₽ · пополнение, 14 сентября 2026 года' }]}
+        ariaLabel="Банк"
+        width={200}
+      />,
+    );
+    expect(container.querySelector('.mark-line')).not.toBeNull();
+    expect(container.querySelector('.mark-dot')).not.toBeNull();
+    expect(container.querySelector('.mark-label')).toBeNull();
+  });
+
   it('клавиатура: стрелки, Home, End, Esc — подсказка и текст для читалки', async () => {
     const user = userEvent.setup();
     render(bankChart());

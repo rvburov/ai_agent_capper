@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 
 import { Icon } from '../../components';
 import { MORE_ITEMS, TAB_ITEMS, type NavId } from './nav';
+import { OpenBetsBadge } from './OpenBetsBadge';
 
 interface TabBarProps {
   navId: NavId | undefined;
@@ -32,6 +33,7 @@ export function TabBar({ navId, moreOpen, onMore }: TabBarProps) {
           <Link key={item.id} className="tab" to={item.to} aria-current={current}>
             <Icon name={item.icon} />
             {t(`nav.${item.id}`)}
+            {item.id === 'bets' && <OpenBetsBadge place="tabbar" />}
           </Link>
         );
       })}

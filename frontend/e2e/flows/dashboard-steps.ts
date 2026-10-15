@@ -60,7 +60,8 @@ const NAV_URL: Record<NavItem, RegExp> = { Главная: /\/$/, Ставки: 
 
 export async function navTo(page: Page, isMobile: boolean, item: NavItem): Promise<void> {
   const nav = isMobile ? page.getByRole('navigation', { name: 'Нижняя навигация' }) : page.getByRole('complementary', { name: 'Основная навигация' });
-  await nav.getByRole('link', { name: item, exact: true }).click();
+  // у «Ставок» после названия — счетчик открытых ставок («Ставки Открытых ставок: 1»)
+  await nav.getByRole('link', { name: new RegExp(`^${item}(\\s|$)`) }).click();
   await expect(page).toHaveURL(NAV_URL[item]);
   expect(await page.evaluate(() => (window as Window & { __spa?: boolean }).__spa)).toBe(true);
 }

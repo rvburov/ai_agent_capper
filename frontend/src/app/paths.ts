@@ -16,6 +16,10 @@ export const ADMIN_TABS = [
 ] as const;
 export type AdminTab = (typeof ADMIN_TABS)[number];
 
+// Вкладки «Обучения модели» (learning.js макета, Р25): уроки, версии стратегии, базовая модель, отчеты
+export const LEARNING_TABS = ['lessons', 'versions', 'model', 'reports'] as const;
+export type LearningTab = (typeof LEARNING_TABS)[number];
+
 // Вкладки карточки игрока: «Профиль из бота» — только у перенесенных из старого бота (Р24)
 export const PLAYER_TABS = ['overview', 'matches', 'news', 'profile'] as const;
 export type PlayerTab = (typeof PLAYER_TABS)[number];
@@ -32,7 +36,7 @@ export const paths = {
   player: (id: string | number, tab?: PlayerTab) =>
     `/players/${encodeURIComponent(String(id))}${tab && tab !== 'overview' ? `/${tab}` : ''}`,
   analytics: '/analytics',
-  learning: '/learning',
+  learning: (tab?: LearningTab) => (tab && tab !== 'lessons' ? `/learning/${tab}` : '/learning'),
   costs: '/costs',
   profile: (tab?: ProfileTab) => (tab && tab !== 'profile' ? `/profile/${tab}` : '/profile'),
   admin: (tab?: AdminTab) => (tab && tab !== 'overview' ? `/admin/${tab}` : '/admin'),

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Card, Chip, DataTable, type DataColumn } from '../../components';
 import { ChartWithTable, LineChart, type ValueFormat } from '../../components/charts';
 import { capitalize, periodStart, signClass } from '../../features/analytics/display';
+import { bankSteps, flowMarks, flowsText } from '../../features/analytics/flows';
 import type { Analytics, SeriesRow } from '../../features/analytics/types';
 import { currencyOf } from '../../features/bets/display';
 import { currencySign, formatDate, formatDateLong, formatDateRange, formatMoney, formatNumber, formatPercent, stepDigits } from '../../lib/format';
@@ -11,8 +12,9 @@ import { cx } from '../../lib/cx';
 import { Howto, RoiText, TableBox } from './parts';
 
 // Банк по дням (без фильтров рынка, покрытия и источника) или результат отобранных ставок
-// нарастающим итогом (bankCard макета): график с опорной линией, таблица по неделям или
-// месяцам, полоса итогов. Банк на начало и дни до его появления — по periodStart, как на главной.
+// нарастающим итогом (bankCard макета): у банка — пунктир «вложено» ступенькой и отметки
+// пополнений (В7 этапа 5), у результата — линия нуля; таблица по неделям или месяцам, полоса
+// итогов. Старт периода и дни до появления банка — по periodStart, как на главной.
 
 function lastDayOfMonth(day: string): string {
   const [y, m] = day.split('-').map(Number);
@@ -51,6 +53,9 @@ export function SeriesCard({ data, ctx, mobile, pending }: SeriesCardProps) {
   const values = start.points.map((point) => Number(point.value));
   const last = start.points[start.points.length - 1]?.value ?? series.last;
   const profit = Number(kpi.profit);
+  const labels = start.points.map((point) => point.day);
+  const steps = bankSteps(series, start);
+  const marks = flowMarks(t, steps.flows, labels, currency, mobile);
 
   const columns: DataColumn<SeriesRow>[] = [
     {
@@ -77,13 +82,25 @@ export function SeriesCard({ data, ctx, mobile, pending }: SeriesCardProps) {
 
   const strip: { key: string; label: string; value: string; sub?: string }[] = isBank
     ? [
-        { key: 'start', label: t('analytics.series.start'), value: money(start.amount), sub: formatDate(start.day) },
-        { key: 'peak', label: t('analytics.series.peak'), value: money(series.peak) },
+        {
+          key: 'start',
+          label: t('analytics.series.start'),
+          value: money(start.amount),
+          // за все время старт — первое пополнение (В7)
+          sub: data.period === 'all' ? t('analytics.series.startAll', { date: formatDate(start.day) }) : formatDate(start.day),
+        },
+        {
+          key: 'flows',
+          label: t('analytics.series.flows'),
+          value: steps.flowSum === null ? t('analytics.series.flowsNone') : signed(steps.flowSum),
+          // flows — запись на «день + вид»: вывод и корректировка одного дня — одна дата
+          sub: steps.flows.length ? [...new Set(steps.flows.map((flow) => flow.day))].map((day) => formatDate(day)).join(', ') : t('analytics.series.flowsPeriod'),
+        },
         {
           key: 'dd',
           label: t('analytics.series.drawdown'),
           value: series.max_drawdown < 0 ? formatPercent(series.max_drawdown, { signed: true }) : formatPercent(0, { digits: 0 }),
-          sub: t('analytics.series.fromPeak'),
+          sub: t('analytics.series.fromPeakFlows'),
         },
         { key: 'turnover', label: t('analytics.series.turnover'), value: money(kpi.turnover), sub: t('analytics.count.bets', { count: kpi.settled }) },
       ]
@@ -115,7 +132,11 @@ export function SeriesCard({ data, ctx, mobile, pending }: SeriesCardProps) {
           isBank
             ? [
                 { key: 'bank', name: t('analytics.series.legendBank'), color: 'var(--s1)' },
-                { key: 'base', name: t('analytics.series.legendBase', { amount: money(start.amount) }), type: 'dash' },
+                {
+                  key: 'invested',
+                  name: t(steps.flows.length ? 'analytics.series.legendInvestedFlows' : 'analytics.series.legendInvested', { amount: money(start.amount) }),
+                  type: 'dash',
+                },
               ]
             : [
                 { key: 'result', name: t('analytics.series.legendResult'), color: 'var(--s1)' },
@@ -136,7 +157,7 @@ export function SeriesCard({ data, ctx, mobile, pending }: SeriesCardProps) {
         )}
       >
         <LineChart
-          labels={start.points.map((point) => point.day)}
+          labels={labels}
           series={[
             {
               key: 'series',
@@ -144,17 +165,22 @@ export function SeriesCard({ data, ctx, mobile, pending }: SeriesCardProps) {
               color: 'var(--s1)',
               values,
             },
+            ...(isBank
+              ? [{ key: 'invested', name: t('analytics.series.seriesInvested'), color: 'var(--fg-3)', values: steps.invested, dashed: true, step: true, thin: true, noEnd: true }]
+              : []),
           ]}
+          marks={marks}
           ariaLabel={
             isBank
-              ? t('analytics.series.ariaBank', { ctx, from: money(start.amount), to: money(last) })
+              ? `${t('analytics.series.ariaBank', { ctx, from: money(start.amount), to: money(last) })}${steps.flows.length ? `; ${flowsText(t, steps.flows, currency)}` : ''}`
               : t('analytics.series.ariaResult', { value: signed(last) })
           }
           height={mobile ? 210 : 270}
           area
           {...(isBank ? {} : { areaBase: 0 })}
           endLabel
-          refLines={[{ value: Number(start.amount) }]}
+          // у банка опорная линия — ступенька «вложено», у результата — ноль
+          refLines={isBank ? [] : [{ value: Number(start.amount) }]}
           yFormat={yFormat}
           xFormat={(day) => formatDate(day)}
           tipTitle={(day) => formatDateLong(day)}
@@ -172,7 +198,7 @@ export function SeriesCard({ data, ctx, mobile, pending }: SeriesCardProps) {
         ))}
       </dl>
       <Howto>
-        {isBank ? t('analytics.series.howtoBank') : t('analytics.series.howtoResult')} {mobile ? t('analytics.series.touch') : t('analytics.series.hover')}
+        {isBank ? t('analytics.series.howtoSteps') : t('analytics.series.howtoResult')} {mobile ? t('analytics.series.touch') : t('analytics.series.hover')}
       </Howto>
     </Card>
   );

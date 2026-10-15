@@ -2,9 +2,10 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { bankOut } from '../../features/analysis/testData';
-import { analyticsOut, insightWith, seriesOut } from '../../features/analytics/testData';
-import type { Analytics } from '../../features/analytics/types';
+import { analyticsOut, insightWith, seriesOut, seriesWithFlows } from '../../features/analytics/testData';
+import type { Analytics, Series } from '../../features/analytics/types';
 import type { Bank } from '../../features/bank/types';
+import { fixClock } from '../../test/clock';
 import { json, type Handler } from '../../test/fetchMock';
 import { renderPage } from '../../test/renderPage';
 import { AnalyticsPage } from './AnalyticsPage';
@@ -28,6 +29,9 @@ function renderAnalytics(url = '/analytics', handler: Handler = () => json(analy
 function card(title: string): HTMLElement {
   return screen.getByRole('heading', { level: 3, name: title }).closest('section')!;
 }
+
+// даты образцов — октябрь 2026 (см. fixClock)
+fixClock('2026-10-15T09:00:00Z');
 
 describe('Аналитика', () => {
   it('показатели с ДИ, выборка и пояснения про старый бот и ставки в игре', async () => {
@@ -154,7 +158,7 @@ describe('Аналитика', () => {
   it('банк по дням без фильтров и результат отобранных ставок с фильтром — по series.kind', async () => {
     const result = analyticsOut({
       filtered: true,
-      series: seriesOut({ kind: 'result', base: '0.00', last: '860.00', best: '1200.00', worst: '-300.00', points: [{ day: '2026-08-31', value: '0.00' }, { day: '2026-10-13', value: '860.00' }] }),
+      series: seriesOut({ kind: 'result', base: '0.00', last: '860.00', best: '1200.00', worst: '-300.00', points: [{ day: '2026-08-31', value: '0.00', invested: null }, { day: '2026-10-13', value: '860.00', invested: null }] }),
     });
     const { user } = renderAnalytics('/analytics?surface=hard', (r) => json(query(r).has('surface') ? result : analyticsOut()));
     expect(await screen.findByText('Результат отобранных ставок')).toBeInTheDocument();
@@ -190,30 +194,82 @@ describe('Аналитика', () => {
         start_amount: '20000.00',
         change_share: 0.015,
         points: [
-          { day: '2026-09-23', value: '20350.00' },
-          { day: '2026-10-13', value: '20300.00' },
+          { day: '2026-09-23', value: '20350.00', invested: null },
+          { day: '2026-10-13', value: '20300.00', invested: null },
         ],
       }),
     });
     renderAnalytics('/analytics?period=30d', () => json(data), undefined, bankOut({ equity: '20300.00', invested: '20000.00', growth: '0.0150' }));
     const series = await waitFor(() => card('Банк по дням'));
     expect(within(series).getByText('Старт периода').nextSibling).toHaveTextContent(/^20\s000\s₽23 сен$/);
-    expect(within(series).getByText('Банк на начало периода · 20 000 ₽')).toBeInTheDocument();
+    expect(within(series).getByText('Вложено: старт 20 000 ₽')).toBeInTheDocument();
     const chart = within(series).getByRole('img', { name: /^Банк по дням за 30 дней: с 20\s000\s₽ до 20\s300\s₽$/ });
     expect(chart.querySelector('text.x-label')).toHaveTextContent('23 сен');
     const ticks = [...chart.querySelectorAll('g:not(.ref-line) > text')].map((node) => node.textContent ?? '');
     expect(ticks.some((tick) => tick.startsWith('−') || tick === '0')).toBe(false);
   });
 
+  it('банк по дням с пополнением (В7): ступенька «вложено», отметка, «Пополнения» и просадка без пополнений', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-13T06:00:00Z'));
+    try {
+      const data = analyticsOut({ period: '30d', date_from: '2026-09-14', kpi: { ...analyticsOut().kpi, profit: '10485.00' }, series: seriesWithFlows() });
+      renderAnalytics('/analytics?period=30d', () => json(data), 375, bankOut({ equity: '70485.00', invested: '60000.00' }));
+      const series = await waitFor(() => card('Банк по дням'));
+      expect(within(series).getByText('Вложено: старт 40 000 ₽ и пополнения')).toBeInTheDocument();
+      const chart = within(series).getByRole('img', { name: /; \+20\s000\s₽ · пополнение, 14 сен$/ });
+      expect(chart.querySelector('.line.thin')?.getAttribute('d')).toMatch(/^M[\d.]+ [\d.]+(H[\d.]+V[\d.]+)+$/);
+      expect(chart.querySelector('.ref-line')).toBeNull();
+      // на телефоне подпись отметки — без даты
+      expect(chart.querySelector('.mark-label')).toHaveTextContent(/^\+20\s000\s₽ · пополнение$/);
+      const flows = within(series).getByText('Пополнения').nextSibling as HTMLElement;
+      expect(flows).toHaveTextContent(/^\+20\s000\s₽14 сен$/);
+      expect(within(series).getByText('Макс. просадка').nextSibling).toHaveTextContent(/от пика, без пополнений$/);
+      expect(within(series).queryByText('Пик')).toBeNull();
+      expect(within(series).getByText(/ставки в плюсе на любом участке/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('«Пополнения»: вывод и корректировка одного дня — дата один раз', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-13T06:00:00Z'));
+    try {
+      const flows: Series['flows'] = [
+        { day: '2026-09-14', kind: 'deposit', amount: '20000.00' },
+        { day: '2026-10-01', kind: 'withdrawal', amount: '-3000.00' },
+        { day: '2026-10-01', kind: 'correction', amount: '150.00' },
+      ];
+      const data = analyticsOut({ period: '30d', date_from: '2026-09-14', series: { ...seriesWithFlows(), flows, flows_total: '17150.00' } });
+      renderAnalytics('/analytics?period=30d', () => json(data), undefined, bankOut({ equity: '70485.00', invested: '57150.00' }));
+      const series = await waitFor(() => card('Банк по дням'));
+      expect(within(series).getByText('Пополнения').nextSibling).toHaveTextContent(/^\+17\s150\s₽14 сен, 1 окт$/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('результат отобранных ставок — без ступеньки и отметок, линия нуля', async () => {
+    const data = analyticsOut({ series: seriesOut({ kind: 'result', base: '0.00', start_amount: '0.00', points: [{ day: '2026-10-12', value: '0.00', invested: null }, { day: '2026-10-13', value: '120.00', invested: null }] }) });
+    renderAnalytics('/analytics?market=ML', () => json(data));
+    const series = await waitFor(() => card('Результат отобранных ставок'));
+    const chart = within(series).getByRole('img');
+    expect(chart.querySelectorAll('.line')).toHaveLength(1);
+    expect(chart.querySelector('.ref-line')).not.toBeNull();
+    expect(chart.querySelector('.mark')).toBeNull();
+  });
+
   it('банк по дням за все время: старт — стартовый банк, а не банк на конец первого дня', async () => {
     const data = analyticsOut({
       kpi: { ...analyticsOut().kpi, profit: '1168.20' },
-      series: seriesOut({ group: 'week', start: '2026-10-13', base: '49168.20', start_day: '2026-10-13', start_amount: '48000.00', change_share: 0.0243, last: '49168.20', peak: '49168.20', points: [{ day: '2026-10-13', value: '49168.20' }] }),
+      series: seriesOut({ group: 'week', start: '2026-10-13', base: '49168.20', start_day: '2026-10-13', start_amount: '48000.00', change_share: 0.0243, last: '49168.20', peak: '49168.20', points: [{ day: '2026-10-13', value: '49168.20', invested: null }] }),
     });
     renderAnalytics('/analytics', () => json(data), undefined, bankOut({ equity: '49168.20', invested: '48000.00', growth: '0.0243' }));
     const series = await waitFor(() => card('Банк по дням'));
-    expect(within(series).getByText('Старт периода').nextSibling).toHaveTextContent(/^48\s000\s₽13 окт$/);
-    expect(within(series).getByText('Банк на начало периода · 48 000 ₽')).toBeInTheDocument();
+    // за все время старт — первое пополнение (В7)
+    expect(within(series).getByText('Старт периода').nextSibling).toHaveTextContent(/^48\s000\s₽13 окт · первое пополнение$/);
+    expect(within(series).getByText('Вложено: старт 48 000 ₽')).toBeInTheDocument();
   });
 
   it('срезы: «мало данных» по порогу сервера, итоговый кэф с долей стратегии, нет покрытий — сноска', async () => {

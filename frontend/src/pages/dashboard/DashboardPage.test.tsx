@@ -3,9 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { aiBudget } from '../../features/ai/testData';
 import { bankOut, strategyV3 } from '../../features/analysis/testData';
-import { seriesOut } from '../../features/analytics/testData';
+import { seriesOut, seriesWithFlows } from '../../features/analytics/testData';
 import type { Dashboard } from '../../features/dashboard/types';
 import { adminAttention, aiUsageOut, dashboardOut, myMatch, openBetOut } from '../../features/dashboard/testData';
+import { fixClock } from '../../test/clock';
 import { json, ME_ADMIN, type Handler } from '../../test/fetchMock';
 import type { Me } from '../../test/factories';
 import { renderPage } from '../../test/renderPage';
@@ -49,6 +50,9 @@ function renderDashboard(options: { data?: Dashboard; over?: Record<string, Hand
 
 afterEach(() => window.sessionStorage.clear());
 
+// даты образцов — октябрь 2026 (см. fixClock)
+fixClock('2026-10-15T09:00:00Z');
+
 describe('Главная', () => {
   it('приветствие, банк, плитки с изменением к прошлому периоду и пояснение', async () => {
     const { calls } = renderDashboard();
@@ -58,7 +62,9 @@ describe('Главная', () => {
 
     const hero = screen.getByRole('region', { name: 'Банк' });
     expect(within(hero).getByText('50 860 ₽')).toBeInTheDocument();
-    expect(within(hero).getByText('+2 860 ₽ · +6,0%')).toBeInTheDocument();
+    // главное число периода — прибыль ставок и ROI (В7 этапа 5), а не рост банка
+    expect(within(hero).getByText('+2 860 ₽ · ROI +5,5%')).toBeInTheDocument();
+    expect(within(hero).getByText('прибыль ставок за 30 дней')).toBeInTheDocument();
     expect(within(hero).getByText('48 000 ₽')).toBeInTheDocument();
     expect(within(hero).getByText('1 ставка')).toBeInTheDocument();
     expect(within(hero).getByText('−0,7%')).toBeInTheDocument();
@@ -100,11 +106,11 @@ describe('Главная', () => {
     expect(screen.getByText('оборот 52 000 ₽')).toBeInTheDocument();
   });
 
-  it('банк появился внутри периода: без нулевых дней, старт — стартовый банк, процент — рост с сервера', async () => {
+  it('банк появился внутри периода: без нулевых дней, старт — стартовый банк, прибыль и ROI ставок', async () => {
     // Пополнение 20 000 ₽ 23 сентября, за период +300 ₽: на конец 23 сен банк 20 350 ₽
     const base = dashboardOut();
     const data = dashboardOut({
-      kpi: { ...base.kpi, settled: 3, won: 2, lost: 1, void: 0, profit: '300.00', turnover: '3000.00' },
+      kpi: { ...base.kpi, settled: 3, won: 2, lost: 1, void: 0, profit: '300.00', turnover: '3000.00', roi: 0.1 },
       small_sample: true,
       series: seriesOut({
         group: 'week',
@@ -120,20 +126,21 @@ describe('Главная', () => {
         start_amount: '20000.00',
         change_share: 0.015,
         points: [
-          { day: '2026-09-23', value: '20350.00' },
-          { day: '2026-10-13', value: '20300.00' },
+          { day: '2026-09-23', value: '20350.00', invested: null },
+          { day: '2026-10-13', value: '20300.00', invested: null },
         ],
       }),
       bank: bankOut({ equity: '20300.00', balance: '20300.00', peak: '20350.00', drawdown: '0.0025', invested: '20000.00', growth: '0.0150' }),
     });
     renderDashboard({ data });
     const hero = await screen.findByRole('region', { name: 'Банк' });
-    expect(within(hero).getByText('+300 ₽ · +1,5%')).toBeInTheDocument();
+    expect(within(hero).getByText('+300 ₽ · ROI +10,0%')).toBeInTheDocument();
     const start = within(hero).getByText('Старт периода').nextSibling as HTMLElement;
     expect(start).toHaveTextContent(/^20\s000\s₽23 сен$/);
     expect(within(hero).queryByText('0 ₽')).toBeNull();
 
-    expect(screen.getByText('Банк на начало периода · 20 000 ₽')).toBeInTheDocument();
+    // пополнений внутри периода сервер не прислал — пунктир «вложено» ровный, от старта
+    expect(screen.getByText('Вложено: старт 20 000 ₽')).toBeInTheDocument();
     const chart = screen.getByRole('img', { name: /^Банк по дням за 30 дней: с 20\s000\s₽ до 20\s300\s₽$/ });
     // дней без банка на графике нет: первая подпись — день пополнения, ось не уходит ниже нуля
     expect(chart.querySelector('text.x-label')).toHaveTextContent('23 сен');
@@ -149,19 +156,19 @@ describe('Главная', () => {
       date_from: null,
       change: null,
       prev: null,
-      kpi: { ...base.kpi, settled: 1, won: 1, lost: 0, void: 0, profit: '1168.20', turnover: '1320.00' },
-      series: seriesOut({ group: 'week', start: '2026-10-13', base: '49168.20', start_day: '2026-10-13', start_amount: '48000.00', change_share: 0.0243, last: '49168.20', points: [{ day: '2026-10-13', value: '49168.20' }] }),
+      kpi: { ...base.kpi, settled: 1, won: 1, lost: 0, void: 0, profit: '1168.20', turnover: '1320.00', roi: 0.885 },
+      series: seriesOut({ group: 'week', start: '2026-10-13', base: '49168.20', start_day: '2026-10-13', start_amount: '48000.00', change_share: 0.0243, last: '49168.20', points: [{ day: '2026-10-13', value: '49168.20', invested: null }] }),
       bank: bankOut({ equity: '49168.20', balance: '49168.20', peak: '49168.20', invested: '48000.00', growth: '0.0243' }),
     });
     window.sessionStorage.setItem('capper.dash.period', 'all');
     renderDashboard({ data });
     const hero = await screen.findByRole('region', { name: 'Банк' });
-    expect(within(hero).getByText('+1 168 ₽ · +2,4%')).toBeInTheDocument();
+    expect(within(hero).getByText('+1 168 ₽ · ROI +88,5%')).toBeInTheDocument();
     expect(within(hero).getByText('Старт периода').nextSibling).toHaveTextContent(/^48\s000\s₽13 окт$/);
     // один день банка — точка с подписью, а не пустая полоса
     const one = within(hero).getByText('Ряд по дням появится со второго дня').parentElement!;
     expect(one.querySelector('svg circle')).not.toBeNull();
-    expect(screen.getByText('Банк на начало периода · 48 000 ₽')).toBeInTheDocument();
+    expect(screen.getByText('Вложено: старт 48 000 ₽')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /^Банк по дням с 13 окт: с 48\s000\s₽ до 49\s168\s₽$/ })).toBeInTheDocument();
   });
 
@@ -434,7 +441,7 @@ describe('Главная', () => {
     const data = dashboardOut({
       bank: { ...base.bank, empty: true, equity: '0.00', balance: '0.00', in_play: '0.00', peak: '0.00', drawdown: '0', invested: '0.00', growth: null, week_change: null, winrate: null, settled_bets: 0 },
       kpi: { ...base.kpi, ...zero },
-      series: { ...base.series, base: '0.00', last: '0.00', peak: '0.00', best: '0.00', worst: '0.00', max_drawdown: 0, points: [{ day: '2026-10-13', value: '0.00' }], rows: [] },
+      series: { ...base.series, base: '0.00', last: '0.00', peak: '0.00', best: '0.00', worst: '0.00', max_drawdown: 0, points: [{ day: '2026-10-13', value: '0.00', invested: null }], rows: [] },
       recent: [],
       small_sample: true,
       open_bets: [],
@@ -475,17 +482,65 @@ describe('Главная', () => {
     const base = dashboardOut();
     const data = dashboardOut({
       bank: { ...base.bank, equity: '47848.00', peak: '48000.00', drawdown: '0.0032', invested: '48000.00', growth: '-0.0032' },
-      kpi: { ...base.kpi, settled: 2, won: 1, lost: 1, void: 0, profit: '-152.00' },
-      series: { ...base.series, base: '0.00', start_day: '2026-10-12', start_amount: '48000.00', change_share: -0.0032, last: '47848.00', points: [{ day: '2026-10-12', value: '48000.00' }, { day: '2026-10-13', value: '47848.00' }] },
+      kpi: { ...base.kpi, settled: 2, won: 1, lost: 1, void: 0, profit: '-152.00', roi: -0.076 },
+      series: { ...base.series, base: '0.00', start_day: '2026-10-12', start_amount: '48000.00', change_share: -0.0032, last: '47848.00', points: [{ day: '2026-10-12', value: '48000.00', invested: null }, { day: '2026-10-13', value: '47848.00', invested: null }] },
       small_sample: true,
     });
     renderDashboard({ data });
     const hero = await screen.findByRole('region', { name: 'Банк' });
     expect(within(hero).getByText('47 848 ₽')).toBeInTheDocument();
-    // банка на начало периода не было — процент от стартового банка (рост с сервера), а не от нуля
-    expect(within(hero).getByText('−152 ₽ · −0,3%')).toBeInTheDocument();
+    // прибыль и ROI ставок, а не изменение капитала с пополнением
+    expect(within(hero).getByText('−152 ₽ · ROI −7,6%')).toBeInTheDocument();
     expect(within(hero).queryByText(/47 848 ₽ ·|\+47 848/)).toBeNull();
-    expect(screen.getByText('Прибыль').nextSibling).toHaveTextContent('−152 ₽');
+    expect(screen.getByText('Прибыль ставок').nextSibling).toHaveTextContent('−152 ₽');
+  });
+
+  it('пополнение внутри периода (В7): пунктир «вложено» ступенькой, отметка, «Пополнения» отдельно от прибыли', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-13T06:00:00Z'));
+    try {
+      const base = dashboardOut();
+      renderDashboard({
+        data: dashboardOut({
+          kpi: { ...base.kpi, profit: '10485.00', roi: 0.112 },
+          series: seriesWithFlows(),
+          bank: bankOut({ equity: '70485.00', balance: '70485.00', peak: '70485.00', invested: '60000.00' }),
+        }),
+      });
+      const hero = await screen.findByRole('region', { name: 'Банк' });
+      // главное число — прибыль ставок, пополнение в нее не входит
+      expect(within(hero).getByText('+10 485 ₽ · ROI +11,2%')).toBeInTheDocument();
+      const start = within(hero).getByText('Старт периода').parentElement!;
+      expect(start).toHaveTextContent(/40\s000\s₽13 сен · пополнения \+20\s000\s₽/);
+      expect(start).toHaveAttribute('title', expect.stringMatching(/^Внутри периода: \+20\s000\s₽ · пополнение, 14 сен$/));
+
+      const card = screen.getByRole('heading', { level: 3, name: 'Динамика банка' }).closest('section')!;
+      expect(within(card).getByText('Вложено: старт 40 000 ₽ и пополнения')).toBeInTheDocument();
+      const chart = within(card).getByRole('img', { name: /^Банк по дням за 30 дней: с 40\s000\s₽ до 70\s485\s₽; \+20\s000\s₽ · пополнение, 14 сен$/ });
+      // ступенька: банк и «вложено», у «вложено» нет точки в конце; опорной линии больше нет
+      const lines = chart.querySelectorAll('.line');
+      expect(lines).toHaveLength(2);
+      expect(lines[1]?.getAttribute('d')).toMatch(/^M[\d.]+ [\d.]+(H[\d.]+V[\d.]+)+$/);
+      expect(chart.querySelectorAll('.series .dot')).toHaveLength(1);
+      expect(chart.querySelector('.ref-line')).toBeNull();
+      // отметка пополнения на второй день ряда с подписью
+      expect(chart.querySelectorAll('.mark')).toHaveLength(1);
+      expect(chart.querySelector('.mark-label')).toHaveTextContent(/^\+20\s000\s₽ · пополнение, 14 сен$/);
+      const strip = card.querySelector('.dashboard-strip')!;
+      expect(within(strip as HTMLElement).getByText('Прибыль ставок').nextSibling).toHaveTextContent('+10 485 ₽');
+      expect(within(strip as HTMLElement).getByText('Пополнения').nextSibling).toHaveTextContent('+20 000 ₽');
+      expect(within(card).getByText(/^Как читать: линия банка выше пунктира «вложено»/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('пополнений за период нет — «Пополнения: нет», подпись старта — только дата', async () => {
+    renderDashboard();
+    const card = (await screen.findByRole('heading', { level: 3, name: 'Динамика банка' })).closest('section')!;
+    expect(within(card.querySelector('.dashboard-strip') as HTMLElement).getByText('Пополнения').nextSibling).toHaveTextContent('нет');
+    expect(within(card).getByText(/^Вложено: старт 48\s000\s₽$/)).toBeInTheDocument();
+    expect(card.querySelector('.mark')).toBeNull();
   });
 
   it('открытые ставки: у сегодняшнего матча — время начала, у остальных — день', async () => {

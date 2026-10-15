@@ -1,0 +1,88 @@
+/* Обучение модели (mockup/js/screens/learning.js, Р25). Цвета и размеры — токены. */
+.learning-root { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.learning-head h2 { font-size: var(--fs-2xl); }
+.learning-min { min-width: 0; }
+
+/* плитки: что учится сейчас */
+.learning-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 1180px) { .learning-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .learning-tiles { gap: 12px; } }
+.learning-tile {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0; text-align: left; text-decoration: none;
+  padding: 16px 18px; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: var(--r-lg);
+  transition: border-color .15s, background .15s;
+}
+.learning-tile:hover { border-color: var(--line-strong); background: color-mix(in srgb, var(--surface) 70%, var(--surface-2)); }
+.learning-tile[aria-current="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.learning-tile-label { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--fg-2); min-width: 0; }
+.learning-tile-label svg { width: 16px; height: 16px; flex: none; }
+.learning-tile-label .learning-tile-go { margin-left: auto; color: var(--fg-3); display: inline-flex; }
+.learning-tile-value { font-family: var(--font-display); font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.02em; line-height: 1.15; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.learning-tile-value small { font-family: var(--font-body); font-size: var(--fs-sm); font-weight: 500; color: var(--fg-2); letter-spacing: 0; margin-left: 4px; }
+.learning-tile-hint { font-size: var(--fs-xs); color: var(--fg-3); }
+@media (max-width: 720px) { .learning-tile { padding: 14px; } .learning-tile-value { font-size: var(--fs-xl); } }
+
+/* цикл обучения: 6 шагов в ряд, на планшете — по 3, на телефоне — столбиком с линией */
+.learning-cycle { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 28px; }
+.learning-step { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.learning-step-mark { display: flex; align-items: center; gap: 8px; color: var(--fg-3); }
+.learning-step-num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--accent-soft); color: var(--accent-ink); font-family: var(--font-display); font-weight: 700; font-size: var(--fs-sm); }
+.learning-step-mark > svg { width: 18px; height: 18px; flex: none; }
+.learning-step-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.learning-step h4 { font-size: var(--fs-sm); line-height: 1.3; }
+.learning-step p { font-size: var(--fs-xs); color: var(--fg-2); line-height: 1.45; }
+.learning-step .chip { align-self: flex-start; margin-top: 4px; height: auto; min-height: 22px; white-space: normal; }
+.learning-step-arrow { position: absolute; top: 4px; right: -25px; width: 20px; height: 20px; color: var(--fg-3); }
+.learning-step-arrow svg { width: 20px; height: 20px; }
+.learning-loop { position: relative; height: 24px; margin: 4px calc((100% - 140px) / 6 - 15px) 14px 13px; border: 2px dashed var(--line-strong); border-top: 0; border-radius: 0 0 14px 14px; }
+.learning-loop::before { content: ""; position: absolute; left: -8px; top: -9px; border: 7px solid transparent; border-top: 0; border-bottom: 9px solid var(--line-strong); }
+.learning-loop-label { position: absolute; left: 50%; bottom: 0; transform: translate(-50%, 50%); background: var(--surface); padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--fg-2); white-space: nowrap; }
+.learning-loop-label svg { width: 14px; height: 14px; flex: none; }
+@media (max-width: 1180px) {
+  .learning-cycle { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 24px; }
+  .learning-step-arrow { display: none; }
+  .learning-loop { height: auto; margin: 0; border: 0; border-radius: 0; }
+  .learning-loop::before { display: none; }
+  .learning-loop-label { position: static; transform: none; padding: 0; white-space: normal; font-size: var(--fs-sm); }
+  .learning-loop-label svg { width: 18px; height: 18px; }
+}
+@media (max-width: 720px) {
+  .learning-cycle { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .learning-step { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; padding-bottom: 14px; }
+  .learning-step-mark > svg { display: none; }
+  .learning-step-mark { align-self: stretch; flex-direction: column; }
+  .learning-step:not(:last-child) .learning-step-mark::after { content: ""; flex: 1; width: 2px; background: var(--line); margin-top: 4px; }
+  .learning-step .chip { margin-top: 2px; }
+  .learning-loop-label { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; align-items: center; }
+  .learning-loop-label svg { justify-self: center; }
+}
+.learning-doc, .learning-hint { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-xs); color: var(--fg-3); margin: 0; }
+.learning-doc svg, .learning-hint svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+
+/* вкладки: на телефоне — четыре равные колонки без прокрутки */
+.learning-sections { display: flex; flex-direction: column; gap: 16px; scroll-margin-top: 76px; min-width: 0; }
+@media (max-width: 960px) {
+  .tabs.learning-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; overflow: visible; }
+  .tabs.learning-tabs > a { min-width: 0; padding: 10px 4px; font-size: var(--fs-sm); justify-content: center; text-align: center; overflow: hidden; text-overflow: ellipsis; }
+  .learning-card .card-body > .segmented.learning-filter { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: 100%; align-self: stretch; overflow: visible; }
+  .segmented.learning-filter button { min-width: 0; text-align: center; overflow: hidden; text-overflow: ellipsis; }
+}
+.learning-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.learning-panel:focus { outline: none; }
+.learning-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.learning-two.wide-left { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+@media (max-width: 1180px) { .learning-two, .learning-two.wide-left { grid-template-columns: minmax(0, 1fr); } }
+.learning-card .card-body > .segmented, .learning-card .card-body > .btn { align-self: flex-start; }
+
+/* правила приема версии */
+.learning-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.learning-rules li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; font-size: var(--fs-sm); }
+.learning-rules li > span:first-child { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-2); font-weight: 700; font-size: var(--fs-xs); }
+.learning-rules li > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.learning-rules b { font-weight: 600; }
+
+/* строки версий (правила суммы ставки, версии модели) */
+.learning-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.learning-row:first-child { border-top: 0; padding-top: 0; }
+.learning-ver-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.learning-ver-name b { font-family: var(--font-mono); font-weight: 600; }

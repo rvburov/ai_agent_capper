@@ -33,7 +33,7 @@ export const NAV_ITEMS: Record<NavId, NavItem> = {
   bets: { id: 'bets', to: paths.bets, icon: 'ticket' },
   players: { id: 'players', to: paths.players, icon: 'users' },
   analytics: { id: 'analytics', to: paths.analytics, icon: 'chart' },
-  learning: { id: 'learning', to: paths.learning, icon: 'brain' },
+  learning: { id: 'learning', to: paths.learning(), icon: 'brain' },
   costs: { id: 'costs', to: paths.costs, icon: 'coins' },
   profile: { id: 'profile', to: paths.profile(), icon: 'user' },
   // Пункт меню ведет к «Обзору» раздела (этап 4): дела, бюджет ключа, последние действия

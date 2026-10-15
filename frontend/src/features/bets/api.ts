@@ -99,6 +99,14 @@ export function useBetSummary(query: BetFiltersQuery, { enabled = true } = {}) {
   });
 }
 
+/** Счетчики меню: открытые ставки и из них ждущие результата (GET /api/bets/counts). */
+export function useBetCounts() {
+  return useQuery({
+    queryKey: betKeys.counts,
+    queryFn: () => unwrap(api.GET('/api/bets/counts')),
+  });
+}
+
 /** Карточка ставки (GET /api/bets/{id}); initial — ставка из списка, пока карточка не пришла. */
 export function useBet(id: number | null, initial?: BetItem) {
   return useQuery({

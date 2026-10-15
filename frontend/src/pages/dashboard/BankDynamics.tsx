@@ -6,15 +6,17 @@ import { paths } from '../../app/paths';
 import { Button, Card, Chip, DataTable, EmptyState, Icon, type DataColumn } from '../../components';
 import { ChartWithTable, LineChart, type ValueFormat } from '../../components/charts';
 import { capitalize, periodStart } from '../../features/analytics/display';
+import { bankSteps, flowMarks, flowsText } from '../../features/analytics/flows';
 import type { Bank } from '../../features/bank/types';
 import { currencyOf, toneClass } from '../../features/bets/display';
 import type { Dashboard, RecentBet } from '../../features/dashboard/types';
 import { formatDate, formatDateLong, formatMoney, formatNumber, formatOdds, formatPercent, stepDigits } from '../../lib/format';
 import { StatusChip } from '../bets/parts';
 
-// «Динамика банка» (chartCard макета): банк по дням с опорной линией «на начало периода»,
-// таблица последних рассчитанных ставок и полоса итогов периода. Банка еще нет (ни ставок, ни
-// пополнений) — пустое состояние: нулевой график с «Банком на начало периода · 0 ₽» был бы неправдой.
+// «Динамика банка» (chartCard макета): банк по дням и пунктир «вложено» ступенькой с отметками
+// пополнений (В7 этапа 5), таблица последних рассчитанных ставок и полоса итогов периода —
+// прибыль ставок и пополнения отдельно. Банка еще нет (ни ставок, ни пополнений) — пустое
+// состояние: нулевой график с «Вложено: старт 0 ₽» был бы неправдой.
 
 function betPath(id: number): string {
   return `${paths.bets}?bet=${id}`;
@@ -158,6 +160,12 @@ export function BankDynamics({ data, bank, ctx, mobile, pending }: BankDynamicsP
   // Дни до появления банка не рисуем, опорная линия — банк на начало (см. periodStart)
   const start = periodStart(series);
   const last = start.points[start.points.length - 1]?.value ?? series.last;
+  const labels = start.points.map((point) => point.day);
+  // В7: пунктир «вложено» — ступенькой (старт периода, пополнения и выводы), в день движения —
+  // отметка с подписью; на телефоне подпись без даты (дата — в подсказке и по оси)
+  const steps = bankSteps(series, start);
+  const marks = flowMarks(t, steps.flows, labels, currency, mobile);
+  const flows = steps.flows.length ? `; ${flowsText(t, steps.flows, currency)}` : '';
   return (
     <Card
       className="dashboard-card"
@@ -173,18 +181,27 @@ export function BankDynamics({ data, bank, ctx, mobile, pending }: BankDynamicsP
         pending={pending}
         legend={[
           { key: 'bank', name: t('dashboard.chart.legendBank'), color: 'var(--s1)' },
-          { key: 'base', name: t('dashboard.chart.legendBase', { amount: formatMoney(start.amount, currency) }), type: 'dash' },
+          {
+            key: 'invested',
+            name: t(steps.flows.length ? 'dashboard.chart.legendInvestedFlows' : 'dashboard.chart.legendInvested', {
+              amount: formatMoney(start.amount, currency),
+            }),
+            type: 'dash',
+          },
         ]}
         table={() => <Recent data={data} mobile={mobile} />}
       >
         <LineChart
-          labels={start.points.map((point) => point.day)}
-          series={[{ key: 'bank', name: t('dashboard.chart.series'), color: 'var(--s1)', values: start.points.map((point) => Number(point.value)) }]}
-          ariaLabel={t('dashboard.chart.aria', { ctx, from: formatMoney(start.amount, currency), to: formatMoney(last, currency) })}
+          labels={labels}
+          series={[
+            { key: 'bank', name: t('dashboard.chart.series'), color: 'var(--s1)', values: start.points.map((point) => Number(point.value)) },
+            { key: 'invested', name: t('dashboard.chart.seriesInvested'), color: 'var(--fg-3)', values: steps.invested, dashed: true, step: true, thin: true, noEnd: true },
+          ]}
+          marks={marks}
+          ariaLabel={`${t('dashboard.chart.aria', { ctx, from: formatMoney(start.amount, currency), to: formatMoney(last, currency) })}${flows}`}
           height={mobile ? 200 : 250}
           area
           endLabel
-          refLines={[{ value: Number(start.amount) }]}
           yFormat={yFormat}
           xFormat={(day) => formatDate(day)}
           tipTitle={(day) => formatDateLong(day)}
@@ -192,16 +209,16 @@ export function BankDynamics({ data, bank, ctx, mobile, pending }: BankDynamicsP
       </ChartWithTable>
       <div className="dashboard-howto">
         <Icon name="info" />
-        <span>{mobile ? t('dashboard.chart.howtoTouch') : t('dashboard.chart.howtoHover')}</span>
+        <span>{mobile ? t('dashboard.chart.howtoStepsTouch') : t('dashboard.chart.howtoStepsHover')}</span>
       </div>
       <dl className="dashboard-strip">
         <div>
-          <dt>{t('dashboard.chart.profit')}</dt>
+          <dt>{t('dashboard.chart.betsProfit')}</dt>
           <dd className={toneClass(kpi.profit)}>{formatMoney(kpi.profit, currency, { signed: true })}</dd>
         </div>
         <div>
-          <dt>{t('dashboard.chart.settled')}</dt>
-          <dd>{formatNumber(kpi.settled)}</dd>
+          <dt>{t('dashboard.chart.flows')}</dt>
+          <dd>{steps.flowSum === null ? t('dashboard.chart.flowsNone') : formatMoney(steps.flowSum, currency, { signed: true })}</dd>
         </div>
         <div>
           <dt>{t('dashboard.chart.turnover')}</dt>

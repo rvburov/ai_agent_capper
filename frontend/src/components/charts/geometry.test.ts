@@ -20,8 +20,10 @@ import {
   niceTicks,
   outsideDomain,
   pickAxisLabels,
+  placeMarkLabels,
   px,
   sparkGeometry,
+  stepPath,
   textWidth,
   tooltipPosition,
 } from './geometry';
@@ -361,5 +363,163 @@ describe('px', () => {
     expect(px(10.04)).toBe(10);
     expect(px(10.06)).toBe(10.1);
     expect(Object.is(px(-0.01), -0)).toBe(false);
+  });
+});
+
+describe('stepPath: ступенька «вложено»', () => {
+  it('от точки к точке сначала по горизонтали, потом по вертикали', () => {
+    expect(stepPath([[0, 100], [10, 100], [20, 60], [30, 60]])).toBe('M0 100H10V100H20V60H30V60');
+  });
+
+  it('скачок — ровно в день события, а не между днями', () => {
+    // пополнение на третий день (x = 20): до x = 20 линия на старом уровне
+    const d = stepPath([[0, 100], [10, 100], [20, 60]]);
+    expect(d).toContain('H20V60');
+    expect(d).not.toContain('L');
+  });
+
+  it('пропуск — разрыв линии, одна точка — только перо, пусто — пустой путь', () => {
+    expect(stepPath([[0, 5], null, [20, 7], [30, 9]])).toBe('M0 5M20 7H30V9');
+    expect(stepPath([[4, 4]])).toBe('M4 4');
+    expect(stepPath([])).toBe('');
+    expect(stepPath([null, null])).toBe('');
+  });
+
+  it('координаты — с одной цифрой после точки', () => {
+    expect(stepPath([[0.04, 1.26], [10.55, 2.04]])).toBe('M0 1.3H10.6V2');
+  });
+});
+
+describe('placeMarkLabels: подписи отметок пополнения', () => {
+  const box = { min: 0, max: 400 };
+
+  it('в левой части — справа от отметки, в правой (за 55%) — слева', () => {
+    expect(placeMarkLabels([{ x: 100, width: 120 }], box)).toEqual([{ x: 106, anchor: 'start', row: 0 }]);
+    expect(placeMarkLabels([{ x: 300, width: 120 }], box)).toEqual([{ x: 294, anchor: 'end', row: 0 }]);
+  });
+
+  it('не влезает со своей стороны — с другой', () => {
+    // справа от 200 места 200 px меньше ширины 230 − 6, слева тоже нет: подписи нет
+    expect(placeMarkLabels([{ x: 200, width: 230 }], box)).toEqual([null]);
+    // в левой части справа не влезает (216 + 200 > 400) — встает слева
+    expect(placeMarkLabels([{ x: 210, width: 200 }], box)).toEqual([{ x: 204, anchor: 'end', row: 0 }]);
+    // граница сторон считается от min: у сдвинутой области своя середина
+    expect(placeMarkLabels([{ x: 95, width: 40 }], { min: 60, max: 150 })).toEqual([{ x: 101, anchor: 'start', row: 0 }]);
+    expect(placeMarkLabels([{ x: 90, width: 120 }], { min: 0, max: 150 })).toEqual([null]);
+    expect(placeMarkLabels([{ x: 20, width: 160 }], { min: 0, max: 150 })).toEqual([null]);
+    expect(placeMarkLabels([{ x: 300, width: 250 }], box)).toEqual([{ x: 294, anchor: 'end', row: 0 }]);
+    expect(placeMarkLabels([{ x: 360, width: 380 }], box)).toEqual([null]);
+  });
+
+  it('налезающие подписи — во второй ряд с той же стороны, дальше места нет — без подписи', () => {
+    // три события одного дня (общий пунктир): ряды 0 и 1 слева, третья — справа, если влезает
+    const sameDay = (width: number) =>
+      placeMarkLabels(
+        [
+          { x: 300, width: 100 },
+          { x: 300, width: 80 },
+          { x: 300, width },
+        ],
+        box,
+      );
+    expect(sameDay(120)).toEqual([{ x: 294, anchor: 'end', row: 0 }, { x: 294, anchor: 'end', row: 1 }, null]);
+    expect(sameDay(60)[2]).toEqual({ x: 306, anchor: 'start', row: 0 });
+    // подписи разных сторон налезают друг на друга — вторая ниже, сторона та же
+    expect(
+      placeMarkLabels(
+        [
+          { x: 100, width: 100 },
+          { x: 250, width: 100 },
+        ],
+        box,
+      ),
+    ).toEqual([
+      { x: 106, anchor: 'start', row: 0 },
+      { x: 244, anchor: 'end', row: 1 },
+    ]);
+  });
+
+  it('подпись не накрывает пунктир другого дня: соседние дни — в разные стороны', () => {
+    // оба дня правее середины: левая подпись уходит влево, правая — вправо, не через соседа
+    expect(
+      placeMarkLabels(
+        [
+          { x: 260, width: 100 },
+          { x: 270, width: 100 },
+        ],
+        box,
+      ),
+    ).toEqual([
+      { x: 254, anchor: 'end', row: 0 },
+      { x: 276, anchor: 'start', row: 0 },
+    ]);
+    // справа нет места — подписи нет, а не поверх пунктира соседа
+    expect(
+      placeMarkLabels(
+        [
+          { x: 330, width: 100 },
+          { x: 340, width: 100 },
+        ],
+        box,
+      ),
+    ).toEqual([{ x: 324, anchor: 'end', row: 0 }, null]);
+    // пунктир вплотную к краю (ближе 2 px) — тоже «под» подписью
+    expect(placeMarkLabels([{ x: 100, width: 50 }, { x: 157, width: 10 }], box)[0]).toEqual({ x: 94, anchor: 'end', row: 0 });
+  });
+
+  it('над неподписанной отметкой подпись встает, если другого места нет: ее пунктир ниже полосы', () => {
+    // 150: подписи нет места (300 px), ее пунктир — только в области построения
+    expect(
+      placeMarkLabels(
+        [
+          { x: 100, width: 120 },
+          { x: 150, width: 300 },
+        ],
+        box,
+      ),
+    ).toEqual([{ x: 106, anchor: 'start', row: 0 }, null]);
+    // подпись ряда 1 под чужой подписью: ее пунктир идет от своего ряда вниз и ту не задевает
+    expect(
+      placeMarkLabels(
+        [
+          { x: 100, width: 120 },
+          { x: 150, width: 300 },
+          { x: 160, width: 30 },
+        ],
+        box,
+      )[2],
+    ).toEqual({ x: 166, anchor: 'start', row: 1 });
+    // а подпись ряда 0 не встает, если ее пунктир прошел бы через подпись ряда 1 (230 под ней)
+    expect(
+      placeMarkLabels(
+        [
+          { x: 0, width: 200 },
+          { x: 50, width: 200 },
+          { x: 230, width: 10 },
+        ],
+        box,
+      ),
+    ).toEqual([{ x: 6, anchor: 'start', row: 0 }, { x: 56, anchor: 'start', row: 1 }, null]);
+  });
+
+  it('граница сторон split задается отдельно: 55% области построения, а не всей полосы', () => {
+    // полоса 0–400, область построения 60–300: split = 60 + 240 × 0,55 = 192
+    expect(placeMarkLabels([{ x: 200, width: 50 }], { ...box, split: 192 })).toEqual([{ x: 194, anchor: 'end', row: 0 }]);
+    expect(placeMarkLabels([{ x: 200, width: 50 }], box)).toEqual([{ x: 206, anchor: 'start', row: 0 }]);
+  });
+
+  it('далеко друг от друга — в одном ряду; порядок ответа — порядок отметок', () => {
+    const places = placeMarkLabels(
+      [
+        { x: 350, width: 100 },
+        { x: 20, width: 100 },
+      ],
+      box,
+    );
+    expect(places).toEqual([
+      { x: 344, anchor: 'end', row: 0 },
+      { x: 26, anchor: 'start', row: 0 },
+    ]);
+    expect(placeMarkLabels([], box)).toEqual([]);
   });
 });

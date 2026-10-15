@@ -131,6 +131,7 @@ export function dashboardOut(over: Partial<Dashboard> = {}): Dashboard {
     }),
     open_bets: [openBetOut()],
     open_count: 1,
+    awaiting_count: 0,
     open_stake: '1320.00',
     my_matches: [myMatch()],
     admin: null,

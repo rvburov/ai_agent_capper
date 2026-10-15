@@ -7,6 +7,7 @@ import { aiBudget } from '../../../features/ai/testData';
 import { adminAttention } from '../../../features/dashboard/testData';
 import { playLimitsOut } from '../../../features/bank/testData';
 import { adminPrefsOut, memberPrefsOut } from '../../../features/notifications/testData';
+import { fixClock } from '../../../test/clock';
 import { apiError, json, ME_ADMIN, ME_MEMBER, type Handler } from '../../../test/fetchMock';
 import { bodyOf, renderPage } from '../../../test/renderPage';
 import { ProfilePage } from '../ProfilePage';
@@ -31,6 +32,9 @@ function renderTab(handlers: Record<string, Handler>, me: typeof ME_MEMBER | typ
 async function card() {
   return (await screen.findByRole('heading', { name: 'О чем сообщать' })).closest('section') as HTMLElement;
 }
+
+// даты образцов — октябрь 2026 (см. fixClock)
+fixClock('2026-10-15T09:00:00Z');
 
 describe('Кабинет: уведомления', () => {
   it('участник: виды по строкам, лимит с числами, обязательные — неактивны с пояснением', async () => {

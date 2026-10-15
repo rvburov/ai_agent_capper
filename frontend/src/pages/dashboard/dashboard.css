@@ -48,11 +48,13 @@
 
 .dashboard-player { color: var(--fg); font-weight: 600; text-decoration: none; }
 .dashboard-player:hover { color: var(--accent-ink); text-decoration: underline; }
-/* на телефоне зона нажатия имени — 40px в высоту и на 10px шире текста с каждой стороны (фамилия
-   из трех букв — от 40px): отрицательные поля возвращают строке прежние размеры, текст не сдвигается
-   и перед тире не появляется пустое место, как дало бы min-width */
+/* на телефоне зона нажатия имени — 40px в высоту и на 10px шире текста с каждой стороны:
+   отрицательные поля возвращают строке прежние размеры, текст не сдвигается и перед тире не
+   появляется пустое место, как дало бы min-width. Короткой фамилии («Ли», «Ву») этого мало —
+   зону до 40px по ширине добирает невидимый ::before по центру имени */
 @media (max-width: 960px) {
-  .dashboard-player { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 10px; margin: -10px -10px; }
+  .dashboard-player { position: relative; display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 10px; margin: -10px -10px; }
+  .dashboard-player::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, var(--tap)); height: var(--tap); transform: translate(-50%, -50%); }
   /* имя в «Моих матчах» обрезается многоточием (overflow: hidden): поля на ту же величину, чтобы
      обрезка не съедала расширенную зону нажатия */
   .dashboard-match-name { padding: 10px; margin: -10px; }

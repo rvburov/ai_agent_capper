@@ -6,6 +6,7 @@ export const betKeys = {
   all: ['bets'] as const,
   list: (query: Omit<BetListQuery, 'before'>) => ['bets', 'list', query] as const,
   summary: (query: BetFiltersQuery) => ['bets', 'summary', query] as const,
+  counts: ['bets', 'counts'] as const,
   one: (id: number) => ['bets', 'one', id] as const,
 };
 
