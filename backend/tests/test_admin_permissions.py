@@ -162,6 +162,8 @@ async def test_admin_user_payload_keys(
         "ai_spent_month_usd",
         "analyses_month",
         "limit",
+        # доля месячного лимита — тот же расход на ИИ (Р14)
+        "limit_share",
     }
     rows = (await admin.client.get("/api/admin/users")).json()
     assert {tuple(sorted(row)) for row in rows} == {tuple(sorted(expected))}

@@ -387,6 +387,8 @@
   const ciDec3 = ci => (ci ? signedDec(ci[0], 3) + '…' + signedDec(ci[1], 3) : '—');
   const noisy = ci => !ci || (ci[0] <= 0 && ci[1] >= 0);
   const ciCell = ci => h('span', { class: 'analytics-nowrap muted', title: '95% доверительный интервал' }, ciPct(ci));
+  const roiCiCell = g => h('span', { style: 'display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px' },
+    roiText(g.roi), h('span', { class: 'analytics-nowrap muted xsmall', title: '95% доверительный интервал' }, ciPct(g.ci)));
 
   // Подписи оси X у UI.lineChart: первая прижата к левому краю, а шаг рассчитан на центрированные подписи,
   // поэтому в узкой колонке первые две слипаются. После каждой отрисовки убираем подписи, которые налезают
@@ -696,12 +698,16 @@
       body: [
         groups.length ? UI.withTable(roiBars(groups, { colorOf: k => D.surfaces[k].color, selected: state.surface }), () => tableBox(mtable({
           columns: [
-            { key: 'label', label: 'Покрытие', render: g => UI.surfaceChip(g.key) },
-            { key: 'n', label: 'Событий', align: 'r' },
+            // На телефоне, как в приложении: число событий — под покрытием, ДИ — второй строкой
+            // под ROI, а не отдельными колонками (иначе таблица не помещается в 360 px)
+            { key: 'label', label: 'Покрытие', render: g => UI.isMobile()
+              ? h('span', { style: 'display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px' }, UI.surfaceChip(g.key), h('span', { class: 'muted xsmall' }, nEv(g.n)))
+              : UI.surfaceChip(g.key) },
+            { key: 'n', label: 'Событий', align: 'r', hideMobile: true },
             { key: 'winrate', label: 'Винрейт', align: 'r', render: g => fmt.pct(g.winrate) },
             { key: 'avgOdds', label: nowrap('Ср. кэф'), align: 'r', hideMobile: true, render: g => h('span', { class: 'odds' }, fmt.odds(g.avgOdds)) },
-            { key: 'roi', label: 'ROI', align: 'r', render: g => roiText(g.roi) },
-            { key: 'ci', label: '95% ДИ', align: 'r', render: g => ciCell(g.ci) },
+            { key: 'roi', label: UI.isMobile() ? 'ROI · 95% ДИ' : 'ROI', align: 'r', render: g => UI.isMobile() ? roiCiCell(g) : roiText(g.roi) },
+            { key: 'ci', label: '95% ДИ', align: 'r', hideMobile: true, render: g => ciCell(g.ci) },
           ], rows: groups,
         }))) : UI.empty('Нет событий за период'),
         (groups.some(g => g.n < SMALL) || missing.length) && h('div', { class: 'stack', style: 'gap:4px' },

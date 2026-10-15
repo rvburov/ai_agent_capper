@@ -160,6 +160,7 @@ async def test_measure_runs_every_route(engine: AsyncEngine, app: FastAPI) -> No
         "GET /api/admin/activity",
         "GET /api/me/export [json]",
         "GET /api/me/export [csv]",
+        "GET /api/me/export/summary",
         "PUT /api/admin/settings/currency [preview]",
         "POST /api/admin/messages [preview]",
         "GET /api/me [loop]",

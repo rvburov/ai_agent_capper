@@ -46,6 +46,7 @@ from app.schemas.dashboard import (
     AdminAttentionOut,
     ArchiveSourceOut,
     ArchiveStaleOut,
+    ArchiveStatusOut,
     DashboardCoreOut,
     DashboardOut,
     Greeting,
@@ -343,21 +344,25 @@ def _player_ref(players: dict[int, Player], player_id: int) -> PlayerRefOut:
 async def admin_attention(db: AsyncSession, now: datetime) -> AdminAttentionOut:
     """Архив матчей, просьбы вернуть ключ и участники у лимита (Р14: только расход на ИИ)."""
     loads = await last_ok_loads(db)
-    archive = None
-    if is_stale(loads, now):
-        known = [when for when in loads.values() if when is not None]
-        oldest = min(known) if len(known) == len(loads) else None
-        archive = ArchiveStaleOut(
-            days=(now - oldest).days if oldest is not None else None,
-            last_load=oldest,
-            stale_after_days=STALE_AFTER.days,
-            update_hour_utc=get_settings().data_update_hour_utc,
-            update_minute=DATA_UPDATE_MINUTE,
-            sources=[
-                ArchiveSourceOut(source=source, last_load=when)  # type: ignore[arg-type]
-                for source, when in loads.items()
-            ],
-        )
+    known = [when for when in loads.values() if when is not None]
+    oldest = min(known) if len(known) == len(loads) else None
+    status = ArchiveStatusOut(
+        stale=is_stale(loads, now),
+        days=(now - oldest).days if oldest is not None else None,
+        last_load=oldest,
+        stale_after_days=STALE_AFTER.days,
+        update_hour_utc=get_settings().data_update_hour_utc,
+        update_minute=DATA_UPDATE_MINUTE,
+        sources=[
+            ArchiveSourceOut(source=source, last_load=when)  # type: ignore[arg-type]
+            for source, when in loads.items()
+        ],
+    )
+    archive = (
+        ArchiveStaleOut.model_validate(status.model_dump(exclude={"stale"}))
+        if status.stale
+        else None
+    )
     settings = await get_app_settings(db)
     members = list(
         await db.scalars(
@@ -406,6 +411,7 @@ async def admin_attention(db: AsyncSession, now: datetime) -> AdminAttentionOut:
         )
     return AdminAttentionOut(
         archive=archive,
+        archive_status=status,
         return_requests=requests,
         limits=alerts,
         alert_pct=settings.budget_alert_pct,

@@ -56,6 +56,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.csv_safe import csv_cell
 from app.core.errors import AppError
 from app.core.i18n import t
 from app.db.models import (
@@ -779,6 +780,8 @@ def _leg_out(context: LegContext, players: dict[int, Player], *, open_bet: bool)
     leg, match = context.leg, context.match
     leg_clv = clv(leg.odds_taken, leg.closing_odds) if leg.closing_odds is not None else None
     fair = clv_fair(leg.odds_taken, leg.q_close) if leg.q_close is not None else None
+    # Прогноз ноги: итоговая вероятность, у ставок бота — оценка Claude
+    p = context.p_final if context.p_final is not None else context.p_claude
     return BetLegItemOut(
         id=leg.id,
         match=LegMatchOut(
@@ -799,6 +802,7 @@ def _leg_out(context: LegContext, players: dict[int, Player], *, open_bet: bool)
         p_final=context.p_final,
         p_base=context.p_base,
         p_claude=context.p_claude,
+        edge=p - 1 / float(leg.odds_taken) if p is not None and leg.odds_taken > 0 else None,
         result=leg.result,  # type: ignore[arg-type]
         score=score_from_own(leg.score, leg.selection),
         settled_at=leg.settled_at,
@@ -1060,18 +1064,6 @@ CSV_COLUMNS: tuple[str, ...] = (
     "clv",
     "clv_fair",
 )
-# Текст, с которого таблица начнет формулу: такие ячейки начинаются с апострофа
-_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
-
-
-def csv_cell(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return "'" + value if value.startswith(_FORMULA_START) else value
-    if isinstance(value, float):
-        return repr(round(value, 6))
-    return str(value)
 
 
 def _local(moment: datetime | None, zone: Any) -> str | None:

@@ -955,3 +955,39 @@ async def test_player_name_form_indexes_migration(settings: Settings) -> None:
                 assert len(await _player_indexes(conn)) == 6
         finally:
             await engine.dispose()
+
+
+async def test_settings_change_audit_migration(settings: Settings) -> None:
+    """0006 → 0007: журнал принимает settings_change, прежние записи остаются. Откат до
+    0006 удаляет только записи settings_change (прежний CHECK их не пропустит), повторный
+    upgrade проходит."""
+    insert = (
+        "INSERT INTO admin_audit_log (action, details) VALUES"
+        " ('settings_change', '{\"field\": \"default_tz\"}')"
+    )
+    async with _temp_database(settings, "s4audit") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0006")
+                await conn.execute(
+                    text("INSERT INTO admin_audit_log (action, details) VALUES ('message', '{}')")
+                )
+                assert await _refused(conn, insert)
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                assert not await _refused(conn, insert)
+                await conn.execute(text(insert))
+                assert await _refused(
+                    conn, "INSERT INTO admin_audit_log (action, details) VALUES ('nope', '{}')"
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0006")
+            async with engine.begin() as conn:
+                actions = await conn.scalars(text("SELECT action FROM admin_audit_log"))
+                assert list(actions) == ["message"]
+                assert await _refused(conn, insert)
+                await conn.run_sync(run_alembic_upgrade, "head")
+        finally:
+            await engine.dispose()

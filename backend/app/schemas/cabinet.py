@@ -4,7 +4,7 @@
 Деньги — Decimal строкой в JSON, в валюте программы (currency).
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
@@ -48,10 +48,32 @@ class NotificationPrefOut(BaseModel):
     admin: bool
 
 
+class AlertRulesOut(BaseModel):
+    """Пороги сигналов расхода ИИ (ai_alert, TOKEN_ECONOMY.md, раздел 6) — те же числа,
+    что проверяет воркер: доля кэша ниже cache_min_share по cache_analyses последним
+    анализам; анализ дороже cost_factor медиан за cost_window_days дней; ответов
+    max_tokens и refusal за сутки больше stops_max_share; поисков за день (UTC) —
+    searches_per_day (лимит из настроек агента); rate_limit_series ответов 429 за
+    rate_limit_window_minutes минут. Одно уведомление на правило в сутки."""
+
+    cache_min_share: float
+    cache_analyses: int
+    cost_factor: float
+    cost_window_days: int
+    stops_max_share: float
+    searches_per_day: int
+    rate_limit_series: int
+    rate_limit_window_minutes: int
+
+
 class NotificationPrefsOut(BaseModel):
+    """alert_rules — пороги сигналов расхода ИИ для подсказки (только у администратора,
+    у участника null)."""
+
     items: list[NotificationPrefOut]
     # Push включится на этапе 6: до этого столбец «Push» неактивен
     push_available: bool
+    alert_rules: AlertRulesOut | None
 
 
 class NotificationPrefIn(BaseModel):
@@ -190,3 +212,26 @@ class DeletionOut(BaseModel):
 
 
 ExportFormat = Literal["json", "csv"]
+
+
+class LegacyPeriodOut(BaseModel):
+    """Дни первой и последней ставки старого бота (по поясу участника)."""
+
+    first: date
+    last: date
+
+
+class ExportSummaryOut(BaseModel):
+    """Что войдет в экспорт (кабинет «Данные»): ставки (из них в игре и из старого бота),
+    события — ноги всех ставок, свои вызовы Claude. legacy_period и legacy_no_result —
+    для статуса импорта истории бота: период его ставок (null — ставок бота нет) и ноги
+    рассчитанных экспрессов бота без исхода (бот не записывал исходы ног проигранных
+    экспрессов)."""
+
+    bets: int
+    open_bets: int
+    legacy_bets: int
+    events: int
+    ai_runs: int
+    legacy_period: LegacyPeriodOut | None
+    legacy_no_result: int

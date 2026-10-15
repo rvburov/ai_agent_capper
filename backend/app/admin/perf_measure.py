@@ -384,6 +384,7 @@ async def _reads(run: Runner, ids: Ids, samples: int) -> None:
         ("/api/me/bookmakers", None),
         ("/api/me/bookmakers/list", None),
         ("/api/me/play-limits", None),
+        ("/api/me/export/summary", None),
         ("/api/players/ranking", None),
         ("/api/players/ranking?q=Sinner", "q"),
         ("/api/players/ranking?q=%D0%A1%D0%B8%D0%BD%D0%BD%D0%B5%D1%80", "q ru"),

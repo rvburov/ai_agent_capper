@@ -12,7 +12,7 @@ Decimal, доли (ROI, винрейт, CLV, вероятности, Brier) — 
 from datetime import date, datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from app.schemas.analyses import DecimalOut, Market, TextKey
 from app.schemas.bets import DATE_MAX, DATE_MIN, BetSource, Period, SurfaceFilter
@@ -352,7 +352,8 @@ class ParlaysOut(BaseModel):
 
 class CalibrationBinOut(BaseModel):
     """Корзина 5 п.п.: события с вероятностью в [low, high), средняя вероятность p (на
-    графике), средние p_base и p_claude (в таблице), доля сыгравших и интервал Уилсона."""
+    графике), средние p_base и p_claude (в таблице), доля сыгравших и интервал Уилсона.
+    diff — «факт − прогноз» (доля, со знаком; колонка «Разница» в таблице)."""
 
     low: float
     high: float
@@ -363,6 +364,11 @@ class CalibrationBinOut(BaseModel):
     actual: float
     ci_low: float
     ci_high: float
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def diff(self) -> float:
+        return self.actual - self.p
 
 
 class CalibrationFlagOut(BaseModel):

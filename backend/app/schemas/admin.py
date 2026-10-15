@@ -61,6 +61,7 @@ AuditAction = Literal[
     "ai_mode_change",
     "budget_change",
     "agent_config_change",
+    "settings_change",
 ]
 
 
@@ -80,7 +81,8 @@ class AdminUserOut(BaseModel):
     """Строка списка участников. Только учетная запись, расход на ИИ и активность (Р14).
 
     ai_spent_month_usd и analyses_month — за текущий месяц (UTC) на ключе администратора.
-    limit пустой, если лимита нет (участник на своем ключе).
+    limit пустой, если лимита нет (участник на своем ключе). limit_share — ai_spent_month_usd
+    к месячному лимиту (доля; пусто — лимита нет или он нулевой).
     """
 
     id: int
@@ -95,6 +97,7 @@ class AdminUserOut(BaseModel):
     ai_spent_month_usd: UsdOut
     analyses_month: int
     limit: LimitOut | None
+    limit_share: float | None
 
 
 class AdminUserDetailOut(AdminUserOut):

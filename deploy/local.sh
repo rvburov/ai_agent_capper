@@ -29,6 +29,13 @@
 #                                           Коды команд приемки: 0 — пройдена, 1 — нет, 2 — отменено,
 #                                           3 — пробный прогон (выборка меньше, чем для приемки),
 #                                           130 — прервано (Ctrl+C останавливает и команду в контейнере)
+#   bash deploy/local.sh elo-current        таблица текущего Эло (места и Эло игроков на «Игроках»)
+#                                           по уже посчитанным рейтингам, без загрузки данных
+#   bash deploy/local.sh perf [--slack 1.5] [--scale 0.5] [--keep]
+#                                           замер скорости API (p95): временная база capper_perf_N
+#                                           на этом же PostgreSQL, синтетика (10 тыс. ставок, 100 тыс.
+#                                           вызовов Claude), замер, база удаляется. Рабочую базу не
+#                                           трогает. Отчет — deploy/reports/perf-ДАТА.md
 #   bash deploy/local.sh backup             ночной бэкап вручную и проверка восстановления
 #   bash deploy/local.sh restore latest | --list | <вид>/<файл>
 #                                           восстановить рабочую базу из копии
@@ -220,6 +227,25 @@ cmd_backtest() {
   printf '\nОтчет: %s\n' "$report"
 }
 
+# Замер скорости: временная база на том же сервере PostgreSQL. Служебный адрес — адрес
+# рабочей базы с базой postgres (пользователь capper в контейнере postgres — владелец
+# сервера); код возврата 1 — p95 какого-то маршрута выше цели
+cmd_perf() {
+  local status=0 report
+  run_tmp
+  dc exec -T api sh -c '
+    admin="$(printf "%s" "$CAPPER_DATABASE_URL" | sed "s|^postgresql+asyncpg://|postgresql://|; s|/[^/]*\$|/postgres|")"
+    out="$1"; shift
+    exec python -m app.admin.perf run --admin-url "$admin" --markdown "$out" "$@"
+  ' sh "$RUN_TMP/perf.md" "$@" || status=$?
+  if dc exec -T api test -s "$RUN_TMP/perf.md"; then
+    report="$(report_path perf)"
+    dc exec -T api cat "$RUN_TMP/perf.md" > "$report"
+    printf '\nОтчет: %s\n' "$report"
+  fi
+  [[ "$status" == 0 ]] || die "замер: p95 выше цели или замер не выполнен (код $status), причина — в выводе выше"
+}
+
 # Папка команды приемки в контейнере: у каждого запуска своя, как у data
 RUN_TMP=""
 
@@ -367,11 +393,13 @@ case "${1:-}" in
   backtest) shift; cmd_backtest "$@" ;;
   acceptance-runs|smoke-eval) name="$1"; shift; cmd_acceptance "$name" "$@" ;;
   parse-eval) shift; cmd_parse_eval "$@" ;;
+  elo-current) dc exec -T api python -m app.admin.cli elo-current ;;
+  perf) shift; cmd_perf "$@" ;;
   backup) cmd_backup ;;
   restore) shift; cmd_restore "$@" ;;
   status) dc ps ;;
   logs) shift; dc logs -f --tail 200 "$@" ;;
   down) dc down ;;
   wipe) cmd_wipe ;;
-  *) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

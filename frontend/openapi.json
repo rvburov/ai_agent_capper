@@ -1063,6 +1063,38 @@
         }
       }
     },
+    "/api/me/export/summary": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Export Summary",
+        "description": "Числа кабинета «Данные»: ставки (в игре, из старого бота), события, свои вызовы\nClaude; период ставок бота и ноги его экспрессов без исхода. Только свое.",
+        "operationId": "export_summary_api_me_export_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSummaryOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/me/export": {
       "get": {
         "tags": [
@@ -2226,7 +2258,8 @@
                       "player_edit",
                       "ai_mode_change",
                       "budget_change",
-                      "agent_config_change"
+                      "agent_config_change",
+                      "settings_change"
                     ],
                     "type": "string"
                   }
@@ -3113,7 +3146,7 @@
           "admin"
         ],
         "summary": "Update Settings",
-        "description": "Часовой пояс по умолчанию для новых участников (база IANA, иначе 422).",
+        "description": "Часовой пояс по умолчанию для новых участников (база IANA, иначе 422). Смена — в\nжурнале администратора (settings_change с прежним и новым поясом).",
         "operationId": "update_settings_api_admin_settings_put",
         "requestBody": {
           "content": {
@@ -6166,6 +6199,9 @@
               }
             ]
           },
+          "archive_status": {
+            "$ref": "#/components/schemas/ArchiveStatusOut"
+          },
           "return_requests": {
             "items": {
               "$ref": "#/components/schemas/KeyReturnRequestOut"
@@ -6188,12 +6224,13 @@
         "type": "object",
         "required": [
           "archive",
+          "archive_status",
           "return_requests",
           "limits",
           "alert_pct"
         ],
         "title": "AdminAttentionOut",
-        "description": "Дела администратора на главной."
+        "description": "Дела администратора на главной. archive — дело «Архив матчей не обновлялся»\n(null — архив свежий); archive_status — свежесть архива всегда, с признаком stale."
       },
       "AdminBudgetOut": {
         "properties": {
@@ -6546,6 +6583,17 @@
               }
             ]
           },
+          "limit_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Share"
+          },
           "active_sessions": {
             "type": "integer",
             "title": "Active Sessions"
@@ -6572,6 +6620,7 @@
           "ai_spent_month_usd",
           "analyses_month",
           "limit",
+          "limit_share",
           "active_sessions",
           "recent_logins"
         ],
@@ -6655,6 +6704,17 @@
                 "type": "null"
               }
             ]
+          },
+          "limit_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Share"
           }
         },
         "type": "object",
@@ -6670,10 +6730,11 @@
           "last_login_at",
           "ai_spent_month_usd",
           "analyses_month",
-          "limit"
+          "limit",
+          "limit_share"
         ],
         "title": "AdminUserOut",
-        "description": "Строка списка участников. Только учетная запись, расход на ИИ и активность (Р14).\n\nai_spent_month_usd и analyses_month — за текущий месяц (UTC) на ключе администратора.\nlimit пустой, если лимита нет (участник на своем ключе)."
+        "description": "Строка списка участников. Только учетная запись, расход на ИИ и активность (Р14).\n\nai_spent_month_usd и analyses_month — за текущий месяц (UTC) на ключе администратора.\nlimit пустой, если лимита нет (участник на своем ключе). limit_share — ai_spent_month_usd\nк месячному лимиту (доля; пусто — лимита нет или он нулевой)."
       },
       "AgentSettingsOut": {
         "properties": {
@@ -7475,6 +7536,55 @@
         "title": "AiUsageOut",
         "description": "Свой расход на Claude за месяц (UTC) по вызовам agent_runs, без проверок (eval).\nУ администратора — свои вызовы и общие задачи без участника (shared_usd), прогоны\nприемки — отдельно (acceptance_usd); own_usd — свои остальные вызовы.\n\ndays — с 1-го числа по last_day (сегодня, если месяц текущий). admin_key_usd и\nown_key_usd — чей ключ платил. search_usd — цена поисков, cache_saved_usd — сколько\nсэкономило чтение кэша против обычного входа (по model_prices на момент вызова).\navg_analysis_usd — средняя цена своего законченного анализа месяца без прогонов\nприемки (на обоих ключах). admin_key_avg_usd — то же только на ключе администратора\n(шаг $0,0001): у участника на ключе администратора — то же число, что\navg_analysis_usd в GET /ai/budget; ее показывать рядом с лимитом. forecast_usd —\nпрогноз на конец месяца по темпу (участник на ключе администратора — не выше лимита,\nна паузе — потрачено); у прошедшего месяца — итог. analyses_left — на сколько\nанализов по admin_key_avg_usd хватит остатка лимита (left_usd в GET /ai/budget;\nтолько участник на ключе администратора в текущем месяце); 0 — остатка меньше\nсамого маленького вызова оценки (анализ не запустится). pace_usd — темп под лимит:\nмесячный лимит участника (у администратора — бюджет ключа) на дни месяца; пусто —\nна своем ключе лимита нет. Лимит и бюджет — сегодняшние (истории лимитов нет)."
       },
+      "AlertRulesOut": {
+        "properties": {
+          "cache_min_share": {
+            "type": "number",
+            "title": "Cache Min Share"
+          },
+          "cache_analyses": {
+            "type": "integer",
+            "title": "Cache Analyses"
+          },
+          "cost_factor": {
+            "type": "number",
+            "title": "Cost Factor"
+          },
+          "cost_window_days": {
+            "type": "integer",
+            "title": "Cost Window Days"
+          },
+          "stops_max_share": {
+            "type": "number",
+            "title": "Stops Max Share"
+          },
+          "searches_per_day": {
+            "type": "integer",
+            "title": "Searches Per Day"
+          },
+          "rate_limit_series": {
+            "type": "integer",
+            "title": "Rate Limit Series"
+          },
+          "rate_limit_window_minutes": {
+            "type": "integer",
+            "title": "Rate Limit Window Minutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cache_min_share",
+          "cache_analyses",
+          "cost_factor",
+          "cost_window_days",
+          "stops_max_share",
+          "searches_per_day",
+          "rate_limit_series",
+          "rate_limit_window_minutes"
+        ],
+        "title": "AlertRulesOut",
+        "description": "Пороги сигналов расхода ИИ (ai_alert, TOKEN_ECONOMY.md, раздел 6) — те же числа,\nчто проверяет воркер: доля кэша ниже cache_min_share по cache_analyses последним\nанализам; анализ дороже cost_factor медиан за cost_window_days дней; ответов\nmax_tokens и refusal за сутки больше stops_max_share; поисков за день (UTC) —\nsearches_per_day (лимит из настроек агента); rate_limit_series ответов 429 за\nrate_limit_window_minutes минут. Одно уведомление на правило в сутки."
+      },
       "AnalysisCostOut": {
         "properties": {
           "id": {
@@ -8221,6 +8331,68 @@
         "title": "ArchiveStaleOut",
         "description": "Архив матчей устарел (то же правило, что уведомление data_stale): days — дней с\nсамой старой из последних успешных загрузок (null — какой-то архив не загружался ни\nразу), stale_after_days — порог; update_hour_utc и update_minute — когда идет ночное\nобновление (UTC)."
       },
+      "ArchiveStatusOut": {
+        "properties": {
+          "days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days"
+          },
+          "last_load": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Load"
+          },
+          "stale_after_days": {
+            "type": "integer",
+            "title": "Stale After Days"
+          },
+          "update_hour_utc": {
+            "type": "integer",
+            "title": "Update Hour Utc"
+          },
+          "update_minute": {
+            "type": "integer",
+            "title": "Update Minute"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveSourceOut"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "last_load",
+          "stale_after_days",
+          "update_hour_utc",
+          "update_minute",
+          "sources",
+          "stale"
+        ],
+        "title": "ArchiveStatusOut",
+        "description": "Свежесть архива матчей всегда, и когда он свежий: stale — устарел ли (то же\nправило, что archive в делах и уведомление data_stale). Нужен кабинету\n«Уведомления» (порог и последняя загрузка в подсказке) и главной."
+      },
       "AuditOut": {
         "properties": {
           "id": {
@@ -8271,7 +8443,8 @@
               "player_edit",
               "ai_mode_change",
               "budget_change",
-              "agent_config_change"
+              "agent_config_change",
+              "settings_change"
             ],
             "title": "Action"
           },
@@ -9140,6 +9313,17 @@
             ],
             "title": "P Claude"
           },
+          "edge": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edge"
+          },
           "result": {
             "anyOf": [
               {
@@ -9258,6 +9442,7 @@
           "p_final",
           "p_base",
           "p_claude",
+          "edge",
           "result",
           "score",
           "settled_at",
@@ -9268,7 +9453,7 @@
           "score_outcomes"
         ],
         "title": "BetLegItemOut",
-        "description": "Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда\nрассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),\nвероятности прогноза (p_final; у ставок бота — только p_claude). score_outcomes — у\nоткрытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для\nокна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все\nравно за участником (В16)."
+        "description": "Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда\nрассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),\nвероятности прогноза (p_final; у ставок бота — только p_claude) и перевес над рынком\nedge — вероятность прогноза минус 1/кэф (пусто — прогноза нет). score_outcomes — у\nоткрытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для\nокна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все\nравно за участником (В16)."
       },
       "BetLegOut": {
         "properties": {
@@ -9926,6 +10111,11 @@
           "ci_high": {
             "type": "number",
             "title": "Ci High"
+          },
+          "diff": {
+            "type": "number",
+            "title": "Diff",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -9938,10 +10128,11 @@
           "p_claude",
           "actual",
           "ci_low",
-          "ci_high"
+          "ci_high",
+          "diff"
         ],
         "title": "CalibrationBinOut",
-        "description": "Корзина 5 п.п.: события с вероятностью в [low, high), средняя вероятность p (на\nграфике), средние p_base и p_claude (в таблице), доля сыгравших и интервал Уилсона."
+        "description": "Корзина 5 п.п.: события с вероятностью в [low, high), средняя вероятность p (на\nграфике), средние p_base и p_claude (в таблице), доля сыгравших и интервал Уилсона.\ndiff — «факт − прогноз» (доля, со знаком; колонка «Разница» в таблице)."
       },
       "CalibrationFlagOut": {
         "properties": {
@@ -11935,6 +12126,56 @@
         "title": "EventIn",
         "description": "Событие, которое подтвердил участник. Игроки — id из базы (подсказки GET /players\nили черновик разбора). Турнир — id из черновика или название (новый турнир)."
       },
+      "ExportSummaryOut": {
+        "properties": {
+          "bets": {
+            "type": "integer",
+            "title": "Bets"
+          },
+          "open_bets": {
+            "type": "integer",
+            "title": "Open Bets"
+          },
+          "legacy_bets": {
+            "type": "integer",
+            "title": "Legacy Bets"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "ai_runs": {
+            "type": "integer",
+            "title": "Ai Runs"
+          },
+          "legacy_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LegacyPeriodOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "legacy_no_result": {
+            "type": "integer",
+            "title": "Legacy No Result"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bets",
+          "open_bets",
+          "legacy_bets",
+          "events",
+          "ai_runs",
+          "legacy_period",
+          "legacy_no_result"
+        ],
+        "title": "ExportSummaryOut",
+        "description": "Что войдет в экспорт (кабинет «Данные»): ставки (из них в игре и из старого бота),\nсобытия — ноги всех ставок, свои вызовы Claude. legacy_period и legacy_no_result —\nдля статуса импорта истории бота: период его ставок (null — ставок бота нет) и ноги\nрассчитанных экспрессов бота без исхода (бот не записывал исходы ног проигранных\nэкспрессов)."
+      },
       "ExpressLeg": {
         "properties": {
           "prediction_id": {
@@ -13261,6 +13502,27 @@
         "title": "LegSettleIn",
         "description": "Исход ноги, счет (необязательно; первым — игрок 1) и закрывающий кэф: поля нет —\nзакрытие не меняется, null — стирается."
       },
+      "LegacyPeriodOut": {
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "date",
+            "title": "First"
+          },
+          "last": {
+            "type": "string",
+            "format": "date",
+            "title": "Last"
+          }
+        },
+        "type": "object",
+        "required": [
+          "first",
+          "last"
+        ],
+        "title": "LegacyPeriodOut",
+        "description": "Дни первой и последней ставки старого бота (по поясу участника)."
+      },
       "LegacyProfileOut": {
         "properties": {
           "updated_at": {
@@ -14183,6 +14445,17 @@
               }
             ],
             "title": "Level"
+          },
+          "limit_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Share"
           }
         },
         "type": "object",
@@ -14201,10 +14474,11 @@
           "analyses_today",
           "analyses_month",
           "return_requested_at",
-          "level"
+          "level",
+          "limit_share"
         ],
         "title": "MemberLimitOut",
-        "description": "Строка таблицы «Лимиты участников». Р14: только расход на ИИ и активность.\n\nlimit — действующий лимит на ключе администратора (у участника на своем ключе он\nвступит в силу при возврате); пусто у администратора: у него нет личного лимита.\nspent_month_usd — расход за месяц на ключе администратора, own_spent_month_usd —\nна своем ключе (вне общего бюджета); без проверочных прогонов. analyses_today — на\nключе администратора с полуночи в поясе участника. return_requested_at — участник\nпросит вернуть ключ администратора (Р12). level — пройденный порог лимита на ключе\nадминистратора по правилу дел администратора (AdminAttentionOut.limits): 80 —\nalert_pct, 100 — остатка не хватает на анализ; пусто — порог не пройден, участник на\nсвоем ключе или администратор."
+        "description": "Строка таблицы «Лимиты участников». Р14: только расход на ИИ и активность.\n\nlimit — действующий лимит на ключе администратора (у участника на своем ключе он\nвступит в силу при возврате); пусто у администратора: у него нет личного лимита.\nspent_month_usd — расход за месяц на ключе администратора, own_spent_month_usd —\nна своем ключе (вне общего бюджета); без проверочных прогонов. analyses_today — на\nключе администратора с полуночи в поясе участника. return_requested_at — участник\nпросит вернуть ключ администратора (Р12). level — пройденный порог лимита на ключе\nадминистратора по правилу дел администратора (AdminAttentionOut.limits): 80 —\nalert_pct, 100 — остатка не хватает на анализ; пусто — порог не пройден, участник на\nсвоем ключе или администратор. limit_share — spent_month_usd к месячному лимиту (доля;\nпусто — лимита нет или он нулевой)."
       },
       "MessageIn": {
         "properties": {
@@ -14822,14 +15096,26 @@
           "push_available": {
             "type": "boolean",
             "title": "Push Available"
+          },
+          "alert_rules": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AlertRulesOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "required": [
           "items",
-          "push_available"
+          "push_available",
+          "alert_rules"
         ],
-        "title": "NotificationPrefsOut"
+        "title": "NotificationPrefsOut",
+        "description": "alert_rules — пороги сигналов расхода ИИ для подсказки (только у администратора,\nу участника null)."
       },
       "NotificationsOut": {
         "properties": {

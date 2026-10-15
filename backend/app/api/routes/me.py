@@ -20,6 +20,7 @@ from app.schemas.cabinet import (
     DeletionIn,
     DeletionOut,
     ExportFormat,
+    ExportSummaryOut,
     NotificationPrefsIn,
     NotificationPrefsOut,
     PauseIn,
@@ -271,6 +272,13 @@ async def take_pause(body: PauseIn, user: CurrentUser, db: DbSession) -> PlayLim
 
 
 # --- экспорт и удаление ---
+
+
+@router.get("/export/summary")
+async def export_summary(user: CurrentUser, db: DbSession) -> ExportSummaryOut:
+    """Числа кабинета «Данные»: ставки (в игре, из старого бота), события, свои вызовы
+    Claude; период ставок бота и ноги его экспрессов без исхода. Только свое."""
+    return await data_export.summary(db, user)
 
 
 @router.get(

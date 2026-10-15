@@ -30,12 +30,14 @@ from sqlalchemy import (
     Numeric,
     Select,
     String,
+    func,
     or_,
     select,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.csv_safe import safe_text
 from app.db.models import (
     AgentRun,
     AiLimit,
@@ -57,6 +59,7 @@ from app.db.models import (
     User,
     UserSession,
 )
+from app.schemas.cabinet import ExportSummaryOut, LegacyPeriodOut
 from app.services.app_settings import get_app_settings
 from app.services.bank import local_today, user_zone
 from app.services.sessions import utcnow
@@ -439,7 +442,8 @@ def _plain(value: Any) -> Any:
 
 
 def _cell(value: Any) -> str:
-    """Ячейка CSV: пусто для NULL, JSON для вложенных данных."""
+    """Ячейка CSV: пусто для NULL, JSON для вложенных данных, текст — без формулы
+    (safe_text)."""
     value = _plain(value)
     if value is None:
         return ""
@@ -447,6 +451,8 @@ def _cell(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, str):
+        return safe_text(value)
     return str(value)
 
 
@@ -460,6 +466,54 @@ async def _batches(
     keys = list(result.keys())
     async for rows in result.partitions(_FETCH_ROWS):
         yield keys, rows
+
+
+async def summary(db: AsyncSession, user: User) -> ExportSummaryOut:
+    """Числа для кабинета «Данные»: сколько ставок, событий и вызовов Claude войдет в
+    экспорт и статус импорта бота. Те же таблицы и условия, что у экспорта: свое — по id
+    вошедшего."""
+    uid = user.id
+    is_open = Bet.status == "open"
+    is_legacy = Bet.source == "legacy"
+    bets = (
+        await db.execute(
+            select(
+                func.count(),
+                func.count().filter(is_open),
+                func.count().filter(is_legacy),
+                func.min(Bet.placed_at).filter(is_legacy),
+                func.max(Bet.placed_at).filter(is_legacy),
+            ).where(Bet.user_id == uid)
+        )
+    ).one()
+    legs = (
+        await db.execute(
+            select(
+                func.count(),
+                func.count().filter(is_legacy, ~is_open, BetLeg.result.is_(None)),
+            )
+            .select_from(BetLeg)
+            .join(Bet, Bet.id == BetLeg.bet_id)
+            .where(Bet.user_id == uid)
+        )
+    ).one()
+    runs = await db.scalar(select(func.count()).where(AgentRun.user_id == uid))
+    zone = user_zone(user.tz)
+    first, last = bets[3], bets[4]
+    period = (
+        LegacyPeriodOut(first=first.astimezone(zone).date(), last=last.astimezone(zone).date())
+        if first is not None and last is not None
+        else None
+    )
+    return ExportSummaryOut(
+        bets=int(bets[0]),
+        open_bets=int(bets[1]),
+        legacy_bets=int(bets[2]),
+        events=int(legs[0]),
+        ai_runs=int(runs or 0),
+        legacy_period=period,
+        legacy_no_result=int(legs[1]),
+    )
 
 
 def filename(user: User, fmt: str, now: datetime | None = None) -> str:
@@ -547,13 +601,24 @@ def _flag(value: Any) -> str:
     return "" if value is None else "true" if value else "false"
 
 
+def _text(value: Any) -> str:
+    """Строка: чужой текст (имя участника в заголовке уведомления, сообщение
+    администратора) не должен стать формулой в таблице получателя."""
+    if value is None:
+        return ""
+    return safe_text(value) if isinstance(value, str) else str(value)
+
+
 def _converter(column_type: Any) -> Callable[[Any], str] | None:
-    """Как писать колонку в CSV. None — значения csv пишет сам как нужно: строки, целые,
-    деньги (Decimal — str), числа с плавающей точкой, пустое — пусто. Время — ISO, да/нет —
-    true/false, остальное (JSON, выражения без типа) — _cell."""
+    """Как писать колонку в CSV. None — значения csv пишет сам как нужно: целые, деньги
+    (Decimal — str), числа с плавающей точкой, пустое — пусто. Строки — _text (без
+    формулы), время — ISO, да/нет — true/false, остальное (JSON, выражения без типа) —
+    _cell."""
     if isinstance(column_type, Boolean):
         return _flag
-    if isinstance(column_type, String | Integer | Numeric):
+    if isinstance(column_type, String):
+        return _text
+    if isinstance(column_type, Integer | Numeric):
         return None
     if isinstance(column_type, DateTime | Date):
         return _iso

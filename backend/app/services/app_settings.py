@@ -157,14 +157,26 @@ async def admin_settings(db: AsyncSession) -> AdminSettingsOut:
     )
 
 
-async def update_settings(db: AsyncSession, *, default_tz: str, actor: User) -> AdminSettingsOut:
+async def update_settings(
+    db: AsyncSession, *, default_tz: str, actor: User, ip: str | None = None
+) -> AdminSettingsOut:
     """Часовой пояс по умолчанию для новых участников (у зарегистрированных свой).
+    Смена — в журнале (settings_change, {field, from, to}); тот же пояс — без записи.
     Делает commit."""
+    from app.services.audit import write_audit
+
     row = await _locked_settings(db)
     if row.default_tz != default_tz:
         previous = row.default_tz
         row.default_tz = default_tz
         row.updated_by = actor.id
+        await write_audit(
+            db,
+            action="settings_change",
+            actor_id=actor.id,
+            details={"field": "default_tz", "from": previous, "to": default_tz},
+            ip=ip,
+        )
         await db.commit()
         log.info("settings.default_tz", actor_id=actor.id, before=previous, after=default_tz)
     else:
@@ -459,8 +471,9 @@ def _path(*keys: str) -> ColumnElement[Any]:
 
 
 async def _convert_results(db: AsyncSession, rate: Rate) -> None:
-    """Рекомендации и предупреждения готовых анализов. Строки — под блокировкой: воркер,
-    который как раз записывает итог, допишет его, и итог тоже пересчитается."""
+    """Рекомендации и предупреждения готовых анализов, строки — под блокировкой. Воркер,
+    который как раз записывает итог, держит разделяемую CURRENCY_LOCK (analysis_run,
+    шаг compose): смена начинается после его commit, и итог тоже пересчитается."""
     from app.services.strategy_versions import params_of
 
     rows = (

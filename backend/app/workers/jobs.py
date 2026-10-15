@@ -62,6 +62,8 @@ LOGIN_EVENTS_RETENTION = timedelta(days=90)
 # Не чаще раза в сутки: 23 часа, чтобы ежедневный запуск, сдвинутый на секунды, не
 # пропускал день
 STALE_NOTIFY_EVERY = timedelta(hours=23)
+# Куда ведет data_stale: «Администрирование → Обзор», там дело «Архив матчей не обновлялся»
+STALE_LINK = "/admin"
 
 
 @dataclass(frozen=True)
@@ -170,6 +172,7 @@ async def notify_stale_data(db: AsyncSession, *, now: datetime | None = None) ->
             db,
             user_id=admin_id,
             kind="data_stale",
+            link=STALE_LINK,
             sackmann=_when(loads["sackmann"]),
             tennis_data=_when(loads["tennis_data"]),
             days=STALE_AFTER.days,

@@ -542,6 +542,7 @@ async def _member_rows(db: AsyncSession, users: list[User]) -> list[MemberLimitO
             if _has_level(user)
             else None
         )
+        limit = _limit_out(limits) if user.role != "admin" else None
         rows.append(
             MemberLimitOut(
                 id=user.id,
@@ -550,7 +551,7 @@ async def _member_rows(db: AsyncSession, users: list[User]) -> list[MemberLimitO
                 role=user.role,  # type: ignore[arg-type]
                 status=user.status,  # type: ignore[arg-type]
                 ai_mode=user.ai_mode,  # type: ignore[arg-type]
-                limit=_limit_out(limits) if user.role != "admin" else None,
+                limit=limit,
                 own_cap_usd=limits.own_per_analysis_usd,
                 own_key_last4=last4.get(user.id),
                 spent_month_usd=spent,
@@ -559,6 +560,11 @@ async def _member_rows(db: AsyncSession, users: list[User]) -> list[MemberLimitO
                 analyses_month=analyses,
                 return_requested_at=limits.return_requested_at,
                 level=level,  # type: ignore[arg-type]
+                limit_share=(
+                    float(spent / limit.monthly_usd)
+                    if limit is not None and limit.monthly_usd
+                    else None
+                ),
             )
         )
     return rows

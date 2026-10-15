@@ -46,6 +46,8 @@ AUDIT_ACTIONS = (
     "ai_mode_change",
     "budget_change",
     "agent_config_change",
+    # Этап 4: смена настроек программы (часовой пояс по умолчанию)
+    "settings_change",
 )
 # Порог предупреждения о расходе, % от лимита или бюджета
 BUDGET_ALERT_PCTS = (50, 70, 80, 90)

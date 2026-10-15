@@ -322,7 +322,8 @@
     "player_edit": "Правка игрока",
     "ai_mode_change": "Смена режима ключа Claude",
     "budget_change": "Изменение бюджета на ИИ",
-    "agent_config_change": "Изменение настроек агента"
+    "agent_config_change": "Изменение настроек агента",
+    "settings_change": "Изменение настроек программы"
   },
   "cli": {
     "command_metavar": "<команда>",

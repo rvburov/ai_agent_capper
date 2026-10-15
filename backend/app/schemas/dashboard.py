@@ -115,6 +115,14 @@ class ArchiveStaleOut(BaseModel):
     sources: list[ArchiveSourceOut]
 
 
+class ArchiveStatusOut(ArchiveStaleOut):
+    """Свежесть архива матчей всегда, и когда он свежий: stale — устарел ли (то же
+    правило, что archive в делах и уведомление data_stale). Нужен кабинету
+    «Уведомления» (порог и последняя загрузка в подсказке) и главной."""
+
+    stale: bool
+
+
 class KeyReturnRequestOut(BaseModel):
     """Участник просит вернуть ключ администратора (Р12)."""
 
@@ -140,9 +148,11 @@ class LimitAlertOut(BaseModel):
 
 
 class AdminAttentionOut(BaseModel):
-    """Дела администратора на главной."""
+    """Дела администратора на главной. archive — дело «Архив матчей не обновлялся»
+    (null — архив свежий); archive_status — свежесть архива всегда, с признаком stale."""
 
     archive: ArchiveStaleOut | None
+    archive_status: ArchiveStatusOut
     return_requests: list[KeyReturnRequestOut]
     limits: list[LimitAlertOut]
     alert_pct: int

@@ -52,6 +52,7 @@ from redis.asyncio import Redis
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.csv_safe import csv_cell
 from app.core.errors import AppError
 from app.core.i18n import t
 from app.db.models import BankrollLedger, Bet, BetLeg, Match, Prediction, Tournament, User
@@ -114,7 +115,7 @@ from app.services.bank import (
     period_start,
     user_zone,
 )
-from app.services.bets import bet_conditions, csv_cell, leg_surface_sql, summary_query
+from app.services.bets import bet_conditions, leg_surface_sql, summary_query
 from app.services.sessions import utcnow
 from app.services.strategy_versions import active_version, params_of
 

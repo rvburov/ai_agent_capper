@@ -23,7 +23,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.db.models import NotificationPref, User
-from app.schemas.cabinet import NotificationPrefIn, NotificationPrefOut, NotificationPrefsOut
+from app.schemas.cabinet import (
+    AlertRulesOut,
+    NotificationPrefIn,
+    NotificationPrefOut,
+    NotificationPrefsOut,
+)
 
 # Приходят всегда: защита аккаунта и важные новости от администратора
 REQUIRED_KINDS = frozenset({"new_device", "login_failures", "admin_message"})
@@ -78,7 +83,11 @@ async def _stored(db: AsyncSession, user_id: int) -> dict[str, NotificationPref]
     return {row.kind: row for row in rows}
 
 
-def _out(kinds: Sequence[PrefKind], stored: dict[str, NotificationPref]) -> NotificationPrefsOut:
+def _out(
+    kinds: Sequence[PrefKind],
+    stored: dict[str, NotificationPref],
+    alert_rules: AlertRulesOut | None = None,
+) -> NotificationPrefsOut:
     items: list[NotificationPrefOut] = []
     for item in kinds:
         row = stored.get(item.kind)
@@ -93,11 +102,31 @@ def _out(kinds: Sequence[PrefKind], stored: dict[str, NotificationPref]) -> Noti
                 admin=item.admin,
             )
         )
-    return NotificationPrefsOut(items=items, push_available=False)
+    return NotificationPrefsOut(items=items, push_available=False, alert_rules=alert_rules)
+
+
+async def alert_rules(db: AsyncSession) -> AlertRulesOut:
+    """Пороги сигналов расхода ИИ — из правил воркера (ai_alerts.RULES) и настроек агента."""
+    # ai_alerts шлет уведомления через notifications, а та спрашивает is_enabled отсюда
+    from app.agent.config import load_agent_config
+    from app.services.ai_alerts import RULES
+
+    config = await load_agent_config(db)
+    return AlertRulesOut(
+        cache_min_share=RULES.cache_min_share,
+        cache_analyses=RULES.cache_analyses,
+        cost_factor=float(RULES.cost_factor),
+        cost_window_days=RULES.cost_window.days,
+        stops_max_share=RULES.stops_max_share,
+        searches_per_day=config.news_max_searches_per_day,
+        rate_limit_series=RULES.rate_limit_series,
+        rate_limit_window_minutes=int(RULES.rate_limit_window.total_seconds() // 60),
+    )
 
 
 async def get_prefs(db: AsyncSession, user: User) -> NotificationPrefsOut:
-    return _out(available_kinds(user), await _stored(db, user.id))
+    rules = await alert_rules(db) if user.role == "admin" else None
+    return _out(available_kinds(user), await _stored(db, user.id), rules)
 
 
 async def update_prefs(

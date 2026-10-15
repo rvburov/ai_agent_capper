@@ -203,7 +203,8 @@ class ClosingOut(BaseModel):
 class BetLegItemOut(BaseModel):
     """Нога ставки: исход (null — не рассчитана), счет (первым — игрок 1), кто и когда
     рассчитал, закрытие и CLV (кэф / закрытие − 1; без маржи — кэф · q_close − 1),
-    вероятности прогноза (p_final; у ставок бота — только p_claude). score_outcomes — у
+    вероятности прогноза (p_final; у ставок бота — только p_claude) и перевес над рынком
+    edge — вероятность прогноза минус 1/кэф (пусто — прогноза нет). score_outcomes — у
     открытой ставки: исход ноги по каждому полному счету («2:1», первым — игрок 1) для
     окна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все
     равно за участником (В16)."""
@@ -217,6 +218,7 @@ class BetLegItemOut(BaseModel):
     p_final: float | None
     p_base: float | None
     p_claude: float | None
+    edge: float | None
     result: LegResult | None
     score: str | None
     settled_at: datetime | None

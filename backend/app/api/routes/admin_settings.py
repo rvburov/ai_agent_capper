@@ -30,10 +30,11 @@ async def get_settings(db: DbSession) -> AdminSettingsOut:
 
 @router.put("/settings")
 async def update_settings(
-    db: DbSession, admin: AdminUser, body: AdminSettingsIn
+    db: DbSession, admin: AdminUser, ip: ClientIp, body: AdminSettingsIn
 ) -> AdminSettingsOut:
-    """Часовой пояс по умолчанию для новых участников (база IANA, иначе 422)."""
-    return await app_settings.update_settings(db, default_tz=body.default_tz, actor=admin)
+    """Часовой пояс по умолчанию для новых участников (база IANA, иначе 422). Смена — в
+    журнале администратора (settings_change с прежним и новым поясом)."""
+    return await app_settings.update_settings(db, default_tz=body.default_tz, actor=admin, ip=ip)
 
 
 @router.put("/settings/currency")

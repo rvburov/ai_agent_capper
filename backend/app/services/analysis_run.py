@@ -85,6 +85,7 @@ from app.services.ai_keys import report_key_failure
 from app.services.analysis_input import Confirmed, ConfirmedEvent
 from app.services.analysis_result import ComposeInput, compose
 from app.services.analysis_view import make_event
+from app.services.bank import CURRENCY_LOCK
 from app.services.claude_key import key_for_run
 from app.services.dossier import archive_tournament, build_dossier, canonical_json
 from app.services.progress import publish
@@ -1260,6 +1261,10 @@ class _Runner:
                 update={"state": "done", "elapsed_ms": elapsed}
             )
             async with self.maker() as db:
+                # Разделяемая CURRENCY_LOCK до строки анализа, как у start_run: валюта
+                # программы и банк из учета читаются ниже, а смена валюты не найдет итог,
+                # пока он не закоммичен, — пусть ждет commit и пересчитает его
+                await db.execute(select(func.pg_advisory_xact_lock_shared(CURRENCY_LOCK)))
                 analysis = await db.get(Analysis, self.analysis_id, with_for_update=True)
                 if analysis is None or not self.owns(analysis):
                     raise Stopped

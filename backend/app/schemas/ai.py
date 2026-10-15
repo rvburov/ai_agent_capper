@@ -271,7 +271,8 @@ class MemberLimitOut(BaseModel):
     просит вернуть ключ администратора (Р12). level — пройденный порог лимита на ключе
     администратора по правилу дел администратора (AdminAttentionOut.limits): 80 —
     alert_pct, 100 — остатка не хватает на анализ; пусто — порог не пройден, участник на
-    своем ключе или администратор."""
+    своем ключе или администратор. limit_share — spent_month_usd к месячному лимиту (доля;
+    пусто — лимита нет или он нулевой)."""
 
     id: int
     display_name: str
@@ -288,6 +289,7 @@ class MemberLimitOut(BaseModel):
     analyses_month: int
     return_requested_at: datetime | None
     level: Literal["80", "100"] | None
+    limit_share: float | None
 
 
 class AdminLimitsOut(BaseModel):

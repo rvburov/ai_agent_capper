@@ -20,6 +20,7 @@ from app.db.session import create_sessionmaker
 from app.ml.strategy import StrategyParams
 from app.schemas.analyses import ConfirmIn
 from app.services import analyses as analyses_service
+from app.services import analysis_result, analysis_run
 from app.services.app_settings import Rate, converted_stake
 from app.services.bank import CURRENCY_LOCK, bank_state
 from tests.analysis_helpers import (
@@ -486,3 +487,53 @@ async def test_start_run_waits_for_currency_change(
     assert refused.value.code == "common.currency_changed"
     row = await db.get_one(Analysis, draft_id, populate_existing=True)
     assert row.bank_input is None and row.status == "needs_confirmation"
+
+
+async def test_currency_change_waits_for_compose_with_ledger_bank(
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    db: AsyncSession,
+    engine: AsyncEngine,
+    redis: Redis,
+    totp_code: TotpCodeFn,
+    fake: FakeClaude,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Смена валюты, пока воркер записывает итог (банк из учета, в анализе банка нет):
+    смена ждет commit итога и пересчитывает рекомендацию. Без разделяемой блокировки в
+    compose итог оставался в рублях: незакоммиченная строка не попадала в пересчет."""
+    world = await seed_world(db, engine)
+    await set_admin_key(db)
+    await seed_prices(db)
+    admin = await admin_signed_in(make_client, make_user, login)
+    member = await signed_in(make_client, make_user, login, ip="10.0.0.2")
+    user = member.user.user
+    db.add(BankrollLedger(user_id=user.id, kind="deposit", amount=D(10000), currency="RUB"))
+    await db.commit()
+    pairs = (("sinner", "rune"), ("djokovic", "rublev"))
+    analysis_id = await make_analysis(db, redis, user, world, *pairs, bank=None)
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = analysis_result.compose
+
+    async def gated(session: AsyncSession, data: Any) -> dict[str, Any]:
+        result = await original(session, data)
+        # Итог посчитан в рублях, commit еще не сделан
+        entered.set()
+        await release.wait()
+        return result
+
+    monkeypatch.setattr(analysis_run, "compose", gated)
+    task = asyncio.create_task(run(engine, redis, analysis_id))
+    await asyncio.wait_for(entered.wait(), 60)
+    change = asyncio.create_task(_change(admin, totp_code))
+    await asyncio.sleep(0.5)
+    waited = not change.done()
+    release.set()
+    assert await asyncio.wait_for(task, 60) == "done"
+    await asyncio.wait_for(change, 30)
+    # Смена ждет воркера, а не проходит мимо незаписанного итога
+    assert waited
+    stake = _stake(await db.get_one(Analysis, analysis_id, populate_existing=True))
+    # 10 000 ₽ ÷ 95 = 105,26 €
+    assert (stake["currency"], stake["bank"], stake["amount"]) == ("EUR", "105.26", "2.00")

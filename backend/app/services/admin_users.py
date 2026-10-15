@@ -156,6 +156,10 @@ def _user_fields(
     user: User, usage: tuple[Decimal, int] | None, limit: AiLimit | None
 ) -> dict[str, Any]:
     spent, analyses = usage or (Decimal(0), 0)
+    # У администратора нет личного лимита: строка ai_limits у него может быть
+    # (регистрация по приглашению), но не действует
+    limit_out = _limit_out(limit) if user.role != "admin" else None
+    monthly = limit_out.monthly_usd if limit_out is not None else None
     return {
         "id": user.id,
         "display_name": user.display_name,
@@ -168,9 +172,8 @@ def _user_fields(
         "last_login_at": user.last_login_at,
         "ai_spent_month_usd": spent,
         "analyses_month": analyses,
-        # У администратора нет личного лимита: строка ai_limits у него может быть
-        # (регистрация по приглашению), но не действует
-        "limit": _limit_out(limit) if user.role != "admin" else None,
+        "limit": limit_out,
+        "limit_share": float(spent / monthly) if monthly else None,
     }
 
 
