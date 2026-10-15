@@ -96,9 +96,18 @@ export function displayName(player: { name: string; nameRu?: string | null; name
   return player.nameRu ?? player.name_ru ?? player.name;
 }
 
-/** Фамилия для коротких подписей: «Синнер» из «Янник Синнер». */
+// Инициал имени: «Я.», «K.» (буква и точка)
+const INITIAL = /^\p{L}\.$/u;
+
+/**
+ * Фамилия для коротких подписей: «Синнер» из «Янник Синнер». Игроки из старого бота записаны
+ * фамилией с инициалом («Синнер Я.»): инициал в конце отбрасывается, а не берется вместо фамилии.
+ */
 export function shortName(full: string): string {
   const parts = full.trim().split(/\s+/);
+  if (parts.length > 1 && INITIAL.test(parts[parts.length - 1] ?? '') && !INITIAL.test(parts[0] ?? '')) {
+    return parts.slice(0, -1).join(' ');
+  }
   return parts.length > 1 ? parts.slice(1).join(' ') : full.trim();
 }
 

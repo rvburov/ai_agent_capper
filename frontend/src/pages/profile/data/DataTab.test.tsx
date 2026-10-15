@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { meQueryKey } from '../../../api/keys';
+import type { ExportSummary } from '../../../features/account/api';
 import { aiBudget } from '../../../features/ai/testData';
 import { playLimitsOut } from '../../../features/bank/testData';
 import { betsSummary } from '../../../features/bets/testData';
@@ -18,9 +19,15 @@ function summary(request: Request) {
   return json(legacy ? betsSummary({ settled: 0, open: 0, legacy_settled: 0 }) : betsSummary());
 }
 
+// Числа «Данных» — с сервера (GET /api/me/export/summary)
+function exportSummary(over: Partial<ExportSummary> = {}): ExportSummary {
+  return { bets: 4, open_bets: 1, legacy_bets: 1, events: 9, ai_runs: 128, legacy_period: null, legacy_no_result: 0, ...over };
+}
+
 function api(over: Record<string, Handler> = {}): Record<string, Handler> {
   return {
     'GET /api/bets/summary': summary,
+    'GET /api/me/export/summary': () => json(exportSummary({ legacy_bets: 0 })),
     'GET /api/me/bookmakers/list': () => json(bookmakersOut()),
     'GET /api/ai/budget': () => json(aiBudget()),
     'GET /api/me/login-events': () => json([]),
@@ -64,6 +71,7 @@ describe('Кабинет: данные', () => {
     });
     const { user, calls } = renderTab(
       api({
+        'GET /api/me/export/summary': () => json(exportSummary()),
         'GET /api/me/export': (request) => {
           const format = new URL(request.url).searchParams.get('format');
           const name = format === 'json' ? 'capper-export-2026-10-14.json' : 'capper-export-2026-10-14.zip';
@@ -80,6 +88,8 @@ describe('Кабинет: данные', () => {
     // 3 рассчитанные и 1 в игре, 1 — старого бота; букмекеров 3, скрыт 1
     expect(await within(exportCard).findByText('4 ставки, из них 1 в игре, 1 из старого бота')).toBeInTheDocument();
     expect(await within(exportCard).findByText('3 букмекера, из них скрыто 1')).toBeInTheDocument();
+    expect(within(exportCard).getByText('9 событий')).toBeInTheDocument();
+    expect(within(exportCard).getByText('128 · токены и стоимость')).toBeInTheDocument();
     expect(within(exportCard).getByText('без паролей, кодов 2FA и ключей Claude')).toBeInTheDocument();
     await user.click(within(exportCard).getByRole('button', { name: 'Скачать JSON' }));
     expect(await screen.findByText('Скачивание началось: capper-export-2026-10-14.json')).toBeInTheDocument();
@@ -87,7 +97,7 @@ describe('Кабинет: данные', () => {
     expect(await screen.findByText('Скачивание началось: capper-export-2026-10-14.zip')).toBeInTheDocument();
     expect(clicked).toEqual(['capper-export-2026-10-14.json', 'capper-export-2026-10-14.zip']);
     expect(await created[0]!.text()).toBe('{"profile":{}}');
-    const formats = calls.filter((r) => r.url.includes('/api/me/export')).map((r) => new URL(r.url).searchParams.get('format'));
+    const formats = calls.filter((r) => new URL(r.url).pathname === '/api/me/export').map((r) => new URL(r.url).searchParams.get('format'));
     expect(formats).toEqual(['json', 'csv']);
   });
 
@@ -117,17 +127,26 @@ describe('Кабинет: данные', () => {
   it('импорт старого бота: участнику — только если ставки перенесены; администратору — всегда', async () => {
     const legacy = (request: Request) =>
       new URL(request.url).searchParams.get('source') === 'legacy' ? json(betsSummary({ settled: 40, open: 2, legacy_settled: 40 })) : json(betsSummary());
-    renderTab(api({ 'GET /api/bets/summary': legacy }));
+    renderTab(
+      api({
+        'GET /api/bets/summary': legacy,
+        'GET /api/me/export/summary': () =>
+          json(exportSummary({ bets: 46, legacy_bets: 42, legacy_period: { first: '2025-03-02', last: '2025-09-28' }, legacy_no_result: 5 })),
+      }),
+    );
     const done = await card('Импорт истории из старого бота');
     expect(within(done).getByText('Выполнен')).toBeInTheDocument();
     expect(await within(done).findByText('42 ставки в ваш аккаунт, из них 2 в игре')).toBeInTheDocument();
+    // период ставок бота и ноги проигранных экспрессов без исхода — с сервера
+    expect(within(done).getByText('2 мар 2025 – 28 сен 2025')).toBeInTheDocument();
+    expect(within(done).getByText('5 событий в проигранных экспрессах')).toBeInTheDocument();
     expect(within(done).getByText('bash deploy/local.sh import EMAIL История-ставок.json')).toBeInTheDocument();
   });
 
   it('участник без ставок бота — карточки импорта нет; у администратора — «Не выполнен»', async () => {
     const view = renderTab(api());
     await card('Экспорт всех данных');
-    await waitFor(() => expect(view.calls.some((r) => r.url.includes('source=legacy'))).toBe(true));
+    await waitFor(() => expect(view.calls.some((r) => r.url.includes('/api/me/export/summary'))).toBe(true));
     expect(screen.queryByRole('heading', { name: 'Импорт истории из старого бота' })).toBeNull();
     view.unmount();
     renderTab(api(), ME_ADMIN);
@@ -140,6 +159,7 @@ describe('Кабинет: данные', () => {
     let attempt = 0;
     const { user, calls } = renderTab(
       api({
+        'GET /api/me/export/summary': () => json(exportSummary()),
         'POST /api/me/deletion': () => {
           attempt += 1;
           if (attempt === 1) return apiError(400, 'auth.current_password_invalid', 'Пароль не подходит');

@@ -123,7 +123,7 @@ function LegsTable({ bet }: { bet: BetItem }) {
                 <td className="r">{formatProb(p)}</td>
                 <td className="r">{formatProb(implied)}</td>
                 <td className="r">
-                  <span className="soft">{p !== null && implied !== null ? formatPp(p - implied, { digits: 0 }) : '—'}</span>
+                  <span className="soft">{formatPp(leg.edge, { digits: 0 })}</span>
                 </td>
                 <td>
                   <LegChip shown={legShown(bet, leg)} />

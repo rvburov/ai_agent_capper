@@ -7,7 +7,7 @@ import { paths } from '../../app/paths';
 import { BudgetBar, Button, Card, Chip, Icon, Skeleton, spendTone, useToast, type IconName } from '../../components';
 import { keyMask } from '../../features/ai/keyFormat';
 import { auditTarget, isTerminal } from '../../features/admin/audit';
-import { spendMonth, timeLeft, whenInline } from '../../features/admin/display';
+import { spendMonth, timeLeft, utcDayInline, whenInline } from '../../features/admin/display';
 import { personName } from '../../features/admin/people';
 import type { AdminBudget, AuditEntry, Invite, MemberLimit, ResetCode } from '../../features/admin/types';
 import { useAdminAiUsage, useAdminActivity } from '../../features/admin/useAdminUsage';
@@ -99,7 +99,12 @@ function DecisionsCard({ me }: { me: Me }) {
           const limit = m.limit;
           // уровень 100 — остатка нет даже на вызов Claude: анализы уже остановлены (решает сервер)
           const stopped = item.level === '100';
-          const tail = limit?.paused ? t('admin.overview.decisions.paused') : stopped ? t('admin.overview.decisions.stopped') : t('admin.overview.decisions.willStop');
+          // день, когда при нынешнем темпе лимит кончится, — с сервера (runs_out_on)
+          let tail;
+          if (limit?.paused) tail = t('admin.overview.decisions.paused');
+          else if (stopped) tail = t('admin.overview.decisions.stopped');
+          else if (item.runsOutOn) tail = t('admin.overview.decisions.runsOut', { when: utcDayInline(item.runsOutOn) });
+          else tail = t('admin.overview.decisions.willStop');
           return (
             <AttRow
               key={`l${m.id}`}
@@ -274,9 +279,11 @@ interface Spender {
 
 /** «Кто тратит» ключ администратора: первые трое и «остальные», общие задачи и итог. */
 export function SpendersList({ usage, me, levels, compact = false, t }: { usage: AdminAiUsage; me: Me; levels: ReadonlyMap<number, '80' | '100'>; compact?: boolean; t: TFunction }) {
-  const people = usage.people.filter((p) => p.key_spent_usd > 0).sort((a, b) => b.key_spent_usd - a.key_spent_usd);
-  const top = people.length > 4 ? people.slice(0, 3) : people;
-  const rest = people.slice(top.length);
+  // Кто попал в «остальные» и их сумму решает сервер (others_*); строки — тратившие ключ, кроме них
+  const others = new Set(usage.others_ids);
+  const byId = new Map(usage.people.map((p) => [p.user_id, p]));
+  const top = usage.people.filter((p) => p.key_spent_usd > 0 && !others.has(p.user_id)).sort((a, b) => b.key_spent_usd - a.key_spent_usd);
+  const rest = usage.others_ids.map((id) => byId.get(id)?.display_name ?? '').filter(Boolean);
   const rows: Spender[] = top.map((p) => {
     // цвет полосы — по уровню лимита с сервера (дела администратора), а не по доле в браузере
     const level = p.ai_mode === 'shared' ? levels.get(p.user_id) : undefined;
@@ -298,13 +305,13 @@ export function SpendersList({ usage, me, levels, compact = false, t }: { usage:
       tone,
     };
   });
-  if (rest.length) {
+  if (usage.others_count > 0) {
     rows.push({
       key: 'rest',
-      name: t('admin.overview.spenders.rest', { count: rest.length }),
-      value: Math.round(rest.reduce((sum, p) => sum + p.key_spent_usd, 0) * 100) / 100,
+      name: t('admin.overview.spenders.rest', { count: usage.others_count }),
+      value: usage.others_usd,
       share: null,
-      meta: rest.map((p) => p.display_name.split(' ')[0]).join(', '),
+      meta: rest.map((name) => name.split(' ')[0]).join(', '),
       tone: null,
     });
   }
@@ -359,8 +366,6 @@ function budgetDay(monthStart: string, day: number): Date {
 function BudgetBody({ budget, t }: { budget: AdminBudget; t: TFunction }) {
   const total = budget.budget_usd;
   const tone = spendTone(budget.spent_usd, total, budget.alert_pct);
-  // доля прогноза в бюджете — пока в браузере (заявка A: forecast_share в AdminBudgetOut)
-  const pct = (value: number) => formatPercent(total > 0 ? value / total : 0, { digits: 0 });
   const today = budget.days_in_month - budget.days_left;
   const end = formatDate(budgetDay(budget.month_start, budget.days_in_month), { timeZone: 'UTC' });
   const todayText = formatDate(budgetDay(budget.month_start, today), { timeZone: 'UTC' });
@@ -372,7 +377,7 @@ function BudgetBody({ budget, t }: { budget: AdminBudget; t: TFunction }) {
         <span className="stat-value">{formatUsd(budget.spent_usd)}</span>
         <span className="adm-of">{t('admin.key.budget.of', { budget: formatLimitUsd(total) })}</span>
         <Chip kind={tone ?? 'good'} icon={tone ? 'alert' : 'check'}>
-          {t('admin.key.budget.share', { pct: budget.budget_share === null || budget.budget_share === undefined ? '—' : formatShare(budget.budget_share) })}
+          {t('admin.key.budget.share', { pct: formatShare(budget.budget_share) })}
         </Chip>
       </div>
       <BudgetBar
@@ -407,7 +412,7 @@ function BudgetBody({ budget, t }: { budget: AdminBudget; t: TFunction }) {
           <dt>{t('admin.key.budget.forecast')}</dt>
           <dd>
             {t('profile.key.approx', { amount: formatUsd(budget.forecast_usd) })}
-            <small>{t('admin.key.budget.share', { pct: pct(budget.forecast_usd) })}</small>
+            <small>{t('admin.key.budget.share', { pct: formatShare(budget.forecast_share) })}</small>
           </dd>
         </div>
       </dl>
@@ -592,6 +597,7 @@ const ACTION_ICON: Partial<Record<AuditEntry['action'], IconName>> = {
   key_change: 'key',
   ai_mode_change: 'key',
   currency_change: 'currency',
+  settings_change: 'clock',
   message: 'megaphone',
   confirm_failed: 'shield',
   player_merge: 'users',

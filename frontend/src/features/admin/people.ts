@@ -52,13 +52,14 @@ export function summarize(users: readonly AdminUser[]): PeopleSummary {
 export type { SpendTone };
 
 /**
- * Доля израсходованного личного лимита и цвет полосы; без лимита — null. alertPct — порог
- * уведомления из настроек администратора (50–90%): с него полоса желтая, как в макете.
+ * Доля израсходованного личного лимита (с сервера, limit_share) и цвет полосы; без лимита —
+ * null. alertPct — порог уведомления из настроек администратора (50–90%): с него полоса
+ * желтая, как в макете.
  */
 export function spendShare(user: AdminUser, alertPct: number): { share: number | null; tone: SpendTone } {
   const monthly = user.limit?.monthly_usd;
   if (!monthly) return { share: null, tone: null };
-  return { share: user.ai_spent_month_usd / monthly, tone: spendTone(user.ai_spent_month_usd, monthly, alertPct) };
+  return { share: user.limit_share, tone: spendTone(user.ai_spent_month_usd, monthly, alertPct) };
 }
 
 const byName = (a: AdminUser, b: AdminUser) => personName(a).localeCompare(personName(b), 'ru');

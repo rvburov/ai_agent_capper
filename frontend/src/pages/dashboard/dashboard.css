@@ -145,3 +145,5 @@
 /* ---------- расходы ИИ ---------- */
 .dashboard-cost-row { align-items: flex-end; }
 .dashboard-cost-value { font-family: var(--font-display); font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
+/* Матч без времени начала: «сегодня» вместо времени, как у ноги в «Открытых ставках» */
+.dashboard-match-day { font-weight: 600; font-size: var(--fs-sm); color: var(--fg-2); }

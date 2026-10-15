@@ -16,7 +16,7 @@ const PLAYERS = {
 const OUTCOMES_BO3 = { '2:0': 'win', '2:1': 'win', '1:2': 'loss', '0:2': 'loss' } as const;
 
 export function betLeg(over: Partial<BetLeg> = {}): BetLeg {
-  return {
+  const leg: BetLeg = {
     id: 11,
     match: {
       id: 101,
@@ -44,8 +44,13 @@ export function betLeg(over: Partial<BetLeg> = {}): BetLeg {
     clv: null,
     clv_fair: null,
     score_outcomes: { ...OUTCOMES_BO3 },
+    edge: null,
     ...over,
   };
+  // Перевес над рынком, как на сервере: прогноз ноги минус 1/кэф, если его не задали явно
+  const p = leg.p_final ?? leg.p_claude;
+  if (!('edge' in over)) leg.edge = p !== null ? p - 1 / Number(leg.odds_taken) : null;
+  return leg;
 }
 
 /** Вторая нога: Джокович П1 @1.45. */

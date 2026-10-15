@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { adminBudget } from '../../features/admin/testData';
 import { aiBudget } from '../../features/ai/testData';
-import { adminAiUsageOut, aiRunOut, aiRunsOut, aiUsageFull, NEWS_RUN } from '../../features/costs/testData';
-import { adminAttention, aiUsageOut, dashboardOut } from '../../features/dashboard/testData';
+import { adminAiUsageOut, aiRunOut, aiRunsOut, aiUsageFull, NEWS_RUN, personUsage } from '../../features/costs/testData';
+import { adminAttention, aiUsageOut } from '../../features/dashboard/testData';
 import { apiError, json, ME_ADMIN, type Handler } from '../../test/fetchMock';
 import { renderPage } from '../../test/renderPage';
 import { CostsPage } from './CostsPage';
@@ -27,7 +27,7 @@ function renderCosts({ admin = false, width, url = '/costs', api = {} }: Options
       'GET /api/ai/usage': () => json(aiUsageFull()),
       'GET /api/ai/runs': () => json(aiRunsOut()),
       'GET /api/admin/ai/usage': () => json(adminAiUsageOut()),
-      'GET /api/dashboard': () => json(dashboardOut({ admin: adminAttention({ return_requests: [], limits: [] }) })),
+      'GET /api/admin/attention': () => json(adminAttention({ return_requests: [], limits: [] })),
       ...api,
     },
     stubs: { '/analysis/:id': 'Экран анализа', '/admin/:tab?': 'Администрирование', '/profile/:tab?': 'Личный кабинет' },
@@ -191,11 +191,52 @@ describe('ИИ и расходы', () => {
     expect(within(hero).getByRole('link', { name: 'Лимиты участников' })).toHaveAttribute('href', '/admin/key#adm-limits');
   });
 
+  it('администратор: «в день», «можно в день», сумма порога, темп и «остальные» — числа сервера', async () => {
+    // нарочно не равны тому, что дало бы деление в браузере (41,20 / 13 дней, 18,80 / 24 дня)
+    const budget = aiBudget({ monthly_usd: null, left_usd: null, daily_analyses: null, limit_share: null, per_day_usd: 3.33, budget: adminBudget({ per_day_usd: 4.44, can_per_day_usd: 0.55, alert_usd: 47 }) });
+    const usage = adminAiUsageOut({
+      people: [
+        personUsage({ user_id: 1, display_name: 'Роман Буров', role: 'admin', key_spent_usd: 20, limit_usd: null, limit_share: null }),
+        personUsage({ user_id: 2, display_name: 'Ольга Лехтинен', key_spent_usd: 8 }),
+        personUsage({ user_id: 4, display_name: 'Мария Виртанен', key_spent_usd: 6 }),
+        personUsage({ user_id: 6, display_name: 'Анна Корхонен', key_spent_usd: 2 }),
+        personUsage({ user_id: 7, display_name: 'Павел Ким', key_spent_usd: 1 }),
+      ],
+      others_ids: [6, 7],
+      others_count: 2,
+      others_usd: 3.05,
+    });
+    renderCosts({
+      admin: true,
+      api: {
+        'GET /api/ai/budget': () => json(budget),
+        'GET /api/ai/usage': () => json(aiUsageFull({ pace_usd: 1.94 })),
+        'GET /api/admin/ai/usage': () => json(usage),
+      },
+    });
+    const hero = await screen.findByRole('region', { name: 'Бюджет ключа администратора' });
+    expect(within(hero).getByText('$4,44')).toBeInTheDocument();
+    expect(within(hero).getByText('$0,55')).toBeInTheDocument();
+    expect(within(hero).getByText(/На 80% бюджета \(\$47\) придет уведомление/)).toBeInTheDocument();
+    const daily = screen.getByRole('heading', { name: 'Расходы по дням' }).closest('section')!;
+    expect(within(daily).getByText('Темп бюджета ключа — $1,94 в день')).toBeInTheDocument();
+    expect(within(daily).getByText(/в среднем \$4,44 в день при темпе бюджета \$1,94; из них ваши вызовы и общие задачи — \$3,33\./)).toBeInTheDocument();
+    const who = (await screen.findByRole('heading', { name: 'Кто тратит бюджет' })).closest('section')!;
+    const rest = await within(who).findByText('Еще 2 человека');
+    expect(rest.closest('li')).toHaveTextContent('$3,05');
+    expect(within(who).queryByText('Анна Корхонен')).toBeNull();
+  });
+
+  it('участник: сумма порога уведомления в правилах — с сервера (alert_usd)', async () => {
+    renderCosts({ api: { 'GET /api/ai/budget': () => json(aiBudget({ alert_usd: 7.5 })) } });
+    expect(await screen.findByText('80% — $7,50')).toBeInTheDocument();
+  });
+
   it('администратор: уровень лимита «Кто тратит» — с сервера; 100 — «анализы остановлены» красным', async () => {
     const usage = adminAiUsageOut();
     const member = usage.people.find((p) => p.ai_mode === 'shared' && p.limit_usd !== null && p.key_spent_usd > 0)!;
     const attention = adminAttention({ return_requests: [], limits: [{ user_id: member.user_id, name: member.display_name, spent_usd: member.key_spent_usd, limit_usd: member.limit_usd!, share: 0.5, level: '100', runs_out_on: null }] });
-    renderCosts({ admin: true, api: { 'GET /api/dashboard': () => json(dashboardOut({ admin: attention })) } });
+    renderCosts({ admin: true, api: { 'GET /api/admin/attention': () => json(attention) } });
     const who = (await screen.findByRole('heading', { name: 'Кто тратит бюджет' })).closest('section')!;
     const sub = await within(who).findByText(/анализы остановлены/);
     expect(sub).toHaveClass('bad-text');

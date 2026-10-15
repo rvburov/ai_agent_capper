@@ -20,12 +20,13 @@ import {
 } from '../../components';
 import { ChartLegend, ChartWithTable, HBars } from '../../components/charts';
 import { apiErrorText } from '../../features/analysis/codes';
-import { analysisNumber } from '../../features/analysis/number';
+import { analysisNumber, latestAnalysis } from '../../features/analysis/number';
 import { roundLabel } from '../../features/analysis/rounds';
 import { usePlayerH2H } from '../../features/players/api';
-import { eloDelta, eloText, playerName, scoreText, shortName, winShare } from '../../features/players/display';
-import type { PlayerCard, ServeMetrics, SurfaceElo, SurfaceResult, TodayMatch, WinLoss } from '../../features/players/types';
-import { formatDate, formatDateLong, formatMonthYear, formatNumber, formatPercent, formatPp } from '../../lib/format';
+import { impliedProb } from '../../features/bets/display';
+import { eloDelta, eloText, playerName, scoreText, shortName } from '../../features/players/display';
+import type { PlayerCard, ServeInfo, ServeMetrics, SurfaceElo, SurfaceResult, TodayMatch, WinLoss } from '../../features/players/types';
+import { formatDate, formatDateLong, formatMonthYear, formatNumber, formatOdds, formatPercent, formatPp } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { inlineWhen, matchPlace } from './parts';
 
@@ -33,9 +34,9 @@ import { inlineWhen, matchPlace } from './parts';
 // против среднего по туру, результаты по покрытиям и ключевые матчи; «сегодня» — входные точки
 // модели (Эло и личные встречи) из своих ставок и анализов.
 
-/** «В–П · %»: «12–4 · 75%»; матчей нет — «0–0». */
+/** «В–П · %»: «12–4 · 75%»; матчей нет — «0–0». Доля — с сервера (win_share). */
 function record(item: WinLoss): string {
-  const share = winShare(item.wins, item.losses);
+  const share = item.win_share;
   return share === null ? `${item.wins}–${item.losses}` : `${item.wins}–${item.losses} · ${formatPercent(share, { digits: 0 })}`;
 }
 
@@ -88,11 +89,20 @@ function TodayNote({ card, today }: { card: PlayerCard; today: TodayMatch }) {
   const on = surfaceOn(today.surface, t);
   const h2h = today.h2h;
   const total = h2h.wins + h2h.losses;
-  const analysis = today.analyses[0];
+  const analysis = latestAnalysis(today.analyses);
   let prob;
   if (today.elo_prob === null) prob = t('players.overview.today.noProb');
-  else if (on) prob = t('players.overview.today.prob', { surface: on, p: formatPercent(today.elo_prob, { digits: 0 }) });
-  else prob = t('players.overview.today.probAny', { p: formatPercent(today.elo_prob, { digits: 0 }) });
+  else {
+    const p = formatPercent(today.elo_prob, { digits: 0 });
+    const both = today.elo !== null && today.opponent_elo !== null;
+    const vs = { surface: on, elo: eloText(today.elo), opp: eloText(today.opponent_elo), p };
+    if (both) prob = on ? t('players.overview.today.probVs', vs) : t('players.overview.today.probVsAny', vs);
+    else prob = on ? t('players.overview.today.prob', vs) : t('players.overview.today.probAny', vs);
+    // Кэф своей ставки на победу этого игрока: нога ML на его сторону (side с сервера)
+    const own = today.side === null ? undefined : today.bets.find((bet) => bet.market === 'ML' && bet.selection === today.side);
+    const implied = own ? impliedProb(own.odds_taken) : null;
+    if (own && implied !== null) prob += t('players.overview.today.own', { odds: formatOdds(own.odds_taken), p: formatPercent(implied, { digits: 0 }) });
+  }
   let meetings;
   if (!total) meetings = t('players.overview.today.h2hNone');
   else {
@@ -259,7 +269,7 @@ function metricText(spec: MetricSpec, value: number): string {
   return spec.percent ? formatPercent(value, { digits: 0 }) : formatNumber(value, 1);
 }
 
-function Metric({ spec, player, tour }: { spec: MetricSpec; player: ServeMetrics; tour: ServeMetrics | null }) {
+function Metric({ spec, player, tour, diffs }: { spec: MetricSpec; player: ServeMetrics; tour: ServeMetrics | null; diffs: ServeInfo['diff'] }) {
   const { t } = useTranslation();
   const label = t(`players.overview.serve.metrics.${spec.key}`);
   const value = player[spec.key];
@@ -276,8 +286,9 @@ function Metric({ spec, player, tour }: { spec: MetricSpec; player: ServeMetrics
   }
   const clamp = (v: number) => Math.max(0, Math.min(100, (v / spec.max) * 100));
   let delta = null;
-  if (base !== null) {
-    const diff = value - base;
+  // Разница с туром — с сервера (serve.diff); здесь только порог «≈ тур» и цвет
+  const diff = diffs?.[spec.key] ?? null;
+  if (base !== null && diff !== null) {
     const flat = Math.abs(diff) < (spec.percent ? 0.01 : 0.3);
     const good = spec.lowerBetter ? diff < 0 : diff > 0;
     const text = flat ? t('players.overview.serve.tour') : spec.percent ? formatPp(diff, { digits: 0 }) : formatNumber(diff, 1, { signed: true });
@@ -347,13 +358,13 @@ function ServeCard({ card }: { card: PlayerCard }) {
             <div className="players-metrics-col">
               <div className="eyebrow">{t('players.overview.serve.serveCol')}</div>
               {SERVE.map((spec) => (
-                <Metric key={spec.key} spec={spec} player={player} tour={serve.tour} />
+                <Metric key={spec.key} spec={spec} player={player} tour={serve.tour} diffs={serve.diff} />
               ))}
             </div>
             <div className="players-metrics-col">
               <div className="eyebrow">{t('players.overview.serve.returnCol')}</div>
               {RETURN.map((spec) => (
-                <Metric key={spec.key} spec={spec} player={player} tour={serve.tour} />
+                <Metric key={spec.key} spec={spec} player={player} tour={serve.tour} diffs={serve.diff} />
               ))}
             </div>
           </div>
@@ -395,7 +406,7 @@ function ResultsCard({ card }: { card: PlayerCard }) {
               label: t('players.overview.results.cols.pct'),
               align: 'r',
               render: (row) => {
-                const share = winShare(row.wins, row.losses);
+                const share = row.win_share;
                 return (
                   <span className="players-wl-meter">
                     <b className="num">{share === null ? '—' : formatPercent(share, { digits: 0 })}</b>

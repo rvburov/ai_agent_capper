@@ -98,7 +98,6 @@ export function CalibrationCard({ data, mobile, pending }: { data: Analytics; mo
       </Card>
     );
   }
-  const gapLimit = thresholds.calibration_gap * 100;
   // Сжатый вид (FitTable) — без колонок hideMobile: событий, база, Claude
   const columns = (): DataColumn<CalibrationBinOut>[] => [
     { key: 'range', label: t('analytics.calibration.cols.range'), render: (b) => <span className="analytics-nowrap">{formatProbRange(b.low, b.high)}</span> },
@@ -112,14 +111,14 @@ export function CalibrationCard({ data, mobile, pending }: { data: Analytics; mo
       label: t('analytics.calibration.cols.diff'),
       align: 'r',
       render: (b) => {
-        const d = Math.round((b.actual - b.p) * 100);
-        const far = Math.abs(d) >= gapLimit;
+        // разница «факт − прогноз» — с сервера (diff), здесь только цвет по порогу
+        const far = Math.abs(b.diff) >= thresholds.calibration_gap;
         return (
           <span
-            className={far ? (d < 0 ? 'bad-text analytics-nowrap' : 'warn-text analytics-nowrap') : 'analytics-nowrap'}
-            title={far ? (d < 0 ? t('analytics.calibration.overTitle') : t('analytics.calibration.underTitle')) : undefined}
+            className={far ? (b.diff < 0 ? 'bad-text analytics-nowrap' : 'warn-text analytics-nowrap') : 'analytics-nowrap'}
+            title={far ? (b.diff < 0 ? t('analytics.calibration.overTitle') : t('analytics.calibration.underTitle')) : undefined}
           >
-            {formatNumber(d, 0, { signed: true })}
+            {formatPp(b.diff, { digits: 0, unit: false })}
           </span>
         );
       },

@@ -23,6 +23,7 @@ export function memberPrefsOut(off: Kind[] = []): NotificationPrefs {
       item('admin_message', 'message', true),
     ],
     push_available: false,
+    alert_rules: null,
   };
 }
 
@@ -52,5 +53,16 @@ export function adminPrefsOut(off: Kind[] = []): NotificationPrefs {
       item('ai_alert', 'alert', { admin: true }),
     ],
     push_available: false,
+    // пороги сигналов расхода ИИ — у администратора (как в правилах воркера)
+    alert_rules: {
+      cache_min_share: 0.5,
+      cache_analyses: 10,
+      cost_factor: 2,
+      cost_window_days: 7,
+      stops_max_share: 0.02,
+      searches_per_day: 30,
+      rate_limit_series: 3,
+      rate_limit_window_minutes: 10,
+    },
   };
 }

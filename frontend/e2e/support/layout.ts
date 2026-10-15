@@ -30,7 +30,8 @@ export interface TapTargetOptions {
 /**
  * Видимые элементы, на которые нажимают, с зоной меньше min px по ширине или высоте:
  * «button "Показать таблицей" 120×32». Флажок и переключатель внутри подписи меряются по
- * подписи (нажимают на нее); ссылки внутри строки текста (WCAG 2.5.8) не считаются.
+ * подписи (нажимают на нее); ссылки внутри строки текста (WCAG 2.5.8) не считаются; зона,
+ * расширенная псевдоэлементом ::before или ::after (position: absolute), считается целиком.
  */
 export async function smallTapTargets(page: Page, options: TapTargetOptions = {}): Promise<string[]> {
   const root = options.root ?? page.locator('body');
@@ -67,9 +68,19 @@ export async function smallTapTargets(page: Page, options: TapTargetOptions = {}
         }
         const rect = target.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) continue;
-        if (rect.width + 0.5 < min || rect.height + 0.5 < min) {
+        // зона нажатия, расширенная псевдоэлементом (::before с position: absolute, как у
+        // .login-link): нажатие на него попадает в саму ссылку
+        let width = rect.width;
+        let height = rect.height;
+        for (const pseudo of ['::before', '::after']) {
+          const box = getComputedStyle(target, pseudo);
+          if (box.content === 'none' || box.content === 'normal' || box.position !== 'absolute') continue;
+          width = Math.max(width, parseFloat(box.width) || 0);
+          height = Math.max(height, parseFloat(box.height) || 0);
+        }
+        if (width + 0.5 < min || height + 0.5 < min) {
           const name = (el.getAttribute('aria-label') ?? el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40);
-          out.push(`${el.tagName.toLowerCase()} "${name}" ${Math.round(rect.width)}×${Math.round(rect.height)}`);
+          out.push(`${el.tagName.toLowerCase()} "${name}" ${Math.round(width)}×${Math.round(height)}`);
         }
       }
       return out;

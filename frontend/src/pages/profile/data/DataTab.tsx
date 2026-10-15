@@ -5,13 +5,13 @@ import { isApiError } from '../../../api/errors';
 import type { Me } from '../../../api/hooks/useMe';
 import { paths } from '../../../app/paths';
 import { Button, Callout, Card, Chip, Field, Icon, KeyValue, Skeleton, Toggle, useToast } from '../../../components';
-import { useExportData, useConsent, useRequestDeletion, type ExportFormat } from '../../../features/account/api';
+import { useExportData, useExportSummary, useConsent, useRequestDeletion, type ExportFormat, type ExportSummary } from '../../../features/account/api';
 import { useLeaveAccount } from '../../../features/account/useLeaveAccount';
 import { useAdminUsers } from '../../../features/admin/useAdminUsers';
 import { apiErrorText } from '../../../features/analysis/codes';
 import { useBetSummary } from '../../../features/bets/api';
 import { useBookmakerList } from '../../../features/bookmakers/api';
-import { formatDayMonth } from '../../../lib/format';
+import { formatDateRange, formatDayMonth, formatNumber } from '../../../lib/format';
 import { useHashTarget } from '../useHashTarget';
 import './data.css';
 
@@ -24,21 +24,23 @@ import './data.css';
 export function DataTab({ me }: { me: Me }) {
   useHashTarget(true);
   const admin = me.role === 'admin';
-  const summary = useBetSummary({});
+  // Числа экспорта и импорта — с сервера одним запросом (GET /api/me/export/summary)
+  const summary = useExportSummary();
   const legacy = useBetSummary({ source: 'legacy' });
-  const legacyBets = legacy.data ? legacy.data.settled + legacy.data.open : null;
+  const data = summary.data;
+  const legacyBets = data ? data.legacy_bets : null;
   // Импорт выполняет администратор командой на сервере: статус видит он и тот, кому перенесли ставки
   const showImport = admin || (legacyBets ?? 0) > 0;
-  const total = summary.data ? summary.data.settled + summary.data.open : null;
+  const total = data ? data.bets : null;
   return (
     <div className="grid">
       <div className="col-7 profile-col">
-        <ExportCard />
+        <ExportCard summary={data} />
         <SourcesCard />
       </div>
       <div className="col-5 profile-col">
         <ConsentCard me={me} />
-        {showImport && <ImportCard legacyBets={legacyBets} legacyOpen={legacy.data?.open ?? 0} />}
+        {showImport && <ImportCard summary={data} legacyOpen={legacy.data?.open ?? 0} />}
       </div>
       <div className="col-12 profile-col">
         <DangerCard me={me} bets={total} />
@@ -47,11 +49,10 @@ export function DataTab({ me }: { me: Me }) {
   );
 }
 
-function ExportCard() {
+function ExportCard({ summary: s }: { summary: ExportSummary | undefined }) {
   const { t } = useTranslation();
   const toast = useToast();
   const exportData = useExportData();
-  const summary = useBetSummary({});
   const books = useBookmakerList();
   const busy = useRef(false);
 
@@ -67,12 +68,11 @@ function ExportCard() {
     });
   }
 
-  const s = summary.data;
   const betsText = s
     ? [
-        t('profile.data.export.bets', { count: s.settled + s.open }),
-        s.open ? t('profile.data.export.betsOpen', { count: s.open }) : null,
-        s.legacy_settled ? t('profile.data.export.betsBot', { count: s.legacy_settled }) : null,
+        t('profile.data.export.bets', { count: s.bets }),
+        s.open_bets ? t('profile.data.export.betsOpen', { count: s.open_bets }) : null,
+        s.legacy_bets ? t('profile.data.export.betsBot', { count: s.legacy_bets }) : null,
       ]
         .filter(Boolean)
         .join(', ')
@@ -106,11 +106,19 @@ function ExportCard() {
       <KeyValue
         items={[
           { key: 'bets', label: t('profile.data.export.rows.bets'), value: betsText ?? <Skeleton width={120} /> },
-          { key: 'events', label: t('profile.data.export.rows.events'), value: t('profile.data.export.rows.eventsValue') },
+          {
+            key: 'events',
+            label: t('profile.data.export.rows.events'),
+            value: s ? t('profile.data.export.rows.eventsCount', { count: s.events }) : <Skeleton width={80} />,
+          },
           { key: 'bank', label: t('profile.data.export.rows.bank'), value: t('profile.data.export.rows.bankValue') },
           { key: 'books', label: t('profile.data.export.rows.books'), value: booksText ?? <Skeleton width={100} /> },
           { key: 'strategy', label: t('profile.data.export.rows.strategy'), value: t('profile.data.export.rows.strategyValue') },
-          { key: 'ai', label: t('profile.data.export.rows.ai'), value: t('profile.data.export.rows.aiValue') },
+          {
+            key: 'ai',
+            label: t('profile.data.export.rows.ai'),
+            value: s ? t('profile.data.export.rows.aiCount', { n: formatNumber(s.ai_runs) }) : <Skeleton width={120} />,
+          },
           { key: 'notif', label: t('profile.data.export.rows.notif'), value: t('profile.data.export.rows.notifValue') },
           { key: 'without', label: t('profile.data.export.rows.without'), value: t('profile.data.export.rows.withoutValue') },
         ]}
@@ -173,9 +181,11 @@ function ConsentCard({ me }: { me: Me }) {
   );
 }
 
-function ImportCard({ legacyBets, legacyOpen }: { legacyBets: number | null; legacyOpen: number }) {
+function ImportCard({ summary, legacyOpen }: { summary: ExportSummary | undefined; legacyOpen: number }) {
   const { t } = useTranslation();
+  const legacyBets = summary ? summary.legacy_bets : null;
   const done = (legacyBets ?? 0) > 0;
+  const period = summary?.legacy_period ?? null;
   return (
     <Card
       id="profile-import"
@@ -208,6 +218,17 @@ function ImportCard({ legacyBets, legacyOpen }: { legacyBets: number | null; leg
                 t('profile.data.import.movedNone')
               ),
           },
+          // Период ставок бота и ноги его экспрессов без исхода — с сервера (export/summary)
+          ...(done && period && summary
+            ? [
+                { key: 'period', label: t('profile.data.import.period'), value: formatDateRange(period.first, period.last) },
+                {
+                  key: 'noResult',
+                  label: t('profile.data.import.noResult'),
+                  value: summary.legacy_no_result ? t('profile.data.import.noResultValue', { count: summary.legacy_no_result }) : t('profile.data.import.noResultNone'),
+                },
+              ]
+            : []),
           { key: 'who', label: t('profile.data.import.who'), value: t('profile.data.import.whoValue') },
         ]}
       />

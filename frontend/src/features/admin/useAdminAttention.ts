@@ -1,34 +1,30 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { api, unwrap } from '../../api/client';
-import { dashboardKeys } from '../dashboard/keys';
-import type { AdminAttention, DashboardPeriod } from '../dashboard/types';
+import type { AdminAttention } from '../dashboard/types';
+import { adminKeys } from './keys';
 import type { MemberLimit } from './types';
 
 /*
- * Дела администратора — из ответа сервера (AdminAttentionOut в GET /api/dashboard), а не из
- * расчета в браузере: уровень 100 сервер ставит и тогда, когда до 100% расхода не хватает
- * нескольких центов, но остатка уже нет даже на самый маленький вызов оценки матча — анализы
- * участника остановлены. Те же дела и то же число — на главной, во вкладке «Обзор», у вкладки
- * и у пункта меню. Ключ запроса — главной за период по умолчанию: на главной второго запроса
- * нет; действия администратора сбрасывают его вместе с разделом (invalidateAdmin).
+ * Дела администратора — из ответа сервера (GET /api/admin/attention, тот же AdminAttentionOut,
+ * что в главной), а не из расчета в браузере: уровень 100 сервер ставит и тогда, когда до 100%
+ * расхода не хватает нескольких центов, но остатка уже нет даже на самый маленький вызов оценки
+ * матча — анализы участника остановлены. Те же дела и то же число — на главной, во вкладке
+ * «Обзор», у вкладки и у пункта меню. Отдельный маршрут легче всей главной: счетчик у пункта
+ * меню не тянет банк и аналитику. Ключ — под ['admin']: действия администратора сбрасывают его
+ * вместе с разделом (invalidateAdmin), уведомления о лимитах и просьбах — staleQueriesFor.
  */
-// Период главной по умолчанию (DEFAULT_PERIOD в features/dashboard/display — равенство проверяет
-// тест). Своя константа: счетчик у пункта меню — в начальной загрузке, а подписи главной — нет
-export const ATTENTION_PERIOD: DashboardPeriod = '30d';
-
 export function useAdminAttention(enabled = true) {
   return useQuery({
-    queryKey: dashboardKeys.period(ATTENTION_PERIOD),
-    queryFn: () => unwrap(api.GET('/api/dashboard', { params: { query: { period: ATTENTION_PERIOD } } })),
-    select: (data): AdminAttention | null => data.admin ?? null,
+    queryKey: adminKeys.attention,
+    queryFn: (): Promise<AdminAttention> => unwrap(api.GET('/api/admin/attention')),
     enabled,
   });
 }
 
 export type Decision =
   | { kind: 'return'; member: MemberLimit }
-  | { kind: 'limit'; member: MemberLimit; share: number; level: '80' | '100' };
+  | { kind: 'limit'; member: MemberLimit; share: number; level: '80' | '100'; runsOutOn: string | null };
 
 /**
  * Дела «Нужно решение»: сначала просьбы вернуть ключ, затем участники у лимита (по доле расхода,
@@ -45,7 +41,7 @@ export function decisionsOf(attention: AdminAttention, members: readonly MemberL
   const limits = [...attention.limits].sort((a, b) => b.share - a.share);
   for (const item of limits) {
     const member = byId.get(item.user_id);
-    if (member) out.push({ kind: 'limit', member, share: item.share, level: item.level });
+    if (member) out.push({ kind: 'limit', member, share: item.share, level: item.level, runsOutOn: item.runs_out_on });
   }
   return out;
 }

@@ -19,7 +19,7 @@ describe('журнал действий', () => {
       block: true, unblock: true, delete: true, role_change: true, sessions_revoke: true,
       limit_change: true, key_change: true, currency_change: true, create_admin: true, import: true,
       message: true, confirm_failed: true, player_merge: true, player_edit: true,
-      ai_mode_change: true, budget_change: true, agent_config_change: true,
+      ai_mode_change: true, budget_change: true, agent_config_change: true, settings_change: true,
     };
     for (const action of Object.keys(all)) {
       expect(grouped.filter((a) => a === action)).toHaveLength(1);
@@ -119,5 +119,15 @@ describe('журнал действий', () => {
       'Валюта программы: евро → доллары США, курс 1\u00a0€ = 1,08\u00a0$',
     );
     expect(d('message', { text: ' Завтра обновление архива ', to: 'all', recipients: 3 })).toBe('Завтра обновление архива');
+    // смена часового пояса по умолчанию (миграция 0007): группа «Валюта, настройки, сообщения»
+    expect(groupActions('settings')).toContain('settings_change');
+    expect(d('settings_change', { field: 'default_tz', from: 'Europe/Berlin', to: 'Europe/Helsinki' })).toBe(
+      'Часовой пояс для новых участников: Берлин → Хельсинки',
+    );
+    // пояса нет в списке городов — имя IANA без подчеркиваний
+    expect(d('settings_change', { field: 'default_tz', from: 'Asia/Ho_Chi_Minh', to: 'Europe/Helsinki' })).toBe(
+      'Часовой пояс для новых участников: Asia/Ho Chi Minh → Хельсинки',
+    );
+    expect(d('settings_change', { field: 'default_tz', from: 'Europe/Berlin' })).toBe('');
   });
 });

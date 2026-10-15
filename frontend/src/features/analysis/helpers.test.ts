@@ -176,6 +176,10 @@ describe('черновик событий', () => {
     expect(shortName('Янник Синнер')).toBe('Синнер');
     expect(shortName('Felix Auger Aliassime')).toBe('Auger Aliassime');
     expect(shortName('Синнер')).toBe('Синнер');
+    // игроки старого бота: фамилия и инициал — короткое имя по фамилии, а не «Я.»
+    expect(shortName('Синнер Я.')).toBe('Синнер');
+    expect(shortName('Ауже-Альяссим Ф.')).toBe('Ауже-Альяссим');
+    expect(shortName('Я. Синнер')).toBe('Синнер');
   });
 });
 

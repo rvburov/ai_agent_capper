@@ -182,7 +182,7 @@ describe('Главная', () => {
 
   it('мои матчи сегодня: время по поясу, место по Эло, ставка и анализ', async () => {
     const data = dashboardOut({
-      my_matches: [myMatch(), myMatch({ match_id: 102, scheduled_at: null, bets: [], analyses: [140], rank1: null, round: 'QF', tournament: null })],
+      my_matches: [myMatch(), myMatch({ match_id: 102, scheduled_at: null, bets: [], analyses: [140, 143], rank1: null, round: 'QF', tournament: null })],
     });
     renderDashboard({ data });
     const card = (await screen.findByText('Мои матчи сегодня')).closest('section')!;
@@ -193,8 +193,13 @@ describe('Главная', () => {
     expect(within(first).getByText('В ставке №7 · П1 1.30')).toBeInTheDocument();
     expect(within(first).getByRole('link', { name: 'Открыть ставку №7' })).toHaveAttribute('href', '/bets?bet=7');
     const second = within(card).getByRole('article', { name: 'Синнер — Руне' });
+    // без времени начала — «сегодня», как у ноги в «Открытых ставках», а не прочерк
+    expect(within(second).getByText('сегодня')).toBeInTheDocument();
+    expect(within(second).queryByText('—', { selector: '.dashboard-match-time *' })).toBeNull();
     expect(within(second).getByText('Анализ #A-0140')).toBeInTheDocument();
-    expect(within(second).getByRole('link', { name: 'Открыть анализ #A-0140' })).toHaveAttribute('href', '/analysis/140');
+    expect(within(second).getByText('Анализ #A-0143')).toBeInTheDocument();
+    // «Анализ» — последний анализ матча, с самой свежей оценкой
+    expect(within(second).getByRole('link', { name: 'Открыть анализ #A-0143' })).toHaveAttribute('href', '/analysis/143');
     expect(within(card).getByRole('link', { name: 'Новый анализ' })).toHaveAttribute('href', '/new');
   });
 

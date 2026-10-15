@@ -366,7 +366,8 @@ function LimitSpend({ member, alertPct }: { member: MemberLimit; alertPct: numbe
       </div>
     );
   }
-  const share = limit.monthly_usd > 0 ? onKey / limit.monthly_usd : 0;
+  // доля лимита — с сервера (limit_share)
+  const share = member.limit_share ?? 0;
   const tone = spendTone(onKey, limit.monthly_usd, alertPct ?? 100);
   const max = formatLimitUsd(limit.monthly_usd);
   return (

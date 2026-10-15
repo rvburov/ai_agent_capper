@@ -69,6 +69,19 @@ export function adminAttention(over: Partial<AdminAttention> = {}): AdminAttenti
         { source: 'tennis_data', last_load: '2026-10-10T03:30:00Z' },
       ],
     },
+    // свежесть архива всегда (и когда дела «архив» нет) — то же, что archive, с признаком stale
+    archive_status: {
+      days: 4,
+      last_load: '2026-10-09T03:30:00Z',
+      stale_after_days: 3,
+      update_hour_utc: 3,
+      update_minute: 30,
+      sources: [
+        { source: 'sackmann', last_load: '2026-10-09T03:30:00Z' },
+        { source: 'tennis_data', last_load: '2026-10-10T03:30:00Z' },
+      ],
+      stale: true,
+    },
     return_requests: [{ user_id: 3, name: 'Олег', at: '2026-10-12T10:00:00Z' }],
     limits: [{ user_id: 2, name: 'Анна', spent_usd: 8.5, limit_usd: 10, share: 0.85, level: '80', runs_out_on: '2026-10-16' }],
     alert_pct: 80,

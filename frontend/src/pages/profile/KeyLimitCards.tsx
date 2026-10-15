@@ -32,7 +32,7 @@ function Fact({ label, value, sub }: { label: ReactNode; value: ReactNode; sub: 
 }
 
 /** Шкала лимита с подписями «$0 · 80% · $8 · $10» (limitBar макета). */
-function Bar({ spent, max, alertPct, label }: { spent: number; max: number; alertPct: number; label: string }) {
+function Bar({ spent, max, alertPct, alertUsd, label }: { spent: number; max: number; alertPct: number; alertUsd: number; label: string }) {
   const { t } = useTranslation();
   const valueText = t('profile.key.barValue', { spent: formatUsd(spent), max: formatLimitUsd(max) });
   return (
@@ -46,7 +46,7 @@ function Bar({ spent, max, alertPct, label }: { spent: number; max: number; aler
         formatUsd(0, 0),
         t('profile.key.scaleMark', {
           pct: formatPercent(alertPct / 100, { digits: 0 }),
-          amount: formatLimitUsd(Math.round(max * alertPct) / 100),
+          amount: formatLimitUsd(alertUsd),
         }),
         formatLimitUsd(max),
       ]}
@@ -66,7 +66,9 @@ export function MemberLimitCard({ budget }: { budget: AiBudget }) {
   const { month, next } = monthOf(budget);
   const monthly = budget.monthly_usd ?? 0;
   const spent = budget.spent_usd;
-  const left = budget.left_usd ?? Math.max(0, monthly - spent);
+  // Остаток и сумма порога уведомления — с сервера
+  const left = budget.left_usd ?? 0;
+  const alertUsd = budget.alert_usd ?? 0;
   const alert = budget.alert_pct;
   const tone = spendTone(spent, monthly, alert);
   // Лимит месяца не пускает анализ и тогда, когда остаток меньше худшего случая вызова Claude:
@@ -160,7 +162,7 @@ export function MemberLimitCard({ budget }: { budget: AiBudget }) {
           components={{ b: <b /> }}
         />
       </p>
-      <Bar spent={spent} max={monthly} alertPct={alert} label={t('profile.key.limit.barLabel', { month })} />
+      <Bar spent={spent} max={monthly} alertPct={alert} alertUsd={alertUsd} label={t('profile.key.limit.barLabel', { month })} />
       {why}
       <dl className="profile-kfacts">
         <Fact
@@ -181,7 +183,7 @@ export function MemberLimitCard({ budget }: { budget: AiBudget }) {
           <li>
             <span className="profile-thr-badge warn">{alertText}</span>
             <span>
-              <b>{t('profile.key.limit.thrWarnStrong', { amount: formatLimitUsd(Math.round(monthly * alert) / 100) })}</b>{' '}
+              <b>{t('profile.key.limit.thrWarnStrong', { amount: formatLimitUsd(alertUsd) })}</b>{' '}
               {t('profile.key.limit.thrWarn')}
             </span>
           </li>
@@ -278,6 +280,7 @@ export function AdminOwnerCard({ budget }: { budget: AiBudget }) {
             spent={total.spent_usd}
             max={total.budget_usd}
             alertPct={total.alert_pct}
+            alertUsd={total.alert_usd}
             label={t('profile.key.owner.barLabel', { month })}
           />
         </>

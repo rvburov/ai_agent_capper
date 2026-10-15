@@ -155,6 +155,12 @@ describe('Игроки: список', () => {
     expect(screen.getByText(/Jeff Sackmann, tennis_atp \(CC BY-NC-SA 4\.0\)/)).toBeInTheDocument();
   });
 
+  it('строка авторства — по признаку сервера sackmann: данных Сакманна нет — только tennis-data', async () => {
+    renderPlayers('/players', () => json(rankingOut({ sackmann: false })));
+    expect(await screen.findByText('Результаты и кэфы: tennis-data.co.uk')).toBeInTheDocument();
+    expect(screen.queryByText(/Jeff Sackmann/)).toBeNull();
+  });
+
   it('ошибка загрузки — текст и «Повторить», без ложного «никого не нашли»', async () => {
     let fail = true;
     const { user } = renderPlayers('/players', () => (fail ? apiError(503, 'common.unavailable', 'Сервер недоступен') : json(rankingOut())));

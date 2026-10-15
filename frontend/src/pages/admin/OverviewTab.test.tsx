@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NAV_ITEMS } from '../../app/layout/nav';
 import { adminBudget, adminKey, adminUser, auditEntry, LIMIT_DEFAULTS, memberLimit } from '../../features/admin/testData';
-import { activityOut, adminAiUsageOut } from '../../features/costs/testData';
+import { activityOut, adminAiUsageOut, personUsage } from '../../features/costs/testData';
 import type { MemberLimit } from '../../features/admin/types';
 import { decisionsOf } from '../../features/admin/useAdminAttention';
-import { adminAttention, aiUsageOut, dashboardOut } from '../../features/dashboard/testData';
+import { adminAttention, aiUsageOut } from '../../features/dashboard/testData';
 import type { AdminAttention } from '../../features/dashboard/types';
 import { apiError, json, ME_ADMIN, type Handler } from '../../test/fetchMock';
 import { renderPage } from '../../test/renderPage';
@@ -33,19 +33,19 @@ const MEMBERS: MemberLimit[] = [
   memberLimit({ id: 5, display_name: 'Дмитрий Шульц', email: 'dmitry@example.com', ai_mode: 'own', own_key_last4: '7Qx2', own_spent_month_usd: 3.4 }),
 ];
 
-// Дела решает сервер (AdminAttentionOut в GET /api/dashboard): Ольга просит ключ, Мария — у порога
+// Дела решает сервер (GET /api/admin/attention): Ольга просит ключ, Мария — у порога
 const ATTENTION = adminAttention({
   return_requests: [{ user_id: 2, name: 'Ольга Лехтинен', at: ago(2) }],
   limits: [{ user_id: 4, name: 'Мария Виртанен', spent_usd: 8.5, limit_usd: 10, share: 0.85, level: '80', runs_out_on: '2026-10-16' }],
 });
 
 function attentionRoute(attention: AdminAttention): Handler {
-  return () => json(dashboardOut({ admin: attention }));
+  return () => json(attention);
 }
 
 function routes(extra: Record<string, Handler> = {}): Record<string, Handler> {
   return {
-    'GET /api/dashboard': attentionRoute(ATTENTION),
+    'GET /api/admin/attention': attentionRoute(ATTENTION),
     'GET /api/admin/users': () => json(USERS),
     'GET /api/admin/invites': () =>
       json([
@@ -155,7 +155,7 @@ describe('Администрирование: «Обзор»', () => {
     expect(within(decisions).getByText('Ольга Лехтинен просит вернуть ключ администратора')).toBeInTheDocument();
     expect(within(decisions).getByText(/Сейчас работает на своем ключе sk-ant-…k3Yz/)).toBeInTheDocument();
     expect(within(decisions).getByText('Мария Виртанен — 85% лимита')).toBeInTheDocument();
-    expect(within(decisions).getByText(/\$8,50 из \$10 за .+, сегодня 2 из 3 анализов\. Когда остатка не хватит на вызов Claude, анализы на вашем ключе остановятся\./)).toBeInTheDocument();
+    expect(within(decisions).getByText(/\$8,50 из \$10 за .+, сегодня 2 из 3 анализов\. При таком темпе лимит закончится 16 окт, и анализы на вашем ключе остановятся\./)).toBeInTheDocument();
     expect(within(decisions).getByRole('button', { name: 'Поднять лимит: Мария Виртанен' })).toBeInTheDocument();
     await user.click(within(decisions).getByRole('button', { name: 'Разрешить: Ольга Лехтинен возвращается на ключ администратора' }));
     expect(await screen.findByRole('dialog', { name: 'Вернуть на ключ администратора' })).toBeInTheDocument();
@@ -168,7 +168,7 @@ describe('Администрирование: «Обзор»', () => {
       limits: [{ user_id: 4, name: 'Мария Виртанен', spent_usd: 8.8, limit_usd: 10, share: 0.88, level: '100', runs_out_on: null }],
     });
     const members = MEMBERS.map((m) => (m.id === 4 ? { ...m, spent_month_usd: 8.8 } : m));
-    renderAdmin('/admin', { 'GET /api/dashboard': attentionRoute(stopped), 'GET /api/admin/ai/limits': () => json({ defaults: LIMIT_DEFAULTS, members }) });
+    renderAdmin('/admin', { 'GET /api/admin/attention': attentionRoute(stopped), 'GET /api/admin/ai/limits': () => json({ defaults: LIMIT_DEFAULTS, members }) });
     const tab = await screen.findByRole('tab', { name: /Обзор/ });
     await waitFor(() => expect(tab).toHaveTextContent('(нужно решение: 1)'));
     const decisions = card('Нужно решение');
@@ -179,7 +179,7 @@ describe('Администрирование: «Обзор»', () => {
   });
 
   it('просьб и предупреждений нет — «Все спокойно», без точки у вкладки', async () => {
-    renderAdmin('/admin', { 'GET /api/dashboard': attentionRoute(adminAttention({ return_requests: [], limits: [] })) });
+    renderAdmin('/admin', { 'GET /api/admin/attention': attentionRoute(adminAttention({ return_requests: [], limits: [] })) });
     const decisions = await waitFor(() => card('Нужно решение'));
     expect(await within(decisions).findByText('Все спокойно')).toBeInTheDocument();
     expect(within(decisions).getByText(/подойдет к 80% лимита/)).toBeInTheDocument();
@@ -217,6 +217,38 @@ describe('Администрирование: «Обзор»', () => {
     // участник на своем ключе без расхода на ключе администратора в «Кто тратит» не попадает
     expect(within(list).queryByText(/Дмитрий/)).toBeNull();
     expect(list).not.toHaveTextContent('₽');
+  });
+
+  it('бюджет и «Кто тратит» — числа сервера: доля прогноза (forecast_share) и «остальные» (others_*)', async () => {
+    // пятеро тратили ключ: первые трое строками, двое — «остальными»; сумма остальных — с сервера
+    // (нарочно не равна сумме их строк: экран не складывает сам)
+    const usage = adminAiUsageOut({
+      people: [
+        personUsage({ user_id: 1, display_name: 'Роман Буров', role: 'admin', key_spent_usd: 20, limit_usd: null, limit_share: null }),
+        personUsage({ user_id: 2, display_name: 'Ольга Лехтинен', key_spent_usd: 8 }),
+        personUsage({ user_id: 4, display_name: 'Мария Виртанен', key_spent_usd: 6 }),
+        personUsage({ user_id: 6, display_name: 'Анна Корхонен', key_spent_usd: 2 }),
+        personUsage({ user_id: 7, display_name: 'Павел Ким', key_spent_usd: 1 }),
+      ],
+      others_ids: [6, 7],
+      others_count: 2,
+      others_usd: 3.05,
+    });
+    renderAdmin('/admin', { 'GET /api/admin/ai/usage': () => json(usage), 'GET /api/admin/ai/budget': () => json(adminBudget({ forecast_share: 1.5 })) });
+    const budget = await waitFor(() => card('Бюджет ключа администратора'));
+    expect(await within(budget).findByText('150% бюджета')).toBeInTheDocument();
+    const list = await within(budget).findByRole('list', { name: 'Кто тратит ключ администратора' });
+    const rows = within(list).getAllByRole('listitem');
+    expect(rows.map((row) => row.querySelector('.adm-urow-name')?.textContent)).toEqual([
+      'Роман Буроввы',
+      'Ольга Лехтинен',
+      'Мария Виртанен',
+      'Остальные: 2',
+      'Общие фоновые задачи',
+      'Итого с вашего ключа',
+    ]);
+    expect(rows[3]).toHaveTextContent('$3,05');
+    expect(rows[3]).toHaveTextContent('Анна, Павел');
   });
 
   it('плитки аккаунтов, ключа и валюты; последние действия со ссылкой на журнал', async () => {
@@ -281,6 +313,14 @@ describe('Администрирование: «Расход ИИ»', () => {
     const own = card('На своем ключе');
     expect(await within(own).findByText('12 анализов · ключ sk-ant-…7Qx2')).toBeInTheDocument();
     expect(within(own).getByText('$3,40')).toBeInTheDocument();
+  });
+
+  it('«По людям»: доли в легенде — с сервера (spent_share), а не из сумм в браузере', async () => {
+    const base = adminAiUsageOut();
+    const usage = adminAiUsageOut({ people: base.people.map((p) => (p.user_id === 1 ? { ...p, spent_share: 0.5 } : p)) });
+    renderAdmin('/admin/usage', { 'GET /api/admin/ai/usage': () => json(usage) });
+    const people = await waitFor(() => card('По людям'));
+    expect(within(people).getByText('Роман 50%')).toBeInTheDocument();
   });
 
   it('активность: период — в адресе (?period=7d), после перезагрузки тот же', async () => {

@@ -108,7 +108,7 @@ function Bar({ spent, max, forecast, alertPct, what, period }: { spent: number; 
 function MemberStop({ budget }: { budget: AiBudget }) {
   const { t } = useTranslation();
   const monthly = budget.monthly_usd ?? 0;
-  const left = budget.left_usd ?? Math.max(0, monthly - budget.spent_usd);
+  const left = budget.left_usd ?? 0;
   if (budget.paused) {
     return (
       <Callout kind="warn" icon="pause">
@@ -145,8 +145,9 @@ function memberStopped(budget: AiBudget): boolean {
 export function MemberHero({ budget, usage, period }: { budget: AiBudget; usage: AiUsage | undefined; period: Period }) {
   const { t } = useTranslation();
   const monthly = budget.monthly_usd ?? 0;
-  const left = budget.left_usd ?? Math.max(0, monthly - budget.spent_usd);
-  const forecast = usage?.forecast_usd ?? budget.spent_usd;
+  // Остаток и прогноз — с сервера (прогноз месяца — тот же, что под графиком по дням)
+  const left = budget.left_usd;
+  const forecast = usage?.forecast_usd ?? budget.forecast_usd;
   // «хватит на N анализов» — только когда анализ сейчас запустится (причины с сервера нет)
   const enough = budget.reason_code ? null : (usage?.analyses_left ?? null);
   const avg = usage?.admin_key_avg_usd ?? null;
@@ -163,7 +164,7 @@ export function MemberHero({ budget, usage, period }: { budget: AiBudget; usage:
       <MemberStop budget={budget} />
       {monthly > 0 && <Bar spent={budget.spent_usd} max={monthly} forecast={forecast} alertPct={budget.alert_pct} what={t('costs.hero.member.what')} period={period} />}
       <dl className="costs-kv">
-        <Kv label={t('costs.hero.left')} value={formatUsd(left)} note={t('costs.hero.until', { end: period.end })} />
+        <Kv label={t('costs.hero.left')} value={left !== null ? formatUsd(left) : '—'} note={t('costs.hero.until', { end: period.end })} />
         <Kv
           label={t('costs.hero.today')}
           value={budget.daily_analyses !== null ? t('costs.hero.todayValue', { n: budget.analyses_today, max: budget.daily_analyses }) : formatNumber(budget.analyses_today)}
@@ -215,7 +216,7 @@ export function OwnHero({ budget, usage, period }: { budget: AiBudget; usage: Ai
         {before !== null ? (
           <Kv label={t('costs.hero.own.before')} value={formatUsd(before)} note={t('costs.hero.own.beforeNote')} />
         ) : (
-          <Kv label={t('costs.hero.forecast')} value={t('costs.hero.approx', { amount: formatUsd(usage?.forecast_usd ?? budget.spent_usd) })} note={t('costs.hero.onEnd', { end: period.end })} />
+          <Kv label={t('costs.hero.forecast')} value={t('costs.hero.approx', { amount: formatUsd(usage?.forecast_usd ?? budget.forecast_usd) })} note={t('costs.hero.onEnd', { end: period.end })} />
         )}
         <Kv
           label={t('costs.hero.own.verified')}
@@ -239,11 +240,10 @@ export function OwnHero({ budget, usage, period }: { budget: AiBudget; usage: Ai
 }
 
 /** Администратор: бюджет ключа администратора — все, кто на нем, и общие фоновые задачи. */
-export function AdminHero({ budget, usage, period }: { budget: AiBudget; usage: AiUsage | undefined; period: Period }) {
+export function AdminHero({ budget, period }: { budget: AiBudget; period: Period }) {
   const { t } = useTranslation();
   const total = budget.budget;
   if (!total) return null;
-  const elapsed = usage?.days_elapsed ?? 0;
   return (
     <section className="card stat costs-hero" aria-label={t('costs.hero.admin.label')}>
       <div className="costs-hero-top">
@@ -257,10 +257,10 @@ export function AdminHero({ budget, usage, period }: { budget: AiBudget; usage: 
       <Bar spent={total.spent_usd} max={total.budget_usd} forecast={total.forecast_usd} alertPct={total.alert_pct} what={t('costs.hero.admin.what')} period={period} />
       <dl className="costs-kv">
         <Kv label={t('costs.hero.left')} value={formatUsd(total.left_usd)} note={t('costs.hero.until', { end: period.end })} />
-        <Kv label={t('costs.hero.admin.perDay')} value={elapsed > 0 ? formatUsd(total.spent_usd / elapsed) : '—'} note={t('costs.hero.admin.avg')} />
-        <Kv label={t('costs.hero.admin.canPerDay')} value={total.days_left > 0 ? formatUsd(total.left_usd / total.days_left) : '—'} note={t('costs.hero.admin.toFit')} />
+        <Kv label={t('costs.hero.admin.perDay')} value={formatUsd(total.per_day_usd)} note={t('costs.hero.admin.avg')} />
+        <Kv label={t('costs.hero.admin.canPerDay')} value={formatUsd(total.can_per_day_usd)} note={t('costs.hero.admin.toFit')} />
       </dl>
-      <Note>{t('costs.hero.admin.note', { pct: total.alert_pct, amount: usdLimit((total.budget_usd * total.alert_pct) / 100) })}</Note>
+      <Note>{t('costs.hero.admin.note', { pct: total.alert_pct, amount: usdLimit(total.alert_usd) })}</Note>
       <div className="costs-hero-foot">
         <div className="costs-hero-actions">
           <Button kind="secondary" size="sm" icon="sliders" to={`${paths.admin('key')}#adm-limits`}>
@@ -314,11 +314,10 @@ export function MemberRules({ budget, usage, period }: { budget: AiBudget; usage
       />
     );
   }
-  const monthly = budget.monthly_usd ?? 0;
   const items: { key: string; icon: IconName; tone?: 'warn' | 'bad' | 'info'; title: string; text: string }[] = [];
   if (budget.paused) items.push({ key: 'paused', icon: 'pause', tone: 'bad', title: t('costs.hero.pausedStrong'), text: t('costs.rules.pausedText') });
   items.push(
-    { key: 'alert', icon: 'bell', tone: 'warn', title: t('costs.rules.alertTitle', { pct: budget.alert_pct, amount: usdLimit((monthly * budget.alert_pct) / 100) }), text: t('costs.rules.alertText') },
+    { key: 'alert', icon: 'bell', tone: 'warn', title: t('costs.rules.alertTitle', { pct: budget.alert_pct, amount: usdLimit(budget.alert_usd ?? 0) }), text: t('costs.rules.alertText') },
     { key: 'stop', icon: 'pause', tone: 'bad', title: t('costs.rules.stopTitle'), text: t('costs.rules.stopText') },
   );
   if (budget.daily_analyses !== null) {
@@ -397,9 +396,9 @@ export function AdminWho({ data, me, levels, error, onRetry, month }: AdminWhoPr
       </Card>
     );
   }
-  const spenders = data.people.filter((p) => p.key_spent_usd > 0).sort((a, b) => b.key_spent_usd - a.key_spent_usd);
-  const top = spenders.length > 4 ? spenders.slice(0, 3) : spenders;
-  const rest = spenders.slice(top.length);
+  // «Остальные» (кто и сколько) решает сервер (others_*), как в «Обзоре» администрирования
+  const others = new Set(data.others_ids);
+  const top = data.people.filter((p) => p.key_spent_usd > 0 && !others.has(p.user_id)).sort((a, b) => b.key_spent_usd - a.key_spent_usd);
   const rows: WhoRow[] = top.map((person) => ({
     key: `u${person.user_id}`,
     name: (
@@ -411,12 +410,12 @@ export function AdminWho({ data, me, levels, error, onRetry, month }: AdminWhoPr
     sub: personSub(person, levels.get(person.user_id), t),
     value: formatUsd(person.key_spent_usd),
   }));
-  if (rest.length) {
+  if (data.others_count > 0) {
     rows.push({
       key: 'rest',
-      name: t('costs.who.rest', { count: rest.length }),
+      name: t('costs.who.rest', { count: data.others_count }),
       sub: t('costs.who.restSub'),
-      value: formatUsd(rest.reduce((sum, p) => sum + p.key_spent_usd, 0)),
+      value: formatUsd(data.others_usd),
     });
   }
   rows.push(

@@ -4,9 +4,7 @@ import { api, unwrap } from '../../api/client';
 import { isApiError } from '../../api/errors';
 import type { components } from '../../api/schema';
 import { formatNumber, type Currency } from '../../lib/format';
-import { analysisKeys } from '../analysis/keys';
-import { playKeys } from '../bank/currency';
-import { publicSettingsKey } from '../profile/keys';
+import { refreshMoney } from '../bank/currency';
 import { adminKeys, invalidateAdmin } from './keys';
 
 /*
@@ -115,18 +113,12 @@ export function useCurrencyPreview(
 }
 
 /**
- * После смены валюты: валюта программы (суммы на всех экранах), банк, анализы и лимиты
- * ответственной игры — в новой валюте; раздел администратора — заново (журнал, обзор).
+ * После смены валюты: все суммы (валюта, банк, анализы, лимиты, ставки, главная, «Аналитика» —
+ * MONEY_QUERIES) — в новой валюте; раздел администратора — заново (журнал, обзор).
  */
 export function refreshAfterCurrency(client: QueryClient): Promise<unknown> {
   client.removeQueries({ queryKey: settingsKeys.previewAll });
-  return Promise.all([
-    invalidateAdmin(client),
-    client.invalidateQueries({ queryKey: publicSettingsKey }),
-    client.invalidateQueries({ queryKey: analysisKeys.all }),
-    client.invalidateQueries({ queryKey: analysisKeys.bank }),
-    client.invalidateQueries({ queryKey: playKeys.limits }),
-  ]);
+  return Promise.all([invalidateAdmin(client), refreshMoney(client)]);
 }
 
 /** Валюту программы сменили, пока окно смены было открыто (409 common.currency_changed). */

@@ -190,7 +190,7 @@ export function Costs({ budget, usage, me, failed }: CostsProps) {
   }
 
   const monthly = budget.monthly_usd;
-  const left = budget.left_usd ?? (monthly === null ? null : Math.max(0, monthly - budget.spent_usd));
+  const left = budget.left_usd;
   return (
     <Card className="dashboard-card" title={title} subtitle={t('dashboard.costs.memberSubtitle')} actions={more}>
       {monthly !== null ? (

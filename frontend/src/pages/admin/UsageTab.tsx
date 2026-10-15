@@ -23,8 +23,7 @@ import './overview.css';
 // за месяц (дни по UTC) по людям и по задачам, общие задачи без участника и проверки (eval)
 // отдельно, участники на своих ключах и активность — входы и анализы. Р14: только расход на ИИ
 // и активность, без ставок, банка и содержания анализов. Суммы, доли бюджета, кэш и средняя
-// цена — с сервера. Пока считаются здесь (заявка A на волну 5): доли людей в легенде «По людям»
-// (доля в расходе — PersonUsageOut.spent_share); ширины полос — только рисунок.
+// цена, доли людей в расходе (spent_share) — с сервера; ширины полос — только рисунок.
 
 // Цвета людей — как PERSON_COLORS макета; общие задачи — серым
 const PERSON_COLORS = ['var(--s1)', 'var(--s3)', 'var(--s4)', 'var(--s7)', 'var(--s5)', 'var(--s2)'] as const;
@@ -44,10 +43,6 @@ export function ownPeople(people: readonly PersonUsage[]): PersonUsage[] {
   return people
     .filter((p) => p.status !== 'deleted' && (p.ai_mode === 'own' || p.own_spent_usd > 0))
     .sort((a, b) => b.own_spent_usd - a.own_spent_usd || a.display_name.localeCompare(b.display_name, 'ru'));
-}
-
-function shareOf(value: number, total: number): string {
-  return formatPercent(total > 0 ? value / total : 0, { digits: 0 });
 }
 
 function sharedKinds(usage: AdminAiUsage, t: TFunction): string {
@@ -109,8 +104,12 @@ function PeopleCard({ usage, me, t }: { usage: AdminAiUsage; me: Me; t: TFunctio
   const period = usagePeriod(usage);
   const people = keyPeople(usage.people).map((p, i) => ({ p, color: PERSON_COLORS[i % PERSON_COLORS.length] ?? 'var(--s1)' }));
   const segs = [
-    ...people.filter(({ p }) => p.key_spent_usd > 0).map(({ p, color }) => ({ key: `u${p.user_id}`, label: p.display_name.split(/\s+/)[0] ?? p.display_name, value: p.key_spent_usd, color })),
-    ...(usage.shared.cost_usd > 0 ? [{ key: 'shared', label: t('admin.usage.people.sharedShort'), value: usage.shared.cost_usd, color: SHARED_COLOR }] : []),
+    ...people
+      .filter(({ p }) => p.key_spent_usd > 0)
+      .map(({ p, color }) => ({ key: `u${p.user_id}`, label: p.display_name.split(/\s+/)[0] ?? p.display_name, value: p.key_spent_usd, share: p.spent_share, color })),
+    ...(usage.shared.cost_usd > 0
+      ? [{ key: 'shared', label: t('admin.usage.people.sharedShort'), value: usage.shared.cost_usd, share: usage.shared.spent_share, color: SHARED_COLOR }]
+      : []),
   ];
   const total = segs.reduce((sum, s) => sum + s.value, 0);
   const max = Math.max(...people.map(({ p }) => p.key_spent_usd), usage.shared.cost_usd, 0) || 1;
@@ -128,7 +127,7 @@ function PeopleCard({ usage, me, t }: { usage: AdminAiUsage; me: Me; t: TFunctio
             {segs.map((s) => (
               <span key={s.key}>
                 <i style={{ background: s.color }} aria-hidden="true" />
-                {s.label} {shareOf(s.value, total)}
+                {s.label} {formatPercent(s.share, { digits: 0 })}
               </span>
             ))}
           </div>

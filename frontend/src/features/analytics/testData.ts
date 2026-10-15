@@ -195,8 +195,8 @@ export function analyticsOut(over: Partial<Analytics> = {}): Analytics {
       events: 58,
       outside: 6,
       bins: [
-        { low: 0.65, high: 0.7, n: 20, p: 0.672, p_base: 0.66, p_claude: 0.68, actual: 0.7, ci_low: 0.48, ci_high: 0.85 },
-        { low: 0.7, high: 0.75, n: 14, p: 0.72, p_base: 0.71, p_claude: 0.73, actual: 0.62, ci_low: 0.36, ci_high: 0.82 },
+        { low: 0.65, high: 0.7, n: 20, p: 0.672, p_base: 0.66, p_claude: 0.68, actual: 0.7, diff: 0.028, ci_low: 0.48, ci_high: 0.85 },
+        { low: 0.7, high: 0.75, n: 14, p: 0.72, p_base: 0.71, p_claude: 0.73, actual: 0.62, diff: -0.1, ci_low: 0.36, ci_high: 0.82 },
       ],
       status: 'off',
       worst: { low: 0.7, high: 0.75, n: 14, p: 0.72, actual: 0.62, gap: 0.1, direction: 'over' },
@@ -250,9 +250,9 @@ export function wideAnalyticsOut(over: Partial<Analytics> = {}): Analytics {
     calibration: {
       ...base.calibration,
       bins: [
-        { low: 0.5, high: 0.55, n: 120, p: 0.522, p_base: 0.516, p_claude: 0.538, actual: 0.7, ci_low: 0.48, ci_high: 0.85 },
-        { low: 0.65, high: 0.7, n: 20, p: 0.672, p_base: 0.66, p_claude: 0.68, actual: 0.7, ci_low: 0.48, ci_high: 0.85 },
-        { low: 0.95, high: 1, n: 14, p: 0.972, p_base: 0.971, p_claude: 0.973, actual: 0.62, ci_low: 0.36, ci_high: 0.82 },
+        { low: 0.5, high: 0.55, n: 120, p: 0.522, p_base: 0.516, p_claude: 0.538, actual: 0.7, diff: 0.178, ci_low: 0.48, ci_high: 0.85 },
+        { low: 0.65, high: 0.7, n: 20, p: 0.672, p_base: 0.66, p_claude: 0.68, actual: 0.7, diff: 0.028, ci_low: 0.48, ci_high: 0.85 },
+        { low: 0.95, high: 1, n: 14, p: 0.972, p_base: 0.971, p_claude: 0.973, actual: 0.62, diff: -0.352, ci_low: 0.36, ci_high: 0.82 },
       ],
     },
     ...over,

@@ -18,12 +18,14 @@ export const adminKeys = {
   // «Обзор» и «Расход ИИ» (этап 4): расход по людям и задачам за месяц, входы и анализы
   aiUsage: ['admin', 'ai', 'usage', 'current'] as const,
   activity: (period: string) => ['admin', 'activity', period] as const,
+  // Дела администратора (GET /api/admin/attention): «Обзор», точка у вкладки, пункт меню
+  attention: ['admin', 'attention'] as const,
 };
 
 /**
  * После любого действия администратора: перечитать данные раздела (участники, коды, журнал,
- * ключ, бюджет и лимиты), сводку «Доступ к аккаунту» в личном кабинете администратора и главную:
- * в ней дела администратора (useAdminAttention) — «Обзор», точка у вкладки и пункт меню.
+ * ключ, бюджет, лимиты и дела — adminKeys.attention), сводку «Доступ к аккаунту» в личном
+ * кабинете администратора и главную: в ней те же дела администратора.
  */
 export function invalidateAdmin(client: QueryClient): Promise<unknown> {
   return Promise.all([

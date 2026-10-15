@@ -1,5 +1,6 @@
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
 
+import { watchProgramCurrency } from '../features/bank/currency';
 import { setDisplayTimeZone } from '../lib/format';
 import { ApiError, isUnauthorized } from './errors';
 import { meQueryKey } from './keys';
@@ -56,5 +57,6 @@ export function createQueryClient(): QueryClient {
       setDisplayTimeZone(me?.tz);
     }
   });
+  watchProgramCurrency(client);
   return client;
 }

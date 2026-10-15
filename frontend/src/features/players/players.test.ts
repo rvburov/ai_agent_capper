@@ -7,18 +7,16 @@ import {
   eloDelta,
   eloText,
   handText,
-  hasSackmann,
   initials,
   newsState,
   playerIdOf,
   safeHttpUrl,
   scoreText,
   siteName,
-  winShare,
 } from './display';
 import { DEFAULT_FILTERS, filtersFromSearch, PAGE_MAX, rankingQuery, searchWithFilters, withFilter } from './filters';
 import { fieldLabel, hasContent, legacyView, psychTone } from './legacy';
-import { archiveInfo, legacyProfile } from './testData';
+import { legacyProfile } from './testData';
 
 // Локаль сервера: названия стран (players.countries) и коды errors.player.* приходят из API —
 // тексты во фронтенде должны совпадать с серверными
@@ -75,12 +73,10 @@ describe('Игроки: подписи', () => {
     expect(initials('Янник Синнер')).toBe('ЯС');
   });
 
-  it('свежесть новостей и доля побед', () => {
+  it('свежесть новостей', () => {
     expect(newsState(null, false)).toBe('never');
     expect(newsState('2026-10-13T08:00:00Z', true)).toBe('fresh');
     expect(newsState('2026-10-01T08:00:00Z', false)).toBe('stale');
-    expect(winShare(3, 1)).toBe(0.75);
-    expect(winShare(0, 0)).toBeNull();
   });
 
   it('ссылка источника — только http(s); сайт — имя или домен без www', () => {
@@ -99,14 +95,6 @@ describe('Игроки: подписи', () => {
     expect(playerIdOf('12abc')).toBeNull();
     expect(playerIdOf('-1')).toBeNull();
     expect(playerIdOf(undefined)).toBeNull();
-  });
-
-  it('строка авторства Сакманна — если его архив загружался или матчи в базе есть (при сомнении — показываем)', () => {
-    expect(hasSackmann(archiveInfo())).toBe(true);
-    // загрузок в журнале нет, но матчи в базе есть — данные Сакманна могут быть: строка нужна
-    expect(hasSackmann(archiveInfo({ last_load: null, sources: [{ source: 'sackmann', last_load: null }] }))).toBe(true);
-    // база пуста — строки нет
-    expect(hasSackmann(archiveInfo({ data_to: null, last_load: null, sources: [{ source: 'sackmann', last_load: null }] }))).toBe(false);
   });
 
   it('счет — геймы через двоеточие, как в макете; тай-брейк и пометки не трогаются', () => {

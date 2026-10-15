@@ -110,16 +110,16 @@ function dayTip(day: UsageDay, t: TFunction) {
 /** Расход по дням (дни по UTC, как месяц расходов) с темпом под лимит или бюджет и прогнозом. */
 export function DailyCard({ usage, budget, admin, period, mobile }: { usage: AiUsage; budget: AiBudget; admin: boolean; period: Period; mobile: boolean }) {
   const { t } = useTranslation();
-  const target = admin ? (budget.budget?.budget_usd ?? null) : budget.mode === 'own' ? null : budget.monthly_usd;
-  const pace = target !== null && usage.days_in_month > 0 ? target / usage.days_in_month : null;
+  // Темп под лимит или бюджет (лимит на дни месяца) и средние в день — с сервера
+  const pace = usage.pace_usd;
   const max = priciestDay(usage.days);
   const over = pace !== null ? usage.days.filter((day) => day.cost_usd > pace).length : 0;
   let paceText = '';
   if (admin && budget.budget && usage.days_elapsed > 0 && pace !== null) {
     paceText = t('costs.daily.paceAdmin', {
-      all: formatUsd(budget.budget.spent_usd / usage.days_elapsed),
+      all: formatUsd(budget.budget.per_day_usd),
       pace: formatUsd(pace),
-      mine: formatUsd(usage.totals.cost_usd / usage.days_elapsed),
+      mine: formatUsd(budget.per_day_usd),
     });
   } else if (pace !== null) {
     paceText = over ? t('costs.daily.over', { count: over }) : t('costs.daily.noOver');

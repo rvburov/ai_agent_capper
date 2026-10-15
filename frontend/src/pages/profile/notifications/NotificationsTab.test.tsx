@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { notificationsQueryKey } from '../../../api/keys';
 import { adminBudget } from '../../../features/admin/testData';
 import { aiBudget } from '../../../features/ai/testData';
-import { dashboardOut } from '../../../features/dashboard/testData';
+import { adminAttention } from '../../../features/dashboard/testData';
 import { playLimitsOut } from '../../../features/bank/testData';
 import { adminPrefsOut, memberPrefsOut } from '../../../features/notifications/testData';
 import { apiError, json, ME_ADMIN, ME_MEMBER, type Handler } from '../../../test/fetchMock';
@@ -92,17 +92,16 @@ describe('Кабинет: уведомления', () => {
     renderTab(
       api({
         'GET /api/ai/budget': () => json(aiBudget({ budget: adminBudget() })),
-        // дела администратора — из главной: одна просьба вернуть ключ, Игорь у лимита
-        'GET /api/dashboard': () =>
-          json({
-            ...dashboardOut(),
-            admin: {
+        // дела администратора (GET /api/admin/attention): одна просьба вернуть ключ, Игорь у лимита
+        'GET /api/admin/attention': () =>
+          json(
+            adminAttention({
               archive: null,
               return_requests: [{ user_id: 5, name: 'Дмитрий', at: '2026-10-12T10:00:00Z' }],
-              limits: [{ user_id: 4, name: 'Игорь Нестеров', spent_usd: 8.6, limit_usd: 10, share: 0.86, level: '80' }],
+              limits: [{ user_id: 4, name: 'Игорь Нестеров', spent_usd: 8.6, limit_usd: 10, share: 0.86, level: '80', runs_out_on: null }],
               alert_pct: 80,
-            },
-          }),
+            }),
+          ),
         'GET /api/me/notification-prefs': () => json(adminPrefsOut(['data_stale'])),
       }),
       ME_ADMIN,
@@ -113,7 +112,10 @@ describe('Кабинет: уведомления', () => {
     expect(within(what).getByText('От других администраторов: работы на сервере, изменения в программе')).toBeInTheDocument();
     expect(within(what).getByRole('switch', { name: 'На сайте: Архив матчей давно не обновлялся' })).not.toBeChecked();
     expect(within(what).getByRole('switch', { name: 'На сайте: Сигналы расхода ИИ' })).toBeChecked();
-    expect(within(what).getByText(/больше 30 поисков в день/)).toBeInTheDocument();
+    // пороги сигналов расхода — с сервера (alert_rules), те же числа, что проверяет воркер
+    expect(
+      within(what).getByText(/^Доля кэша ниже 50% по 10 анализам, анализ дороже 2 медиан за 7 дн\., больше 2% обрезанных ответов или отказов, больше 30 поисков в день/),
+    ).toBeInTheDocument();
     expect(within(what).getByText('новое')).toBeInTheDocument();
     expect(await within(what).findByText(/^Общий бюджет ключа администратора — \$60 в месяц/)).toBeInTheDocument();
     expect(await within(what).findByText('Участник на своем ключе просит вернуть его на ваш. Сейчас ждут: 1')).toBeInTheDocument();
@@ -122,27 +124,29 @@ describe('Кабинет: уведомления', () => {
     expect(within(what).queryByRole('switch', { name: 'На сайте: Лимит ИИ: 80% и остановка' })).toBeNull();
   });
 
-  it('администратор: «Архив матчей давно не обновлялся» — порог и последняя загрузка с сервера', async () => {
+  it('администратор: «Архив матчей давно не обновлялся» — порог и последняя загрузка с сервера, и когда архив свежий', async () => {
     renderTab(
       api({
         'GET /api/ai/budget': () => json(aiBudget({ budget: adminBudget() })),
-        'GET /api/dashboard': () =>
-          json({
-            ...dashboardOut(),
-            admin: {
-              archive: {
-                days: 5,
+        'GET /api/admin/attention': () =>
+          json(
+            adminAttention({
+              // архив свежий: дела «архив» нет, а порог и последняя загрузка есть (archive_status)
+              archive: null,
+              archive_status: {
+                days: 0,
                 last_load: '2026-10-09T03:10:00Z',
                 stale_after_days: 4,
                 update_hour_utc: 3,
                 update_minute: 0,
                 sources: [],
+                stale: false,
               },
               return_requests: [],
               limits: [],
               alert_pct: 80,
-            },
-          }),
+            }),
+          ),
         'GET /api/me/notification-prefs': () => json(adminPrefsOut()),
       }),
       ME_ADMIN,

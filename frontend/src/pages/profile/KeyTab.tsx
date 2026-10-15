@@ -27,7 +27,8 @@ export function keyNeedsAttention(budget: AiBudget | undefined, admin: boolean):
   if (!budget) return false;
   if (budget.mode === 'own') return !budget.own_key;
   if (admin || budget.monthly_usd === null) return false;
-  return budget.paused || (budget.monthly_usd > 0 && (budget.spent_usd / budget.monthly_usd) * 100 >= budget.alert_pct);
+  // доля лимита — с сервера (limit_share)
+  return budget.paused || (budget.limit_share !== null && budget.limit_share * 100 >= budget.alert_pct);
 }
 
 /**

@@ -16,6 +16,7 @@ import {
   Icon,
   KeyValue,
   Skeleton,
+  spendTone,
   useToast,
 } from '../../components';
 import { amountInput, BUDGET_MAX, BUDGET_MIN, checkBudget, formatLimitUsd } from '../../features/admin/limits';
@@ -23,7 +24,7 @@ import { personName } from '../../features/admin/people';
 import type { AdminBudget, AdminKey, AdminLimits, AlertPct } from '../../features/admin/types';
 import { useAdminBudget, useAdminKey, useAdminLimits, useReplaceAdminKey, useUpdateBudget } from '../../features/admin/useAdminAi';
 import { keyMask, keyProblem, spelled } from '../../features/ai/keyFormat';
-import { formatDate, formatDateTime, formatPercent, formatUsd } from '../../lib/format';
+import { formatDate, formatDateTime, formatPercent, formatShare, formatUsd } from '../../lib/format';
 import { LimitsCard } from './LimitsCard';
 import { ConfirmDialog, HowTo, LoadError } from './parts';
 
@@ -335,12 +336,11 @@ function BudgetCard({ budget, limits }: { budget: AdminBudget; limits: AdminLimi
   const alertId = useId();
 
   const total = budget.budget_usd;
-  const share = total > 0 ? budget.spent_usd / total : 0;
-  const tone = share >= 1 ? 'bad' : share * 100 >= budget.alert_pct ? 'warn' : 'good';
+  // Цвет — по порогу уведомления; доли расхода и прогноза в бюджете — с сервера
+  const tone = spendTone(budget.spent_usd, total, budget.alert_pct) ?? 'good';
   const today = budget.days_in_month - budget.days_left;
   const end = formatDate(utcDay(budget.month_start, budget.days_in_month), { timeZone: 'UTC' });
   const todayText = formatDate(utcDay(budget.month_start, today), { timeZone: 'UTC' });
-  const pct = (value: number) => formatPercent(total > 0 ? value / total : 0, { digits: 0 });
   const alertText = formatPercent(budget.alert_pct / 100, { digits: 0 });
   const changed = monthly.trim() !== base.monthly || alert !== base.alert;
   const moved = server.monthly !== base.monthly || server.alert !== base.alert;
@@ -418,7 +418,7 @@ function BudgetCard({ budget, limits }: { budget: AdminBudget; limits: AdminLimi
         <span className="stat-value">{formatUsd(budget.spent_usd)}</span>
         <span className="adm-of">{t('admin.key.budget.of', { budget: formatLimitUsd(total) })}</span>
         <Chip kind={tone} icon={tone === 'good' ? 'check' : 'alert'}>
-          {t('admin.key.budget.share', { pct: pct(budget.spent_usd) })}
+          {t('admin.key.budget.share', { pct: formatShare(budget.budget_share) })}
         </Chip>
       </div>
       <BudgetBar
@@ -459,7 +459,7 @@ function BudgetCard({ budget, limits }: { budget: AdminBudget; limits: AdminLimi
           <dt>{t('admin.key.budget.forecast')}</dt>
           <dd>
             {t('profile.key.approx', { amount: formatUsd(budget.forecast_usd) })}
-            <small>{t('admin.key.budget.share', { pct: pct(budget.forecast_usd) })}</small>
+            <small>{t('admin.key.budget.share', { pct: formatShare(budget.forecast_share) })}</small>
           </dd>
         </div>
       </dl>

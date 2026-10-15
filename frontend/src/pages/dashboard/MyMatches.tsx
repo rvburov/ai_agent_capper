@@ -4,7 +4,7 @@ import { paths } from '../../app/paths';
 import { Button, Card, Chip, EmptyState } from '../../components';
 import { displayName, shortName } from '../../features/analysis/draft';
 import { marketLabel } from '../../features/analysis/markets';
-import { analysisNumber } from '../../features/analysis/number';
+import { analysisNumber, latestAnalysis } from '../../features/analysis/number';
 import { roundLabel } from '../../features/analysis/rounds';
 import type { Dashboard, MyMatch, PlayerRef } from '../../features/dashboard/types';
 import { timeZoneDative, timeZoneName } from '../../features/profile/timezones';
@@ -30,15 +30,18 @@ function Player({ player, rank }: { player: PlayerRef; rank: number | null }) {
 
 function MatchRow({ match }: { match: MyMatch }) {
   const { t } = useTranslation();
+  // Время начала знаем не всегда (его вписывают в «Новом анализе»): без него — «сегодня», как у
+  // ноги в «Открытых ставках»; все матчи этого блока сегодняшние
   const time = match.scheduled_at ? formatTime(match.scheduled_at) : null;
   const place = [match.tournament, roundLabel(match.round)].filter(Boolean).join(', ');
   const name = `${shortName(displayName(match.player1))} — ${shortName(displayName(match.player2))}`;
   const firstBet = match.bets[0];
-  const firstAnalysis = match.analyses[0];
+  // «Анализ» ведет на последний анализ матча: в нем самая свежая оценка
+  const lastAnalysis = latestAnalysis(match.analyses);
   return (
     <article className="dashboard-match" aria-label={time ? `${name}, ${time}` : name}>
       <div className="dashboard-match-time">
-        <span className="mono">{time ?? '—'}</span>
+        {time ? <span className="mono">{time}</span> : <span className="dashboard-match-day">{t('bets.today')}</span>}
         {place && <span className="xsmall">{place}</span>}
       </div>
       <div className="dashboard-match-players">
@@ -67,12 +70,12 @@ function MatchRow({ match }: { match: MyMatch }) {
           <Button size="sm" icon="ticket" to={`${paths.bets}?bet=${firstBet.bet_id}`} aria-label={t('dashboard.matches.openBetLabel', { id: firstBet.bet_id })}>
             {t('dashboard.matches.openBet', { id: firstBet.bet_id })}
           </Button>
-        ) : firstAnalysis !== undefined ? (
+        ) : lastAnalysis !== undefined ? (
           <Button
             size="sm"
             icon="spark"
-            to={paths.analysis(firstAnalysis)}
-            aria-label={t('dashboard.matches.openAnalysisLabel', { number: analysisNumber(firstAnalysis) })}
+            to={paths.analysis(lastAnalysis)}
+            aria-label={t('dashboard.matches.openAnalysisLabel', { number: analysisNumber(lastAnalysis) })}
           >
             {t('dashboard.matches.openAnalysis')}
           </Button>

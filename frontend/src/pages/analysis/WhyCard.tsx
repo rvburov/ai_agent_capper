@@ -8,7 +8,7 @@ import { keyText } from '../../features/analysis/codes';
 import { modelName, usdSmall } from '../../features/analysis/markets';
 import { analysisNumber } from '../../features/analysis/number';
 import type { Analysis, Result } from '../../features/analysis/types';
-import { formatDuration, formatTokens, formatUsd } from '../../lib/format';
+import { formatDuration, formatPercent, formatTokens, formatUsd } from '../../lib/format';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 import { matchTitle, type MatchNames } from './MatchCard';
 import { runNumbers } from './Progress';
@@ -77,7 +77,7 @@ export function MetaLine({ analysis }: { analysis: Analysis }) {
   const numbers = runNumbers(analysis);
   const parts = [
     t('analysis.meta.mode'),
-    t('analysis.meta.tokens', { tokens: formatTokens(numbers.tokens), share: Math.round(costs.cache_share * 100) }),
+    t('analysis.meta.tokens', { tokens: formatTokens(numbers.tokens), share: formatPercent(costs.cache_share, { digits: 0 }) }),
     costs.searches ? t('analysis.meta.searches', { count: costs.searches }) : t('analysis.meta.noSearch'),
     costs.estimate_usd !== null
       ? t('analysis.meta.costEst', { cost: usdSmall(numbers.costUsd), est: formatUsd(costs.estimate_usd) })

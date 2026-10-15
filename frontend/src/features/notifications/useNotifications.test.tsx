@@ -23,7 +23,10 @@ const note = (id: number, kind: string) => ({
 
 describe('уведомления и данные открытых экранов', () => {
   it('вид уведомления — какие данные устарели', () => {
-    expect(staleQueriesFor('ai_mode_request')).toEqual([adminKeys.users, adminKeys.aiLimits]);
+    // дела администратора (счетчик у пункта меню, «Обзор») — GET /api/admin/attention
+    expect(staleQueriesFor('ai_mode_request')).toEqual([adminKeys.users, adminKeys.aiLimits, adminKeys.attention]);
+    expect(staleQueriesFor('limit_100')).toEqual(expect.arrayContaining([adminKeys.attention]));
+    expect(staleQueriesFor('data_stale')).toEqual([adminKeys.attention]);
     expect(staleQueriesFor('ai_mode_decision')).toEqual(expect.arrayContaining([aiKeys.all, meQueryKey]));
     expect(staleQueriesFor('limit_80')).toEqual(expect.arrayContaining([aiKeys.all, adminKeys.aiLimits]));
     expect(staleQueriesFor('budget_100')).toEqual(expect.arrayContaining([adminKeys.aiBudget]));

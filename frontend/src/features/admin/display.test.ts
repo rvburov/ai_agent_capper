@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { lowerFirst, maskIp, spendMonth, timeLeft } from './display';
+import { lowerFirst, maskIp, spendMonth, timeLeft, utcDayInline } from './display';
 
 const NOW = Date.parse('2026-10-07T09:00:00Z');
 const at = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
@@ -26,6 +26,13 @@ describe('подписи раздела «Администрирование»',
   it('месяц расхода — по UTC, для подписи «за октябрь»', () => {
     expect(spendMonth(new Date('2026-10-31T23:30:00Z'))).toBe('октябрь');
     expect(spendMonth(new Date('2026-11-01T00:10:00Z'))).toBe('ноябрь');
+  });
+
+  it('день, когда кончится лимит (UTC), внутри фразы: «сегодня», «завтра», иначе дата', () => {
+    const now = new Date('2026-10-13T23:30:00Z');
+    expect(utcDayInline('2026-10-13', now)).toBe('сегодня');
+    expect(utcDayInline('2026-10-14', now)).toBe('завтра');
+    expect(utcDayInline('2026-10-16', now)).toBe('16 окт');
   });
 
   it('время внутри фразы — со строчной буквы', () => {

@@ -6,8 +6,8 @@ import { useAdminAttention } from '../../../features/admin/useAdminAttention';
 import { apiErrorText } from '../../../features/analysis/codes';
 import { useAiBudget } from '../../../features/ai/useAiBudget';
 import { timeZoneDative, timeZoneName } from '../../../features/profile/timezones';
-import { prefRows, useNotificationPrefs, useSetNotificationPref, type PrefRow } from '../../../features/notifications/prefs';
-import { formatDate, formatRelative, formatUsd } from '../../../lib/format';
+import { prefRows, useNotificationPrefs, useSetNotificationPref, type NotificationPrefs, type PrefRow } from '../../../features/notifications/prefs';
+import { formatDate, formatNumber, formatPercent, formatRelative, formatUsd } from '../../../lib/format';
 import { ProfileItem } from '../ProfileItem';
 import { LoadError } from '../LoadError';
 import './notifications.css';
@@ -38,7 +38,7 @@ export function NotificationsTab({ me }: { me: Me }) {
 }
 
 /** Подпись строки с числами, где они есть. */
-function useRowHint(me: Me) {
+function useRowHint(me: Me, prefs: NotificationPrefs | undefined) {
   const { t } = useTranslation();
   const admin = me.role === 'admin';
   const budget = useAiBudget();
@@ -70,8 +70,9 @@ function useRowHint(me: Me) {
         return value !== null ? t('profile.notifs.rows.budgetAdmin.hint', { budget: formatUsd(value, 0) }) : t('profile.notifs.rows.budgetAdmin.hintPlain');
       }
       case 'archiveAdmin': {
-        // Порог и последняя загрузка — с сервера (archive в делах администратора, пока архив устарел)
-        const archive = attention.data?.archive ?? null;
+        // Порог и последняя загрузка — с сервера (archive_status в делах администратора: и когда
+        // архив свежий)
+        const archive = attention.data?.archive_status ?? null;
         const text = archive
           ? t('profile.notifs.rows.archiveAdmin.hint', { count: archive.stale_after_days })
           : t('profile.notifs.rows.archiveAdmin.hintPlain');
@@ -79,6 +80,20 @@ function useRowHint(me: Me) {
         return last
           ? t('profile.notifs.rows.archiveAdmin.last', { hint: text, date: formatDate(last), ago: formatRelative(last) })
           : text;
+      }
+      case 'alertAdmin': {
+        // Пороги сигналов расхода — те же числа, что проверяет воркер (alert_rules с сервера)
+        const rules = prefs?.alert_rules ?? null;
+        return rules
+          ? t('profile.notifs.rows.alertAdmin.hintRules', {
+              cache: formatPercent(rules.cache_min_share, { digits: 0 }),
+              analyses: formatNumber(rules.cache_analyses),
+              factor: formatNumber(rules.cost_factor, Number.isInteger(rules.cost_factor) ? 0 : 1),
+              days: formatNumber(rules.cost_window_days),
+              stops: formatPercent(rules.stops_max_share, { digits: 0 }),
+              searches: formatNumber(rules.searches_per_day),
+            })
+          : t('profile.notifs.rows.alertAdmin.hint');
       }
       default:
         return t(`profile.notifs.rows.${row.id}.hint`);
@@ -89,7 +104,7 @@ function useRowHint(me: Me) {
 function WhatCard({ me }: { me: Me }) {
   const { t } = useTranslation();
   const prefs = useNotificationPrefs();
-  const hint = useRowHint(me);
+  const hint = useRowHint(me, prefs.data);
   const rows = prefRows(prefs.data);
   const common = rows.filter((row) => !row.admin);
   const forAdmin = rows.filter((row) => row.admin);

@@ -107,7 +107,7 @@ export function CostsPage() {
   const monthsIn: readonly string[] = t('dashboard.costs.monthsIn', { returnObjects: true });
   const own = !admin && ai.mode === 'own';
   const lead = admin ? 'costs.head.leadAdmin' : own ? 'costs.head.leadOwn' : 'costs.head.leadMember';
-  const hero = admin ? <AdminHero budget={ai} usage={data} period={period} /> : own ? <OwnHero budget={ai} usage={data} period={period} /> : <MemberHero budget={ai} usage={data} period={period} />;
+  const hero = admin ? <AdminHero budget={ai} period={period} /> : own ? <OwnHero budget={ai} usage={data} period={period} /> : <MemberHero budget={ai} usage={data} period={period} />;
   const side = admin ? (
     <AdminWho
       data={adminUsage.data}

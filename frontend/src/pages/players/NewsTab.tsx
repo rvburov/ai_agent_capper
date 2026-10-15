@@ -1,7 +1,9 @@
 import { useTranslation } from 'react-i18next';
 
 import { Button, Callout, Card, Chip, Icon, Skeleton, type ChipKind, type IconName } from '../../components';
+import { modelLabel } from '../../features/ai/models';
 import { apiErrorText } from '../../features/analysis/codes';
+import { analysisNumber } from '../../features/analysis/number';
 import { usePlayerNews } from '../../features/players/api';
 import { safeHttpUrl, siteName } from '../../features/players/display';
 import type { NewsItem, NewsKind, PlayerCard } from '../../features/players/types';
@@ -61,6 +63,16 @@ export function NewsTab({ card }: { card: PlayerCard }) {
   const fresh = pages[0]?.fresh ?? status.fresh;
   const ttl = pages[0]?.ttl_hours ?? status.ttl_hours;
   const days = pages[0]?.lookback_days ?? status.lookback_days;
+  // Кто проверял: модель шага новостей и свой анализ (чужой анализ сервер не называет)
+  const checkedModel = pages[0]?.checked_model ?? null;
+  const checkedAnalysis = pages[0]?.checked_analysis_id ?? null;
+  const where =
+    checkedAnalysis !== null
+      ? t('players.news.byAnalysis', { id: analysisNumber(checkedAnalysis) })
+      : pages.length
+        ? t('players.news.byShared')
+        : '';
+  const search = checkedModel ? t('players.news.searchModel', { model: modelLabel(checkedModel) }) : t('players.news.search');
 
   let body;
   if (!checkedAt) {
@@ -106,7 +118,7 @@ export function NewsTab({ card }: { card: PlayerCard }) {
       <Card
         className="players-card"
         title={t('players.news.title')}
-        subtitle={checkedAt ? t('players.news.subtitle', { when: inlineWhen(checkedAt), days }) : t('players.news.subtitleNever')}
+        subtitle={checkedAt ? t('players.news.subtitle', { when: inlineWhen(checkedAt), where, search, days }) : t('players.news.subtitleNever')}
         actions={
           checkedAt ? (
             fresh && until ? (

@@ -81,7 +81,7 @@ describe('Личный кабинет: ключ Claude, участник на к
   });
 
   it('у порога уведомления — метка и точка у вкладки; пауза и анализы на сегодня — причина из API', async () => {
-    mockFetch(routes(ME_MEMBER, aiBudget({ spent_usd: 8.5, left_usd: 1.5 })));
+    mockFetch(routes(ME_MEMBER, aiBudget({ spent_usd: 8.5, left_usd: 1.5, limit_share: 0.85 })));
     const first = renderKey();
     expect(await screen.findByText('Больше 80% лимита')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /Ключ Claude\s*\(есть что проверить\)/ })).toBeInTheDocument();

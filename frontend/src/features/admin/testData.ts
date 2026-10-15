@@ -2,7 +2,7 @@ import type { AdminBudget, AdminKey, AdminUser, AuditEntry, LimitDefaults, Membe
 
 // Данные для тестов раздела «Администрирование».
 export function adminUser(over: Partial<AdminUser> = {}): AdminUser {
-  return {
+  const row: AdminUser = {
     id: 2,
     display_name: 'Ольга Лехтинен',
     email: 'olga@example.com',
@@ -15,8 +15,12 @@ export function adminUser(over: Partial<AdminUser> = {}): AdminUser {
     ai_spent_month_usd: 1.93,
     analyses_month: 11,
     limit: { monthly_usd: 10, daily_analyses: 3, per_analysis_usd: 1, paused: false },
+    limit_share: null,
     ...over,
   };
+  // Доля лимита, как на сервере: расход к месячному лимиту, если ее не задали явно
+  if (!('limit_share' in over)) row.limit_share = row.limit?.monthly_usd ? row.ai_spent_month_usd / row.limit.monthly_usd : null;
+  return row;
 }
 
 export function auditEntry(over: Partial<AuditEntry> = {}): AuditEntry {
@@ -38,7 +42,7 @@ export function auditEntry(over: Partial<AuditEntry> = {}): AuditEntry {
 export const LIMIT_DEFAULTS: LimitDefaults = { monthly_usd: 10, daily_analyses: 3, per_analysis_usd: 1, soft_cap_usd: 0.5 };
 
 export function memberLimit(over: Partial<MemberLimit> = {}): MemberLimit {
-  return {
+  const row: MemberLimit = {
     id: 2,
     display_name: 'Ольга Лехтинен',
     email: 'olga@example.com',
@@ -54,8 +58,11 @@ export function memberLimit(over: Partial<MemberLimit> = {}): MemberLimit {
     analyses_month: 11,
     return_requested_at: null,
     level: null,
+    limit_share: null,
     ...over,
   };
+  if (!('limit_share' in over)) row.limit_share = row.limit?.monthly_usd ? row.spent_month_usd / row.limit.monthly_usd : null;
+  return row;
 }
 
 export function adminBudget(over: Partial<AdminBudget> = {}): AdminBudget {

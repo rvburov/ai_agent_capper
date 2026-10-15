@@ -90,7 +90,8 @@ describe('Карточка игрока', () => {
 
     const elo = cardOf('Эло по покрытиям');
     expect(within(elo).getByText('Сегодня: Синнер — Руне')).toBeInTheDocument();
-    expect(within(elo).getByText('По Эло на харде: 69% на победу')).toBeInTheDocument();
+    // Эло обоих на покрытии матча и сторона игрока — с сервера; кэф своей ставки на его победу
+    expect(within(elo).getByText('Эло на харде: 2180 против 2010 → 69% на победу · ваш кэф 1.30 → 77% с маржой букмекера')).toBeInTheDocument();
     expect(within(elo).getByText('Личные встречи: 3–1, на харде 2–0 · последняя — 8 окт 2025, победа')).toBeInTheDocument();
     expect(within(elo).getByRole('link', { name: 'анализе #A-0012' })).toHaveAttribute('href', '/analysis/12');
     expect(within(cardOf('Форма')).getByText('Дней без матчей в базе')).toBeInTheDocument();
@@ -103,6 +104,21 @@ describe('Карточка игрока', () => {
     expect(list).toHaveTextContent('Ролан Гаррос, 1/16 финала · 6:7(4) 4:6поражение');
   });
 
+  it('«сегодня»: ставка на соперника — без «ваш кэф»; Эло соперника нет — только вероятность', async () => {
+    // игрок — вторая сторона матча, нога ставки — на первую (на соперника)
+    renderCard('/players/1', playerCard({ today: [todayMatch({ side: 2 })] }));
+    await screen.findByRole('heading', { level: 3, name: 'Эло по покрытиям' });
+    const elo = cardOf('Эло по покрытиям');
+    expect(await within(elo).findByText('Эло на харде: 2180 против 2010 → 69% на победу')).toBeInTheDocument();
+  });
+
+  it('«сегодня»: нет Эло соперника в таблице текущего Эло — вероятность без чисел Эло', async () => {
+    renderCard('/players/1', playerCard({ today: [todayMatch({ opponent_elo: null, bets: [] })] }));
+    await screen.findByRole('heading', { level: 3, name: 'Эло по покрытиям' });
+    const elo = cardOf('Эло по покрытиям');
+    expect(await within(elo).findByText('По Эло на харде: 69% на победу')).toBeInTheDocument();
+  });
+
   it('«сегодня» в двух ставках — номера ставок через ключ локали', async () => {
     const legs = [
       { bet_id: 7, leg_id: 71, market: 'ML' as const, selection: 1, odds_taken: '1.300' },
@@ -111,6 +127,16 @@ describe('Карточка игрока', () => {
     renderCard('/players/1', playerCard({ today: [todayMatch({ bets: legs })] }));
     const hero = await screen.findByRole('region', { name: 'Игрок Янник Синнер' });
     expect(within(hero).getByText(/соперник —/).closest('div')).toHaveTextContent('· в ваших ставках №7, №8');
+  });
+
+  it('два анализа одного матча: строка, «Открыть анализ» и «Итог» ведут на последний', async () => {
+    renderCard('/players/1', playerCard({ today: [todayMatch({ bets: [], analyses: [12, 15] })] }));
+    const hero = await screen.findByRole('region', { name: 'Игрок Янник Синнер' });
+    expect(within(hero).getByText(/соперник —/).closest('div')).toHaveTextContent('· в вашем анализе #A-0015');
+    expect(within(hero).getByRole('link', { name: 'Открыть анализ' })).toHaveAttribute('href', '/analysis/15');
+    const elo = cardOf('Эло по покрытиям');
+    expect(within(elo).getByRole('link', { name: 'анализе #A-0015' })).toHaveAttribute('href', '/analysis/15');
+    expect(within(elo).queryByRole('link', { name: 'анализе #A-0012' })).toBeNull();
   });
 
   it('«сегодня» из анализа без ставки — «Открыть анализ», вероятности по Эло нет', async () => {
@@ -185,6 +211,29 @@ describe('Карточка игрока', () => {
     expect(within(articles[1]!).getByText('tennis.com')).toBeInTheDocument();
     expect(within(card).getByText(/^Свежие · до/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Искать/ })).toBeNull();
+  });
+
+  it('«Новости»: кто проверял — модель шага новостей и свой анализ; чужой анализ — «из общей базы»', async () => {
+    renderCard('/players/1/news');
+    expect(await screen.findByText(/^Проверены .+ при анализе #A-0012 · Sonnet 5\.5, веб-поиск · за 14 дней$/)).toBeInTheDocument();
+  });
+
+  it('«Новости»: анализ другого участника сервер не называет — «из общей базы новостей»', async () => {
+    renderCard('/players/1/news', undefined, { 'GET /api/players/1/news': () => json(newsOut({ checked_analysis_id: null, checked_model: null })) });
+    expect(await screen.findByText(/^Проверены .+ · из общей базы новостей · веб-поиск · за 14 дней$/)).toBeInTheDocument();
+  });
+
+  it('разница с туром и доля побед — с сервера (serve.diff, win_share), а не вычитанием в браузере', async () => {
+    const base = playerCard();
+    // нарочно не равно «игрок минус тур» и «победы / матчи»: экран обязан взять числа сервера
+    const card = playerCard({
+      serve: { ...base.serve!, diff: { ...base.serve!.diff!, first_in: 0.08 } },
+      key_matches: { ...base.key_matches, top10: { wins: 9, losses: 3, win_share: 0.7 } },
+    });
+    renderCard('/players/1', card);
+    await screen.findByRole('heading', { level: 3, name: 'Подача и прием' });
+    expect(within(cardOf('Подача и прием')).getByText('+8 п.п.')).toBeInTheDocument();
+    expect(within(cardOf('Результаты')).getByText('9–3 · 70%')).toBeInTheDocument();
   });
 
   it('новости не искали — пустое состояние без запроса кнопкой', async () => {

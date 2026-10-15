@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 
 import { paths } from '../../app/paths';
 import { Button, Chip, FormDots, Icon } from '../../components';
-import { analysisNumber } from '../../features/analysis/number';
+import { analysisNumber, latestAnalysis } from '../../features/analysis/number';
 import { countryName, eloDelta, eloText, handText, initials, newsState, playerName } from '../../features/players/display';
 import type { PlayerCard, TodayMatch } from '../../features/players/types';
 import { formatDate, formatOdds, formatTime } from '../../lib/format';
@@ -65,7 +65,7 @@ function LastStatus({ card }: { card: PlayerCard }) {
 function TodayLine({ today }: { today: TodayMatch }) {
   const { t } = useTranslation();
   const bet = today.bets[0];
-  const analysis = today.analyses[0];
+  const analysis = latestAnalysis(today.analyses);
   let where = '';
   if (today.bets.length === 1 && bet) where = t('players.card.today.bet', { id: bet.bet_id, odds: formatOdds(bet.odds_taken) });
   else if (today.bets.length > 1) where = t('players.card.today.bets', { ids: today.bets.map((b) => t('players.card.today.betNo', { id: b.bet_id })).join(', ') });

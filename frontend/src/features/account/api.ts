@@ -1,9 +1,10 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, unwrap } from '../../api/client';
 import { apiErrorFrom } from '../../api/errors';
 import { meQueryKey } from '../../api/keys';
 import type { components } from '../../api/schema';
+import { betKeys } from '../bets/keys';
 
 /*
  * Кабинет → «Данные» (GDPR, Р15, В10): экспорт своих данных сразу скачиванием, согласие на
@@ -14,6 +15,21 @@ import type { components } from '../../api/schema';
 
 export type ExportFormat = 'json' | 'csv';
 export type DeletionOut = components['schemas']['DeletionOut'];
+export type ExportSummary = components['schemas']['ExportSummaryOut'];
+
+/**
+ * Числа «Данных» (GET /api/me/export/summary): сколько ставок, событий и своих вызовов ИИ войдет
+ * в экспорт, период ставок старого бота и ноги его экспрессов без исхода. Ключ — под ['bets']:
+ * новая ставка, расчет и сторно перечитывают его вместе со ставками.
+ */
+export const exportSummaryKey = [...betKeys.all, 'export-summary'] as const;
+
+export function useExportSummary() {
+  return useQuery({
+    queryKey: exportSummaryKey,
+    queryFn: () => unwrap(api.GET('/api/me/export/summary')),
+  });
+}
 
 /** Имя файла из Content-Disposition: attachment; filename="capper-export-2026-10-14.json". */
 export function attachmentName(header: string | null, fallback: string): string {

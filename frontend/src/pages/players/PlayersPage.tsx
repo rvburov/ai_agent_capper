@@ -24,7 +24,7 @@ import {
 } from '../../components';
 import { apiErrorText } from '../../features/analysis/codes';
 import { usePlayerRanking } from '../../features/players/api';
-import { countryName, eloDelta, eloText, hasSackmann, newsState, playerName } from '../../features/players/display';
+import { countryName, eloDelta, eloText, newsState, playerName } from '../../features/players/display';
 import {
   DATA_FILTERS,
   filtersFromSearch,
@@ -496,7 +496,7 @@ export function PlayersPage() {
           </div>
         )}
       </section>
-      <Sources sackmann={data ? hasSackmann(data.archive) : true} />
+      <Sources sackmann={data?.sackmann ?? true} />
     </div>
   );
 }

@@ -161,6 +161,26 @@ export function dashboardOut(over: Partial<Schemas['DashboardOut']> = {}): Schem
   };
 }
 
+/** Дела администратора (GET /api/admin/attention): архив свежий, просьб и участников у лимита нет. */
+export function adminAttention(over: Partial<Schemas['AdminAttentionOut']> = {}): Schemas['AdminAttentionOut'] {
+  return {
+    archive: null,
+    archive_status: {
+      days: 0,
+      last_load: '2026-10-13T03:30:00Z',
+      stale_after_days: 3,
+      update_hour_utc: 3,
+      update_minute: 30,
+      sources: [],
+      stale: false,
+    },
+    return_requests: [],
+    limits: [],
+    alert_pct: 80,
+    ...over,
+  };
+}
+
 /**
  * Свой расход ИИ за октябрь (GET /api/ai/usage) — как aiUsageOut() в
  * src/features/dashboard/testData.ts ($1,93, из кэша 68%, прогноз $4,50). Здесь своей копией:
@@ -327,7 +347,12 @@ export async function mockApi(page: Page, me: Me | null, api: Record<string, Moc
     }
     // и что присылать: выключенные в кабинете виды он прячет (все включены)
     if (url.pathname === '/api/me/notification-prefs' && me) {
-      await route.fulfill({ json: { items: [], push_available: false } });
+      await route.fulfill({ json: { items: [], push_available: false, alert_rules: null } });
+      return;
+    }
+    // счетчик дел у пункта «Администрирование» (GET /api/admin/attention) — дел нет
+    if (url.pathname === '/api/admin/attention' && me?.role === 'admin') {
+      await route.fulfill({ json: adminAttention() });
       return;
     }
     // плашка «Банк» в шапке — тоже

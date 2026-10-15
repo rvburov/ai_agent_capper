@@ -1,5 +1,5 @@
 import i18n from '../../i18n';
-import { formatDateTime, type DateInput } from '../../lib/format';
+import { formatDate, formatDateTime, type DateInput } from '../../lib/format';
 
 // Подписи раздела «Администрирование»: срок кода, IP, месяц расхода.
 
@@ -16,6 +16,18 @@ export function timeLeft(expires: DateInput, now: number = Date.now()): string {
 /** Время внутри фразы со строчной буквы: «действует до завтра, 09:20». */
 export function lowerFirst(text: string): string {
   return text.charAt(0).toLocaleLowerCase('ru') + text.slice(1);
+}
+
+/**
+ * День по UTC внутри фразы (runs_out_on лимита — день месяца расходов, а он по UTC): «сегодня»,
+ * «завтра», иначе «16 окт».
+ */
+export function utcDayInline(day: string, now: Date = new Date()): string {
+  const today = now.toISOString().slice(0, 10);
+  const tomorrow = new Date(now.getTime() + 86_400_000).toISOString().slice(0, 10);
+  if (day === today) return lowerFirst(i18n.t('format.today'));
+  if (day === tomorrow) return lowerFirst(i18n.t('format.tomorrow'));
+  return formatDate(`${day}T12:00:00Z`, { timeZone: 'UTC' });
 }
 
 /** «Сегодня, 09:20» строчными — для середины фразы. */

@@ -7,6 +7,7 @@ import { paths } from '../../app/paths';
 import { adminKeys } from '../admin/keys';
 import { aiKeys } from '../ai/keys';
 import { analysisKeys } from '../analysis/keys';
+import { MONEY_QUERIES } from '../bank/currency';
 import { ANALYTICS_PREFIX, betKeys, DASHBOARD_PREFIX } from '../bets/keys';
 
 // Центр уведомлений (колокольчик, Р3): вид уведомления, ссылки и отметка прочитанного в кэше.
@@ -64,17 +65,24 @@ const AI_BUDGET: readonly QueryKey[] = [aiKeys.all];
 export function staleQueriesFor(kind: string): readonly QueryKey[] {
   switch (kind) {
     case 'ai_mode_request':
-      return [adminKeys.users, adminKeys.aiLimits];
+      return [adminKeys.users, adminKeys.aiLimits, adminKeys.attention];
     case 'ai_mode_decision':
       return [...AI_BUDGET, meQueryKey];
     case 'ai_key_failed':
       return [...AI_BUDGET, adminKeys.aiKey];
     case 'limit_80':
     case 'limit_100':
-      return [...AI_BUDGET, adminKeys.aiLimits, adminKeys.users];
+      return [...AI_BUDGET, adminKeys.aiLimits, adminKeys.users, adminKeys.attention];
     case 'budget_80':
     case 'budget_100':
       return [...AI_BUDGET, adminKeys.aiBudget, adminKeys.aiLimits];
+    // Архив матчей устарел: дело администратора на «Обзоре» и в кабинете
+    case 'data_stale':
+      return [adminKeys.attention];
+    // Администратор сменил валюту программы: все суммы — заново (без уведомления участник
+    // заметит смену по первому ответу в новой валюте, watchProgramCurrency)
+    case 'currency_changed':
+      return MONEY_QUERIES;
     // Ставка рассчитана сама (этап 5): ставки, банк, главная и аналитика
     case 'bet_settled':
       return [betKeys.all, analysisKeys.bank, DASHBOARD_PREFIX, ANALYTICS_PREFIX];

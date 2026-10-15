@@ -1,6 +1,7 @@
 import i18n from '../../i18n';
 import { currencySign, formatPercent, type Currency } from '../../lib/format';
 import { formatLimitUsd, limitText } from './limits';
+import { timeZoneName } from '../profile/timezones';
 import { formatRate } from './settings';
 import type { AuditAction, AuditEntry, Role } from './types';
 
@@ -22,7 +23,7 @@ const GROUP_ACTIONS: Record<Exclude<AuditGroup, 'all'>, readonly AuditAction[]> 
   access: ['reset_code', 'reset_code_revoke', 'reset_2fa', 'sessions_revoke', 'confirm_failed'],
   people: ['block', 'unblock', 'delete', 'role_change', 'create_admin'],
   money: ['key_change', 'limit_change', 'ai_mode_change', 'budget_change'],
-  settings: ['currency_change', 'message', 'agent_config_change'],
+  settings: ['currency_change', 'settings_change', 'message', 'agent_config_change'],
   // Правка игроков — тоже команды терминала с общими данными, как импорт (этап 2)
   import: ['import', 'player_merge', 'player_edit'],
 };
@@ -213,6 +214,13 @@ export function auditDetails(entry: AuditEntry): string {
     }
     case 'message':
       return text(d.text) ?? '';
+    case 'settings_change': {
+      // «Часовой пояс для новых участников: Москва → Хельсинки» ({field, from, to})
+      const from = text(d.from);
+      const to = text(d.to);
+      if (d.field !== 'default_tz' || !from || !to) return '';
+      return t('admin.audit.details.defaultTz', { from: timeZoneName(t, from), to: timeZoneName(t, to) });
+    }
     default:
       // confirm_failed, player_merge, player_edit (этап 2) и agent_config_change пока без
       // строки подробностей

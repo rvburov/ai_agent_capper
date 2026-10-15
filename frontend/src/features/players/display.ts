@@ -2,7 +2,7 @@ import type { TFunction } from 'i18next';
 
 import { displayName, shortName } from '../analysis/draft';
 import { formatNumber } from '../../lib/format';
-import type { ArchiveInfo, PlayerRef } from './types';
+import type { PlayerRef } from './types';
 
 // Подписи «Игроков» и карточки: имя, страна, рука, Эло, свежесть новостей. Числа (Эло, место,
 // форма, свежесть) считает сервер, здесь только вид.
@@ -58,28 +58,12 @@ export function scoreText(score: string | null | undefined): string {
   return score.replace(/(\d+)-(\d+)/g, '$1:$2');
 }
 
-/** Доля побед 0…1; матчей нет — null. */
-export function winShare(wins: number, losses: number): number | null {
-  const total = wins + losses;
-  return total > 0 ? wins / total : null;
-}
-
 /** Рука и бэкхенд: «правша, двуручный бэкхенд»; неизвестное не пишется. */
 export function handText(hand: string | null, backhand: string | null, t: TFunction): string | null {
   const parts: string[] = [];
   if (hand === 'R' || hand === 'L' || hand === 'A') parts.push(t(`players.card.hand.${hand}`));
   if (backhand === 'one' || backhand === 'two') parts.push(t(`players.card.backhand.${backhand}`));
   return parts.length ? parts.join(', ') : null;
-}
-
-/**
- * Нужна ли в списке строка авторства Сакманна (CC BY-NC-SA). Лицензия требует ее, когда его
- * данные есть, а по журналу загрузок это видно не всегда: матчи могли попасть в базу до записей
- * о загрузках. Поэтому при сомнении — показываем: загрузка Сакманна записана или матчи в базе
- * есть. Без строки — только пустая база (точный признак — заявка A: sackmann в ответе списка).
- */
-export function hasSackmann(archive: ArchiveInfo): boolean {
-  return archive.data_to !== null || archive.sources.some((source) => source.source === 'sackmann' && source.last_load !== null);
 }
 
 /**
