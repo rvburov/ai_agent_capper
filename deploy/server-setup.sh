@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Первичная настройка VPS под AI Capper: Hetzner Cloud в Хельсинки (Р19), Ubuntu 24.04.
+# Первичная настройка VPS под AI Capper: сервер в Финляндии (Р19), Ubuntu 24.04 или 26.04.
 # Запускается один раз от root на чистом сервере. Повторный запуск безопасен: уже
 # сделанное пропускается, так можно, например, позже добавить ключ GitHub Actions.
 #
@@ -59,8 +59,9 @@ done
 [ "$admin" != "$DEPLOY_USER" ] || die "имя $DEPLOY_USER занято под деплой"
 # shellcheck source=/dev/null
 . /etc/os-release
-[ "${ID:-}" = ubuntu ] && [ "${VERSION_ID:-}" = "24.04" ] \
-  || die "скрипт рассчитан на Ubuntu 24.04, а здесь ${PRETTY_NAME:-неизвестная система}"
+# Обе версии — LTS, Docker выпускает для них пакеты (noble и resolute)
+[ "${ID:-}" = ubuntu ] && { [ "${VERSION_ID:-}" = "24.04" ] || [ "${VERSION_ID:-}" = "26.04" ]; } \
+  || die "скрипт рассчитан на Ubuntu 24.04 или 26.04, а здесь ${PRETTY_NAME:-неизвестная система}"
 
 export DEBIAN_FRONTEND=noninteractive
 

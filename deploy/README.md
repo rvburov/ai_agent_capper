@@ -7,7 +7,7 @@
 | `docker-compose.yml` | Сервисы: caddy, api, worker, postgres, redis, backup |
 | `Caddyfile` | HTTPS, статика интерфейса, `/api/*` на FastAPI, заголовки безопасности |
 | `.env.example` | Образец `deploy/.env`: домен, пароли, ключи, бэкапы |
-| `server-setup.sh` | Первичная настройка VPS (Ubuntu 24.04), один раз от root |
+| `server-setup.sh` | Первичная настройка VPS (Ubuntu 24.04 или 26.04), один раз от root |
 | `deploy.sh` | Деплой: код, сборка, копия базы, миграции, перезапуск, проверка здоровья |
 | `backup/` | Образ бэкапов: `backup.sh`, `restore-check.sh`, `restore.sh`, расписание `crontab` |
 | `../.github/workflows/deploy.yml` | Деплой из GitHub Actions после успешных проверок master |
@@ -37,7 +37,7 @@ cd /opt/ai_agent_capper/deploy
 
 ## 1. Сервер
 
-1. [Hetzner Cloud](https://console.hetzner.cloud) → новый проект → **Add Server**: локация **Helsinki**, образ **Ubuntu 24.04**, тип с 2 vCPU и 4 ГБ памяти (x86), ключ SSH — ваш публичный ключ (`~/.ssh/id_ed25519.pub`). Пароль root не нужен.
+1. [Hetzner Cloud](https://console.hetzner.cloud) → новый проект → **Add Server**: локация **Helsinki**, образ **Ubuntu 24.04** или **26.04**, тип с 2 vCPU и 4 ГБ памяти (x86), ключ SSH — ваш публичный ключ (`~/.ssh/id_ed25519.pub`). Пароль root не нужен.
 2. **Firewalls** → Create Firewall: входящие TCP 22, 80, 443 и UDP 443, применить к серверу. Это второй слой к `ufw` на сервере, и он важен: порты, которые публикует docker, обходят `ufw`.
 3. Запишите IPv4 сервера.
 
