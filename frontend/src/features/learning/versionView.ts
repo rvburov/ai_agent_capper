@@ -69,6 +69,8 @@ export interface CompareRow {
   ci: string | null;
   tolerance: string | null;
   ok: boolean | null;
+  /** Изменение токенов на анализ (доля): 0 — «столько же», а не «дороже». */
+  change?: number | null;
 }
 
 function metricRow(key: 'log_loss' | 'brier' | 'ece', m: MetricDiff, rule: Comparison['rule'], t: TFunction): CompareRow {
@@ -113,17 +115,23 @@ export function compareRows(c: Comparison, t: TFunction): CompareRow[] {
       ci: t('learning.compare.byLogs'),
       tolerance: null,
       ok: c.tokens_per_event.ok,
+      change: c.tokens_per_event.change,
     });
   }
   return rows;
 }
 
-/** Вывод по строке: «не хуже» / «лучше» / «хуже»; у токенов — «дешевле» / «дороже». */
-export type VerdictWord = 'notWorse' | 'worse' | 'better' | 'notBetter' | 'notMore' | 'more' | 'cheaper' | 'pricier';
+/** Вывод по строке: «не хуже» / «лучше» / «хуже»; у токенов — «дешевле» / «столько же» / «дороже». */
+export type VerdictWord = 'notWorse' | 'worse' | 'better' | 'notBetter' | 'notMore' | 'more' | 'cheaper' | 'pricier' | 'same';
 
 export function rowVerdict(row: CompareRow, rule: Comparison['rule']): { text: VerdictWord; kind: ChipKind; icon: IconName } | null {
   if (row.ok === null) return null;
-  if (row.key === 'tokens' || row.key === 'cost') return row.ok ? { text: 'cheaper', kind: 'good', icon: 'check' } : { text: 'pricier', kind: 'warn', icon: 'alert' };
+  if (row.key === 'tokens' || row.key === 'cost') {
+    if (row.ok) return { text: 'cheaper', kind: 'good', icon: 'check' };
+    // токенов столько же — не «дороже»: экономии нет, но и роста нет
+    if (row.change === 0) return { text: 'same', kind: 'outline', icon: 'info' };
+    return { text: 'pricier', kind: 'warn', icon: 'alert' };
+  }
   if (row.key === 'format_errors') return row.ok ? { text: 'notMore', kind: 'good', icon: 'check' } : { text: 'more', kind: 'bad', icon: 'x' };
   if (rule === 'improve' && row.key === 'log_loss') return row.ok ? { text: 'better', kind: 'good', icon: 'check' } : { text: 'notBetter', kind: 'outline', icon: 'info' };
   return row.ok ? { text: 'notWorse', kind: 'good', icon: 'check' } : { text: 'worse', kind: 'bad', icon: 'x' };

@@ -25,6 +25,16 @@
                      архив; рейтинги пересчитываются заново.
   weekly EMAIL     — отчет прошлой недели участнику (задача воркера по понедельникам) и его
                      уведомление weekly_report.
+  postmortem-start — начало разборов (postmortem_since), как при первом запуске очереди
+                     задачей воркера: на стеке воркер без расписания, а первая команда
+                     postmortems записала бы «сейчас» и не взяла бы ставку, рассчитанную до нее.
+                     Уже задано — не меняется.
+  postmortem-cleanup СТАВКА
+                   — убрать след сквозного сценария «ставка → архив → разбор → урок»
+                     (learning-loop.spec.ts): разборы матчей ставки с их вызовами Claude и
+                     пакетами и уроки из этих разборов — как cleanup КОД. Матчи архива
+                     остаются: повторная загрузка того же файла снова рассчитывает новую
+                     ставку, а разбор матча встает в очередь заново.
 """
 
 import asyncio
@@ -368,6 +378,47 @@ async def weekly(email: str) -> None:
         await engine.dispose()
 
 
+async def postmortem_start() -> None:
+    from app.services.postmortems import review_since
+
+    engine = create_engine()
+    try:
+        async with create_sessionmaker(engine)() as db:
+            since = await review_since(db, datetime.now(UTC))
+            await db.commit()
+            print(f"postmortem-start: {since.isoformat()}")
+    finally:
+        await engine.dispose()
+
+
+async def postmortem_cleanup(bet_id: int) -> None:
+    from app.db.models import BetLeg, Postmortem
+
+    engine = create_engine()
+    try:
+        async with create_sessionmaker(engine)() as db:
+            matches = list(await db.scalars(select(BetLeg.match_id).where(BetLeg.bet_id == bet_id)))
+            pms = list(await db.scalars(select(Postmortem).where(Postmortem.match_id.in_(matches))))
+            lesson_ids = {pm.lesson_id for pm in pms if pm.lesson_id is not None}
+            runs = [pm.agent_run_id for pm in pms if pm.agent_run_id is not None]
+            jobs = {pm.batch_job_id for pm in pms if pm.batch_job_id is not None}
+            codes = list(await db.scalars(select(Lesson.code).where(Lesson.id.in_(lesson_ids))))
+            if pms:
+                await db.execute(delete(Postmortem).where(Postmortem.id.in_([p.id for p in pms])))
+            if runs:
+                await db.execute(delete(AgentRun).where(AgentRun.id.in_(runs)))
+            # Пакет удаляется целиком, даже если в нем были разборы других матчей (у них
+            # batch_job_id станет NULL): после сценария на стенде не остается его пакетов
+            if jobs:
+                await db.execute(delete(BatchJob).where(BatchJob.id.in_(jobs)))
+            await db.commit()
+            print(f"postmortem-cleanup: разборов {len(pms)}, уроки {codes}")
+    finally:
+        await engine.dispose()
+    for code in codes:
+        await cleanup(code)
+
+
 def main() -> None:
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     if command == "ready" and len(sys.argv) in (3, 4):
@@ -384,10 +435,14 @@ def main() -> None:
         asyncio.run(eval_cleanup())
     elif command == "weekly" and len(sys.argv) == 3:
         asyncio.run(weekly(sys.argv[2]))
+    elif command == "postmortem-start":
+        asyncio.run(postmortem_start())
+    elif command == "postmortem-cleanup" and len(sys.argv) == 3:
+        asyncio.run(postmortem_cleanup(int(sys.argv[2])))
     else:
         raise SystemExit(
             "ready КОД | collect | cleanup КОД | eval-world | eval-collect | eval-cleanup"
-            " | weekly EMAIL"
+            " | weekly EMAIL | postmortem-start | postmortem-cleanup СТАВКА"
         )
 
 

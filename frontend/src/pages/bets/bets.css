@@ -111,6 +111,7 @@
 .bets-res.void { background: var(--surface-3); color: var(--fg-2); }
 .bets-res.open { background: var(--info-soft); color: var(--info-ink); }
 .bets-res.unknown { background: var(--surface-3); color: var(--fg-3); }
+.bets-res.none { background: var(--surface-3); color: var(--fg-3); }
 
 /* ---------- история ---------- */
 .bets-hist .card-head { align-items: center; }

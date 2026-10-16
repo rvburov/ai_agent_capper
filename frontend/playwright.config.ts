@@ -11,6 +11,7 @@ import { BASE_URL } from './e2e/support/stack';
  * - exclusive (1366 px): сценарии, которые меняют общее для всех состояние (валюта программы,
  *   инструкции анализа и замороженный набор),
  *   идут после остальных проектов; в других проектах они пропускаются.
+ * - loop (1366 px): сквозной сценарий этапа 5 learning-loop.spec.ts — после exclusive.
  * Стек поднимает scripts/e2e-stack.sh: временная база с миграциями, uvicorn, vite preview с
  * прокси /api. Нужны PostgreSQL и Redis, как для тестов backend. Уже запущенный стек
  * (bash scripts/e2e-stack.sh в другом терминале) переиспользуется, кроме CI.
@@ -62,6 +63,15 @@ export default defineConfig({
       testDir: './e2e/flows',
       testMatch: ['admin-settings-currency.spec.ts', 'learning-versions.spec.ts'],
       dependencies: ['desktop', 'mobile', 'mobile-360'],
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1366, height: 900 } },
+    },
+    // Сквозной сценарий этапа 5 (ставка → архив → разбор → урок → версия → откат): тоже меняет
+    // инструкции анализа и уроки, поэтому идет после exclusive, а не вместе с его сценариями
+    {
+      name: 'loop',
+      testDir: './e2e/flows',
+      testMatch: 'learning-loop.spec.ts',
+      dependencies: ['exclusive'],
       use: { ...devices['Desktop Chrome'], viewport: { width: 1366, height: 900 } },
     },
   ],

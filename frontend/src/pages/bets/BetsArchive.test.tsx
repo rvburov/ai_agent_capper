@@ -7,6 +7,7 @@ import {
   betAuto,
   betAwaiting,
   betLeg,
+  betLeg2,
   betLegacy,
   betOpen,
   betPage,
@@ -329,6 +330,36 @@ describe('Ставки: разбор ИИ', () => {
     expect(await within(await detailOf(9)).findByText(/^Разбор не получился/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Детали ставки №10' }));
     expect(await within(await detailOf(10)).findByText('Разбора нет: у событий ставки нет прогноза модели.')).toBeInTheDocument();
+  });
+
+  it('ставка рассчитана до начала разборов (before_start) — свой текст и вердикт по CLV', async () => {
+    renderBets({
+      history: [betAuto()],
+      over: { 'GET /api/bets/9/review': () => json(betReview({ state: 'not_reviewed', reason: 'before_start' }, [])) },
+    });
+    const detail = await detailOf(9);
+    expect(await within(detail).findByText('Разбора нет: ставка рассчитана до включения разборов ИИ. Разбираются ставки, рассчитанные позже.')).toBeInTheDocument();
+    expect(within(detail).getByText('По CLV, без ИИ:')).toBeInTheDocument();
+  });
+
+  it('проигранный экспресс рассчитан по архиву, у ноги со снятием исхода нет — «Без исхода», а не «Не записан»', async () => {
+    const lost = betAuto({
+      status: 'lost',
+      profit: '-1320.00',
+      payout: '0.00',
+      bank_after: '46680.00',
+      legs: [
+        betLeg({ id: 91, result: 'loss', score: '0:2', settled_at: '2026-10-12T08:14:00Z', result_source: 'auto', closing: archiveClosing(), score_outcomes: null, match: { ...betLeg().match, id: 191, day: '2026-10-09' } }),
+        betLeg2({ id: 92, result: null, score: null, settled_at: null, result_source: null, score_outcomes: null, match: { ...betLeg2().match, id: 192, day: '2026-10-09' } }),
+      ],
+    });
+    renderBets({ history: [lost], over: { 'GET /api/bets/9/review': () => json(betReview({ state: 'pending' }, [])) } });
+    const detail = await detailOf(9);
+    const rows = within(within(detail).getByRole('table', { name: 'События ставки №9' })).getAllByRole('row').slice(1);
+    expect(rows[0]).toHaveTextContent('Не зашло');
+    expect(rows[1]).toHaveTextContent('Без исхода');
+    expect(rows[1]).not.toHaveTextContent('Не записан');
+    expect(within(detail).queryByText(/старым ботом/)).toBeNull();
   });
 
   it('возврат не разбирается — запроса разбора нет', async () => {

@@ -92,6 +92,21 @@ export function measureOf(saving: Saving, admin: boolean, t: TFunction): Measure
   };
 }
 
+/**
+ * Цена проверки меры «Оценка матча на Sonnet 5.5» (model_check сервера): один прогон
+ * замороженного набора через Batch из бюджета проверок — оценка, худший случай и остаток бюджета.
+ * Сервер не прислал (у модели нет цены) — словами без суммы.
+ */
+export function modelCheckText(check: AiUsage['model_check'], t: TFunction): string {
+  if (!check) return t('costs.savings.sonnetSave');
+  return t(check.estimate_source === 'live' ? 'costs.savings.sonnetCheckLive' : 'costs.savings.sonnetCheckSettings', {
+    amount: formatUsd(check.estimate_usd),
+    worst: formatUsd(check.worst_usd),
+    left: formatUsd(check.budget_left_usd),
+    events: t(check.set_frozen ? 'costs.savings.sonnetEvents' : 'costs.savings.sonnetEventsPlanned', { count: check.events }),
+  });
+}
+
 export function SavingsCard({ usage, settings, admin, period }: { usage: AiUsage; settings: AgentSettings; admin: boolean; period: Period }) {
   const { t } = useTranslation();
   const items: Measure[] = [
@@ -102,7 +117,7 @@ export function SavingsCard({ usage, settings, admin, period }: { usage: AiUsage
       icon: 'flask',
       title: t('costs.savings.sonnetTitle'),
       text: t('costs.savings.sonnetText', { model: modelLabel(settings.analysis_model) }),
-      save: t('costs.savings.sonnetSave'),
+      save: modelCheckText(usage.model_check, t),
       chip: { kind: 'outline', icon: 'flask', text: t('costs.savings.notChecked') },
     },
     {

@@ -33,13 +33,18 @@ export const VERDICT_CHIP: Record<Verdict, ChipMeta> = {
   model_error: { kind: 'serious', icon: 'alert' },
 };
 
-/** Исход ноги на экране: open — еще не сыграно, unknown — старый бот исход не записал. */
-export type LegShown = 'win' | 'loss' | 'void' | 'open' | 'unknown';
+/**
+ * Исход ноги на экране: open — еще не сыграно, unknown — старый бот исход не записал, none —
+ * ставка приложения рассчитана без исхода этой ноги (экспресс проигран другой ногой по архиву,
+ * а здесь снятие, неявка или матча еще нет в архиве — сервер исход не ставит).
+ */
+export type LegShown = 'win' | 'loss' | 'void' | 'open' | 'unknown' | 'none';
 
-export function legShown(bet: Pick<BetItem, 'status'>, leg: Pick<BetLeg, 'result'>): LegShown {
+export function legShown(bet: Pick<BetItem, 'status'> & Partial<Pick<BetItem, 'source'>>, leg: Pick<BetLeg, 'result'>): LegShown {
   if (bet.status === 'void') return 'void';
   if (leg.result) return leg.result;
-  return bet.status === 'open' ? 'open' : 'unknown';
+  if (bet.status === 'open') return 'open';
+  return bet.source === 'app' ? 'none' : 'unknown';
 }
 
 export const LEG_ICON: Record<LegShown, IconName> = {
@@ -48,6 +53,7 @@ export const LEG_ICON: Record<LegShown, IconName> = {
   void: 'refresh',
   open: 'clock',
   unknown: 'info',
+  none: 'ban',
 };
 
 export const LEG_CHIP: Record<LegShown, ChipMeta> = {
@@ -56,6 +62,7 @@ export const LEG_CHIP: Record<LegShown, ChipMeta> = {
   void: { kind: 'outline', icon: 'refresh' },
   open: { kind: 'info', icon: 'clock' },
   unknown: { kind: 'outline', icon: 'info' },
+  none: { kind: 'outline', icon: 'ban' },
 };
 
 /** Ключ рынка в текстах (в названии рынка есть точка — разделитель ключей i18next). */

@@ -377,7 +377,8 @@ function RulesCard({ instructions }: { instructions: StrategyVersion[] }) {
   }
   const chips = comparison
     ? compareRows(comparison, t)
-        .filter((row) => row.ok !== null)
+        // правило улучшения проверяет лог-лосс и ошибки формата; токены — только у правила экономии
+        .filter((row) => row.ok !== null && (comparison.rule !== 'improve' || row.key !== 'tokens'))
         .map((row) => (
           <Chip key={row.key} kind={row.ok ? 'good' : 'bad'} icon={row.ok ? 'check' : 'x'}>
             {ruleChipText(row.key, comparison, row.diff, t)}

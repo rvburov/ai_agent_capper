@@ -1,4 +1,6 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+
+import { LEARNING_TABS, paths } from '../../src/app/paths';
 
 import { memberDevice } from '../support/analysis';
 import { expectScreenLayout } from '../support/layout';
@@ -11,11 +13,15 @@ import { placeBet, settleWon } from './dashboard-steps';
 // e2e/support/routes.ts): на телефоне 375 px и 360 px (метка @360), в светлой и темной темах — нет
 // прокрутки вбок, зоны нажатия не меньше 40 px, ошибок консоли и ответов 5xx нет (их ловит фикстура
 // device). Зоны нажатия меряются по всей странице — с шапкой, боковой панелью и нижними вкладками,
-// а у участника и администратора еще и с открытым колокольчиком (окно уведомлений). Данные на
-// экранах настоящие: у участника — анализ и рассчитанная ставка, у администратора — его разделы,
+// а у участника и администратора еще и с открытым колокольчиком (окно уведомлений) и окнами этапа 5
+// (ставка с разбором ИИ, предложение правил, предложение урока). Данные на экранах настоящие: у
+// участника — анализ и рассчитанная ставка, у администратора — его разделы, «Обучение модели»,
 // «ИИ и расходы» и кабинет.
 
 const THEMES = ['light', 'dark'] as const;
+
+// Виды общих экранов у администратора (свои кнопки и блоки) — сверх адресов из routes.ts
+const ADMIN_VIEWS = ['/', '/costs', '/profile/notifications', '/profile/data', ...LEARNING_TABS.map((tab) => paths.learning(tab))];
 
 // «Перейти к содержимому» — для клавиатуры: спрятана за верхним краем окна (top: -60px), пока на
 // ней нет фокуса, пальцем на нее не нажимают
@@ -69,6 +75,30 @@ async function checkBell(device: Device): Promise<void> {
   });
 }
 
+/**
+ * Окно экрана этапа 5, которое открывается без особых данных: адрес, кнопка, окно — раскладка всей
+ * страницы с открытым окном в обеих темах. Окна с данными (урок, проверка урока, версия, прогон,
+ * разбор ставки) проверяют свои сценарии: learning-lessons, learning-versions, learning-loop.
+ */
+async function checkWindow(device: Device, url: string, open: (page: Page) => Locator, name: string): Promise<void> {
+  const page = device.page;
+  await test.step(`окно «${name}» (${url})`, async () => {
+    await page.goto(url);
+    await settled(page, false);
+    await open(page).click();
+    const dialog = page.getByRole('dialog', { name });
+    await expect(dialog).toBeVisible();
+    await expect.poll(() => dialog.locator('.skeleton').count(), { timeout: 15_000 }).toBe(0);
+    for (const scheme of THEMES) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await expectScreenLayout(page, { ...PAGE_LAYOUT, root: page.locator('body') });
+    }
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+  });
+}
+
 test('список маршрутов — из router.tsx, каждый описан в routes.ts', () => {
   const patterns = routePatterns();
   expect(patterns).toEqual(expect.arrayContaining(['/login', '/index', 'bets', 'analytics', 'players/:id/:tab?', 'costs', 'profile/:tab?', 'admin/:tab?', '*']));
@@ -103,12 +133,17 @@ test('все экраны на телефоне: без прокрутки вб�
     ...(await checkUrls(guest, urls.filter((u) => u.who === 'guest'))),
     ...(await checkUrls(m, urls.filter((u) => u.who === 'member'))),
     ...(await checkUrls(admin, urls.filter((u) => u.who === 'admin'))),
-    // у администратора свои виды общих экранов: дела на главной, бюджет ключа, разделы кабинета
-    ...(await checkUrls(admin, ['/', '/costs', '/profile/notifications', '/profile/data'].map((url) => ({ url, who: 'admin' as const, pattern: 'вид администратора' })))),
+    // у администратора свои виды общих экранов: дела на главной, бюджет ключа, разделы кабинета,
+    // «Обучение модели» с решениями (предложить урок, заморозить набор, перекалибровать, JSONL)
+    ...(await checkUrls(admin, ADMIN_VIEWS.map((url) => ({ url, who: 'admin' as const, pattern: 'вид администратора' })))),
   ];
-  expect(seen.length).toBe(urls.length + 4);
+  expect(seen.length).toBe(urls.length + ADMIN_VIEWS.length);
   await checkBell(m);
   await checkBell(admin);
+  // окна этапа 5: ставка с блоком «Разбор ИИ» (нижний лист), предложение правил суммы, урок
+  await checkWindow(m, '/bets', (page) => page.getByRole('region', { name: 'История ставок' }).getByRole('button', { name: new RegExp(`^Ставка №${id},`) }), `Ставка №${id}`);
+  await checkWindow(m, '/profile/bank', (page) => page.getByRole('button', { name: 'Предложить изменение' }).first(), 'Предложить изменение правил');
+  await checkWindow(admin, '/learning', (page) => page.getByRole('button', { name: 'Предложить урок' }).first(), 'Предложить урок');
 });
 
 test('гостю закрыты экраны приложения: адрес из списка маршрутов ведет на вход', async ({ device, isMobile }) => {

@@ -156,6 +156,27 @@ describe('ИИ и расходы', () => {
     expect(within(before).getByText(/цена и токены — по логам прогонов на наборе \(Batch со скидкой, без новостей\)/)).toBeInTheDocument();
   });
 
+  it('«Оценка матча на Sonnet 5.5»: цена проверки и худший случай — model_check сервера; нет — словами', async () => {
+    const check = (over: Record<string, unknown> = {}) => ({
+      model: 'claude-sonnet-5-5', events: 250, set_frozen: true, estimate_usd: 6.75, estimate_source: 'settings' as const, worst_usd: 13.5, budget_left_usd: 18.16, ...over,
+    });
+    const first = renderCosts({ api: { 'GET /api/ai/usage': () => json(aiUsageFull({ model_check: check() })) } });
+    const savings = (await screen.findByRole('heading', { name: 'Где экономим' })).closest('section')!;
+    expect(
+      within(savings).getByText(
+        'Экономия: проверка ≈ $6,75 из бюджета проверок по ценам модели (250 событий набора, Batch), худший случай $13,50 · остаток бюджета $18,16',
+      ),
+    ).toBeInTheDocument();
+    first.unmount();
+    const second = renderCosts({ api: { 'GET /api/ai/usage': () => json(aiUsageFull({ model_check: check({ estimate_source: 'live', estimate_usd: 3.1, set_frozen: false, events: 251 }) })) } });
+    const live = (await screen.findByRole('heading', { name: 'Где экономим' })).closest('section')!;
+    expect(within(live).getByText(/^Экономия: проверка ≈ \$3,10 из бюджета проверок по прошлым прогонам \(251 событие, набор еще не заморожен, Batch\)/)).toBeInTheDocument();
+    second.unmount();
+    renderCosts({ api: { 'GET /api/ai/usage': () => json(aiUsageFull({ model_check: null })) } });
+    const none = (await screen.findByRole('heading', { name: 'Где экономим' })).closest('section')!;
+    expect(within(none).getByText('Экономия: проверка — из бюджета проверок')).toBeInTheDocument();
+  });
+
   it('«До и после»: цена по вашим вызовам (live) — своя подпись; основы нет — строки цены нет', async () => {
     const side = (code: string, price: number | null) => ({
       version_id: code === 'v3' ? 1 : 2, code, name: null, status: code === 'v3' ? ('archived' as const) : ('active' as const), prompt_version: `analysis.${code}`,

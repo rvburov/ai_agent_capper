@@ -171,6 +171,9 @@ describe('Ставки: вид', () => {
     expect(legShown({ status: 'void' }, { result: 'win' })).toBe('void');
     expect(legShown({ status: 'open' }, { result: null })).toBe('open');
     expect(legShown({ status: 'lost' }, { result: null })).toBe('unknown');
+    expect(legShown({ status: 'lost', source: 'legacy' }, { result: null })).toBe('unknown');
+    // проигранный экспресс приложения рассчитан по архиву без исхода ноги со снятием
+    expect(legShown({ status: 'lost', source: 'app' }, { result: null })).toBe('none');
     expect(legShown({ status: 'won' }, { result: 'win' })).toBe('win');
   });
 

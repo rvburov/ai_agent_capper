@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  comparison,
   evalPlan,
   evalRun,
   evalSet,
@@ -60,6 +61,31 @@ function renderVersions({ admin = false, versions = versionsWithCandidate(), set
 const panel = () => screen.getByRole('tabpanel', { name: 'Версии стратегии' });
 
 describe('«Версии стратегии»', () => {
+  it('правило улучшения: в правилах приема — лог-лосс и формат, без токенов; токенов столько же — «столько же», а не «дороже»', async () => {
+    const [base, cand] = versionsWithCandidate();
+    const same = comparison({
+      rule: 'improve',
+      verdict: 'noise',
+      passed: false,
+      log_loss: { a: 0.484, b: 0.484, diff: 0, low: 0, high: 0, margin: 0, ok: false },
+      brier: { a: 0.156, b: 0.156, diff: 0, low: 0, high: 0, margin: null, ok: null },
+      ece: { a: 0.092, b: 0.092, diff: 0, low: 0, high: 0, margin: null, ok: null },
+      tokens_per_event: { a: 5900, b: 5900, change: 0, ok: false },
+      cost_per_event: { a: 0.014, b: 0.014, change: 0, ok: false },
+    });
+    const versions = [base!, { ...cand!, goal: 'quality' as const, comparison: same }];
+    const { user } = renderVersions({ versions });
+    const rules = (await within(panel()).findByRole('heading', { name: 'Как принимается новая версия' })).closest('section')!;
+    expect(await within(rules).findByText('Ошибок формата: 0')).toBeInTheDocument();
+    expect(within(rules).getByText('ДИ лог-лосса: 0,000…0,000')).toBeInTheDocument();
+    expect(within(rules).queryByText(/^Токенов/)).toBeNull();
+    await user.click(within(panel()).getByRole('button', { name: 'Сравнить v3 и v4' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Сравнение v3 и v4' });
+    const tokens = (await within(dialog).findByText('Токенов на анализ')).closest('tr')!;
+    expect(tokens).toHaveTextContent('столько же');
+    expect(tokens).not.toHaveTextContent('дороже');
+  });
+
   it('участник: таблица версий — лог-лосс, разница с рынком и ДИ, статус; правила приема с итогом кандидата; включать нельзя', async () => {
     const { user, calls } = renderVersions();
     const table = await within(panel()).findByRole('table', { name: 'Инструкции анализа' });
