@@ -239,7 +239,13 @@ export function NotificationsBell() {
                   <Icon name="sliders" />
                   {t('notifications.settings')}
                 </Link>
-                <span className="xsmall muted">{hidden.size ? t('notifications.someHidden') : t('notifications.channels')}</span>
+                <span className="xsmall muted">
+                  {hidden.size
+                    ? t('notifications.someHidden')
+                    : prefs.data?.push_available
+                      ? t('notifications.channels')
+                      : t('notifications.channelsNoPush')}
+                </span>
               </div>
             </div>
           </>,

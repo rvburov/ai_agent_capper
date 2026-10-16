@@ -25,6 +25,8 @@ const GROUPS = [
   'errors.bookmaker',
   'errors.account',
   'errors.notification',
+  // push (этап 6): ключ VAPID, подписка, тестовый push
+  'errors.push',
   'errors.common.currency_changed',
   'errors.admin.currency_same',
   'errors.admin.currency_rate_base',

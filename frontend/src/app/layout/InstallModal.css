@@ -1,0 +1,10 @@
+/* Окно установки (mockup/js/pwa.js, installModal). Шаги и кнопки iPhone — components/Pwa.css. */
+.install-body { gap: 14px; }
+.install-app { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.install-app .app-icon { width: 56px; height: 56px; }
+.install-app-text { min-width: 0; }
+.install-app-name { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); }
+.install-pros { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); color: var(--fg-2); }
+.install-pros li { display: flex; gap: 8px; align-items: flex-start; }
+.install-pros svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--accent-ink); }
+.install-body p { margin: 0; }

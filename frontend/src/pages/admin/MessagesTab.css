@@ -14,3 +14,4 @@
 
 .adm-msg-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
 .adm-msg-by { display: block; margin-top: 2px; }
+.adm-msg-push { gap: 8px; }

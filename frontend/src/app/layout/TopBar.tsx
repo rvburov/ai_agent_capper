@@ -13,6 +13,8 @@ interface TopBarProps {
   crumbs?: string;
   me: Me;
   onLogout: () => void;
+  /** Идет выход (отзыв push и /auth/logout): кнопка «Выйти» неактивна, с индикатором. */
+  loggingOut?: boolean;
 }
 
 /**
@@ -20,7 +22,7 @@ interface TopBarProps {
  * Знака AI Capper здесь нет: на компьютере он в боковой панели, а на телефоне заголовку раздела
  * нужна вся ширина (в макете знак в шапке скрыт до 960 px).
  */
-export function TopBar({ title, crumbs, me, onLogout }: TopBarProps) {
+export function TopBar({ title, crumbs, me, onLogout, loggingOut = false }: TopBarProps) {
   const { t } = useTranslation();
   const { resolved, toggle } = useTheme();
   const dark = resolved === 'dark';
@@ -42,7 +44,7 @@ export function TopBar({ title, crumbs, me, onLogout }: TopBarProps) {
           onClick={toggle}
         />
         <NotificationsBell />
-        <UserMenu me={me} onLogout={onLogout} />
+        <UserMenu me={me} onLogout={onLogout} loggingOut={loggingOut} />
       </div>
     </header>
   );

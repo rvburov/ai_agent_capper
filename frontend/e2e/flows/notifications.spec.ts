@@ -82,7 +82,7 @@ test('выключенный вид: колокольчик его не пока
   await expect.poll(kinds).toContain('ai_mode_request');
   bell = await openBell(page);
   await expect(bell.getByRole('button', { name: new RegExp(title) })).toHaveCount(1);
-  await expect(bell.getByText('На сайте · push появится на этапе 6')).toBeVisible();
+  await expect(bell.getByText('На сайте · push не включен')).toBeVisible();
   await closeBell(page);
 
   // выключили снова — пришедшее колокольчик прячет (оно не удаляется: включили — снова видно)

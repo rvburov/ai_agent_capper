@@ -1,38 +1,59 @@
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
 import type { Me } from '../../../api/hooks/useMe';
-import { Button, Card, Chip, Icon, Skeleton, useToast } from '../../../components';
+import { Button, Callout, Card, Chip, Icon, Skeleton, useToast } from '../../../components';
 import { useDataUploads } from '../../../features/admin/dataUploads';
 import { useAdminAttention } from '../../../features/admin/useAdminAttention';
 import { apiErrorText } from '../../../features/analysis/codes';
 import { useAiBudget } from '../../../features/ai/useAiBudget';
-import { timeZoneDative, timeZoneName } from '../../../features/profile/timezones';
+import { usePushChannel, type PushChannel } from '../../../features/pwa/api';
+import { timeZoneName } from '../../../features/profile/timezones';
 import { prefRows, useNotificationPrefs, useSetNotificationPref, type NotificationPrefs, type PrefRow } from '../../../features/notifications/prefs';
+import { cx } from '../../../lib/cx';
 import { formatDate, formatNumber, formatPercent, formatRelative, formatUsd } from '../../../lib/format';
-import { ProfileItem } from '../ProfileItem';
+import { MOBILE_QUERY, useMediaQuery } from '../../../lib/useMediaQuery';
 import { LoadError } from '../LoadError';
+import { ChannelsCard, focusEnablePush } from './ChannelsCard';
+import { DevicesCard } from './DevicesCard';
+import { PushLookCard } from './PushLookCard';
+import { QuietCard } from './QuietCard';
 import './notifications.css';
 
 /*
- * Кабинет → «Уведомления» (panelNotifications макета): «О чем сообщать» — виды по строкам с
- * переключателем «на сайте» (GET/PUT /api/me/notification-prefs, сохраняется сразу);
- * обязательные — включены и неактивны; push и тихие часы — неактивны до этапа 6. Какие строки
+ * Кабинет → «Уведомления» (panelNotifications макета, Р26): «О чем сообщать» — виды по строкам
+ * с переключателями «на сайте» и push (GET/PUT /api/me/notification-prefs, сохраняется сразу);
+ * «Каналы» — push на этом устройстве; «Устройства с push»; «Тихие часы»; «Как выглядит push».
+ * Обязательные виды на сайте приходят всегда, push у них выключается. Пока push нет ни на
+ * одном устройстве (push_available, В5), столбец «Push» и тихие часы неактивны. Какие строки
  * есть у человека, решает сервер (роль и режим ключа); числа в подписях — из лимита ИИ и дел
  * администратора, которые уже загружены в приложении.
  */
 
-// Тихие часы по умолчанию — как в макете; заработают вместе с push (этап 6)
-const HOURS = ['23:00', '08:00'] as const;
-
 export function NotificationsTab({ me }: { me: Me }) {
+  const mobile = useMediaQuery(MOBILE_QUERY);
+  const push = usePushChannel();
+  // На телефоне сначала — push на этом устройстве, потом длинный список видов
+  if (mobile) {
+    return (
+      <div className="profile-col">
+        <ChannelsCard push={push} />
+        <DevicesCard push={push} />
+        <WhatCard me={me} push={push} />
+        <QuietCard tz={me.tz} available={push.available} />
+        <PushLookCard />
+      </div>
+    );
+  }
   return (
     <div className="grid">
       <div className="col-8 profile-col">
-        <WhatCard me={me} />
+        <WhatCard me={me} push={push} />
+        <QuietCard tz={me.tz} available={push.available} />
       </div>
       <div className="col-4 profile-col">
-        <ChannelsCard />
-        <QuietCard tz={me.tz} />
+        <ChannelsCard push={push} />
+        <DevicesCard push={push} />
+        <PushLookCard />
       </div>
     </div>
   );
@@ -118,13 +139,15 @@ function useRowHint(me: Me, prefs: NotificationPrefs | undefined) {
   };
 }
 
-function WhatCard({ me }: { me: Me }) {
+function WhatCard({ me, push }: { me: Me; push: PushChannel }) {
   const { t } = useTranslation();
   const prefs = useNotificationPrefs();
   const hint = useRowHint(me, prefs.data);
   const rows = prefRows(prefs.data);
   const common = rows.filter((row) => !row.admin);
   const forAdmin = rows.filter((row) => row.admin);
+  // Push есть хотя бы на одном устройстве аккаунта (В5): настройки общие, менять можно отовсюду
+  const pushOn = prefs.data?.push_available ?? push.available;
 
   let body;
   if (prefs.error && !prefs.data) {
@@ -139,17 +162,17 @@ function WhatCard({ me }: { me: Me }) {
           <span>{t('profile.notifs.head.site')}</span>
           <span>
             {t('profile.notifs.head.push')}
-            <small>{t('profile.notifs.head.pushStage')}</small>
+            {!pushOn && <small>{t('profile.notifs.head.pushOff')}</small>}
           </span>
         </div>
         {common.map((row) => (
-          <Row key={row.id} row={row} hint={hint(row)} />
+          <Row key={row.id} row={row} hint={hint(row)} pushOn={pushOn} />
         ))}
         {forAdmin.length > 0 && (
           <>
             <div className="profile-group-label">{t('profile.notifs.forAdmin')}</div>
             {forAdmin.map((row) => (
-              <Row key={row.id} row={row} hint={hint(row)} />
+              <Row key={row.id} row={row} hint={hint(row)} pushOn={pushOn} />
             ))}
           </>
         )}
@@ -158,7 +181,26 @@ function WhatCard({ me }: { me: Me }) {
   }
 
   return (
-    <Card id="profile-notif" className="profile-anchor" title={t('profile.notifs.title')} subtitle={t('profile.notifs.subtitle')}>
+    <Card
+      id="profile-notif"
+      className={cx('profile-anchor', !pushOn && 'profile-notif-off')}
+      title={t('profile.notifs.title')}
+      subtitle={t('profile.notifs.subtitle')}
+    >
+      {prefs.data && !pushOn && (
+        <Callout kind="info" icon="bell">
+          <div className="stack profile-push-first">
+            <span>
+              <Trans i18nKey="profile.notifs.pushFirstCallout" components={{ b: <b /> }} />
+            </span>
+            <div>
+              <Button size="sm" icon="bell" onClick={focusEnablePush}>
+                {t('profile.notifs.enablePush')}
+              </Button>
+            </div>
+          </div>
+        </Callout>
+      )}
       {body}
       <p className="profile-note">
         <Icon name="lock" />
@@ -168,7 +210,7 @@ function WhatCard({ me }: { me: Me }) {
   );
 }
 
-function Row({ row, hint }: { row: PrefRow; hint: string }) {
+function Row({ row, hint, pushOn }: { row: PrefRow; hint: string; pushOn: boolean }) {
   const { t } = useTranslation();
   const toast = useToast();
   const set = useSetNotificationPref();
@@ -176,12 +218,23 @@ function Row({ row, hint }: { row: PrefRow; hint: string }) {
   const lower = title.charAt(0).toLowerCase() + title.slice(1);
   const hintId = `profile-n-${row.id}-hint`;
 
-  function change(onSite: boolean) {
+  function changeSite(onSite: boolean) {
     set.mutate(
       { kinds: row.kinds, onSite },
       {
         onSuccess: () =>
           toast.show(t(onSite ? 'profile.notifs.toastOn' : 'profile.notifs.toastOff', { title: lower }), { icon: onSite ? 'bell' : 'x' }),
+        onError: (error) => toast.show(apiErrorText(error), { icon: 'alert' }),
+      },
+    );
+  }
+
+  function changePush(push: boolean) {
+    set.mutate(
+      { kinds: row.kinds, push },
+      {
+        onSuccess: () =>
+          toast.show(t(push ? 'profile.notifs.pushToastOn' : 'profile.notifs.pushToastOff', { title: lower }), { icon: push ? 'bell' : 'bellOff' }),
         onError: (error) => toast.show(apiErrorText(error), { icon: 'alert' }),
       },
     );
@@ -218,99 +271,27 @@ function Row({ row, hint }: { row: PrefRow; hint: string }) {
               aria-label={t('profile.notifs.siteLabel', { title })}
               aria-describedby={hintId}
               checked={row.onSite}
-              onChange={(event) => change(event.target.checked)}
+              onChange={(event) => changeSite(event.target.checked)}
             />
             <span />
           </span>
         )}
       </div>
       <div className="profile-notif-cell">
-        <span className="switch">
+        <span className="switch" title={pushOn ? undefined : t('profile.notifs.pushFirst')}>
           <input
             type="checkbox"
             role="switch"
             id={`profile-n-${row.id}-push`}
-            aria-label={t('profile.notifs.pushLabel', { title })}
-            checked={false}
-            disabled
-            readOnly
+            aria-label={pushOn ? t('profile.notifs.pushLabel', { title }) : t('profile.notifs.pushLabelOff', { title })}
+            aria-describedby={hintId}
+            checked={pushOn && row.push}
+            disabled={!pushOn}
+            onChange={(event) => changePush(event.target.checked)}
           />
           <span />
         </span>
       </div>
     </div>
-  );
-}
-
-function ChannelsCard() {
-  const { t } = useTranslation();
-  return (
-    <Card
-      id="profile-channels"
-      className="profile-anchor"
-      title={t('profile.notifs.channels.title')}
-      subtitle={t('profile.notifs.channels.subtitle')}
-      foot={
-        <Button icon="bell" disabled title={t('profile.notifs.channels.pushSoon')}>
-          {t('profile.notifs.channels.allowPush')}
-        </Button>
-      }
-    >
-      <div className="profile-list">
-        <ProfileItem
-          icon="bell"
-          iconKind="good"
-          title={t('profile.notifs.channels.site')}
-          titleExtra={
-            <Chip kind="good" icon="check">
-              {t('profile.notifs.channels.always')}
-            </Chip>
-          }
-          meta={t('profile.notifs.channels.siteMeta')}
-          below
-        />
-        <ProfileItem
-          icon="device"
-          title={t('profile.notifs.channels.push')}
-          titleExtra={
-            <Chip kind="outline" icon="clock">
-              {t('profile.notifs.stage6')}
-            </Chip>
-          }
-          meta={t('profile.notifs.channels.pushMeta')}
-          below
-        />
-      </div>
-    </Card>
-  );
-}
-
-function QuietCard({ tz }: { tz: string }) {
-  const { t } = useTranslation();
-  const dative = timeZoneDative(t, tz);
-  const zone = dative ? t('profile.notifs.quiet.tzCity', { city: dative }) : t('profile.notifs.quiet.tzName', { zone: timeZoneName(t, tz) });
-  return (
-    <Card
-      id="profile-quiet"
-      title={t('profile.notifs.quiet.title')}
-      subtitle={t('profile.notifs.quiet.subtitle', { zone })}
-      actions={
-        <Chip kind="outline" icon="clock">
-          {t('profile.notifs.stage6')}
-        </Chip>
-      }
-    >
-      <div className="profile-time">
-        {(['from', 'to'] as const).map((part, i) => (
-          <div className="field" key={part}>
-            <label className="field-label" htmlFor={`profile-quiet-${part}`}>
-              <span>{t(`profile.notifs.quiet.${part}`)}</span>
-            </label>
-            <input id={`profile-quiet-${part}`} className="input mono" value={HOURS[i]} disabled readOnly />
-          </div>
-        ))}
-      </div>
-      <p className="xsmall muted profile-quiet-note">{t('profile.notifs.quiet.note')}</p>
-    </Card>
   );
 }

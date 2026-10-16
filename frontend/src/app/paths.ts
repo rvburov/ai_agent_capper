@@ -29,6 +29,7 @@ export const paths = {
   login: '/login',
   register: '/register',
   reset: '/reset',
+  offline: '/offline',
   home: '/',
   newAnalysis: '/new',
   analysis: (id: string | number) => `/analysis/${encodeURIComponent(String(id))}`,

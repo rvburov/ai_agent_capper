@@ -8,9 +8,12 @@ import type { AdminUser } from './types';
 
 /*
  * «Администрирование → Сообщение» (PANELS.message макета admin.js): короткое уведомление всем
- * участникам или одному — в центр уведомлений на сайте (push — этап 6). Отправленные — те же
- * записи «Сообщение участникам», что в журнале. Сколько получит «всем», считает сервер
- * (recipients_all в GET /api/admin/messages); список «одному» — активные люди, кроме вас.
+ * участникам или одному — в центр уведомлений на сайте и, с флажком «Также push» (В8), push
+ * тем, у кого он включен. Отправленные — те же записи «Сообщение участникам», что в журнале.
+ * Сколько получит «всем» и у скольких из них push, считает сервер (recipients_all и
+ * push_recipients_all в GET /api/admin/messages; у одного — предпросмотр POST с preview);
+ * администратор видит только число, без устройств (Р14). Список «одному» — активные люди,
+ * кроме вас.
  */
 
 export type AdminMessage = components['schemas']['MessageOut'];
@@ -45,11 +48,32 @@ export function useAdminMessages() {
   });
 }
 
+/**
+ * Есть ли push у одного выбранного получателя: предпросмотр (preview — без отправки) отдает
+ * push_recipients. Предпросмотру нужен текст сообщения, поэтому — только когда он введен;
+ * число не зависит от текста, и запрос повторяется только при смене получателя.
+ */
+export function useRecipientPush(userId: number | null, text: string) {
+  return useQuery({
+    queryKey: [...messageKeys.list, 'push', userId],
+    queryFn: async () => {
+      const out = await unwrap(api.POST('/api/admin/messages', { body: { text, user_id: userId, preview: true, also_push: true } }));
+      return out.push_recipients;
+    },
+    enabled: userId !== null && text !== '',
+    staleTime: 60_000,
+  });
+}
+
 export function useSendMessage() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: { text: string; userId: number | null }) =>
-      unwrap(api.POST('/api/admin/messages', { body: { text: body.text, user_id: body.userId, preview: false } })),
+    mutationFn: (body: { text: string; userId: number | null; alsoPush: boolean }) =>
+      unwrap(
+        api.POST('/api/admin/messages', {
+          body: { text: body.text, user_id: body.userId, preview: false, also_push: body.alsoPush },
+        }),
+      ),
     networkMode: 'always',
     onSuccess: () => invalidateAdmin(client),
   });

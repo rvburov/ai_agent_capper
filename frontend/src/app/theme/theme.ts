@@ -22,6 +22,24 @@ export function applyThemeChoice(choice: ThemeChoice): void {
   const root = document.documentElement;
   if (choice === 'system') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', choice);
+  syncThemeColor(choice);
+}
+
+/**
+ * Цвет строки состояния телефона (meta theme-color в index.html: светлый и темный по
+ * prefers-color-scheme). Тема выбрана вручную — оба тега берут цвет этой темы, «как в системе» —
+ * каждый свой. Исходный цвет тега запоминается в data-color.
+ */
+export function syncThemeColor(choice: ThemeChoice): void {
+  const metas = [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')];
+  for (const meta of metas) {
+    if (!meta.dataset.color) meta.dataset.color = meta.content;
+  }
+  const colorOf = (theme: ResolvedTheme) => metas.find((meta) => meta.media.includes(theme))?.dataset.color;
+  for (const meta of metas) {
+    const color = choice === 'system' ? meta.dataset.color : colorOf(choice);
+    if (color) meta.content = color;
+  }
 }
 
 export function resolveTheme(choice: ThemeChoice, systemDark: boolean): ResolvedTheme {

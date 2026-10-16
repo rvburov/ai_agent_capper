@@ -44,6 +44,8 @@ export interface DeviceOptions {
   /** Свой IP-адрес; по умолчанию случайный из 10.0.0.0/8. */
   ip?: string;
   userAgent?: string;
+  /** Service worker приложения: по умолчанию выключен (playwright.config.ts), PWA — 'allow'. */
+  serviceWorkers?: 'allow' | 'block';
 }
 
 export function freshIp(): string {
@@ -131,6 +133,7 @@ export const test = base.extend<{ device: DeviceFactory; apiClient: ApiFactory }
       const context = await browser.newContext({
         extraHTTPHeaders: { 'X-Forwarded-For': ip },
         ...(options.userAgent ? { userAgent: options.userAgent } : {}),
+        ...(options.serviceWorkers ? { serviceWorkers: options.serviceWorkers } : {}),
       });
       contexts.push(context);
       // Нарушение CSP сайта (preview отдает ту же политику, что Caddy) — ошибка теста
@@ -142,8 +145,9 @@ export const test = base.extend<{ device: DeviceFactory; apiClient: ApiFactory }
       context.on('weberror', (error) => errors.push(error.error().message));
       context.on('console', (message) => {
         // Ответы 4xx (неверный пароль, 401 после завершения сеанса, 429) браузер пишет в консоль
-        // сам: это ожидаемо. Все остальные ошибки консоли — нет
-        if (message.type() === 'error' && !/status of 4\d\d/.test(message.text())) {
+        // сам: это ожидаемо. Запросы без сети (сценарий «Нет связи», context.setOffline) — тоже.
+        // Все остальные ошибки консоли — нет
+        if (message.type() === 'error' && !/status of 4\d\d|net::ERR_INTERNET_DISCONNECTED/.test(message.text())) {
           errors.push(`console: ${message.text()}`);
         }
       });

@@ -256,3 +256,9 @@
 @media (max-width: 360px) {
   .profile-panel .btn { white-space: normal; height: auto; min-height: var(--tap); padding-block: 8px; text-align: left; max-width: 100%; }
 }
+
+/* «Приложение на телефоне» (installCard макета) */
+.profile-item-ic.profile-install-ic { background: none; }
+.profile-install-note { margin: 0; }
+.profile-install-links { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--fs-sm); }
+@media (max-width: 960px) { .profile-install-links a { display: inline-flex; align-items: center; min-height: 40px; } }

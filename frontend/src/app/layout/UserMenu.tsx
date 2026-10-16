@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Me } from '../../api/hooks/useMe';
-import { Chip, Icon, Segmented } from '../../components';
+import { Chip, Icon, Segmented, Spinner } from '../../components';
 import { paths } from '../paths';
 import { useTheme } from '../theme/themeContext';
 import type { ThemeChoice } from '../theme/theme';
@@ -12,12 +12,14 @@ import { initials } from './initials';
 interface UserMenuProps {
   me: Me;
   onLogout: () => void;
+  /** Идет выход (отзыв push и /auth/logout): кнопка «Выйти» неактивна, с индикатором. */
+  loggingOut?: boolean;
 }
 
 const THEMES: readonly ThemeChoice[] = ['light', 'dark', 'system'];
 
 /** Кружок с инициалами в шапке: меню «Личный кабинет», тема, «Выйти». */
-export function UserMenu({ me, onLogout }: UserMenuProps) {
+export function UserMenu({ me, onLogout, loggingOut = false }: UserMenuProps) {
   const { t } = useTranslation();
   const { choice, setChoice } = useTheme();
   const [open, setOpen] = useState(false);
@@ -133,12 +135,14 @@ export function UserMenu({ me, onLogout }: UserMenuProps) {
           <button
             type="button"
             className="menu-item danger"
+            disabled={loggingOut}
+            aria-busy={loggingOut || undefined}
             onClick={() => {
               close(false);
               onLogout();
             }}
           >
-            <Icon name="logout" />
+            {loggingOut ? <Spinner size="sm" decorative /> : <Icon name="logout" />}
             {t('nav.logout')}
           </button>
         </div>

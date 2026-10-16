@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
 import { errorMessage } from '../../api/errors';
 import type { Me } from '../../api/hooks/useMe';
@@ -7,10 +7,12 @@ import {
   Button,
   Callout,
   Card,
+  Checkbox,
   Dropdown,
   Field,
   FieldShell,
   Icon,
+  PushNotice,
   Segmented,
   Skeleton,
   useToast,
@@ -23,6 +25,7 @@ import {
   messageText,
   recipientsOf,
   useAdminMessages,
+  useRecipientPush,
   useSendMessage,
   type AdminMessage,
 } from '../../features/admin/messages';
@@ -41,8 +44,9 @@ const USER_ID = 'adm-msg-user';
 
 /**
  * «Администрирование → Сообщение» (PANELS.message макета admin.js): короткое уведомление всем
- * активным участникам или одному — в центр уведомлений на сайте (push — этап 6). Справа — как
- * его увидят в колокольчике и последние отправленные (те же записи, что в журнале).
+ * активным участникам или одному — в центр уведомлений на сайте и с флажком «Также push» (В8)
+ * — push тем, у кого он включен («Push включен у N из M», только число, Р14). Справа — как его
+ * увидят в колокольчике и push на телефоне, последние отправленные (те же записи, что в журнале).
  */
 export function MessagesTab({ me }: { me: Me }) {
   const { t } = useTranslation();
@@ -56,6 +60,7 @@ export function MessagesTab({ me }: { me: Me }) {
   const [picked, setPicked] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [error, setError] = useState<unknown>(null);
+  const [alsoPush, setAlsoPush] = useState(true);
 
   const chosen = recipients.find((user) => String(user.id) === picked) ?? recipients[0] ?? null;
   // Сколько получит «всем» — число сервера (правило получателей — его, app/services/admin_messages.py);
@@ -64,6 +69,13 @@ export function MessagesTab({ me }: { me: Me }) {
   const count = audience === 'all' ? (everyone ?? 0) : chosen ? 1 : 0;
   const body = messageText(text);
   const canSend = body !== '' && count > 0 && !send.isPending;
+  // У скольких получателей push: «всем» — число сервера, одному — из предпросмотра (нужен текст)
+  const one = useRecipientPush(audience === 'one' && chosen ? chosen.id : null, body);
+  const pushCount = audience === 'all' ? (messages.data?.push_recipients_all ?? null) : (one.data ?? null);
+  let pushHint: string;
+  if (audience === 'all') pushHint = t('admin.messages.pushAll', { count: pushCount ?? 0, total: everyone ?? 0 });
+  else if (pushCount === null) pushHint = t('admin.messages.pushOneUnknown');
+  else pushHint = pushCount > 0 ? t('admin.messages.pushOne') : t('admin.messages.pushOneOff');
   const left = MESSAGE_MAX - text.length;
 
   const templates = [
@@ -77,6 +89,7 @@ export function MessagesTab({ me }: { me: Me }) {
           },
         ]
       : []),
+    { id: 'push', label: t('admin.messages.templatePush'), text: t('admin.messages.templatePushText') },
   ];
 
   function onSubmit(event: FormEvent) {
@@ -84,11 +97,16 @@ export function MessagesTab({ me }: { me: Me }) {
     if (!canSend) return;
     setError(null);
     send.mutate(
-      { text: body, userId: audience === 'one' && chosen ? chosen.id : null },
+      { text: body, userId: audience === 'one' && chosen ? chosen.id : null, alsoPush },
       {
         onSuccess: (sent) => {
           setText('');
-          toast.show(t('admin.messages.sent', { count: sent.recipients }), { icon: 'send' });
+          toast.show(
+            sent.push_recipients > 0
+              ? t('admin.messages.sentPush', { count: sent.recipients, push: sent.push_recipients })
+              : t('admin.messages.sent', { count: sent.recipients }),
+            { icon: 'send' },
+          );
         },
         onError: setError,
       },
@@ -152,6 +170,13 @@ export function MessagesTab({ me }: { me: Me }) {
             setError(null);
           }}
         />
+        <Checkbox
+          id="adm-msg-push"
+          label={<Trans i18nKey="admin.messages.alsoPush" components={{ b: <b /> }} />}
+          hint={pushHint}
+          checked={alsoPush}
+          onChange={setAlsoPush}
+        />
         <div className="adm-presets">
           <span>{t('admin.messages.templates')}</span>
           {templates.map((template) => (
@@ -195,15 +220,15 @@ export function MessagesTab({ me }: { me: Me }) {
         </Card>
       </form>
       <div className="adm-col">
-        <PreviewCard text={body} />
+        <PreviewCard text={body} push={alsoPush && (pushCount ?? 0) > 0} />
         <SentCard />
       </div>
     </div>
   );
 }
 
-/** Как сообщение покажет колокольчик участника (notif-item центра уведомлений). */
-function PreviewCard({ text }: { text: string }) {
+/** Как сообщение покажет колокольчик участника (notif-item центра уведомлений) и push на телефоне. */
+function PreviewCard({ text, push }: { text: string; push: boolean }) {
   const { t } = useTranslation();
   return (
     <Card title={t('admin.messages.preview.title')} subtitle={t('admin.messages.preview.subtitle')}>
@@ -225,6 +250,12 @@ function PreviewCard({ text }: { text: string }) {
           </div>
         </div>
       </div>
+      {push && (
+        <div className="stack adm-msg-push">
+          <div className="xsmall muted">{t('admin.messages.preview.push')}</div>
+          <PushNotice title={t('admin.messages.preview.itemTitle')} body={text || t('admin.messages.preview.empty')} solo />
+        </div>
+      )}
     </Card>
   );
 }
@@ -274,6 +305,9 @@ function SentItem({ message }: { message: AdminMessage }) {
       meta={
         <>
           <span className="adm-msg-text">{message.text}</span>
+          {message.push_recipients > 0 && (
+            <span className="xsmall muted adm-msg-by">{t('admin.messages.history.push', { count: message.push_recipients })}</span>
+          )}
           {message.actor_name && (
             <span className="xsmall muted adm-msg-by">
               {t('admin.messages.history.by', { name: message.actor_name })}

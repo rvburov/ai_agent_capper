@@ -26,8 +26,7 @@ const ICONS: Record<ProfileTab, IconName> = {
   data: 'database',
 };
 
-// Все вкладки работают с этапа 4; push-переключатели и тихие часы во вкладке «Уведомления»
-// заработают на этапе 6 (сейчас — неактивны с пометкой)
+// Все вкладки работают с этапа 4; push, тихие часы и установка на телефон — с этапа 6
 function isProfileTab(value: string): value is ProfileTab {
   return (PROFILE_TABS as readonly string[]).includes(value);
 }

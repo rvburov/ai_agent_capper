@@ -1,10 +1,11 @@
 import { Suspense, type ReactNode } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router';
 
-import { errorMessage, isUnauthorized } from '../../api/errors';
+import { errorMessage, isApiError, isUnauthorized, NETWORK_ERROR } from '../../api/errors';
 import { useMe } from '../../api/hooks/useMe';
 import { FullPageError, FullPageLoading } from '../layout/FullPageState';
 import { lazyPage } from '../lazyPage';
+import { OfflineScreen } from '../offline/OfflineScreen';
 import { loginPath } from '../paths';
 
 // Экран отмены удаления нужен редко — отдельным файлом сборки
@@ -15,7 +16,9 @@ const DeletionPendingScreen = lazyPage(
 
 /**
  * Пускает дальше только с действующим сеансом (GET /api/me). Нет сеанса (401) —
- * на /login?next=<откуда пришли>. Сервер недоступен — экран ошибки с «Повторить».
+ * на /login?next=<откуда пришли>. Нет связи (запрос не дошел до сервера), а данных еще нет — экран
+ * «Нет связи» (В7: приложение открыто из кэша service worker без сети); другая ошибка сервера —
+ * экран ошибки с «Повторить».
  * Если пользователь уже загружен, а фоновая перепроверка упала по сети, приложение не прячем.
  */
 export function RequireAuth({ children }: { children?: ReactNode }) {
@@ -34,6 +37,9 @@ export function RequireAuth({ children }: { children?: ReactNode }) {
     );
   }
   if (!me.data) {
+    if (me.isError && isApiError(me.error) && me.error.code === NETWORK_ERROR) {
+      return <OfflineScreen onBack={() => void me.refetch()} />;
+    }
     if (me.isError) {
       return <FullPageError message={errorMessage(me.error)} onRetry={() => void me.refetch()} />;
     }

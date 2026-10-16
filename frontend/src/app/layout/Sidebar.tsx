@@ -2,10 +2,11 @@ import { Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { Chip, Icon } from '../../components';
+import { Chip, Icon, Spinner } from '../../components';
 import { decisionsCount, useAdminAttention } from '../../features/admin/useAdminAttention';
 import { paths } from '../paths';
 import { BrandMark } from './BrandMark';
+import { useInstallTitle } from './InstallModal';
 import { NAV_GROUPS, NAV_ITEMS, type NavId } from './nav';
 import { OpenBetsBadge } from './OpenBetsBadge';
 import { ThemeNavButton } from './ThemeNavButton';
@@ -14,6 +15,10 @@ interface SidebarProps {
   navId: NavId | undefined;
   isAdmin: boolean;
   onLogout: () => void;
+  /** Идет выход (отзыв push и /auth/logout): кнопка «Выйти» неактивна, с индикатором. */
+  loggingOut?: boolean;
+  /** «Установить приложение» — окно установки. */
+  onInstall: () => void;
 }
 
 /**
@@ -35,8 +40,9 @@ function AdminBadge() {
 }
 
 /** Боковая панель на компьютере (на телефоне скрыта, вместо нее нижние вкладки). */
-export function Sidebar({ navId, isAdmin, onLogout }: SidebarProps) {
+export function Sidebar({ navId, isAdmin, onLogout, loggingOut = false, onInstall }: SidebarProps) {
   const { t } = useTranslation();
+  const installTitle = useInstallTitle();
   return (
     <aside className="sidebar" aria-label={t('nav.mainLabel')}>
       <Link className="brand" to={paths.home}>
@@ -73,9 +79,13 @@ export function Sidebar({ navId, isAdmin, onLogout }: SidebarProps) {
           <Icon name="user" />
           {t('nav.profile')}
         </Link>
+        <button type="button" className="nav-link" onClick={onInstall}>
+          <Icon name="download" />
+          {installTitle}
+        </button>
         <ThemeNavButton />
-        <button type="button" className="nav-link" onClick={onLogout}>
-          <Icon name="logout" />
+        <button type="button" className="nav-link" onClick={onLogout} disabled={loggingOut} aria-busy={loggingOut || undefined}>
+          {loggingOut ? <Spinner size="sm" decorative /> : <Icon name="logout" />}
           {t('nav.logout')}
         </button>
       </div>

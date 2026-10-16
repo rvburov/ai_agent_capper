@@ -39,6 +39,10 @@
   --shadow-raised: 0 1px 2px rgba(0,0,0,.12);
   --brand-ball: #e6f05a;   /* мяч в знаке AI Capper */
   --on-bad: #ffffff;       /* текст на заливке --bad (счетчик колокольчика) */
+  /* значок приложения (PWA, В9): картинка на экране «Домой», с темой не меняется */
+  --app-icon-bg: #14684a;
+  --app-icon-fg: #ffffff;
+  --app-icon-ball: #e6f05a;
 
   --font-display: "Geologica", "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;

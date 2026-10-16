@@ -4,6 +4,7 @@ import { RouterProvider } from 'react-router';
 
 import { createQueryClient } from '../api/queryClient';
 import { ToastProvider } from '../components';
+import { OfflineGate } from './offline/OfflineGate';
 import { createAppRouter } from './router';
 import { ThemeProvider } from './theme/ThemeProvider';
 
@@ -14,7 +15,9 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <ToastProvider>
-          <RouterProvider router={router} />
+          <OfflineGate>
+            <RouterProvider router={router} />
+          </OfflineGate>
         </ToastProvider>
       </ThemeProvider>
     </QueryClientProvider>

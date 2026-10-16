@@ -16,6 +16,10 @@ import './styles/global.css';
 import './styles/components.css';
 import './styles/shell.css';
 import { App } from './app/App';
+import { startPwa } from './pwa/register';
+
+// Установка на телефон и service worker (оболочка без сети, push)
+startPwa();
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Нет элемента #root в index.html');

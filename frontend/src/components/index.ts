@@ -6,6 +6,7 @@ export {
   type ActionMenuItem,
   type ActionMenuProps,
 } from './ActionMenu';
+export { AppIcon } from './AppIcon';
 export { BudgetBar, budgetBarParts, type BudgetBarProps } from './BudgetBar';
 export { Button, type ButtonKind, type ButtonProps, type ButtonSize } from './Button';
 export { Callout, type CalloutKind, type CalloutProps } from './Callout';
@@ -31,10 +32,12 @@ export { FreshnessChip, type Freshness } from './FreshnessChip';
 export { Icon, type IconName, type IconProps } from './Icon';
 export { IconButton, type IconButtonProps } from './IconButton';
 export { KeyValue, type KeyValueItem } from './KeyValue';
+export { KeyCap } from './KeyCap';
 export { LimitBar, limitBarParts, spendTone, type LimitBarProps, type SpendTone } from './LimitBar';
 export { Meter, type MeterProps } from './Meter';
 export { Modal, type ModalProps } from './Modal';
 export { OddsBox, OddsGrid, type OddsCell, type OddsGridProps } from './OddsBox';
+export { PushNotice, type PushNoticeProps } from './PushNotice';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Segmented, type SegmentedItem, type SegmentedProps } from './Segmented';
 export { Skeleton, type SkeletonProps } from './Skeleton';

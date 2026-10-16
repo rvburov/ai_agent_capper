@@ -7,6 +7,7 @@ import { useLogout } from '../../features/auth/useLogout';
 import { useRouteMeta } from '../routeMeta';
 import { useDocumentTitle } from '../useDocumentTitle';
 import { PageLoading } from './FullPageState';
+import { InstallModal } from './InstallModal';
 import { ScreenTitleContext } from './screenTitle';
 import { MoreSheet } from './MoreSheet';
 import { Sidebar } from './Sidebar';
@@ -28,8 +29,10 @@ export function AppShell() {
   const shownMeta = useRouteMeta();
   const meta = pending ? (pending.meta ?? shownMeta) : shownMeta;
   // Выход: запрос, переход на /login, очистка кэша и тост — в одном хуке
-  const { logout: onLogout } = useLogout();
+  const { logout: onLogout, pending: loggingOut } = useLogout();
   const [moreOpen, setMoreOpen] = useState(false);
+  // Окно установки: из боковой панели и шторки «Еще» (кабинет открывает свое)
+  const [installOpen, setInstallOpen] = useState(false);
   // Заголовок из данных экрана (имя игрока) — только пока на экране он сам, а не переход
   const [screenTitle, setScreenTitle] = useState<string | null>(null);
 
@@ -53,10 +56,10 @@ export function AppShell() {
         {t('shell.skipToContent')}
       </a>
       <div className="sidebar-col">
-        <Sidebar navId={meta?.nav} isAdmin={isAdmin} onLogout={onLogout} />
+        <Sidebar navId={meta?.nav} isAdmin={isAdmin} onLogout={onLogout} loggingOut={loggingOut} onInstall={() => setInstallOpen(true)} />
       </div>
       <div className="main">
-        <TopBar title={title} crumbs={crumbs} me={me} onLogout={onLogout} />
+        <TopBar title={title} crumbs={crumbs} me={me} onLogout={onLogout} loggingOut={loggingOut} />
         <main className="view" id="view" tabIndex={-1} aria-busy={pending ? true : undefined}>
           {/* экран грузится отдельным файлом (src/app/lazyPage.ts): шапка и меню уже на месте */}
           {pending && <PageLoading immediate />}
@@ -77,7 +80,10 @@ export function AppShell() {
         navId={meta?.nav}
         isAdmin={isAdmin}
         onLogout={onLogout}
+        loggingOut={loggingOut}
+        onInstall={() => setInstallOpen(true)}
       />
+      <InstallModal open={installOpen} onClose={() => setInstallOpen(false)} />
       <ScrollRestoration />
     </div>
   );

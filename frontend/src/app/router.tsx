@@ -2,6 +2,7 @@ import { Suspense, type ReactNode } from 'react';
 import { createBrowserRouter, type RouteObject } from 'react-router';
 
 import { NotFoundPage } from '../pages/not-found/NotFoundPage';
+import { OfflinePage } from './offline/OfflinePage';
 import { RequireAdmin } from './guards/RequireAdmin';
 import { RequireAuth } from './guards/RequireAuth';
 import { AppShell } from './layout/AppShell';
@@ -85,6 +86,8 @@ export const routes: RouteObject[] = [
   { path: '/login', element: bare(<LoginPage />), errorElement: <RouteError /> },
   { path: '/register', element: bare(<RegisterPage />), errorElement: <RouteError /> },
   { path: '/reset', element: bare(<ResetPage />), errorElement: <RouteError /> },
+  // «Нет связи» (этап 6): в начальной загрузке — экран нужен именно без сети
+  { path: '/offline', element: <OfflinePage />, errorElement: <RouteError /> },
   {
     path: '/',
     element: (

@@ -4,6 +4,7 @@
 .profile-notif-head { font-size: var(--fs-xs); font-weight: 600; color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .profile-notif-head span:not(:first-child) { text-align: center; }
 .profile-notif-head small { display: block; font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.profile-notif-off .profile-notif-head span:last-child { color: var(--fg-3); }
 .profile-notif-row { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .profile-notif-row:last-child { border-bottom: 0; padding-bottom: 0; }
 .profile-notif-text { min-width: 0; }
@@ -12,8 +13,31 @@
 .profile-notif-lock { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 24px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); }
 .profile-notif-lock svg { width: 14px; height: 14px; }
 .profile-group-label { font-size: var(--fs-xs); font-weight: 600; color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; padding: 14px 0 0; }
+.profile-push-first { gap: 8px; }
+
+/* push на этом устройстве */
+.profile-push { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); min-width: 0; }
+.profile-push-head { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.profile-push-head .profile-item-ic { flex: none; }
+.profile-push-title { font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.profile-push p, .profile-devices-note, .profile-quiet-summary, .profile-quiet-note { margin: 0; }
+
+/* тихие часы */
 .profile-time { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.profile-quiet-note { margin: 0; }
+.profile-time .field { margin: 0; }
+
+/* push на экране блокировки */
+.push-lock {
+  margin: 0; width: 100%; max-width: 340px; align-self: center; border-radius: 28px; padding: 18px 10px 14px;
+  border: 1px solid var(--line-strong); color: var(--fg); display: flex; flex-direction: column; gap: 8px;
+  background:
+    radial-gradient(90% 60% at 15% 0%, color-mix(in srgb, var(--accent) 34%, transparent), transparent 70%),
+    radial-gradient(80% 60% at 100% 100%, color-mix(in srgb, var(--s7) 26%, transparent), transparent 70%),
+    var(--surface-2);
+}
+.push-lock-time { font-family: var(--font-display); font-weight: 600; font-size: 2.75rem; line-height: 1; text-align: center; letter-spacing: -.02em; }
+.push-lock-date { text-align: center; font-size: var(--fs-sm); color: var(--fg-2); margin-bottom: 6px; }
+.push-lock-list { display: flex; flex-direction: column; gap: 6px; }
 
 @media (max-width: 720px) {
   .profile-notif-head, .profile-notif-row { grid-template-columns: minmax(0, 1fr) 58px 50px; gap: 6px; }

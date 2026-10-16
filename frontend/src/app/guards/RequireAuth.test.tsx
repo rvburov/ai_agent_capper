@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 
 import { meQueryKey } from '../../api/keys';
 import { createQueryClient } from '../../api/queryClient';
+import { ToastProvider } from '../../components';
+import { ThemeProvider } from '../theme/ThemeProvider';
 import { apiError, json, ME_ADMIN, ME_MEMBER, mockFetch } from '../../test/fetchMock';
 import { RequireAdmin } from './RequireAdmin';
 import { RequireAuth } from './RequireAuth';
@@ -41,7 +43,11 @@ function renderAt(path: string) {
   client.setQueryDefaults(meQueryKey, { retry: false });
   render(
     <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
+      <ThemeProvider>
+        <ToastProvider>
+          <RouterProvider router={router} />
+        </ToastProvider>
+      </ThemeProvider>
     </QueryClientProvider>,
   );
   return router;
@@ -76,6 +82,31 @@ describe('RequireAuth', () => {
     up = true;
     await userEvent.setup().click(screen.getByRole('button', { name: 'Повторить' }));
     expect(await screen.findByText('Ставки участника')).toBeInTheDocument();
+  });
+});
+
+describe('RequireAuth без связи', () => {
+  it('запрос не дошел до сервера, данных нет — «Нет связи с интернетом»; «Повторить» со связью — экран', async () => {
+    let online = false;
+    mockFetch({
+      'GET /api/me': () => {
+        if (!online) throw new TypeError('Failed to fetch');
+        return json(ME_MEMBER);
+      },
+      'GET /api/health': () => {
+        if (!online) throw new TypeError('Failed to fetch');
+        return json({ status: 'ok' });
+      },
+    });
+    renderAt('/bets');
+    expect(await screen.findByRole('heading', { name: 'Нет связи с интернетом' })).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Повторить' }));
+    expect(await screen.findByText('Связи по-прежнему нет. Попробуйте еще раз через минуту')).toBeInTheDocument();
+    online = true;
+    await user.click(screen.getByRole('button', { name: 'Повторить' }));
+    expect(await screen.findByText('Ставки участника')).toBeInTheDocument();
+    expect(await screen.findByText('Связь восстановлена')).toBeInTheDocument();
   });
 });
 

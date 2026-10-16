@@ -6,6 +6,12 @@ type Kind = NotificationPrefs['items'][number]['kind'];
 // Новые виды этапа 5 и сигналы расхода — сервер помечает «новое»
 const NEW_KINDS = new Set<string>(['bet_needs_result', 'settle_conflict', 'weekly_report', 'learning', 'ai_alert']);
 
+// Push по умолчанию (В2): у всех видов, кроме обучения модели и сигналов расхода ИИ
+const PUSH_OFF = new Set<string>(['learning', 'ai_alert']);
+
+/** Тихие часы по умолчанию (В3): включены, 23:00–08:00 по поясу участника. */
+export const QUIET_DEFAULT = { enabled: true, start: '23:00', end: '08:00' };
+
 /** Расписание напоминаний и отчета (по поясу участника) — с сервера. */
 const SCHEDULE = {
   tz: 'Europe/Helsinki',
@@ -22,7 +28,7 @@ export function memberPrefsOut(off: Kind[] = []): NotificationPrefs {
     kind,
     group,
     on_site: required || !off.includes(kind),
-    push: false,
+    push: !PUSH_OFF.has(kind),
     required,
     admin: false,
     new: NEW_KINDS.has(kind),
@@ -41,6 +47,7 @@ export function memberPrefsOut(off: Kind[] = []): NotificationPrefs {
       item('admin_message', 'message', true),
     ],
     push_available: false,
+    quiet_hours: { ...QUIET_DEFAULT },
     alert_rules: null,
     schedule: SCHEDULE,
   };
@@ -52,7 +59,7 @@ export function adminPrefsOut(off: Kind[] = []): NotificationPrefs {
     kind,
     group,
     on_site: required || !off.includes(kind),
-    push: false,
+    push: !PUSH_OFF.has(kind),
     required,
     admin,
     new: NEW_KINDS.has(kind),
@@ -77,6 +84,7 @@ export function adminPrefsOut(off: Kind[] = []): NotificationPrefs {
       item('ai_alert', 'alert', { admin: true }),
     ],
     push_available: false,
+    quiet_hours: { ...QUIET_DEFAULT },
     schedule: SCHEDULE,
     // пороги сигналов расхода ИИ — у администратора (как в правилах воркера)
     alert_rules: {

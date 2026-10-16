@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p e2e",
     "test": "vitest run",
     "gen:api": "node scripts/gen-api.mjs",
+    "gen:icons": "node scripts/gen-icons.mjs",
     "e2e": "playwright test",
     "preview": "vite preview"
   },

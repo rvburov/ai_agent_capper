@@ -193,6 +193,14 @@ describe('колокольчик', () => {
     expect(within(dialog).getByText('Часть видов выключена в настройках')).toBeInTheDocument();
   });
 
+  it('push включен хотя бы на одном устройстве — внизу «На сайте и push»', async () => {
+    setup({ prefs: { ...memberPrefsOut(), push_available: true } });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^Уведомления/ }));
+    const dialog = screen.getByRole('dialog', { name: 'Уведомления' });
+    expect(await within(dialog).findByText('На сайте и push')).toBeInTheDocument();
+  });
+
   it('ссылки на ставку и на анализ; сигнал расхода ИИ — с текстом правила с сервера', async () => {
     const items: Item[] = [
       { id: 9, kind: 'ai_alert', title: 'Доля кэша упала до 31%', body: 'Анализов в проверке: 10. Из кэша прочитано 31%', link: '/analysis/42', created_at: '2026-10-08T11:00:00Z', read_at: null },
@@ -203,7 +211,7 @@ describe('колокольчик', () => {
     await user.click(await screen.findByRole('button', { name: 'Уведомления: непрочитанных 2' }));
     let dialog = screen.getByRole('dialog', { name: 'Уведомления' });
     expect(within(dialog).getByText('Анализов в проверке: 10. Из кэша прочитано 31%')).toBeInTheDocument();
-    expect(within(dialog).getByText('На сайте · push появится на этапе 6')).toBeInTheDocument();
+    expect(within(dialog).getByText('На сайте · push не включен')).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: /Ставка №12 рассчитана/ }));
     await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe('/bets?bet=12'));
     await router.navigate('/');

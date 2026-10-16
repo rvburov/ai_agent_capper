@@ -40,6 +40,8 @@ const ROUTE_URLS: Record<string, (ctx: RouteContext) => { who: Audience; urls: s
   '/login': () => ({ who: 'guest', urls: [paths.login] }),
   '/register': () => ({ who: 'guest', urls: [paths.register] }),
   '/reset': () => ({ who: 'guest', urls: [paths.reset] }),
+  // «Нет связи» (этап 6) открывается и без входа
+  '/offline': () => ({ who: 'guest', urls: [paths.offline] }),
   '/index': () => ({ who: 'member', urls: [paths.home] }),
   new: () => ({ who: 'member', urls: [paths.newAnalysis] }),
   'analysis/:id': (ctx) => ({ who: 'member', urls: [paths.analysis(ctx.analysisId)] }),

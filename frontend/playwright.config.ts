@@ -12,6 +12,9 @@ import { BASE_URL } from './e2e/support/stack';
  *   инструкции анализа и замороженный набор),
  *   идут после остальных проектов; в других проектах они пропускаются.
  * - loop (1366 px): сквозной сценарий этапа 5 learning-loop.spec.ts — после exclusive.
+ * Service worker приложения (этап 6) в сценариях выключен (serviceWorkers: 'block'): подмена
+ * ответов page.route его не видит, а кэш оболочки между тестами не нужен. Сценарии PWA
+ * (e2e/flows/pwa.spec.ts) включают его своим устройствам: device({ serviceWorkers: 'allow' }).
  * Стек поднимает scripts/e2e-stack.sh: временная база с миграциями, uvicorn, vite preview с
  * прокси /api. Нужны PostgreSQL и Redis, как для тестов backend. Уже запущенный стек
  * (bash scripts/e2e-stack.sh в другом терминале) переиспользуется, кроме CI.
@@ -47,6 +50,7 @@ export default defineConfig({
     timezoneId: 'Europe/Helsinki',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    serviceWorkers: 'block',
   },
   projects: [
     { name: 'shell', testMatch: 'shell.spec.ts', use: { ...devices['Desktop Chrome'] } },

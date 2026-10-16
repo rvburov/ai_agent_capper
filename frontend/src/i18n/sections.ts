@@ -22,6 +22,8 @@ export const CORE_TEXTS: readonly string[] = [
   'charts',
   // тексты кодов ошибок сервера (api/errors.ts, features/analysis/codes.ts) — на любом экране
   'errors',
+  // PWA: «Нет связи» (без сети других текстов не загрузить), окно установки из меню, push
+  'pwa',
   // счетчик дел администратора у пункта меню (Sidebar) и «только для администратора»
   // (RequireAdmin: участник открыл /admin — экран администрирования не грузится)
   'admin.overview.decisions.tabNote',

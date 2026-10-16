@@ -1,0 +1,32 @@
+/* «Нет связи» (mockup/js/screens/offline.js): экран приложения и offline.html (src/pwa/build.ts)
+   с одной разметкой. Стили — в начальной загрузке: экран показывается без сети. */
+
+.off-page {
+  min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+  padding: 24px var(--gutter) calc(24px + env(safe-area-inset-bottom, 0px)); background: var(--bg); color: var(--fg);
+}
+.off-overlay { position: fixed; inset: 0; z-index: 150; overflow-y: auto; }
+.off-card {
+  width: min(440px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow);
+  padding: 22px 22px 20px; display: flex; flex-direction: column; gap: 16px; position: relative; overflow: hidden; isolation: isolate;
+}
+.off-court {
+  position: absolute; inset: 0 0 auto 0; height: 132px; width: 100%; z-index: -1; pointer-events: none;
+  background: radial-gradient(120% 100% at 100% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%), var(--accent-soft);
+}
+.off-court svg { width: 100%; height: 100%; display: block; }
+.off-court .ln { stroke: var(--accent); stroke-opacity: .22; fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.off-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; }
+.off-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.off-ic {
+  width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); color: var(--accent-ink);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--surface) 60%, transparent); margin-top: 18px;
+}
+.off-ic svg { width: 30px; height: 30px; }
+.off-card h1 { font-size: var(--fs-2xl); }
+.off-lead { color: var(--fg-2); margin: 0; }
+.off-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); color: var(--fg-2); }
+.off-list li { display: flex; gap: 8px; align-items: flex-start; }
+.off-list svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--accent-ink); }
+.off-status { font-size: var(--fs-sm); color: var(--fg-3); min-height: 1.5em; text-align: center; }
+.off-foot { font-size: var(--fs-xs); color: var(--fg-3); margin: 0; }

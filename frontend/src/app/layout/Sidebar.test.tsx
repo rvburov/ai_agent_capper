@@ -31,7 +31,7 @@ function wrap(children: ReactNode) {
 
 function renderSidebar(isAdmin: boolean, attention = adminAttention(), open = 0) {
   const { calls } = api(attention, open);
-  render(wrap(<Sidebar navId="dashboard" isAdmin={isAdmin} onLogout={() => undefined} />));
+  render(wrap(<Sidebar navId="dashboard" isAdmin={isAdmin} onLogout={() => undefined} onInstall={() => undefined} />));
   const paths = () => calls.map((request) => new URL(request.url).pathname);
   return { paths, sidebar: screen.getByRole('complementary', { name: 'Основная навигация' }) };
 }

@@ -144,3 +144,6 @@ button.nav-link { width: 100%; border: 0; background: none; cursor: pointer; tex
    переходе на другой экран прежний скрыт, на его месте индикатор */
 .view-screen { display: contents; }
 .view-screen[hidden] { display: none; }
+
+/* «Выйти», пока идет выход (отзыв push и запрос): неактивна, вместо значка — индикатор */
+.nav-link:disabled, .menu-item:disabled { cursor: progress; opacity: .7; }

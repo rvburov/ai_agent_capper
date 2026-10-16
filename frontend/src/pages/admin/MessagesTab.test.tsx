@@ -25,6 +25,8 @@ function message(over: Partial<AdminMessage> = {}): AdminMessage {
     recipient_name: null,
     recipients: 3,
     actor_name: 'Роман Буров',
+    also_push: true,
+    push_recipients: 0,
     ...over,
   };
 }
@@ -34,7 +36,7 @@ function api(extra: Record<string, Handler> = {}): Record<string, Handler> {
     'GET /api/admin/users': () => json(USERS),
     'GET /api/admin/invites': () => json([]),
     'GET /api/admin/ai/limits': () => json({ defaults: LIMIT_DEFAULTS, members: [] }),
-    'GET /api/admin/messages': () => json({ items: [], recipients_all: 3 }),
+    'GET /api/admin/messages': () => json({ items: [], recipients_all: 3, push_recipients_all: 1 }),
     ...extra,
   };
 }
@@ -62,13 +64,13 @@ describe('Сообщение: получатели', () => {
 });
 
 describe('Администрирование → Сообщение', () => {
-  it('всем: счетчик, предпросмотр в колокольчике, отправка и отправленные', async () => {
+  it('всем: счетчик, предпросмотр в колокольчике и push, отправка и отправленные', async () => {
     let sent: AdminMessage[] = [];
     const view = renderMessages({
-      'GET /api/admin/messages': () => json({ items: sent, recipients_all: 3 }),
+      'GET /api/admin/messages': () => json({ items: sent, recipients_all: 3, push_recipients_all: 1 }),
       'POST /api/admin/messages': async (request) => {
-        const body = await bodyOf<{ text: string }>(request);
-        const out = message({ id: 11, text: body.text, at: '2026-10-13T12:00:00Z' });
+        const body = await bodyOf<{ text: string; also_push: boolean }>(request);
+        const out = message({ id: 11, text: body.text, at: '2026-10-13T12:00:00Z', push_recipients: body.also_push ? 1 : 0 });
         sent = [out, ...sent];
         return json(out, 201);
       },
@@ -78,43 +80,71 @@ describe('Администрирование → Сообщение', () => {
     expect(screen.getByText('Сообщений еще не было.')).toBeInTheDocument();
     const send = screen.getByRole('button', { name: 'Отправить' });
     expect(send).toBeDisabled();
-    // Предпросмотр — как в центре уведомлений
-    const preview = screen.getByText('Сообщение администратора').closest('.notif-item')!;
+    // «Также push» включен по умолчанию; у скольких push — число сервера (Р14)
+    const alsoPush = screen.getByRole('checkbox', { name: /Также push/ });
+    expect(alsoPush).toBeChecked();
+    expect(screen.getByText(/^Push включен у 1 из 3: им придет и на телефон/)).toBeInTheDocument();
+    // Предпросмотр — как в центре уведомлений и push на телефоне
+    const preview = screen.getByText('Сообщение администратора', { selector: '.notif-title' }).closest('.notif-item')!;
     expect(within(preview as HTMLElement).getByText('Текст сообщения появится здесь')).toBeInTheDocument();
+    const push = () => screen.queryByText('Сообщение администратора', { selector: '.push-notice-title' })?.closest('.push-notice') ?? null;
+    expect(push()).not.toBeNull();
 
     const text = screen.getByLabelText(/^Текст/);
     await user.type(text, '  Сервер обновится в 10:00  ');
     expect(screen.getByText(`28 / ${MESSAGE_MAX}`)).toBeInTheDocument();
     expect(within(preview as HTMLElement).getByText('Сервер обновится в 10:00')).toBeInTheDocument();
+    expect(within(push() as HTMLElement).getByText('Сервер обновится в 10:00')).toBeInTheDocument();
     await user.click(send);
-    expect(await toast('Отправлено 3 участникам: на сайте')).toBeInTheDocument();
+    expect(await toast('Отправлено 3 участникам: на сайте, push — 1')).toBeInTheDocument();
     const post = calls.find((r) => r.method === 'POST' && r.url.endsWith('/api/admin/messages'))!;
-    expect(await bodyOf(post)).toEqual({ text: 'Сервер обновится в 10:00', user_id: null, preview: false });
+    expect(await bodyOf(post)).toEqual({ text: 'Сервер обновится в 10:00', user_id: null, preview: false, also_push: true });
     expect(text).toHaveValue('');
     const history = screen.getByRole('heading', { name: 'Отправленные' }).closest('section')!;
     expect(await within(history).findByText('Сегодня, 15:00 · Все участники (3)')).toBeInTheDocument();
     expect(within(history).getByText('Сервер обновится в 10:00')).toBeInTheDocument();
     expect(within(history).getByText('Отправил Роман Буров')).toBeInTheDocument();
+    expect(within(history).getByText('push — 1')).toBeInTheDocument();
+
+    // без «Также push»: превью push нет, на сервер — also_push: false, в тосте только сайт
+    await user.click(alsoPush);
+    expect(push()).toBeNull();
+    await user.type(text, 'Еще раз');
+    await user.click(send);
+    expect(await toast('Отправлено 3 участникам: на сайте')).toBeInTheDocument();
+    const posts = calls.filter((r) => r.method === 'POST' && r.url.endsWith('/api/admin/messages'));
+    expect(await bodyOf(posts[posts.length - 1]!)).toEqual({ text: 'Еще раз', user_id: null, preview: false, also_push: false });
   });
 
-  it('одному: получатель в общем выпадающем списке, на сервер уходит его id', async () => {
+  it('одному: получатель в общем выпадающем списке, на сервер уходит его id; есть ли у него push — из предпросмотра', async () => {
     const view = renderMessages({
-      'POST /api/admin/messages': () => json(message({ user_id: 2, recipient_name: 'Ольга Лехтинен', recipients: 1 }), 201),
+      'POST /api/admin/messages': async (request) => {
+        const body = await bodyOf<{ preview: boolean; user_id: number }>(request);
+        const push = body.user_id === 3 ? 1 : 0;
+        if (body.preview) return json(message({ id: null, sent: false, user_id: body.user_id, recipients: 1, push_recipients: push }));
+        return json(message({ user_id: 2, recipient_name: 'Ольга Лехтинен', recipients: 1 }), 201);
+      },
     });
     const { user, calls } = view;
     await user.click(await screen.findByRole('button', { name: 'Одному' }));
+    // без текста предпросмотра нет: подсказка общая
+    expect(screen.getByText('Придет и на телефон, если у получателя включен push.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^Получатель: Алексей Ковалев/ }));
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
       'Алексей Ковалев',
       'Мария Виртанен',
       'Ольга Лехтинен',
     ]);
-    await user.click(screen.getByRole('option', { name: 'Ольга Лехтинен' }));
+    await user.click(screen.getByRole('option', { name: 'Алексей Ковалев' }));
     await user.type(screen.getByLabelText(/^Текст/), 'Привет');
+    expect(await screen.findByText('У получателя push включен — придет и на телефон.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Получатель: Алексей Ковалев/ }));
+    await user.click(screen.getByRole('option', { name: 'Ольга Лехтинен' }));
+    expect(await screen.findByText('У получателя push не включен — придет только на сайт.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Отправить' }));
     expect(await toast('Отправлено 1 участнику: на сайте')).toBeInTheDocument();
-    const post = calls.find((r) => r.method === 'POST')!;
-    expect(await bodyOf(post)).toEqual({ text: 'Привет', user_id: 2, preview: false });
+    const bodies = await Promise.all(calls.filter((r) => r.method === 'POST').map((r) => bodyOf<{ preview: boolean }>(r)));
+    expect(bodies.filter((b) => !b.preview)).toEqual([{ text: 'Привет', user_id: 2, preview: false, also_push: true }]);
   });
 
   it('шаблоны подставляют текст, лимит — из лимитов по умолчанию; у 250+ знаков счетчик желтеет', async () => {
@@ -148,14 +178,14 @@ describe('Администрирование → Сообщение', () => {
   });
 
   it('«Всем участникам · N» — число сервера, а не подсчет по списку людей', async () => {
-    renderMessages({ 'GET /api/admin/messages': () => json({ items: [], recipients_all: 7 }) });
+    renderMessages({ 'GET /api/admin/messages': () => json({ items: [], recipients_all: 7, push_recipients_all: 0 }) });
     expect(await screen.findByRole('button', { name: 'Всем участникам · 7' })).toBeInTheDocument();
   });
 
   it('некому отправить: подсказка и кнопка недоступна', async () => {
     const { user } = renderMessages({
       'GET /api/admin/users': () => json([ME, IGOR]),
-      'GET /api/admin/messages': () => json({ items: [], recipients_all: 0 }),
+      'GET /api/admin/messages': () => json({ items: [], recipients_all: 0, push_recipients_all: 0 }),
     });
     expect(await screen.findByText('Некому отправить: в программе нет других активных участников.')).toBeInTheDocument();
     await user.type(screen.getByLabelText(/^Текст/), 'Привет');
@@ -166,7 +196,7 @@ describe('Администрирование → Сообщение', () => {
     const items = Array.from({ length: 7 }, (_, i) =>
       message({ id: 20 - i, user_id: 2, recipient_name: 'Ольга Лехтинен', recipients: 1, text: `Сообщение ${i}` }),
     );
-    renderMessages({ 'GET /api/admin/messages': () => json({ items, recipients_all: 3 }) }, 375);
+    renderMessages({ 'GET /api/admin/messages': () => json({ items, recipients_all: 3, push_recipients_all: 0 }) }, 375);
     const history = (await screen.findByRole('heading', { name: 'Отправленные' })).closest('section')!;
     await waitFor(() => expect(within(history).getAllByText(/Ольга Лехтинен/)).toHaveLength(5));
     expect(within(history).queryByText('Сообщение 5')).not.toBeInTheDocument();
