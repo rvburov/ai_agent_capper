@@ -470,6 +470,24 @@ async def test_cli_freeze_and_recalibrate(
     assert "elo-v1@" in capsys.readouterr().out
 
 
+async def test_cli_eval_run_sees_default_shared_version(
+    db: AsyncSession, make_user: UserFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """eval-run до первого анализа и экрана: действующая v3 общей линии создается, как на
+    экране, и команда доходит до плана (здесь — отказ: набор не заморожен), а не пишет
+    «версии v3 нет» (приемка этапа 5, local.sh eval-run)."""
+    from app.admin import cli
+
+    await make_user(role="admin")
+    code = await asyncio.to_thread(cli.main, ["eval-run", "--version", "v3", "--yes"])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "нет в общей линии" not in err
+    assert "Набор для проверки версий еще не заморожен" in err
+    shared = await strategy_versions.shared_active(db)
+    assert shared is not None and shared.code == "v3"
+
+
 async def test_eval_chunk_and_quick_check_share_budget_under_lock(
     db: AsyncSession,
     engine: AsyncEngine,

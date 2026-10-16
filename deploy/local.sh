@@ -32,6 +32,19 @@
 #                                           Коды команд приемки: 0 — пройдена, 1 — нет, 2 — отменено,
 #                                           3 — пробный прогон (выборка меньше, чем для приемки),
 #                                           130 — прервано (Ctrl+C останавливает и команду в контейнере)
+#   bash deploy/local.sh postmortems        разборы ставок ИИ сейчас, не дожидаясь воркера: очередь,
+#                                           пакет Sonnet 5.5 через Batch (общий бюджет ключа), сбор пакетов
+#   bash deploy/local.sh lessons-check [--recheck]
+#                                           проверка гипотез уроков на архиве (без Claude, бесплатно);
+#                                           --recheck — ежемесячная перепроверка действующих уроков
+#   bash deploy/local.sh eval-freeze [--code КОД] [--since 2026-08-01] [--size 250]
+#                                           заморозить набор матчей для проверки версий (без Claude);
+#                                           тот же код второй раз — отказ
+#   bash deploy/local.sh eval-run --version v4 [--yes]
+#                                           прогон версии инструкций на наборе через Batch: план с ценой
+#                                           и худшим случаем, подтверждение (бюджет проверок)
+#   bash deploy/local.sh eval-cancel ID     остановить прогон (отменяет пакет у Anthropic)
+#   bash deploy/local.sh ml-recalibrate     перекалибровать базовую модель сейчас (иначе — по понедельникам)
 #   bash deploy/local.sh elo-current        таблица текущего Эло (места и Эло игроков на «Игроках»)
 #                                           по уже посчитанным рейтингам, без загрузки данных
 #   bash deploy/local.sh perf [--slack 1.5] [--scale 0.5] [--keep]
@@ -411,6 +424,10 @@ case "${1:-}" in
   acceptance-runs|smoke-eval) name="$1"; shift; cmd_acceptance "$name" "$@" ;;
   parse-eval) shift; cmd_parse_eval "$@" ;;
   elo-current) dc exec -T api python -m app.admin.cli elo-current ;;
+  # Этап 5: подтверждение eval-run спрашивается в терминале контейнера
+  eval-run) dc exec api python -m app.admin.cli "$@" ;;
+  eval-freeze|eval-cancel|postmortems|lessons-check|ml-recalibrate)
+    dc exec -T api python -m app.admin.cli "$@" ;;
   perf) shift; cmd_perf "$@" ;;
   backup) cmd_backup ;;
   restore) shift; cmd_restore "$@" ;;

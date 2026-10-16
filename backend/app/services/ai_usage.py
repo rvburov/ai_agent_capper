@@ -445,6 +445,7 @@ async def usage(
             days_in_month=span.days_in_month,
         ),
         before_after=await ai_savings.before_after(db, versions),
+        model_check=await ai_savings.model_check(db, config, now),
     )
 
 

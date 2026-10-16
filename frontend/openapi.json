@@ -9102,6 +9102,16 @@
                 "type": "null"
               }
             ]
+          },
+          "model_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCheckOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -11498,7 +11508,8 @@
                 "enum": [
                   "void",
                   "legacy",
-                  "no_prediction"
+                  "no_prediction",
+                  "before_start"
                 ]
               },
               {
@@ -19979,6 +19990,54 @@
         ],
         "title": "ModeDecisionIn",
         "description": "Решение по просьбе вернуть ключ администратора. limit — лимит на ключе\nадминистратора при одобрении (не задан — остается прежний)."
+      },
+      "ModelCheckOut": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "set_frozen": {
+            "type": "boolean",
+            "title": "Set Frozen"
+          },
+          "estimate_usd": {
+            "type": "number",
+            "title": "Estimate Usd"
+          },
+          "estimate_source": {
+            "type": "string",
+            "enum": [
+              "live",
+              "settings"
+            ],
+            "title": "Estimate Source"
+          },
+          "worst_usd": {
+            "type": "number",
+            "title": "Worst Usd"
+          },
+          "budget_left_usd": {
+            "type": "number",
+            "title": "Budget Left Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "events",
+          "set_frozen",
+          "estimate_usd",
+          "estimate_source",
+          "worst_usd",
+          "budget_left_usd"
+        ],
+        "title": "ModelCheckOut",
+        "description": "Мера «Оценка матча на Sonnet 5.5» в «Где экономим» (этап 5): сколько стоит ее\nпроверить — один прогон замороженного набора на модели model через Batch из бюджета\nпроверок (правило «экономия не хуже», TOKEN_ECONOMY.md 2.4). estimate_usd — по живой\nцене ответов проверок этой модели, а пока их нет — по ценам модели и токенам из\nнастроек (estimate_source); worst_usd — худший случай (весь eval_max_tokens);\nbudget_left_usd — остаток бюджета проверок месяца. events — события последнего\nзамороженного набора; набора еще нет — его размер из настроек (set_frozen = false)."
       },
       "ModelPriceOut": {
         "properties": {

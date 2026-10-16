@@ -49,7 +49,7 @@ from app.ml.sets import MARKET_ML, PROBS3_FIELDS, Probs3
 from app.schemas.learning import EvalSetIn, EvalSetOut, EvalSetsOut
 from app.services import smoke_eval
 from app.services.audit import write_audit
-from app.services.dossier import calibrated_p1, canonical_json
+from app.services.dossier import calibrated_p1, canonical_json, dossier_flipped
 from app.services.lesson_check import elo_model, elo_model_of, read_only
 from app.services.sessions import utcnow
 
@@ -378,7 +378,10 @@ def stored_event(
     """Событие по уже построенному досье набора (то же, что видели прошлые прогоны)."""
     content = dossier.content or {}
     match = item.match
-    flip = side_flip(match.id)
+    # Стороны — как в самом досье: после слияния матча (другой id или обратный порядок
+    # игроков) side_flip нового id с досье уже не совпадает
+    found = dossier_flipped(content, match.player1_id, match.player2_id)
+    flip = side_flip(match.id) if found is None else found
     first = match.player2_id if flip else match.player1_id
     shown = content.get("p_base") or {}
     return smoke_eval.SmokeEvent(

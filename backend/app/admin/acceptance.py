@@ -55,12 +55,7 @@ from app.services.ai_access import access_for
 from app.services.app_settings import get_app_settings
 from app.services.claude_key import key_for
 from app.services.sessions import utcnow
-from app.services.strategy_versions import (
-    active_version,
-    ensure_shared_ready,
-    prompt_version_of,
-    system_prompt_of,
-)
+from app.services.strategy_versions import ensure_shared_ready, system_prompt_of
 
 MAX_RUNS = 50
 MAX_EVENTS = 200
@@ -469,7 +464,10 @@ async def _acceptance_series(args: argparse.Namespace, maker: Maker, redis: Any)
         problem = acceptance_runs.news_problem(config, plans)
         if problem is not None:
             raise CliError(f"acceptance.runs.{problem[0]}", **problem[1])
-        prompt_version = prompt_version_of(await active_version(db, admin.id))
+        # Оценка — по активной версии общей линии инструкций (ее промпт и уроки получат
+        # анализы прогонов)
+        shared = await ensure_shared_ready(db)
+        prompt_version = shared.prompt_version or system_prompt_of(shared).version_id
         cost = await acceptance_runs.estimate_series(
             db,
             config,

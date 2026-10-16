@@ -163,6 +163,9 @@ async def test_json_export_is_own_and_without_secrets(
     legs = tables["bet_legs"]
     assert len(legs) == 2 and {leg["bet_id"] for leg in legs} == {mine["bet_id"]}
     assert legs[0]["p_final"] == 0.62 and legs[0]["odds_taken"] == "1.800"
+    # Поля этапа 5 о ставке участника: исправление после авторасчета и исход архива
+    assert "reversed_at" in tables["bets"][0]
+    assert {"archive_result", "archive_score"} <= set(legs[0])
     assert {row["kind"] for row in tables["bank_ledger"]} == {"deposit", "stake"}
     assert [row["name"] for row in tables["bookmakers"]] == ["Book-mine"]
     assert tables["play_limits"][0]["stake_per_day"] == "900.00"

@@ -96,6 +96,7 @@ from app.services import (
     players,
     postmortems,
     recalibration,
+    strategy_versions,
 )
 from app.services.app_settings import get_app_settings
 
@@ -964,6 +965,9 @@ async def _eval_run(args: argparse.Namespace) -> None:
     try:
         factory = create_sessionmaker(engine)
         async with factory() as db:
+            # Действующая v3 общей линии появляется с первым анализом или экраном; прогон
+            # из терминала до них видит ее так же
+            await strategy_versions.ensure_shared_ready(db)
             version = await db.scalar(
                 select(StrategyVersion).where(
                     StrategyVersion.user_id.is_(None), StrategyVersion.code == args.version

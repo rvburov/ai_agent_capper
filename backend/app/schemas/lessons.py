@@ -243,10 +243,10 @@ class QuickCheckOut(BaseModel):
 ReviewVerdict = Literal["fine", "lucky", "luck", "model_error", "data_gap"]
 ReviewStatus = Literal["queued", "submitted", "done", "failed"]
 # Разбор ставки целиком: open — не рассчитана; not_reviewed — не разбирается (возврат,
-# ставка старого бота, нет прогноза); pending — разборы готовятся; done; failed — разбор
-# не удался (без повтора)
+# ставка старого бота, нет прогноза, рассчитана до начала разборов — before_start);
+# pending — разборы готовятся; done; failed — разбор не удался (без повтора)
 BetReviewState = Literal["open", "not_reviewed", "pending", "done", "failed"]
-NotReviewedReason = Literal["void", "legacy", "no_prediction"]
+NotReviewedReason = Literal["void", "legacy", "no_prediction", "before_start"]
 
 
 class ReviewLessonOut(BaseModel):

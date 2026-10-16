@@ -18,7 +18,7 @@ from tests.analysis_helpers import install, set_admin_key
 from tests.claude_mock import seed_prices
 from tests.fake_claude import FakeClaude
 from tests.helpers_admin import admin_signed_in, signed_in
-from tests.learning_helpers import MiniArchive, mini_archive, own_leg
+from tests.learning_helpers import MiniArchive, mini_archive, own_leg, reviews_from
 from tests.support import ClientFactory, LoginFn, UserFactory
 
 
@@ -30,6 +30,7 @@ def fake() -> Iterator[FakeClaude]:
 @pytest.fixture
 async def world(db: AsyncSession, engine: AsyncEngine) -> MiniArchive:
     found = await mini_archive(db, engine)
+    await reviews_from(db)
     await set_admin_key(db)
     await seed_prices(db)
     return found

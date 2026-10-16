@@ -1,10 +1,17 @@
 """Разбор рассчитанных ставок ИИ (этап 5, В3 Р25; макет bets.js, блок «Разбор ИИ»).
 
 После расчета ставки (вручную или по архиву) ее матчи встают в очередь разбора: один
-разбор на матч, общий для всех участников, кто на него ставил. Разбор строится только по
-общему (М5 и замечание №2 проверки волны 2): исход и счет матча — только из архива (пока
-исхода архива нет, матч ждет), разбирается прогноз базовой модели на победу в матче —
-сторона-фаворит по p_base досье (нет досье — Эло до дня матча, как в проверке уроков);
+разбор на матч, общий для всех участников, кто на него ставил. Только ставки,
+рассчитанные с postmortem_since (настройка агента; не задана — очередь при первом
+запуске записывает в нее свой момент): история и ставки копии базы, рассчитанные
+раньше, не разбираются (на карточке — «Разбора нет», причина before_start). Разбор
+строится только по общему (М5 и замечание №2 проверки волны 2): исход и счет матча —
+только из архива (пока исхода архива нет, матч ждет), разбирается прогноз базовой модели
+на победу в матче — сторона-фаворит по p_base досье (нет досье — Эло до дня матча, как в
+проверке уроков). Досье — в порядке игроков анализа, сторона и исход — по матчу архива:
+после слияния матчей порядок бывает обратным, тогда досье переворачивается кодом в
+порядок архива (flip_dossier), p_base и оценка Claude — 1 − p; порядок не понять — досье в
+факты не идет, только архив и Эло;
 вероятности — p_base, общая оценка Claude по тому же досье (match_assessments, общая для
 всех) и рынок без маржи по архиву (q_close, эталон Р17). Ставок, сумм, кэфов, исходов и
 текстов анализов участников в фактах нет. Возвраты, ставки старого бота и проверочные
@@ -44,12 +51,13 @@ from app.agent import batches
 from app.agent import postmortem as agent_pm
 from app.agent.calls import estimate_tokens
 from app.agent.client import client_for
-from app.agent.config import AgentConfig, load_agent_config
+from app.agent.config import AgentConfig, config_from_overrides, load_agent_config
 from app.agent.errors import ClaudeStepError
 from app.agent.runs import price_for
 from app.core.errors import AppError
 from app.db.models import (
     AgentRun,
+    AppSettings,
     BatchJob,
     Bet,
     BetLeg,
@@ -64,6 +72,7 @@ from app.db.models import (
     Prediction,
     User,
 )
+from app.ingest.names import fold
 from app.ml.lesson_scope import ARCHIVE_SOURCES, RESULT_STATUSES, ROUNDS
 from app.ml.market import REFERENCE_ORDER, OddsPair, pick_reference
 from app.ml.metrics import clv, clv_parlay
@@ -72,9 +81,10 @@ from app.schemas.lessons import BetReviewOut, LegReviewOut, ReviewLessonOut, Rev
 from app.services import lesson_check
 from app.services import lessons as lessons_service
 from app.services.ai_access import shared_budget_left, usd_text
+from app.services.app_settings import SETTINGS_ROW_ID
 from app.services.bets import verdict
 from app.services.claude_key import key_for
-from app.services.dossier import archive_tournament
+from app.services.dossier import archive_tournament, dossier_flipped, flip_dossier
 from app.services.notifications import notify
 from app.services.sessions import utcnow
 
@@ -155,10 +165,38 @@ async def refresh_stale(db: AsyncSession, match_ids: Sequence[int] | None = None
     return count
 
 
-async def queue(db: AsyncSession) -> int:
-    """Матчи рассчитанных ставок приложения с исходом архива и без разбора — в очередь
-    (queued); устаревшие разборы — заново. commit. → сколько добавлено."""
+async def review_since(db: AsyncSession, now: datetime) -> datetime:
+    """С какого момента расчета ставки разбираются: postmortem_since; не задан — now,
+    и он записывается в настройки агента (первый запуск очереди). Строка app_settings —
+    FOR UPDATE: сохранение настроек администратором не затрет запись. flush; commit — за
+    вызывающим."""
+    config = await load_agent_config(db)
+    if config.postmortem_since is not None:
+        return config.postmortem_since
+    row = await db.scalar(
+        select(AppSettings)
+        .where(AppSettings.id == SETTINGS_ROW_ID)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if row is None:
+        raise RuntimeError("app_settings: нет строки id = 1, примените миграции")
+    stored = dict(row.agent_config or {})
+    found = config_from_overrides(stored).postmortem_since
+    if found is not None:
+        return found
+    stored["postmortem_since"] = now.isoformat()
+    row.agent_config = stored
+    await db.flush()
+    log.info("postmortems.since_set", since=stored["postmortem_since"])
+    return now
+
+
+async def queue(db: AsyncSession, *, now: datetime | None = None) -> int:
+    """Матчи рассчитанных с review_since ставок приложения с исходом архива и без разбора
+    — в очередь (queued); устаревшие разборы — заново. commit. → сколько добавлено."""
     await db.execute(select(func.pg_advisory_xact_lock(QUEUE_LOCK)))
+    since = await review_since(db, now or utcnow())
     await refresh_stale(db)
     reviewed = select(Postmortem.id).where(Postmortem.match_id == BetLeg.match_id).exists()
     rows = (
@@ -170,6 +208,7 @@ async def queue(db: AsyncSession) -> int:
             .where(
                 Bet.source == "app",
                 Bet.status.in_(("won", "lost")),
+                Bet.settled_at >= since,
                 BetLeg.result.in_(("win", "loss")),
                 Prediction.is_eval.is_(False),
                 *_archive_outcome(),
@@ -263,6 +302,35 @@ async def _shared_claude(db: AsyncSession, dossier_id: int) -> float | None:
     return _p1(output.get("p1_win")) if isinstance(output, dict) else None
 
 
+def _dossier_order(
+    content: dict[str, Any], match: Match, players: dict[int, Player]
+) -> bool | None:
+    """Обратный ли порядок игроков досье относительно матча (dossier_flipped): по id, а
+    если игроков досье с тех пор слили с другими — по имени (имя слитого игрока остается
+    в name, name_ru или aliases игрока архива). None — не понять."""
+    found = dossier_flipped(content, match.player1_id, match.player2_id)
+    if found is not None:
+        return found
+
+    def known(player_id: int) -> set[str]:
+        player = players.get(player_id)
+        if player is None:
+            return set()
+        return {fold(value) for value in (player.name, player.name_ru, *player.aliases) if value}
+
+    first, second = known(match.player1_id), known(match.player2_id)
+    shown = []
+    for key in ("p1", "p2"):
+        block = content.get(key)
+        name = block.get("name") if isinstance(block, dict) else None
+        shown.append(fold(name) if isinstance(name, str) and name else None)
+    straight = shown[0] in first or shown[1] in second
+    reverse = shown[0] in second or shown[1] in first
+    if straight != reverse:
+        return reverse
+    return None
+
+
 def _for_side(p1: float | None, side: int) -> float | None:
     if p1 is None:
         return None
@@ -283,21 +351,33 @@ async def facts_for(
         return None
     dossier = await _dossier(db, pm, match)
     content = dict(dossier.content) if dossier is not None else None
+    players = {
+        player.id: player
+        for player in await db.scalars(
+            select(Player).where(Player.id.in_((match.player1_id, match.player2_id)))
+        )
+    }
+    names = {player_id: player.name for player_id, player in players.items()}
+    # Досье — в порядке игроков анализа, сторона и исход — по матчу архива: после слияния
+    # матчей порядок может быть обратным (в tennis-data первым идет победитель)
+    flipped = _dossier_order(content, match, players) if content is not None else None
     shown = (content or {}).get("p_base") or {}
     p1_base = _p1(shown.get("p1_win")) if isinstance(shown, dict) else None
+    p1_claude = await _shared_claude(db, dossier.id) if dossier is not None else None
+    if flipped is None:
+        # Порядок не понять (или досье нет) — досье в факты не идет: только архив и Эло
+        if content is not None:
+            log.warning("postmortems.dossier_order_unknown", match_id=match.id, pm_id=pm.id)
+        content, p1_base, p1_claude = None, None, None
+    elif flipped:
+        # Досье — в порядок матча архива целиком: весь факт для Claude в одном порядке
+        assert content is not None
+        content = flip_dossier(content)
+        p1_base = 1.0 - p1_base if p1_base is not None else None
+        p1_claude = 1.0 - p1_claude if p1_claude is not None else None
     if p1_base is None:
         p1_base = first.p_base
     side = 1 if p1_base >= 0.5 else 2
-    p1_claude = await _shared_claude(db, dossier.id) if dossier is not None else None
-    names = dict(
-        (
-            await db.execute(
-                select(Player.id, Player.name).where(
-                    Player.id.in_((match.player1_id, match.player2_id))
-                )
-            )
-        ).all()
-    )
     tour, level = await archive_tournament(db, match.tournament_id)
     won = winner == side
     p_base = _for_side(p1_base, side)
@@ -393,7 +473,7 @@ async def submit(
     config = await load_agent_config(db)
     if not config.postmortem_enabled:
         return {"skipped": "disabled"}
-    added = await queue(db)
+    added = await queue(db, now=moment)
     result: dict[str, Any] = {"queued": added}
     if not force and not await _due(db, config, moment):
         return {**result, "skipped": "cadence"}
@@ -654,6 +734,13 @@ async def bet_review(db: AsyncSession, user: User, bet_id: int) -> BetReviewOut:
             )
         )
     }
+    # Ставка рассчитана до начала разборов (postmortem_since): своих разборов у нее не
+    # будет, показываются только разборы ее матчей по чужим новым ставкам
+    since = config.postmortem_since
+    if bet.settled_at is None or since is None or bet.settled_at < since:
+        reviewed = [leg for leg in reviewed if leg.match_id in found]
+        if not reviewed:
+            return out.model_copy(update={"state": "not_reviewed", "reason": "before_start"})
     items: list[LegReviewOut] = []
     for leg in reviewed:
         pm = found.get(leg.match_id)

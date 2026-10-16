@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal, get_origin
 
 import structlog
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -124,11 +125,18 @@ class AgentConfig(BaseModel):
     postmortem_max_tokens: int = Field(default=4000, ge=512, le=32000)
     postmortem_every_minutes: int = Field(default=60, ge=15, le=1440)
     postmortem_batch_max: int = Field(default=100, ge=1, le=1000)
+    # Разбираются только ставки, рассчитанные с этого момента (UTC). Не задан — очередь при
+    # первом запуске записывает сюда свой момент: рассчитанные раньше ставки (история,
+    # копия базы) не съедают общий бюджет ключа
+    postmortem_since: AwareDatetime | None = None
     estimate_postmortem_input_tokens: int = Field(default=4000, ge=0, le=1_000_000)
     estimate_postmortem_output_tokens: int = Field(default=1000, ge=0, le=32000)
     # Проверки (eval, Т8): предел ответа оценки матча в пакете проверки и быстрая
     # проверка урока перед включением (В4): столько матчей набора
     eval_max_tokens: int = Field(default=8000, ge=1024, le=128000)
+    # «Где экономим» (этап 5): на какой модели стоит проверить оценку матча — мера
+    # «Оценка матча на Sonnet 5.5»; экран показывает цену такой проверки на наборе
+    eval_alt_model: ModelId = "claude-sonnet-5-5"
     quick_check_events: int = Field(default=40, ge=10, le=200)
     # Замороженный набор (волна 3): событий в наборе и доля трудных (TOKEN_ECONOMY.md,
     # 2.2: 200–300 и 15–20%); прогон версии — пакетами до eval_batch_size событий (Т8:

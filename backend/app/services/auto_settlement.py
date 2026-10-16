@@ -12,6 +12,12 @@ settled_by = auto, у ног result_source = auto, ставка помнит з�
   (reversed_at), авторасчет больше не трогает — ручной расчет главнее;
 - снятие и неявка (retired, walkover) и неполный счет у форы сами не рассчитываются:
   правила букмекеров разные (В16). Участнику один раз — bet_needs_result с причиной;
+- исключение — проигранный экспресс: если хотя бы одна нога проиграна по архиву,
+  экспресс проигран при любом исходе остальных и при любых правилах букмекера, деньги
+  одни (−сумма ставки). Он рассчитывается сам, даже если другая нога — снятие, неявка,
+  прошлая встреча пары или еще без исхода (матч не в архиве). Такая нога остается без
+  исхода (result пуст): в аналитику, калибровку и разборы она не идет, сверка с архивом
+  ее пропускает. Выигрыш со снятием по-прежнему ждет исхода участника;
 - нога на матче архива, сыгранном раньше ставки больше чем на сутки (match_link,
   played_before), — это прошлая встреча той же пары (нога попала на нее при анализе):
   ставка сама не рассчитывается, участнику — bet_needs_result с причиной early, в отчете
@@ -36,7 +42,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import Select, and_, exists, not_, select, update
+from sqlalchemy import Select, exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -49,6 +55,7 @@ from app.ml.sets import (
     BEST_OF,
     OUTCOME_INCOMPLETE,
     OUTCOME_NO_RESULT,
+    RESULT_LOSS,
     complete_for,
     infer_best_of,
     match_leg_outcome,
@@ -177,14 +184,16 @@ def leg_verdict(
 
 
 def _open_on_archive() -> Select[int, int]:
-    """Открытые ставки приложения, у которых все ноги — на матчах архива с исходом и
-    участник их не исправлял."""
-    not_ready = (
+    """Открытые ставки приложения, которые участник не исправлял, хотя бы с одной ногой
+    на матче архива с исходом: все ноги готовы — обычный расчет, часть — только если
+    готовая нога проиграна (проигранный экспресс)."""
+    ready = (
         select(BetLeg.id)
         .join(Match, Match.id == BetLeg.match_id)
         .where(
             BetLeg.bet_id == Bet.id,
-            ~and_(Match.source.in_(ARCHIVE_SOURCES), Match.status.in_(PLAYED_STATUSES)),
+            Match.source.in_(ARCHIVE_SOURCES),
+            Match.status.in_(PLAYED_STATUSES),
         )
     )
     return (
@@ -193,8 +202,7 @@ def _open_on_archive() -> Select[int, int]:
             Bet.status == "open",
             Bet.source == "app",
             Bet.reversed_at.is_(None),
-            exists().where(BetLeg.bet_id == Bet.id),
-            not_(exists(not_ready)),
+            exists(ready),
         )
         .order_by(Bet.user_id, Bet.id)
     )
@@ -278,7 +286,11 @@ async def settle_open_bets(
             verdicts = {
                 leg.id: leg_verdict(leg, matches.get(leg.match_id), bet.placed_at) for leg in items
             }
-            if any(verdict.settlement is None for verdict in verdicts.values()):
+            lost = any(
+                verdict.settlement is not None and verdict.settlement.result == RESULT_LOSS
+                for verdict in verdicts.values()
+            )
+            if not lost and any(verdict.settlement is None for verdict in verdicts.values()):
                 reasons = [v.reason for v in verdicts.values() if v.settlement is None]
                 if OUTCOME_NO_RESULT in reasons:
                     continue
@@ -305,7 +317,7 @@ async def settle_open_bets(
                 result.overflow += 1
                 continue
             settled.append(bet)
-            result.legs += len(items)
+            result.legs += len(outcome)
         if settled:
             await db.flush()
             bank = await bank_state(db, user_id, now=moment)
@@ -402,7 +414,9 @@ async def check_settled_bets(db: AsyncSession, *, now: datetime | None = None) -
             for leg in legs.get(bet.id, []):
                 verdict = leg_verdict(leg, matches.get(leg.match_id), bet.placed_at)
                 found = verdict.settlement
-                if found is None or found.result == leg.result:
+                # Нога без исхода у проигранного экспресса: исход ей не вносили, спорить
+                # не с чем
+                if found is None or leg.result is None or found.result == leg.result:
                     leg.archive_result = None
                     leg.archive_score = None
                     continue

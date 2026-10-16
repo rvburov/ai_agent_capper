@@ -455,6 +455,24 @@ class SavingOut(BaseModel):
     month_forecast_usd: UsdOut | None
 
 
+class ModelCheckOut(BaseModel):
+    """Мера «Оценка матча на Sonnet 5.5» в «Где экономим» (этап 5): сколько стоит ее
+    проверить — один прогон замороженного набора на модели model через Batch из бюджета
+    проверок (правило «экономия не хуже», TOKEN_ECONOMY.md 2.4). estimate_usd — по живой
+    цене ответов проверок этой модели, а пока их нет — по ценам модели и токенам из
+    настроек (estimate_source); worst_usd — худший случай (весь eval_max_tokens);
+    budget_left_usd — остаток бюджета проверок месяца. events — события последнего
+    замороженного набора; набора еще нет — его размер из настроек (set_frozen = false)."""
+
+    model: str
+    events: int
+    set_frozen: bool
+    estimate_usd: UsdOut
+    estimate_source: Literal["live", "settings"]
+    worst_usd: UsdOut
+    budget_left_usd: UsdOut
+
+
 # Основа цены в «До и после»: eval — цена события прогонов на одном наборе (Batch со
 # скидкой, без новостей); live — ваши вызовы оценки матча за месяц (с кэшем и новостями)
 PriceSource = Literal["eval", "live"]
@@ -599,6 +617,9 @@ class AiUsageOut(BaseModel):
     # Этап 5: «Где экономим» и «До и после» (null — нет двух версий с прогоном на наборе)
     savings: list[SavingOut]
     before_after: BeforeAfterOut | None
+    # «Оценка матча на Sonnet 5.5»: цена проверки меры (null — оценка матча уже на этой
+    # модели или у модели нет цены)
+    model_check: ModelCheckOut | None = None
 
 
 class CostPartOut(BaseModel):

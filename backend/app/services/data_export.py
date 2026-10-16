@@ -116,6 +116,8 @@ def _bets(uid: int) -> _Query:
             Bet.profit,
             Bet.settled_at,
             Bet.settled_by,
+            # Этап 5: «Исправить результат» после авторасчета
+            Bet.reversed_at,
             Bet.source,
             Bet.source_ref,
             Bet.created_at,
@@ -147,6 +149,9 @@ def _bet_legs(uid: int) -> _Query:
             BetLeg.score,
             BetLeg.settled_at,
             BetLeg.result_source,
+            # Этап 5: что показал архив, если он разошелся с ручным расчетом
+            BetLeg.archive_result,
+            BetLeg.archive_score,
             BetLeg.closing_odds,
             BetLeg.closing_opp_odds,
             BetLeg.closing_bookmaker,

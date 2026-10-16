@@ -130,10 +130,19 @@ def apply_settlement(
     """Записать расчет открытой ставки: исходы ног, итог, прибыль и выплату в журнал (у
     проигрыша записи нет). Блокировки — у вызывающего (lock_member_money и FOR UPDATE
     ставки и ног). Выплата больше MONEY_MAX — 422 bet.payout_overflow, и ставка не
-    меняется. Возвращает выплату. Только add; flush и commit — за вызывающим."""
-    status = bet_outcome([outcome[leg.id].result for leg in legs])
+    меняется. Возвращает выплату. Только add; flush и commit — за вызывающим.
+
+    Нога, которой нет в outcome, остается без исхода. Так можно только у проигрыша:
+    проигранная нога проигрывает экспресс при любом исходе остальных (авторасчет, Т3);
+    иначе ValueError."""
+    results = [outcome[leg.id].result if leg.id in outcome else None for leg in legs]
+    status = bet_outcome([result for result in results if result is not None])
+    if None in results and status != "lost":
+        raise ValueError("нога без исхода у ставки, которая не проиграна")
     odds = settle_odds(
-        status, bet.total_odds, [(leg.odds_taken, outcome[leg.id].result) for leg in legs]
+        status,
+        bet.total_odds,
+        [(leg.odds_taken, result) for leg, result in zip(legs, results, strict=True)],
     )
     payout = payout_amount(bet.stake, status, odds)
     if payout > MONEY_MAX:
@@ -145,10 +154,11 @@ def apply_settlement(
             currency=bet.currency,
         )
     for leg in legs:
-        leg.result = outcome[leg.id].result
-        leg.score = outcome[leg.id].score
-        leg.settled_at = now
-        leg.result_source = settled_by
+        found = outcome.get(leg.id)
+        leg.result = found.result if found is not None else None
+        leg.score = found.score if found is not None else None
+        leg.settled_at = now if found is not None else None
+        leg.result_source = settled_by if found is not None else None
         leg.archive_result = None
         leg.archive_score = None
     bet.status = status

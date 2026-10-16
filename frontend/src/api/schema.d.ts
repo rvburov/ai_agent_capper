@@ -3324,6 +3324,7 @@ export interface components {
             /** Savings */
             savings: components["schemas"]["SavingOut"][];
             before_after: components["schemas"]["BeforeAfterOut"] | null;
+            model_check?: components["schemas"]["ModelCheckOut"] | null;
         };
         /**
          * AlertRulesOut
@@ -4086,7 +4087,7 @@ export interface components {
              */
             state: "open" | "not_reviewed" | "pending" | "done" | "failed";
             /** Reason */
-            reason: ("void" | "legacy" | "no_prediction") | null;
+            reason: ("void" | "legacy" | "no_prediction" | "before_start") | null;
             /** Clv Verdict */
             clv_verdict: ("legacy" | "void" | "no_closing" | "edge_confirmed" | "won_against_market" | "variance" | "model_error") | null;
             /** Legs */
@@ -7036,6 +7037,35 @@ export interface components {
              */
             decision: "approve" | "reject";
             limit?: components["schemas"]["LimitIn"] | null;
+        };
+        /**
+         * ModelCheckOut
+         * @description Мера «Оценка матча на Sonnet 5.5» в «Где экономим» (этап 5): сколько стоит ее
+         *     проверить — один прогон замороженного набора на модели model через Batch из бюджета
+         *     проверок (правило «экономия не хуже», TOKEN_ECONOMY.md 2.4). estimate_usd — по живой
+         *     цене ответов проверок этой модели, а пока их нет — по ценам модели и токенам из
+         *     настроек (estimate_source); worst_usd — худший случай (весь eval_max_tokens);
+         *     budget_left_usd — остаток бюджета проверок месяца. events — события последнего
+         *     замороженного набора; набора еще нет — его размер из настроек (set_frozen = false).
+         */
+        ModelCheckOut: {
+            /** Model */
+            model: string;
+            /** Events */
+            events: number;
+            /** Set Frozen */
+            set_frozen: boolean;
+            /** Estimate Usd */
+            estimate_usd: number;
+            /**
+             * Estimate Source
+             * @enum {string}
+             */
+            estimate_source: "live" | "settings";
+            /** Worst Usd */
+            worst_usd: number;
+            /** Budget Left Usd */
+            budget_left_usd: number;
         };
         /**
          * ModelPriceOut

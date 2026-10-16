@@ -23,6 +23,7 @@ from app.db.models import (
     AgentRun,
     Analysis,
     AppSettings,
+    Lesson,
     Match,
     OddsSnapshot,
     Player,
@@ -32,7 +33,7 @@ from app.db.models import (
 )
 from app.db.session import create_sessionmaker
 from app.ml.elo import rebuild_ratings
-from app.services import acceptance_runs
+from app.services import acceptance_runs, lessons, strategy_versions
 from app.services.acceptance_runs import RunMatch, RunResult
 from tests.analysis_helpers import (
     install,
@@ -716,3 +717,68 @@ async def test_run_one_records_parse_mismatch(
     assert result.duration_s is not None and result.duration_s >= 0
     assert set(result.costs) == {"parse", "news", "analysis"}
     assert result.searches > 0 and result.cache_share is not None
+
+
+async def test_run_one_uses_shared_instructions_with_lessons(
+    db: AsyncSession,
+    engine: AsyncEngine,
+    redis: Redis,
+    world: dict[str, int],
+    fake: FakeClaude,
+) -> None:
+    """Анализ прогона приемки пишет версию промпта активной версии общей линии инструкций
+    (с блоком уроков), а не личной версии администратора: так прогон проверяет то, что
+    получат анализы участников (заметка волны 4 этапа 5)."""
+    lesson = Lesson(
+        user_id=None,
+        code="L-001",
+        text="На харде фаворит после пяти сетов за двое суток переоценен",
+        scope={
+            "v": 1,
+            "direction": "lower",
+            "conditions": [
+                {"feature": "surface", "op": "in", "values": ["hard"]},
+                {"feature": "role", "op": "eq", "values": ["favorite"]},
+            ],
+        },
+        kind="numeric",
+        status="ready",
+        effect_shrunk=-0.031,
+        origin="manual",
+        validated_at=datetime.now(UTC) - timedelta(days=1),
+        metrics={
+            "quick": {
+                "status": "done",
+                "passed": True,
+                "finished_at": datetime.now(UTC).isoformat(),
+            }
+        },
+    )
+    db.add(lesson)
+    await db.commit()
+    admin = await db.get_one(User, world["admin"])
+    await lessons.enable(db, admin, lesson.id, ip=None)
+    shared = await strategy_versions.shared_active(db)
+    assert shared is not None and shared.lessons == ["L-001"]
+    assert shared.prompt_version is not None and "+lessons_block" in shared.prompt_version
+
+    found, stale = await acceptance_runs.candidate_matches(db, AgentConfig(), now=datetime.now(UTC))
+    plan = acceptance_runs.plan_runs(found, stale, 1)[0]
+    result = await acceptance_runs.run_one(
+        create_sessionmaker(engine),
+        redis,
+        admin_id=world["admin"],
+        plan=plan,
+        title="Приемка этапа 3, прогон 1",
+        currency="RUB",
+    )
+    assert result.done
+    analysis = await db.get_one(Analysis, result.analysis_id, populate_existing=True)
+    assert analysis.prompt_version == shared.prompt_version
+    predictions = list(
+        await db.scalars(select(Prediction).where(Prediction.analysis_id == analysis.id))
+    )
+    assert predictions and {row.prompt_version for row in predictions} == {shared.prompt_version}
+    assert all(row.lessons_applied == ["L-001"] for row in predictions)
+    for body in fake.calls("analysis"):
+        assert len(body["system"]) == 2 and "- L-001:" in body["system"][1]["text"]

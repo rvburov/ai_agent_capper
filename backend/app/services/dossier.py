@@ -28,6 +28,7 @@ serve за 52 недели {m, first_in, first_won, second_won, return_won, tb_w
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -59,7 +60,7 @@ from app.ml.elo import (
     rating_surface,
     win_probability,
 )
-from app.ml.sets import Probs3, base_probs, parse_sets, score_for
+from app.ml.sets import SHOWN_DIGITS, Probs3, base_probs, parse_sets, score_for
 
 FEATURE_SET = "d1"
 FORM_SIZE = 10
@@ -112,6 +113,85 @@ class DossierResult:
 def canonical_json(content: dict[str, Any]) -> str:
     """Канонический текст досье: одинаковое содержание — одинаковый текст и sha256."""
     return json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def dossier_flipped(content: Any, player1_id: int, player2_id: int) -> bool | None:
+    """Порядок игроков досье относительно матча по id игроков p1 и p2 досье: False —
+    игрок 1 досье — игрок 1 матча, True — игрок 2 (матч анализа слит с матчем архива
+    в обратном порядке, или стороны досье проверки назначены side_flip). None — по id не
+    понять: игроков досье с тех пор слили с другими (id в досье не меняются)."""
+    if not isinstance(content, dict):
+        return None
+    first, second = content.get("p1"), content.get("p2")
+    ids = (
+        first.get("id") if isinstance(first, dict) else None,
+        second.get("id") if isinstance(second, dict) else None,
+    )
+    if ids[0] == player1_id or ids[1] == player2_id:
+        return False
+    if ids[0] == player2_id or ids[1] == player1_id:
+        return True
+    return None
+
+
+# Путь к данным стороны в refs: «p1.news», «p2.serve»
+_SIDE_PATH = re.compile(r"\bp([12])\.")
+
+
+def _swap_sides(block: Any) -> Any:
+    """Пара по сторонам {p1, p2, ...}: значения p1 и p2 меняются местами."""
+    if not isinstance(block, dict):
+        return block
+    out = dict(block)
+    if "p1" in block or "p2" in block:
+        out["p1"], out["p2"] = block.get("p2"), block.get("p1")
+    return out
+
+
+def _flip_p(value: Any) -> Any:
+    return round(1.0 - float(value), SHOWN_DIGITS) if isinstance(value, int | float) else value
+
+
+def flip_dossier(content: dict[str, Any]) -> dict[str, Any]:
+    """Досье в обратном порядке игроков (p1 ↔ p2): блоки игроков; p_base — p1_win и elo_p
+    как 1 − p, p1_cover ↔ p2_cover; личные встречи — победы сторон (всего и на покрытии)
+    и победитель каждой встречи (счет — со стороны победителя, не меняется); refs —
+    пути p1.… ↔ p2.…. Остальное (матч, формат, свежесть данных) от порядка не зависит.
+    Нужно, когда досье анализа читается по матчу архива с другим порядком игроков
+    (dossier_flipped): весь факт для Claude — в одном порядке."""
+    out: dict[str, Any] = {**content, "p1": content.get("p2"), "p2": content.get("p1")}
+    shown = content.get("p_base")
+    if isinstance(shown, dict):
+        base = dict(shown)
+        for name in ("p1_win", "elo_p"):
+            if name in shown:
+                base[name] = _flip_p(shown[name])
+        if "p1_cover" in shown or "p2_cover" in shown:
+            base["p1_cover"], base["p2_cover"] = shown.get("p2_cover"), shown.get("p1_cover")
+        out["p_base"] = base
+    meetings_block = content.get("h2h")
+    if isinstance(meetings_block, dict):
+        flipped = _swap_sides(meetings_block)
+        if "surf" in meetings_block:
+            flipped["surf"] = _swap_sides(meetings_block["surf"])
+        last = meetings_block.get("last")
+        if isinstance(last, list):
+            flipped["last"] = [
+                {**item, "w": 3 - item["w"]}
+                if isinstance(item, dict) and item.get("w") in (1, 2)
+                else item
+                for item in last
+            ]
+        out["h2h"] = flipped
+    refs = content.get("refs")
+    if isinstance(refs, dict):
+        out["refs"] = {
+            key: _SIDE_PATH.sub(lambda m: f"p{3 - int(m.group(1))}.", value)
+            if isinstance(value, str)
+            else value
+            for key, value in refs.items()
+        }
+    return out
 
 
 def _ratio(part: int | None, whole: int | None) -> float | None:

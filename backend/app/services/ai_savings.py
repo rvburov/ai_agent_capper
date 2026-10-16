@@ -1,5 +1,6 @@
 """«ИИ и расходы» этапа 5 (волна 4): качество версий инструкций, «Где экономим» и «До и
-после» (TOKEN_ECONOMY.md 2.4; макет costs.js, правка 18).
+после» (TOKEN_ECONOMY.md 2.4; макет costs.js, правка 18), цена проверки меры «Оценка
+матча на Sonnet 5.5» (волна 5).
 
 Качество оценки матча — прогон версии общей линии инструкций на замороженном наборе
 (app/services/eval_runs.py), цена — факт по agent_runs за месяц. Сравнение версий только
@@ -23,6 +24,7 @@ from app.agent.runs import USD_STEP, price_for
 from app.db.models import AgentRun, StrategyVersion, User
 from app.schemas.ai import (
     BeforeAfterOut,
+    ModelCheckOut,
     PriceSource,
     SavingOut,
     UsageVersionOut,
@@ -30,7 +32,8 @@ from app.schemas.ai import (
     VersionSideOut,
 )
 from app.schemas.learning import ComparisonOut, VersionEvalOut
-from app.services import eval_runs
+from app.services import eval_runs, eval_sets, lesson_quick
+from app.services.check_runs import eval_budget
 from app.services.strategy_versions import ACTIVE, CANDIDATE, shared_active
 
 ZERO = Decimal(0)
@@ -333,3 +336,41 @@ async def before_after(
             price_source=source,
         )
     return None
+
+
+async def model_check(
+    db: AsyncSession, config: AgentConfig, moment: datetime
+) -> ModelCheckOut | None:
+    """Цена проверки меры «Оценка матча на другой модели» (eval_alt_model): один прогон
+    последнего замороженного набора через Batch — как прогон версии (eval_runs.plan), но
+    по ценам этой модели. Оценка матча уже на ней или у модели нет цены — None."""
+    model = config.eval_alt_model
+    if model == config.analysis_model:
+        return None
+    try:
+        price = await price_for(db, model)
+    except ClaudeStepError:
+        return None
+    eval_set = await eval_sets.latest_set(db)
+    events = eval_set.n_events if eval_set is not None else config.eval_set_size
+    live = await lesson_quick.live_request_usd(db, model)
+    one = (
+        live
+        if live is not None
+        else batches.request_estimate_usd(
+            price,
+            input_tokens=config.estimate_analysis_input_tokens,
+            output_tokens=config.estimate_analysis_output_tokens,
+        )
+    )
+    worst = lesson_quick.worst_per_request(price, config, config.estimate_analysis_input_tokens)
+    budget = await eval_budget(db, moment)
+    return ModelCheckOut(
+        model=model,
+        events=events,
+        set_frozen=eval_set is not None,
+        estimate_usd=batches.round_usd(one * events),
+        estimate_source="live" if live is not None else "settings",
+        worst_usd=batches.round_usd(worst * events),
+        budget_left_usd=budget.left_usd,
+    )

@@ -89,7 +89,11 @@ from app.services.app_settings import SETTINGS_ROW_ID
 from app.services.claude_key import key_for
 from app.services.progress import TERMINAL_EVENTS, read_events
 from app.services.sessions import utcnow
-from app.services.strategy_versions import ensure_active, prompt_version_of
+from app.services.strategy_versions import (
+    ensure_active,
+    ensure_shared_active,
+    system_prompt_of,
+)
 
 # Критерии приемки (PLAN.md, этап 3)
 P90_LIMIT_SECONDS = 180.0
@@ -677,8 +681,11 @@ async def _run(
         # (bets.bookmakers), а avg и pinnacle — источник кэфов tennis-data, не букмекер
         analysis.status = "needs_confirmation"
         strategy = await ensure_active(db, admin.id)
+        # Промпт и уроки — активной версии общей линии инструкций, как у анализа участника
+        # (Р25, Т6), а не личной версии администратора
+        shared = await ensure_shared_active(db)
         await db.commit()
-        prompt_version = prompt_version_of(strategy)
+        prompt_version = shared.prompt_version or system_prompt_of(shared).version_id
         estimate = await estimate_run(
             db, config, events, prompt_version=prompt_version, now=utcnow()
         )

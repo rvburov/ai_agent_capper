@@ -23,7 +23,8 @@ Playwright волны 3.
   JSONL: каждый запрос пакета отвечается как обычный (без потока, service_tier batch);
   ответ с ошибкой HTTP — результат errored с тем же типом ошибки. Неизвестный пакет —
   404 not_found_error; batches[id]["expired"] = True — прошло 29 дней (пакет виден,
-  results_url нет, результаты — 404).
+  results_url нет, результаты — 404). id пакета — msgbatch_fake‹N› в тестах,
+  msgbatch_fake‹метка процесса›_‹N› у сервера; /_fake/reset номера не сбрасывает.
 
 Сбои включаются переключателем: FakeClaude.fail(step, error, times) в тестах,
 POST /_fake/fail {"step": "analysis", "error": "overloaded", "times": 1} у сервера или
@@ -46,6 +47,7 @@ import json
 import os
 import re
 import threading
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -373,6 +375,10 @@ class FakeClaude:
     # Пакеты Message Batches: id → запросы, сколько опросов еще «в работе», результаты
     batches: dict[str, dict[str, Any]] = field(default_factory=dict)
     batch_polls: int = 0
+    # Номер следующего пакета и метка процесса в id: /_fake/reset их не сбрасывает, id
+    # пакетов не повторяются (batch_jobs.batch_id уникален, пакеты в базе стенда остаются)
+    batch_seq: int = 0
+    batch_tag: str = ""
     # Пакеты, которые отменили (POST …/cancel)
     canceled: list[str] = field(default_factory=list)
     # Гипотеза разбора проигравшей стороны (None — без гипотезы)
@@ -691,7 +697,8 @@ class FakeClaude:
         requests = list(json.loads(raw or b"{}").get("requests") or [])
         now = datetime.now(UTC)
         with self.lock:
-            batch_id = f"msgbatch_fake{len(self.batches) + 1}"
+            self.batch_seq += 1
+            batch_id = f"msgbatch_fake{self.batch_tag}{self.batch_seq}"
             self.batches[batch_id] = {
                 "requests": requests,
                 "polls_left": self.batch_polls,
@@ -897,6 +904,9 @@ def _model(name: str) -> dict[str, Any]:
 
 
 def _from_env(fake: FakeClaude) -> FakeClaude:
+    # Сервер стенда: метка процесса в id пакетов — после перезапуска сервера номера
+    # начинаются заново, а пакеты прошлых запусков остаются в базе
+    fake.batch_tag = f"{uuid.uuid4().hex[:8]}_"
     for part in os.environ.get("FAKE_CLAUDE_FAIL", "").split(","):
         if ":" in part:
             step, error = part.split(":", 1)

@@ -9,9 +9,18 @@ from decimal import Decimal as D
 from typing import Any
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AgentRun, EvalComparison, EvalRun, EvalSet, StrategyVersion, User
+from app.db.models import (
+    AgentRun,
+    AppSettings,
+    EvalComparison,
+    EvalRun,
+    EvalSet,
+    StrategyVersion,
+    User,
+)
 from app.services import ai_access, ai_usage
 from app.services.ai_usage import month_of
 from tests.claude_mock import price_row
@@ -341,3 +350,35 @@ async def test_savings_without_versions_or_postmortems(
     batch = out.savings[0]
     assert batch.per_run_usd is not None and batch.per_run_usd > 0
     assert batch.per_run_without_usd == batch.per_run_usd * 2
+
+
+async def test_model_check_price_from_settings_and_eval_budget(
+    db: AsyncSession, make_user: UserFactory, prices: None
+) -> None:
+    """«Оценка матча на Sonnet 5.5» (волна 5): цена проверки меры — один прогон набора на
+    Sonnet через Batch по ценам модели и токенам настроек (живых проверок на ней нет),
+    худший случай — весь eval_max_tokens, остаток бюджета проверок. Эталон — вручную по
+    ценам claude_mock: вход $2, выход $10, запись кэша на час $4 за 1 млн, Batch — половина."""
+    member = (await make_user()).user
+    out = await ai_usage.usage(db, member, now=NOW)
+    check = out.model_check
+    assert check is not None
+    assert (check.model, check.events, check.set_frozen) == ("claude-sonnet-5-5", 250, False)
+    assert check.estimate_source == "settings"
+    # (7000 × 2 + 4000 × 10) / 1e6 / 2 = 0,027 за событие; 250 событий — $6,75
+    assert check.estimate_usd == D("6.7500")
+    # (7000 × 4 + 8000 × 10) / 1e6 / 2 = 0,054 за событие; 250 событий — $13,50
+    assert check.worst_usd == D("13.5000")
+    assert check.budget_left_usd == D("25")
+    # Набор заморожен: его размер и бюджет месяца первого набора ($30)
+    db.add(EvalSet(code="eval-x", frozen_at=NOW, sha256="0" * 64, n_events=200, rules={}))
+    await db.commit()
+    frozen = (await ai_usage.usage(db, member, now=NOW)).model_check
+    assert frozen is not None and (frozen.events, frozen.set_frozen) == (200, True)
+    assert frozen.estimate_usd == D("5.4000") and frozen.budget_left_usd == D("30")
+    # Оценка матча уже на Sonnet — мерить нечего
+    await db.execute(
+        update(AppSettings).values(agent_config={"analysis_model": "claude-sonnet-5-5"})
+    )
+    await db.commit()
+    assert (await ai_usage.usage(db, member, now=NOW)).model_check is None

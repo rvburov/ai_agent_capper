@@ -30,7 +30,7 @@ from app.db.models import (
 from app.db.session import create_sessionmaker
 from app.ingest import match_link
 from app.ml.market import devig_pair
-from app.services import auto_settlement, players
+from app.services import auto_settlement, players, settlement
 from app.services import bank as bank_service
 from app.services.archive_settlement import settle_from_archive, summary_lines
 from app.services.bank import CURRENCY_LOCK, bank_from_entries, bank_state, ledger_entries
@@ -333,8 +333,8 @@ async def test_link_close_and_settle_express(
 async def test_lost_handicap_and_waiting_legs(
     member: Signed, maker: BetMaker, archive: Archive, db: AsyncSession, factory: Factory
 ) -> None:
-    """Фора −1.5 по полному счету, проигрыш без выплаты; ставка с матчем, которого в
-    архиве еще нет, ждет; закрытие участника не меняется."""
+    """Фора −1.5 по полному счету, проигрыш без выплаты; ставка с сыгравшей ногой и
+    матчем, которого в архиве еще нет, ждет; закрытие участника не меняется."""
     lost = await maker.bet(
         member.user, [_spec(odds="2.40", market="HCP_-1.5")], stake="100", placed_at=PLACED
     )
@@ -347,7 +347,7 @@ async def test_lost_handicap_and_waiting_legs(
     )
     w1, _ = await _legs(db, waiting.id)
     q1, q2 = await _pair(db, w1)
-    await archive.match(q1, q2, winner=2, score="6-3 6-3", odds={"avg": ("1.70", "2.20")})
+    await archive.match(q1, q2, winner=1, score="6-3 6-3", odds={"avg": ("1.70", "2.20")})
     # Закрытие, которое внес участник, архив не трогает
     closing = {"odds": "1.66", "by": "bookmaker"}
     response = await member.client.put(
@@ -372,6 +372,129 @@ async def test_lost_handicap_and_waiting_legs(
     assert (w1.result, w1.closing_source, w1.closing_odds) == (None, "user", D("1.660"))
     assert w2.result is None
     await _check_bank(db, member.id)
+
+
+async def test_lost_parlay_settles_whatever_the_other_legs(
+    member: Signed,
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    maker: BetMaker,
+    archive: Archive,
+    db: AsyncSession,
+    factory: Factory,
+) -> None:
+    """Проигранная нога проигрывает экспресс при любом исходе остальных (Т3): экспресс с
+    неявкой, со снятием и с матчем, которого в архиве нет, рассчитан сам как проигрыш —
+    −сумма ставки, выплаты нет (эталонный SQL); нога без исхода остается пустой, своего
+    расчета ей не нужно, сверка с архивом ее не трогает. Выигранная нога со снятием —
+    по-прежнему «внесите исход», ставка открыта."""
+    # Проигрыш + неявка
+    walkover = await maker.bet(
+        member.user, [_spec(odds="1.85"), _spec(odds="2.10")], stake="333.33", placed_at=PLACED
+    )
+    w_lost, w_void = await _legs(db, walkover.id)
+    await archive.match(*await _pair(db, w_lost), winner=2, score="6-3 6-4")
+    await archive.match(*await _pair(db, w_void), winner=1, score=None, status="walkover")
+    # Снятие + проигрыш (фора −1.5 при 2:1) + матч не в архиве
+    triple = await maker.bet(
+        member.user,
+        [_spec(odds="1.70"), _spec(odds="2.40", market="HCP_-1.5"), _spec(odds="1.50")],
+        stake="250.55",
+        placed_at=PLACED,
+    )
+    t_retired, t_lost, t_missing = await _legs(db, triple.id)
+    await archive.match(*await _pair(db, t_retired), score="6-4 2-1 RET", status="retired")
+    await archive.match(*await _pair(db, t_lost), score="6-4 3-6 6-2")
+    # Выигрыш + снятие: исход снятия — по правилам букмекера, ставка ждет участника
+    won = await maker.bet(member.user, [_spec(), _spec()], stake="100", placed_at=PLACED)
+    v_won, v_retired = await _legs(db, won.id)
+    await archive.match(*await _pair(db, v_won), winner=1)
+    await archive.match(*await _pair(db, v_retired), score="6-4 1-0 RET", status="retired")
+    # Выигрыш + матч не в архиве: ждет следующего файла, без напоминания
+    waiting = await maker.bet(member.user, [_spec(), _spec()], stake="100", placed_at=PLACED)
+    g_won, _ = await _legs(db, waiting.id)
+    await archive.match(*await _pair(db, g_won), winner=1)
+    before = await bank_state(db, member.id)
+
+    report, run_id = await settle_from_archive(factory, warm=False)
+    # Своих исходов — у двух проигранных ног
+    assert report.counts["bets.settled"] == 2 and report.counts["bets.legs"] == 2
+    assert report.counts["bets.manual"] == 1 and report.counts["bets.reminded"] == 1
+
+    rows = {row.id: row for row in (await db.execute(_PAYOUT_SQL, {"user_id": member.id}))}
+    assert set(rows) == {walkover.id, triple.id}
+    for bet, stake in ((walkover, D("333.33")), (triple, D("250.55"))):
+        saved = await _bet(db, bet.id)
+        assert (saved.status, saved.settled_by, saved.settle_run_id) == ("lost", "auto", run_id)
+        assert saved.profit == -stake
+        assert rows[bet.id].payout == rows[bet.id].ledger == 0
+    assert [row.kind for row in await ledger_rows(db, member.id)].count("payout") == 0
+    # Суммы списаны при ставке: баланс тот же, в игре и в капитале — минус обе ставки
+    after = await bank_state(db, member.id)
+    assert after.balance == before.balance
+    assert after.equity == before.equity - D("333.33") - D("250.55")
+    await _check_bank(db, member.id)
+
+    w_lost, w_void = await _legs(db, walkover.id)
+    assert (w_lost.result, w_lost.score, w_lost.result_source) == ("loss", "0:2", "auto")
+    assert (w_void.result, w_void.score, w_void.result_source, w_void.settled_at) == (
+        None,
+        None,
+        None,
+        None,
+    )
+    t_retired, t_lost, t_missing = await _legs(db, triple.id)
+    assert (t_lost.result, t_lost.score) == ("loss", "2:1")
+    assert t_retired.result is None and t_missing.result is None
+
+    notes = await _notes(db, member.id, "bet_settled")
+    assert sorted(note.params["bet"] for note in notes) == sorted(
+        [str(walkover.id), str(triple.id)]
+    )
+    assert all("проигрыш, убыток" in note.body for note in notes)
+    [manual] = await _notes(db, member.id, "bet_needs_result")
+    assert manual.link == f"/bets?bet={won.id}" and manual.params["variant"] == "manual"
+    assert (await _bet(db, won.id)).status == "open"
+    assert (await _bet(db, waiting.id)).status == "open"
+
+    # Карточка: ставка рассчитана, у ноги со снятием исхода нет
+    card = await get_bet(member.client, walkover.id)
+    assert card["status"] == "lost" and card["settled_by"] == "auto"
+    assert [leg["result"] for leg in card["legs"]] == ["loss", None]
+
+    # Матч ноги без исхода появился в архиве: сверка не спорит с пустым исходом, деньги
+    # те же, повторного расчета нет
+    await archive.match(*await _pair(db, t_missing), winner=1)
+    again, _ = await settle_from_archive(factory, warm=False)
+    assert again.counts["bets.settled"] == 0 and again.counts["bets.conflicts"] == 0
+    assert await _notes(db, member.id, "settle_conflict") == []
+    t_retired, t_lost, t_missing = await _legs(db, triple.id)
+    assert t_missing.result is None and t_missing.archive_result is None
+    again_bank = await bank_state(db, member.id)
+    assert (again_bank.balance, again_bank.equity) == (after.balance, after.equity)
+
+    # Чужой проигранный экспресс участник не видит
+    other = await signed_in(make_client, make_user, login, email="other@example.com")
+    assert (await other.client.get(f"/api/bets/{walkover.id}")).status_code == 404
+
+
+def test_leg_without_result_only_in_lost_bet() -> None:
+    """Нога без исхода допустима только у проигрыша: выигрыш или возврат с пустой ногой
+    посчитал бы деньги не по правилам букмекера — ошибка, ставка не меняется."""
+    bet = Bet(id=1, user_id=1, stake=D("100"), total_odds=D("3.000"), currency="RUB")
+    legs = [BetLeg(id=1, odds_taken=D("1.50")), BetLeg(id=2, odds_taken=D("2.00"))]
+    for result in ("win", "void"):
+        with pytest.raises(ValueError):
+            settlement.apply_settlement(
+                None,  # type: ignore[arg-type]
+                bet,
+                legs,
+                {1: settlement.LegSettlement(result, None)},
+                settled_by="auto",
+                now=datetime(2026, 10, 5, tzinfo=UTC),
+            )
+        assert bet.status is None and legs[0].result is None
 
 
 async def test_retired_needs_manual_and_reversed_is_left_alone(

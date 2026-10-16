@@ -26,18 +26,21 @@ from app.db.models import (
     BatchJob,
     Bet,
     BetLeg,
+    Dossier,
     Lesson,
     Match,
+    MatchAssessment,
     Notification,
+    Player,
     Postmortem,
 )
-from app.services import ai_access, postmortems
+from app.services import ai_access, lesson_check, postmortems
 from app.workers.jobs import collect_all
 from tests.analysis_helpers import install, set_admin_key
 from tests.claude_mock import seed_prices
 from tests.fake_claude import FakeClaude, message
 from tests.helpers_admin import signed_in
-from tests.learning_helpers import MiniArchive, mini_archive, own_leg, upset
+from tests.learning_helpers import MiniArchive, mini_archive, own_leg, reviews_from, upset
 from tests.support import ClientFactory, LoginFn, UserFactory
 
 
@@ -49,6 +52,7 @@ def fake() -> Iterator[FakeClaude]:
 @pytest.fixture
 async def world(db: AsyncSession, engine: AsyncEngine) -> MiniArchive:
     found = await mini_archive(db, engine)
+    await reviews_from(db)
     await set_admin_key(db)
     await seed_prices(db)
     return found
@@ -292,6 +296,181 @@ async def test_partial_errors_expired_and_retry(
     assert last is not None and last.status == "failed"
 
 
+async def _dossier_in_order(
+    db: AsyncSession,
+    match: Match,
+    first: int,
+    second: int,
+    *,
+    p1_win: float,
+    p1_claude: float,
+    ids: tuple[int, int] | None = None,
+) -> Dossier:
+    """Досье анализа в его порядке игроков (first — игрок 1 анализа) и общая оценка Claude
+    по нему; ids — id игроков в досье, если они уже не те (игроков потом слили). commit."""
+    rows = await db.execute(select(Player.id, Player.name).where(Player.id.in_((first, second))))
+    names = {player_id: name for player_id, name in rows}
+    shown = ids or (first, second)
+    dossier = Dossier(
+        match_id=match.id,
+        as_of=datetime(2026, 5, 19, 12, 0, tzinfo=UTC),
+        content={
+            "v": "test",
+            "match": {"id": match.id, "surface": "clay", "bo": 3},
+            "p_base": {
+                "p1_win": p1_win,
+                "p1_cover": round(p1_win - 0.15, 3),
+                "p2_cover": round(0.85 - p1_win, 3),
+                "elo_p": p1_win,
+                "cal": True,
+            },
+            "p1": {"id": shown[0], "name": names[first], "elo": {"all": 1700 + first}},
+            "p2": {"id": shown[1], "name": names[second], "elo": {"all": 1700 + second}},
+            # Игрок 1 досье выиграл две встречи из трех, последнюю — тоже
+            "h2h": {
+                "n": 3,
+                "p1": 2,
+                "p2": 1,
+                "surf": {"n": 1, "p1": 1, "p2": 0},
+                "last": [{"d": "2026-01-10", "w": 1, "sc": "6-4 6-4"}],
+            },
+            "refs": {"elo": "p1.elo p2.elo", "news:7": "p1.news"},
+        },
+        sha256=f"{match.id:08d}{first:08d}{second:08d}".ljust(64, "0"),
+        feature_set="test",
+    )
+    db.add(dossier)
+    await db.flush()
+    db.add(
+        MatchAssessment(
+            dossier_id=dossier.id,
+            model="claude-opus-5-5",
+            effort="high",
+            prompt_version="analysis.v3",
+            schema_version="a1",
+            output={"p1_win": p1_claude, "p1_cover": 0.4, "p2_cover": 0.1},
+        )
+    )
+    await db.commit()
+    return dossier
+
+
+@pytest.mark.parametrize("favorite_won", [True, False], ids=["favorite-won", "favorite-lost"])
+@pytest.mark.parametrize("reverse", [False, True], ids=["same-order", "reverse-order"])
+async def test_dossier_order_against_archive(
+    db: AsyncSession,
+    world: MiniArchive,
+    fake: FakeClaude,
+    make_user: UserFactory,
+    make_client: ClientFactory,
+    login: LoginFn,
+    reverse: bool,
+    favorite_won: bool,
+) -> None:
+    """Досье — в порядке игроков анализа, сторона и исход — по матчу архива (в tennis-data
+    первым идет победитель): при обратном порядке вероятности досье переворачиваются.
+    Полуфинал m3: A (игрок 1 архива) обыграл B."""
+    member = await signed_in(make_client, make_user, login)
+    favorite = world.a if favorite_won else world.b
+    first, second = (world.b, world.a) if reverse else (world.a, world.b)
+    # Досье и оценка Claude: фаворит анализа — 0,8 и 0,75
+    p1_win, p1_claude = (0.8, 0.75) if first == favorite else (0.2, 0.25)
+    await _dossier_in_order(db, world.m3, first, second, p1_win=p1_win, p1_claude=p1_claude)
+    # Ставка на фаворита, сторона — по матчу архива
+    selection = 1 if favorite == world.a else 2
+    bet, _, _ = await own_leg(
+        db,
+        member.id,
+        world.m3,
+        selection=selection,
+        result="win" if favorite_won else "loss",
+    )
+
+    await _submit(db)
+    [body] = [body for batch in fake.batches.values() for body in batch["requests"]]
+    facts = json.loads(body["params"]["messages"][0]["content"][0]["text"])
+    assert facts["subject"] == {"market": "ML", "side": selection, "won": favorite_won}
+    assert facts["model"]["p_base"] == 0.8 and facts["model"]["p_claude"] == 0.75
+    assert facts["match"]["winner"] == 1 and facts["match"]["p1"] == "Arno Aalto"
+    # Досье в фактах — в порядке матча архива: p1 досье — игрок 1 матча, числа согласованы
+    shown = facts["dossier"]
+    assert shown["p1"]["name"] == facts["match"]["p1"] == "Arno Aalto"
+    assert shown["p2"]["name"] == facts["match"]["p2"] == "Boris Berg"
+    assert shown["p1"]["elo"] == {"all": 1700 + world.a}
+    p_side = shown["p_base"]["p1_win"] if selection == 1 else 1 - shown["p_base"]["p1_win"]
+    assert round(p_side, 3) == facts["model"]["p_base"] == 0.8
+    assert shown["p_base"]["elo_p"] == shown["p_base"]["p1_win"]
+    assert shown["p_base"]["p1_cover"] == round(shown["p_base"]["p1_win"] - 0.15, 3)
+    h2h_first = (1, 2) if reverse else (2, 1)
+    assert (shown["h2h"]["p1"], shown["h2h"]["p2"]) == h2h_first
+    assert shown["h2h"]["last"][0]["w"] == (2 if reverse else 1)
+    assert shown["refs"]["news:7"] == ("p2.news" if reverse else "p1.news")
+    await collect_all(db)
+
+    pm = await db.scalar(select(Postmortem))
+    assert pm is not None and pm.status == "done"
+    assert (pm.side, pm.winner) == (selection, 1)
+    review = (await member.client.get(f"/api/bets/{bet.id}/review")).json()
+    [leg] = review["legs"]
+    assert leg["same_pick"] is True and leg["selection"] == selection
+    if favorite_won:
+        # Прогноз подтвердился, гипотезы нет
+        assert pm.verdict == "fine" and pm.lesson_id is None
+        assert leg["verdict"] == "fine" and leg["lesson"] is None
+    else:
+        # Фаворит проиграл: ошибка модели и урок-гипотеза
+        assert pm.verdict == "model_error" and pm.lesson_id is not None
+        assert leg["verdict"] == "model_error" and leg["lesson"]["status"] == "hypothesis"
+
+
+async def test_dossier_order_by_name_after_player_merge(
+    db: AsyncSession, world: MiniArchive, fake: FakeClaude, make_user: UserFactory
+) -> None:
+    """id игроков в досье устарели (игроков слили с игроками архива): порядок — по имени,
+    в том числе по псевдониму; не понять — только Эло, без вероятностей досье."""
+    member = await make_user()
+    await upset(db, world.m3)  # B (игрок 2 архива) обыграл A
+    player_b = await db.get_one(Player, world.b)
+    player_b.aliases = ["Boris Berg Jr"]
+    await db.commit()
+    # Анализ «B — A», B — фаворит; id в досье — удаленных игроков
+    dossier = await _dossier_in_order(
+        db, world.m3, world.b, world.a, p1_win=0.7, p1_claude=0.65, ids=(990001, 990002)
+    )
+    dossier.content = {
+        **dossier.content,
+        "p1": {"id": 990001, "name": "Boris Berg Jr"},
+    }
+    await db.commit()
+    await own_leg(db, member.id, world.m3, selection=2, result="win")
+    await _submit(db)
+    [body] = [body for batch in fake.batches.values() for body in batch["requests"]]
+    facts = json.loads(body["params"]["messages"][0]["content"][0]["text"])
+    assert facts["subject"] == {"market": "ML", "side": 2, "won": True}
+    assert facts["model"]["p_base"] == 0.7 and facts["model"]["p_claude"] == 0.65
+    assert facts["dossier"]["p1"]["name"] == "Arno Aalto"
+    assert facts["dossier"]["p_base"]["p1_win"] == 0.3
+
+    # Имен в досье нет среди игроков матча — вероятности досье не берутся
+    elo = await lesson_check.match_sides(db, [world.m3.id])
+    dossier.content = {
+        **dossier.content,
+        "p1": {"id": 990001, "name": "Someone Else"},
+        "p2": {"id": 990002, "name": "Nobody"},
+    }
+    await db.commit()
+    pm = await db.scalar(select(Postmortem))
+    assert pm is not None
+    found = await postmortems.facts_for(db, pm, elo)
+    assert found is not None
+    facts, won, side, winner = found
+    assert side == 1 and winner == 2 and won is False  # фаворит по Эло — A
+    assert facts["model"]["p_base"] == round(elo[(world.m3.id, 1)].p_base, 3)
+    assert facts["model"]["p_claude"] is None
+    # Досье не в факты: порядок его игроков не понять
+    assert facts["dossier"] is None
+
+
 async def test_scope_outside_dictionary_keeps_text_without_lesson(
     db: AsyncSession, world: MiniArchive, fake: FakeClaude, make_user: UserFactory
 ) -> None:
@@ -345,6 +524,61 @@ async def test_budget_wait_and_notice_once(
     await db.execute(update(AppSettings).values(monthly_budget_usd=Decimal("60")))
     await db.commit()
     assert (await _submit(db))["sent"] == 1
+
+
+async def test_old_bets_are_not_reviewed_and_batch_is_capped(
+    db: AsyncSession,
+    world: MiniArchive,
+    fake: FakeClaude,
+    make_user: UserFactory,
+    make_client: ClientFactory,
+    login: LoginFn,
+) -> None:
+    """Очередь разборов берет только ставки, рассчитанные с postmortem_since: не задан —
+    первый запуск записывает свой момент, рассчитанные раньше ставки (история, копия базы)
+    не разбираются и на карточке — «Разбора нет» (before_start). В пакете — не больше
+    postmortem_batch_max матчей, остальные ждут следующего."""
+    await db.execute(update(AppSettings).values(agent_config={"postmortem_batch_max": 1}))
+    await db.commit()
+    member = await signed_in(make_client, make_user, login)
+    # Рассчитаны 21 мая — до первого запуска очереди
+    old_m2, _, _ = await own_leg(db, member.id, world.m2, result="loss")
+    old_m3, _, _ = await own_leg(db, member.id, world.m3, result="win")
+    start = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+
+    summary = await postmortems.submit(db, now=start, force=True)
+    assert (summary["queued"], summary["sent"]) == (0, 0)
+    assert await db.scalar(select(func.count()).select_from(Postmortem)) == 0
+    settings = await db.get_one(AppSettings, 1, populate_existing=True)
+    assert settings.agent_config["postmortem_since"] == start.isoformat()
+    review = (await member.client.get(f"/api/bets/{old_m2.id}/review")).json()
+    assert (review["state"], review["reason"], review["legs"]) == (
+        "not_reviewed",
+        "before_start",
+        [],
+    )
+
+    # Рассчитаны после начала: оба матча в очереди, в пакете — один
+    after = datetime(2026, 6, 2, 9, 0, tzinfo=UTC)
+    new_m1, _, _ = await own_leg(db, member.id, world.m1, result="win", placed_at=after)
+    new_m0, _, _ = await own_leg(db, member.id, world.m0, result="loss", placed_at=after)
+    later = start + timedelta(days=3)
+    summary = await postmortems.submit(db, now=later, force=True)
+    assert (summary["queued"], summary["sent"]) == (2, 1)
+    pms = list(await db.scalars(select(Postmortem).order_by(Postmortem.id)))
+    assert {pm.match_id for pm in pms} == {world.m0.id, world.m1.id}
+    assert {pm.bet_id for pm in pms} == {new_m0.id, new_m1.id}
+    assert sorted(pm.status for pm in pms) == ["queued", "submitted"]
+    # Момент начала не сдвигается следующими запусками
+    settings = await db.get_one(AppSettings, 1, populate_existing=True)
+    assert settings.agent_config["postmortem_since"] == start.isoformat()
+    summary = await postmortems.submit(db, now=later + timedelta(hours=2), force=True)
+    assert (summary["queued"], summary["sent"]) == (0, 1)
+    assert await db.scalar(select(func.count()).select_from(Postmortem)) == 2
+    pending = (await member.client.get(f"/api/bets/{new_m1.id}/review")).json()
+    assert pending["state"] == "pending"
+    still_old = (await member.client.get(f"/api/bets/{old_m3.id}/review")).json()
+    assert still_old["reason"] == "before_start"
 
 
 async def test_cadence_and_disabled(

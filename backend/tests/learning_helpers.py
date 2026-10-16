@@ -6,10 +6,12 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.models import (
     Analysis,
+    AppSettings,
     Bet,
     BetLeg,
     Match,
@@ -170,6 +172,18 @@ async def mini_archive(
     await db.commit()
     await rebuild_ratings(db_factory=create_sessionmaker(engine))
     return MiniArchive(day, a.id, b.id, c.id, m0, m1, m2, m3)
+
+
+# Разборы с начала времен: ставки тестов рассчитаны задним числом (весна 2026)
+REVIEWS_FROM = datetime(2020, 1, 1, tzinfo=UTC)
+
+
+async def reviews_from(db: AsyncSession, when: datetime = REVIEWS_FROM, **config: object) -> None:
+    """Настройки агента: разборы ставок, рассчитанных с when (postmortem_since), и другие
+    настройки config. commit."""
+    overrides = {"postmortem_since": when.isoformat(), **config}
+    await db.execute(update(AppSettings).values(agent_config=overrides))
+    await db.commit()
 
 
 async def upset(db: AsyncSession, match: Match) -> Match:

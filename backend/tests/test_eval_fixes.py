@@ -5,7 +5,9 @@
   (ждущий — сразу, пакет у Anthropic — отмена) и командой терминала;
 - m3: набор раньше среза знаний модели анализа — отказ eval.set_model_seen;
 - m4: калибровка базовой модели закреплена за набором при заморозке;
-- заметка: худший случай до запуска — вместе с пакетом повтора."""
+- заметка: худший случай до запуска — вместе с пакетом повтора;
+- этап 6: стороны события набора — как в его досье, а не по side_flip нового id матча
+  (матч набора слит с другим); досье в обратном порядке игроков (flip_dossier)."""
 
 import asyncio
 from datetime import UTC, date, datetime, timedelta
@@ -15,8 +17,19 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AgentRun, BatchJob, EvalRun, EvalSetItem, Lesson, MlModel, User
+from app.db.models import (
+    AgentRun,
+    BatchJob,
+    Dossier,
+    EvalRun,
+    EvalSetItem,
+    Lesson,
+    Match,
+    MlModel,
+    User,
+)
 from app.ml import model_versions
+from app.ml.backtest import side_flip
 from app.ml.lesson_scope import Condition, Scope
 from app.ml.model_versions import CALIBRATION_KIND
 from app.schemas.learning import EvalRunIn, EvalSetIn, InstructionsCandidateIn
@@ -28,7 +41,7 @@ from app.services import (
     smoke_eval,
     strategy_versions,
 )
-from app.services.dossier import build_dossier
+from app.services.dossier import build_dossier, flip_dossier
 from app.workers.jobs import advance_eval_runs, collect_all
 from tests.fake_claude import FakeClaude
 from tests.helpers_admin import admin_signed_in, error_code, signed_in
@@ -289,3 +302,66 @@ async def test_set_calibration_pinned_at_freeze(
     with_pinned = await build_dossier(db, item.match, model=pinned, **kwargs)  # type: ignore[arg-type]
     with_newer = await build_dossier(db, item.match, model=newer, **kwargs)  # type: ignore[arg-type]
     assert events[0].dossier_id == with_pinned.dossier_id != with_newer.dossier_id
+
+
+@pytest.mark.parametrize("dossier_first", [1, 2])
+def test_stored_event_follows_dossier_order(dossier_first: int) -> None:
+    """Досье набора построено со сторонами по side_flip старого id; после слияния матча
+    у нового id другая четность — событие берет стороны из досье: y и p_base про одного
+    игрока."""
+    match_id = next(n for n in range(1, 100) if not side_flip(n))
+    match = Match(id=match_id, player1_id=11, player2_id=22, winner_id=22)
+    first, second = (11, 22) if dossier_first == 1 else (22, 11)
+    dossier = Dossier(
+        id=5,
+        match_id=match_id,
+        as_of=datetime(2026, 5, 1, tzinfo=UTC),
+        content={
+            "p_base": {"p1_win": 0.3, "p1_cover": 0.1, "p2_cover": 0.4},
+            "p1": {"id": first, "name": f"P{first}"},
+            "p2": {"id": second, "name": f"P{second}"},
+        },
+    )
+    item = smoke_eval.SmokeMatch(match=match, day=date(2026, 5, 2), surface="hard", best_of=3)
+    event = eval_sets.stored_event(item, dossier, "m1")
+    assert event.flip is (dossier_first == 2)
+    assert event.p1 == f"P{first}" and event.p_base.p1_win == 0.3
+    # Победил игрок 22: y — исход игрока 1 досье
+    assert event.y == (1 if first == 22 else 0)
+    # id игроков досье не узнать — как раньше, по side_flip
+    dossier.content = {**dossier.content, "p1": {"id": 1}, "p2": {"id": 2}}
+    assert eval_sets.stored_event(item, dossier, "m1").flip is False
+
+
+def test_flip_dossier_swaps_every_side_pair() -> None:
+    """flip_dossier: блоки игроков, вероятности, личные встречи, refs; дважды — как было."""
+    content = {
+        "v": "f1",
+        "match": {"id": 3, "surface": "clay", "bo": 3},
+        "p_base": {"p1_win": 0.7, "p1_cover": 0.45, "p2_cover": 0.12, "elo_p": 0.66, "cal": True},
+        "p1": {"id": 1, "name": "A", "elo": {"all": 1800}},
+        "p2": {"id": 2, "name": "B", "elo": {"all": 1650}},
+        "h2h": {
+            "n": 3,
+            "p1": 2,
+            "p2": 1,
+            "surf": {"n": 1, "p1": 0, "p2": 1},
+            "last": [{"d": "2026-01-01", "w": 2, "sc": "6-3 6-3"}],
+        },
+        "refs": {"elo": "p1.elo p2.elo", "news:5": "p2.results", "h2h": "h2h"},
+    }
+    flipped = flip_dossier(content)
+    assert flipped["p1"]["name"] == "B" and flipped["p2"]["name"] == "A"
+    assert flipped["p_base"] == {
+        "p1_win": 0.3,
+        "p1_cover": 0.12,
+        "p2_cover": 0.45,
+        "elo_p": 0.34,
+        "cal": True,
+    }
+    assert (flipped["h2h"]["p1"], flipped["h2h"]["p2"], flipped["h2h"]["n"]) == (1, 2, 3)
+    assert flipped["h2h"]["surf"] == {"n": 1, "p1": 1, "p2": 0}
+    assert flipped["h2h"]["last"] == [{"d": "2026-01-01", "w": 1, "sc": "6-3 6-3"}]
+    assert flipped["refs"] == {"elo": "p2.elo p1.elo", "news:5": "p1.results", "h2h": "h2h"}
+    assert flipped["match"] == content["match"] and flipped["v"] == "f1"
+    assert flip_dossier(flipped) == content
