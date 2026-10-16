@@ -1,16 +1,20 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Card, Chip, Icon, Skeleton } from '../../../components';
+import { Button, Card, Icon, Skeleton } from '../../../components';
 import { formatShare } from '../../../features/analysis/markets';
 import { stakeRows, valueRows } from '../../../features/bank/display';
 import type { Bank, Strategy } from '../../../features/bank/types';
 import { currencyOf } from '../../../features/bets/display';
 import { formatMoney, formatOdds, formatPercent } from '../../../lib/format';
 import { LoadError } from '../LoadError';
+import { findActive } from '../../../features/learning/versionList';
+import { useStrategyVersions } from '../../../features/learning/versions';
+import { RuleVersionsBlock } from './RuleVersions';
 
 // «Правила стратегии» (strategyCard макета, Т20): параметры действующей версии стратегии
-// (GET /api/strategy/active) — только просмотр; менять — версиями стратегии на этапе 5.
+// (GET /api/strategy/active). Правила суммы меняются новой версией: «Предложить изменение» →
+// кандидат с проверкой на своих ставках → «Включить» (RuleVersions.tsx).
 
 function Rule({ title, note, value }: { title: string; note?: string; value: ReactNode }) {
   return (
@@ -35,18 +39,22 @@ interface StrategyCardProps {
   error: unknown;
   onRetry: () => void;
   bank: Bank;
+  /** «Предложить изменение»: кандидат правил суммы. */
+  onPropose: () => void;
 }
 
-export function StrategyCard({ strategy, error, onRetry, bank }: StrategyCardProps) {
+export function StrategyCard({ strategy, error, onRetry, bank, onPropose }: StrategyCardProps) {
   const { t } = useTranslation();
+  // инструкции анализа — общая линия версий (ведет администратор), правила суммы — свои
+  const instructions = findActive(useStrategyVersions().data?.instructions ?? []);
   const head = {
     id: 'profile-strategy',
     className: 'profile-anchor',
     title: t('profile.bank.strategy.title'),
     actions: (
-      <Chip kind="outline" icon="lock">
-        {t('profile.bank.readOnly')}
-      </Chip>
+      <Button kind="secondary" size="sm" icon="edit" onClick={onPropose}>
+        {t('profile.bank.rules.propose')}
+      </Button>
     ),
   };
   if (!strategy) {
@@ -62,7 +70,9 @@ export function StrategyCard({ strategy, error, onRetry, bank }: StrategyCardPro
   const rounding = p.rounding[currency] ?? '1';
   const minStake = p.min_stake[currency] ?? '0';
   return (
-    <Card {...head} subtitle={t('profile.bank.strategy.subtitle', { code: strategy.code })}>
+    <Card {...head} subtitle={instructions ? t('profile.bank.strategy.subtitle', { code: instructions.code }) : t('profile.bank.strategy.subtitlePlain')}>
+      <RuleVersionsBlock bank={bank} strategy={strategy} />
+      <hr className="divider" />
       <div className="stack profile-tight">
         <h4>{t('profile.bank.strategy.pick')}</h4>
         <dl className="profile-srules">
@@ -145,7 +155,7 @@ export function StrategyCard({ strategy, error, onRetry, bank }: StrategyCardPro
         </p>
       </div>
       <p className="profile-note">
-        <Icon name="lock" />
+        <Icon name="history" />
         <span>{t('profile.bank.strategy.readOnlyNote')}</span>
       </p>
     </Card>

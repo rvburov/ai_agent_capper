@@ -1,7 +1,7 @@
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
-import { Card, Chip, Icon } from '../../../components';
+import { Button, Card, Chip, Icon } from '../../../components';
 import { formatShare } from '../../../features/analysis/markets';
 import { DRAWDOWN_SCALE, GROWTH, param, PROTECTION, ruleActing } from '../../../features/bank/display';
 import type { Adaptation, AdaptationKey, Bank, StrategyParams } from '../../../features/bank/types';
@@ -18,7 +18,7 @@ function pctOf(value: number | null): string {
 }
 
 /** «Просадка от пика −10% → ставка не больше 2,5% банка». */
-function ruleText(rule: Adaptation, params: StrategyParams | null, t: TFunction): string {
+export function ruleText(rule: Adaptation, params: StrategyParams | null, t: TFunction): string {
   switch (rule.key) {
     case 'dd10':
     case 'dd20': {
@@ -109,7 +109,7 @@ function RuleRow({ rule, bank, params }: { rule: Adaptation; bank: Bank; params:
   );
 }
 
-export function AdaptCard({ bank, params }: { bank: Bank; params: StrategyParams | null }) {
+export function AdaptCard({ bank, params, onPropose }: { bank: Bank; params: StrategyParams | null; onPropose: () => void }) {
   const { t } = useTranslation();
   const byKey = new Map(bank.adaptations.map((rule) => [rule.key, rule]));
   const protection = PROTECTION.map((key) => byKey.get(key)).filter((r): r is Adaptation => r !== undefined);
@@ -132,9 +132,9 @@ export function AdaptCard({ bank, params }: { bank: Bank; params: StrategyParams
       title={t('profile.bank.adapt.title')}
       subtitle={t('profile.bank.adapt.subtitle')}
       actions={
-        <Chip kind="outline" icon="lock">
-          {t('profile.bank.readOnly')}
-        </Chip>
+        <Button kind="secondary" size="sm" icon="edit" onClick={onPropose}>
+          {t('profile.bank.rules.propose')}
+        </Button>
       }
     >
       <div className="profile-dd">
@@ -221,7 +221,7 @@ export function AdaptCard({ bank, params }: { bank: Bank; params: StrategyParams
         )}
       </div>
       <p className="profile-note">
-        <Icon name="lock" />
+        <Icon name="history" />
         <span>{t('profile.bank.adapt.note')}</span>
       </p>
     </Card>

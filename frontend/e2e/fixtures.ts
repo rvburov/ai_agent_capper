@@ -209,6 +209,8 @@ function learningOut(): Schemas['LearningOut'] {
     },
     next_report: '2026-10-19',
     last_report: null,
+    last_report_end: null,
+    last_report_id: null,
   };
 }
 
@@ -259,6 +261,7 @@ export function aiUsage(): Schemas['AiUsageOut'] {
     avg_output_tokens: 800,
     models: [],
     efforts: [],
+    batch_runs: 0,
   });
   return {
     month: '2026-10',
@@ -307,7 +310,13 @@ export function aiUsage(): Schemas['AiUsageOut'] {
       soft_cap_usd: 0.5,
       hard_cap_usd: 1.5,
       default_per_analysis_usd: 0.5,
+      postmortem_enabled: true,
+      postmortem_model: 'claude-sonnet-5-5',
+      postmortem_effort: 'low',
+      postmortem_batch: true,
     },
+    savings: [],
+    before_after: null,
   };
 }
 

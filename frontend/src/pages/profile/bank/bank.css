@@ -79,3 +79,7 @@
   .profile-srule { grid-template-columns: minmax(0, 1fr); }
   .profile-srule dd { text-align: left; }
 }
+
+/* версии правил суммы (этап 5): что изменилось, «Вернуть» */
+.profile-changes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); color: var(--fg-2); }
+.profile-self-start { align-self: flex-start; }

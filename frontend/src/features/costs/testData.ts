@@ -107,8 +107,8 @@ export function aiUsageFull(over: Partial<AiUsage> = {}): AiUsage {
       { ...parse!, models: ['claude-haiku-5-5'], efforts: ['low'] },
     ],
     versions: [
-      { kind: 'analysis', prompt_version: 'analysis-v3', runs: 5, cost_usd: 1.43, avg_cost_usd: 0.286 },
-      { kind: 'news', prompt_version: 'news-v2', runs: 4, cost_usd: 0.38, avg_cost_usd: 0.095 },
+      { kind: 'analysis', prompt_version: 'analysis-v3', runs: 5, cost_usd: 1.43, avg_cost_usd: 0.286, version_code: null, quality: null },
+      { kind: 'news', prompt_version: 'news-v2', runs: 4, cost_usd: 0.38, avg_cost_usd: 0.095, version_code: null, quality: null },
     ],
     analyses: [
       { id: 41, started_at: '2026-10-12T18:00:00Z', cost_usd: 0.61, done: true, acceptance: false, key_source: 'admin' },
@@ -165,17 +165,20 @@ export function adminAiUsageOut(over: Partial<AdminAiUsage> = {}): AdminAiUsage 
       personUsage({ user_id: 3, display_name: 'Игорь Нестеров', status: 'blocked', key_spent_usd: 2.0, analyses: 11, limit_usd: 5, paused: true, budget_share: 2 / 60, limit_share: 0.4 }),
       personUsage({ user_id: 5, display_name: 'Дмитрий Шульц', ai_mode: 'own', key_spent_usd: 0, own_spent_usd: 3.4, analyses: 0, own_analyses: 12, budget_share: 0, limit_share: 0 }),
     ],
-    shared: { runs: 9, cost_usd: 3.1, cache_share: 0.4, budget_share: 3.1 / 60, kinds: ['analysis', 'news'], spent_share: 3.1 / 41.2 },
+    shared: { runs: 9, cost_usd: 3.1, cache_share: 0.4, budget_share: 3.1 / 60, kinds: ['analysis', 'news'], spent_share: 3.1 / 41.2, tasks: [] },
     tasks: [
-      { kind: 'analysis', runs: 112, cost_usd: 30.2, cache_share: 0.72, budget_share: 30.2 / 60, models: ['claude-opus-5-5'] },
-      { kind: 'news', runs: 160, cost_usd: 6.9, cache_share: 0.18, budget_share: 6.9 / 60, models: ['claude-sonnet-5-5'] },
-      { kind: 'parse', runs: 40, cost_usd: 1.0, cache_share: null, budget_share: 1 / 60, models: ['claude-haiku-5-5'] },
+      { kind: 'analysis', runs: 112, cost_usd: 30.2, cache_share: 0.72, budget_share: 30.2 / 60, models: ['claude-opus-5-5'], batch_runs: 0 },
+      { kind: 'news', runs: 160, cost_usd: 6.9, cache_share: 0.18, budget_share: 6.9 / 60, models: ['claude-sonnet-5-5'], batch_runs: 0 },
+      { kind: 'parse', runs: 40, cost_usd: 1.0, cache_share: null, budget_share: 1 / 60, models: ['claude-haiku-5-5'], batch_runs: 0 },
     ],
     eval: {
       budget_usd: 25,
       spent_usd: 4.5,
       runs: 2,
-      items: [{ eval_run_id: 3, created_at: '2026-10-05T10:00:00Z', name: 'Прогон на истории сентября', eval_set: 'sept-2026', n_events: 120, models: ['claude-opus-5-5'], runs: 120, cost_usd: 4.5 }],
+      items: [{ eval_run_id: 3, created_at: '2026-10-05T10:00:00Z', name: 'Прогон на истории сентября', eval_set: 'sept-2026', n_events: 120, models: ['claude-opus-5-5'], runs: 120, cost_usd: 4.5, kind: 'eval', status: 'done', version_code: 'v3', worst_usd: 13.2 }],
+      first_month: false,
+      next_usd: 25,
+      batch_size: 100,
     },
     // тратили ключ трое (не больше 4): «остальных» одной строкой нет
     others_ids: [],

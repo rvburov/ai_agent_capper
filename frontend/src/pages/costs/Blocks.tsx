@@ -7,7 +7,7 @@ import { ChartWithTable, ColumnChart, HBars, Sparkline } from '../../components/
 import { modelLabel } from '../../features/ai/models';
 import type { AiBudget } from '../../features/ai/types';
 import { doneAnalyses, kindLabel, kindsByCost, priciestDay, shareText, usdRun, usdSum } from '../../features/costs/display';
-import type { AgentSettings, AiUsage, UsageDay, UsageKind } from '../../features/costs/types';
+import type { AgentSettings, AiUsage, UsageDay, UsageKind, UsageVersion } from '../../features/costs/types';
 import { usdLimit } from '../../features/dashboard/display';
 import { formatDate, formatNumber, formatPercent, formatTokens, formatUsd, formatWeekday } from '../../lib/format';
 import { TERMINAL_CLI } from '../../lib/terminal';
@@ -192,6 +192,7 @@ function perText(kind: string, settings: AgentSettings, t: TFunction): string {
   if (kind === 'analysis') return t('costs.types.perAnalysis');
   if (kind === 'news') return t('costs.types.perNews', { count: settings.news_searches_per_match });
   if (kind === 'parse') return t('costs.types.perParse');
+  if (kind === 'postmortem') return settings.postmortem_batch ? t('costs.types.perPostmortemBatch') : t('costs.types.perPostmortem');
   return '';
 }
 
@@ -233,7 +234,7 @@ export function TypesCard({ usage, period, onPick }: { usage: AiUsage; period: P
                   <span className="costs-type-cost">
                     <span>
                       <b>{kind.avg_cost_usd !== null ? usdRun(kind.avg_cost_usd) : '—'}</b>
-                      <small>{kind.kind === 'parse' ? t('costs.types.perInput') : kind.kind === 'news' || kind.kind === 'analysis' ? t('costs.types.perMatch') : t('costs.types.perCall')}</small>
+                      <small>{kind.kind === 'parse' ? t('costs.types.perInput') : kind.kind === 'news' || kind.kind === 'analysis' || kind.kind === 'postmortem' ? t('costs.types.perMatch') : t('costs.types.perCall')}</small>
                     </span>
                     <Icon name="chevronRight" />
                   </span>
@@ -250,12 +251,26 @@ export function TypesCard({ usage, period, onPick }: { usage: AiUsage; period: P
   );
 }
 
-/** «Версии инструкций: цена и качество» (В12): цена по версии — сейчас, качество — этап 5. */
+/**
+ * «Версии инструкций: цена и качество» (В12, этап 5): цена по версии — факт месяца, качество
+ * оценки матча — лог-лосс версии на замороженном наборе (quality с сервера).
+ */
 export function VersionsCard({ usage, period }: { usage: AiUsage; period: Period }) {
   const { t } = useTranslation();
   const rows = usage.versions.filter((version) => version.runs > 0);
+  const set = rows.find((row) => row.quality)?.quality?.eval_set_code ?? null;
+  const quality = (row: UsageVersion) => {
+    if (row.kind !== 'analysis') return <span className="muted">—</span>;
+    const q = row.quality;
+    if (!q || q.log_loss === null) return <span className="muted">{t('costs.versions.notRun')}</span>;
+    return <span className="small">{t('costs.versions.logLoss', { value: formatNumber(q.log_loss, 3), code: q.version_code })}</span>;
+  };
   return (
-    <Card className="costs-card costs-o-4" title={t('costs.versions.title')} subtitle={t('costs.versions.subtitle', { period: period.short })}>
+    <Card
+      className="costs-card costs-o-4"
+      title={t('costs.versions.title')}
+      subtitle={set ? t('costs.versions.subtitleSet', { period: period.short, set }) : t('costs.versions.subtitle', { period: period.short })}
+    >
       {rows.length ? (
         <DataTable
           className="costs-ver"
@@ -263,11 +278,16 @@ export function VersionsCard({ usage, period }: { usage: AiUsage; period: Period
           rows={rows}
           rowKey={(row) => `${row.kind}:${row.prompt_version ?? ''}`}
           columns={[
-            { key: 'version', label: t('costs.versions.cols.version'), primary: true, render: (row) => <span className="mono">{row.prompt_version ?? '—'}</span> },
+            {
+              key: 'version',
+              label: t('costs.versions.cols.version'),
+              primary: true,
+              render: (row) => <span className="mono costs-ver-id">{row.version_code ? `${row.version_code} · ${row.prompt_version ?? ''}` : (row.prompt_version ?? '—')}</span>,
+            },
             { key: 'kind', label: t('costs.versions.cols.kind'), render: (row) => kindLabel(row.kind, t) },
             { key: 'runs', label: t('costs.versions.cols.runs'), align: 'r', render: (row) => formatNumber(row.runs) },
             { key: 'cost', label: t('costs.versions.cols.cost'), align: 'r', render: (row) => <b>{row.avg_cost_usd !== null ? usdRun(row.avg_cost_usd) : '—'}</b> },
-            { key: 'quality', label: t('costs.versions.cols.quality'), align: 'r', render: () => <span className="muted">{t('costs.versions.stage5')}</span> },
+            { key: 'quality', label: t('costs.versions.cols.quality'), align: 'r', render: quality },
           ]}
         />
       ) : (
@@ -277,32 +297,6 @@ export function VersionsCard({ usage, period }: { usage: AiUsage; period: Period
         {t('costs.versions.howto')}
         {usage.avg_analysis_usd !== null && ` ${t('costs.versions.avg', { amount: formatUsd(usage.avg_analysis_usd) })}`}
       </Howto>
-    </Card>
-  );
-}
-
-/** «Появится на этапе 5» (В12): «Где экономим», «До и после», смена модели из интерфейса. */
-export function LaterCard() {
-  const { t } = useTranslation();
-  const items: { key: 'savings' | 'before' | 'switch'; icon: 'flask' | 'history' | 'sliders' }[] = [
-    { key: 'savings', icon: 'flask' },
-    { key: 'before', icon: 'history' },
-    { key: 'switch', icon: 'sliders' },
-  ];
-  return (
-    <Card className="costs-card costs-o-3" title={t('costs.later.title')} subtitle={t('costs.later.subtitle')}>
-      <ul className="costs-later">
-        {items.map((item) => (
-          <li key={item.key}>
-            <span className="costs-later-ic">
-              <Icon name={item.icon} />
-            </span>
-            <span>
-              <b>{t(`costs.later.${item.key}.title`)}</b> {t(`costs.later.${item.key}.text`)}
-            </span>
-          </li>
-        ))}
-      </ul>
     </Card>
   );
 }
@@ -351,6 +345,13 @@ export function SettingsCard({ usage, budget, admin }: { usage: AiUsage; budget:
       sub: s.news_enabled ? `${t('costs.settings.news', { model: modelLabel(s.news_model), effort: s.news_effort, n: s.news_searches_per_match })}${avg('news')}` : t('costs.settings.newsOff'),
     },
     { key: 'analysis', title: kindLabel('analysis', t), sub: `${t('costs.settings.analysis', { model: modelLabel(s.analysis_model), effort: s.analysis_effort, n: s.analysis_parallel })}${avg('analysis')}` },
+    {
+      key: 'postmortem',
+      title: kindLabel('postmortem', t),
+      sub: s.postmortem_enabled
+        ? `${t(s.postmortem_batch ? 'costs.settings.postmortemBatch' : 'costs.settings.postmortem', { model: modelLabel(s.postmortem_model), effort: s.postmortem_effort })}${avg('postmortem')}`
+        : t('costs.settings.postmortemOff'),
+    },
   ];
   const limits: ListItem[] = [
     { key: 'searches', title: t('costs.settings.searches'), sub: t('costs.settings.searchesSub'), value: `${s.news_searches_per_match} / ${s.news_searches_per_analysis} / ${s.news_searches_per_day}` },

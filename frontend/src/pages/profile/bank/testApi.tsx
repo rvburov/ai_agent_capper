@@ -3,6 +3,7 @@ import { bankOut, strategyV3 } from '../../../features/analysis/testData';
 import { playLimitsOut } from '../../../features/bank/testData';
 import { betsSummary } from '../../../features/bets/testData';
 import { bookmakersOut } from '../../../features/bookmakers/testData';
+import { strategyVersions } from '../../../features/learning/testData';
 import { json, ME_MEMBER, type Handler } from '../../../test/fetchMock';
 import { renderPage } from '../../../test/renderPage';
 import { ProfilePage } from '../ProfilePage';
@@ -18,6 +19,7 @@ export function bankTabApi(over: Record<string, Handler> = {}): Record<string, H
     'GET /api/me/play-limits': () => json(playLimitsOut()),
     'GET /api/ai/budget': () => json(aiBudget()),
     'GET /api/me/login-events': () => json([]),
+    'GET /api/strategy/versions': () => json(strategyVersions()),
     ...over,
   };
 }

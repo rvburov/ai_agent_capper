@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Button, Callout, Chip, Modal } from '../../components';
 import { baseText, ci3, conditionText, dec3, historyReason, plural, quickState, signed3 } from '../../features/learning/display';
+import { usePublicCasesMin } from '../../features/learning/lessons';
 import type { Lesson } from '../../features/learning/types';
 import { formatDate, formatInterval, formatNumber, formatPp, formatUsd } from '../../lib/format';
 import { LessonChip, shiftText } from './LessonCard';
@@ -40,7 +41,7 @@ function quickText(lesson: Lesson, t: Translate): string | null {
   return passed;
 }
 
-function facts(lesson: Lesson, shrinkK: number | null, t: Translate): [string, ReactNode][] {
+function facts(lesson: Lesson, shrinkK: number | null, min: number, t: Translate): [string, ReactNode][] {
   const out: [string, ReactNode][] = [];
   const history = lesson.history;
   out.push([t('learning.detail.from'), t(`learning.detail.origin.${lesson.origin}`)]);
@@ -50,7 +51,7 @@ function facts(lesson: Lesson, shrinkK: number | null, t: Translate): [string, R
   out.push([t('learning.detail.kind'), t(`learning.detail.kindValue.${lesson.kind}`)]);
   out.push([
     t('learning.detail.base'),
-    lesson.status === 'hypothesis' ? t('learning.detail.baseNeed', { base: baseText(lesson, t), need: lesson.need_cases }) : baseText(lesson, t),
+    lesson.status === 'hypothesis' ? t('learning.detail.baseNeed', { base: baseText(lesson, t, min), need: lesson.need_cases }) : baseText(lesson, t, min),
   ]);
   if (history?.bias) {
     out.push([
@@ -113,6 +114,7 @@ interface LessonModalProps {
 }
 
 export function LessonModal({ lesson, shrinkK, onClose }: LessonModalProps) {
+  const min = usePublicCasesMin();
   const { t } = useTranslation();
   // направление поправки — только у урока про вероятность (как чипы карточки)
   const conditions = lesson.scope
@@ -148,7 +150,7 @@ export function LessonModal({ lesson, shrinkK, onClose }: LessonModalProps) {
       </div>
       <blockquote className="learning-quote">{lesson.text}</blockquote>
       <dl className="learning-facts">
-        {facts(lesson, shrinkK, t).map(([label, value]) => (
+        {facts(lesson, shrinkK, min, t).map(([label, value]) => (
           <div key={label} className="learning-fact">
             <dt>{label}</dt>
             <dd>{value}</dd>

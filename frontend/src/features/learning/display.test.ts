@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import i18n from '../../i18n';
 import { formatNumber } from '../../lib/format';
-import { conditionText, filterCounts, historyReason, plural, quickState, quickView, reasonKey, scopeValueText, sortLessons } from './display';
+import { baseText, casesText, conditionText, filterCounts, historyReason, plural, quickState, quickView, reasonKey, scopeValueText, sortLessons } from './display';
 import { lesson, lessonQuick, readyLesson } from './testData';
 
 const t = i18n.t.bind(i18n);
@@ -89,5 +89,13 @@ describe('окно быстрой проверки: что показать', ()
     expect(quickState(readyLesson({ validated_at: '2026-10-15T06:33:00Z', quick: lessonQuick({ finished_at: '2026-10-14T10:12:00Z' }) }))).toBe('stale');
     expect(quickState(readyLesson({ quick: lessonQuick({ passed: false, format_errors: 1 }) }))).toBe('worse');
     expect(quickState(readyLesson())).toBe('none');
+  });
+});
+
+describe('случаи урока у участника: порог показа — с сервера', () => {
+  it('меньше порога — «меньше N случаев» (public_cases_min), иначе число и свои', () => {
+    expect(casesText({ n_cases: null }, t)).toBe('меньше 5 случаев');
+    expect(casesText({ n_cases: null }, t, 3)).toBe('меньше 3 случаев');
+    expect(baseText({ n_cases: 21, n_hist: 412, own_cases: 2 }, t)).toBe('21 случай + 412 из архива · из них ваших 2');
   });
 });

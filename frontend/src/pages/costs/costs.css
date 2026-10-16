@@ -152,3 +152,10 @@
   .kv.costs-detail dt { font-size: var(--fs-xs); color: var(--fg-3); }
   .kv.costs-detail dd { margin-bottom: 8px; }
 }
+
+/* «Где экономим» (этап 5): мера — заголовок со статусом, что дает, экономия */
+.costs-later li > .costs-min { display: flex; flex-direction: column; gap: 2px; }
+.costs-saving-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 2px; }
+.costs-saving-head .chip { height: auto; min-height: 22px; white-space: normal; }
+.costs-saving-save { display: block; }
+.costs-ver-id { overflow-wrap: anywhere; }

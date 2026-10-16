@@ -424,7 +424,11 @@ export function AdminWho({ data, me, levels, error, onRetry, month }: AdminWhoPr
     {
       key: 'eval',
       name: t('costs.who.eval'),
-      sub: t('costs.who.evalSub', { amount: usdLimit(data.eval.budget_usd) }),
+      // бюджет проверок месяца — как его считает план прогона: в месяц первого набора больше
+      sub:
+        data.eval.first_month && data.eval.next_usd !== data.eval.budget_usd
+          ? t('costs.who.evalSubFirst', { amount: usdLimit(data.eval.budget_usd), next: usdLimit(data.eval.next_usd) })
+          : t('costs.who.evalSub', { amount: usdLimit(data.eval.budget_usd) }),
       value: t('costs.who.evalValue', { spent: formatUsd(data.eval.spent_usd), max: usdLimit(data.eval.budget_usd) }),
       className: 'aside',
     },

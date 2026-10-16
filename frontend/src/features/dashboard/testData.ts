@@ -170,6 +170,7 @@ function kind(name: string, cost: number): AiUsage['kinds'][number] {
     avg_output_tokens: 800,
     models: [],
     efforts: [],
+    batch_runs: 0,
   };
 }
 
@@ -226,7 +227,13 @@ export function aiUsageOut(over: Partial<AiUsage> = {}): AiUsage {
       soft_cap_usd: 0.5,
       hard_cap_usd: 1.5,
       default_per_analysis_usd: 0.5,
+      postmortem_enabled: true,
+      postmortem_model: 'claude-sonnet-5-5',
+      postmortem_effort: 'low',
+      postmortem_batch: true,
     },
+    savings: [],
+    before_after: null,
     ...over,
   };
 }

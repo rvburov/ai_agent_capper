@@ -15,9 +15,10 @@ import type { AiUsage, RunFilter } from '../../features/costs/types';
 import { useAiUsage } from '../../features/dashboard/api';
 import { formatDate, formatDateRange, formatUsd } from '../../lib/format';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
-import { DailyCard, LaterCard, SettingsCard, Tiles, TypesCard, VersionsCard } from './Blocks';
+import { DailyCard, SettingsCard, Tiles, TypesCard, VersionsCard } from './Blocks';
 import { AdminHero, AdminWho, MemberHero, MemberRules, OwnHero, type Period } from './Hero';
 import { PricesModal, RunsCard } from './Runs';
+import { BeforeAfterCard, SavingsCard } from './Savings';
 import './costs.css';
 
 /*
@@ -166,7 +167,8 @@ export function CostsPage() {
         </div>
         <div className="costs-col">
           <TypesCard usage={data} period={period} onPick={pick} />
-          <LaterCard />
+          <SavingsCard usage={data} settings={data.settings} admin={admin} period={period} />
+          <BeforeAfterCard usage={data} />
         </div>
       </div>
       <RunsCard usage={data} budget={ai} admin={admin} mobile={mobile} filter={filter} onFilter={setFilter} />

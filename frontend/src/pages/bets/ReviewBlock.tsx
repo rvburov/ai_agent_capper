@@ -9,6 +9,7 @@ import { modelLabel } from '../../features/ai/models';
 import { marketLabel } from '../../features/analysis/markets';
 import { reviewShown, useBetReview, type LegReview, type ReviewLesson, type ReviewVerdict } from '../../features/bets/review';
 import type { BetItem } from '../../features/bets/types';
+import { PUBLIC_CASES_MIN } from '../../features/learning/limits';
 import { formatDateTime, formatUsd } from '../../lib/format';
 import { reviewText } from './marks';
 import { legMarket, matchText, VerdictChip } from './parts';
@@ -28,8 +29,15 @@ const VERDICT_LOOK: Record<ReviewVerdict, { kind: ChipKind; icon: IconName }> = 
 
 function lessonState(lesson: ReviewLesson, t: TFunction): string {
   switch (lesson.status) {
-    case 'hypothesis':
-      return t('bets.ai.lesson.hypothesis', { cases: lesson.n_cases, min: lesson.need_cases });
+    case 'hypothesis': {
+      // общее число случаев участнику — с порога (сервер: n_cases = null и n_cases_few), как
+      // на «Уроках»; свои — отдельно
+      const base =
+        lesson.n_cases === null
+          ? t('bets.ai.lesson.hypothesisFew', { few: PUBLIC_CASES_MIN, min: lesson.need_cases })
+          : t('bets.ai.lesson.hypothesis', { cases: lesson.n_cases, min: lesson.need_cases });
+      return lesson.own_cases > 0 ? t('bets.ai.lesson.yours', { base, n: lesson.own_cases }) : base;
+    }
     case 'confirmed':
       return lesson.in_prompt ? t('bets.ai.lesson.confirmedOn') : t('bets.ai.lesson.confirmedOff');
     default:

@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { Me } from '../../../api/hooks/useMe';
 import { Button, Card, Chip, Icon, Skeleton, useToast } from '../../../components';
+import { useDataUploads } from '../../../features/admin/dataUploads';
 import { useAdminAttention } from '../../../features/admin/useAdminAttention';
 import { apiErrorText } from '../../../features/analysis/codes';
 import { useAiBudget } from '../../../features/ai/useAiBudget';
@@ -43,6 +44,7 @@ function useRowHint(me: Me, prefs: NotificationPrefs | undefined) {
   const admin = me.role === 'admin';
   const budget = useAiBudget();
   const attention = useAdminAttention(admin);
+  const uploads = useDataUploads({ enabled: admin });
   return (row: PrefRow): string => {
     switch (row.id) {
       case 'limit': {
@@ -53,6 +55,18 @@ function useRowHint(me: Me, prefs: NotificationPrefs | undefined) {
         return limit !== null && pct !== null && alert !== null
           ? t('profile.notifs.rows.limit.hint', { pct, alert: formatUsd(alert, 0), limit: formatUsd(limit, 0) })
           : t('profile.notifs.rows.limit.hintPlain');
+      }
+      case 'needs': {
+        // через сколько дней без исхода в архиве напоминать — настройка сервера (schedule)
+        const days = prefs?.schedule.settle_reminder_days ?? null;
+        return days !== null ? t('profile.notifs.rows.needs.hintDays', { count: days }) : t('profile.notifs.rows.needs.hint');
+      }
+      case 'weekly': {
+        const schedule = prefs?.schedule ?? null;
+        const zone = timeZoneName(t, schedule?.tz ?? me.tz);
+        const hour = `${String(schedule?.report_hour ?? 7).padStart(2, '0')}:00`;
+        const next = schedule ? t('profile.notifs.rows.weekly.next', { date: formatDate(schedule.next_report) }) : '';
+        return `${t('profile.notifs.rows.weekly.hint', { zone, hour })}${next}`;
       }
       case 'message':
         return admin ? t('profile.notifs.rows.message.hintAdmin') : t('profile.notifs.rows.message.hint');
@@ -70,13 +84,16 @@ function useRowHint(me: Me, prefs: NotificationPrefs | undefined) {
         return value !== null ? t('profile.notifs.rows.budgetAdmin.hint', { budget: formatUsd(value, 0) }) : t('profile.notifs.rows.budgetAdmin.hintPlain');
       }
       case 'archiveAdmin': {
-        // Порог и последняя загрузка — с сервера (archive_status в делах администратора: и когда
-        // архив свежий)
-        const archive = attention.data?.archive_status ?? null;
-        const text = archive
-          ? t('profile.notifs.rows.archiveAdmin.hint', { count: archive.stale_after_days })
+        // Пора загрузить файл tennis-data (data_stale): час и порог дней — те же, что у воркера
+        // (schedule сервера), последняя загрузка файла — из «Данных» (GET /admin/data/uploads)
+        const schedule = prefs?.schedule ?? null;
+        const text = schedule
+          ? t('profile.notifs.rows.archiveAdmin.hint', {
+              count: schedule.upload_stale_days,
+              hour: `${String(schedule.upload_hour).padStart(2, '0')}:00`,
+            })
           : t('profile.notifs.rows.archiveAdmin.hintPlain');
-        const last = archive?.last_load ?? null;
+        const last = uploads.data?.archive.last_load ?? null;
         return last
           ? t('profile.notifs.rows.archiveAdmin.last', { hint: text, date: formatDate(last), ago: formatRelative(last) })
           : text;
@@ -175,7 +192,7 @@ function Row({ row, hint }: { row: PrefRow; hint: string }) {
       <div className="profile-notif-text">
         <div className="profile-notif-t">
           {title}
-          {row.id === 'alertAdmin' && (
+          {row.isNew && (
             <>
               {' '}
               <Chip kind="info">{t('profile.notifs.new')}</Chip>

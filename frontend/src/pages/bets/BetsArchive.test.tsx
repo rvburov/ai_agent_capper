@@ -248,15 +248,24 @@ describe('Ставки: разбор ИИ', () => {
     expect(within(detail).getByText('Почему.').parentElement).toHaveTextContent('Соперники близки по Эло на харде');
     const hypothesis = within(detail).getByText('Гипотеза.').parentElement as HTMLElement;
     expect(within(hypothesis).getByRole('link', { name: 'L-022' })).toHaveAttribute('href', '/learning');
-    expect(hypothesis).toHaveTextContent('L-022 — гипотеза, 3 из 20 случаев. Фора −1.5 на харде');
+    expect(hypothesis).toHaveTextContent('L-022 — гипотеза, 3 из 20 случаев, из них ваших 1. Фора −1.5 на харде');
     // вердикт по CLV — строкой внутри, его считает код
     expect(within(detail).getByText('По CLV, без ИИ:')).toBeInTheDocument();
     expect(within(detail).getByText('Без закрытия')).toBeInTheDocument();
     expect(within(detail).getByText(/^Sonnet 5\.5 · Batch · ≈ \$0,01 за матч · 12 окт, \d\d:20 · один разбор на матч, общий для всех/)).toBeInTheDocument();
   });
 
+  it('гипотеза: общих случаев меньше порога — «меньше 5», свои отдельно (Р14)', async () => {
+    const lesson = { id: 22, code: 'L-022', status: 'hypothesis' as const, in_prompt: false, n_cases: null, n_cases_few: true, own_cases: 1, need_cases: 20, text: 'Фора −1.5 на харде' };
+    renderBets({ history: [betAuto()], over: { 'GET /api/bets/9/review': () => json(betReview({}, [legReview({ lesson })])) } });
+    const detail = await detailOf(9);
+    const hypothesis = (await within(detail).findByText('Гипотеза.')).parentElement as HTMLElement;
+    expect(hypothesis).toHaveTextContent('L-022 — гипотеза, меньше 5 из 20 случаев, из них ваших 1.');
+    expect(hypothesis).not.toHaveTextContent('null');
+  });
+
   it('экспресс: разбор каждого матча со своим выводом; статусы урока; без гипотезы — «Новой гипотезы нет»', async () => {
-    const lesson = { id: 22, code: 'L-022', status: 'confirmed' as const, in_prompt: true, n_cases: 20, need_cases: 20, text: 'Фора −1.5 на харде' };
+    const lesson = { id: 22, code: 'L-022', status: 'confirmed' as const, in_prompt: true, n_cases: 20, n_cases_few: false, own_cases: 2, need_cases: 20, text: 'Фора −1.5 на харде' };
     const legs = [
       legReview({ leg_id: 91, match_id: 191, market: 'ML', won: true, verdict: 'fine', what: 'Синнер выиграл 2:0.', why: null, hypothesis: null, lesson: null }),
       legReview({ lesson }),

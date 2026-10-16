@@ -78,6 +78,10 @@ export class Api {
     return this.request.post(path, { data, headers: { 'X-CSRF-Token': await this.csrfToken() } });
   }
 
+  async put(path: string, data?: unknown): Promise<APIResponse> {
+    return this.request.put(path, { data, headers: { 'X-CSRF-Token': await this.csrfToken() } });
+  }
+
   async get(path: string): Promise<APIResponse> {
     return this.request.get(path);
   }

@@ -17,7 +17,9 @@ const note = (id: number, kind: string, read = false) => ({
 describe('что присылать: строки экрана', () => {
   it('виды одной группы — одна строка; обязательные отмечены', () => {
     const rows = prefRows(memberPrefsOut(['limit_80']));
-    expect(rows.map((row) => row.id)).toEqual(['bet', 'limit', 'decision', 'login', 'fails', 'message']);
+    expect(rows.map((row) => row.id)).toEqual(['bet', 'needs', 'weekly', 'limit', 'decision', 'login', 'fails', 'message']);
+    // этап 5: «ждет результата» и «архив показывает другое» — одна строка
+    expect(rows.find((row) => row.id === 'needs')?.kinds).toEqual(['bet_needs_result', 'settle_conflict']);
     const limit = rows.find((row) => row.id === 'limit');
     expect(limit?.kinds).toEqual(['limit_80', 'limit_100']);
     // строка выключена, если выключен хоть один вид из нее
@@ -28,6 +30,7 @@ describe('что присылать: строки экрана', () => {
   it('у администратора — раздел «Для администратора»: ключ участника и ключ администратора — разные строки', () => {
     const rows = prefRows(adminPrefsOut());
     expect(rows.filter((row) => row.admin).map((row) => row.id)).toEqual([
+      'learningAdmin',
       'requestsAdmin',
       'usersAdmin',
       'budgetAdmin',

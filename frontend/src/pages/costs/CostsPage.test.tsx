@@ -79,7 +79,7 @@ describe('ИИ и расходы', () => {
     expect(within(hero).queryByText(/Остатка хватит/)).toBeNull();
   });
 
-  it('плитки, расходы по дням с прогнозом, задачи с долей с сервера, версии и «Появится на этапе 5»', async () => {
+  it('плитки, расходы по дням с прогнозом, задачи с долей с сервера, версии и «Где экономим»', async () => {
     renderCosts();
     const price = (await screen.findByText('Цена анализа', { selector: '.stat-label' })).closest('section')!;
     expect(price).toHaveTextContent('$0,13');
@@ -90,8 +90,95 @@ describe('ИИ и расходы', () => {
     expect(within(types).getByRole('list', { name: 'Расход по задачам' })).toHaveTextContent('74%');
     expect(screen.getByRole('heading', { name: 'Версии инструкций: цена и качество' })).toBeInTheDocument();
     expect(screen.getByText('analysis-v3')).toBeInTheDocument();
-    const later = screen.getByRole('heading', { name: 'Появится на этапе 5' }).closest('section')!;
-    expect(within(later).getByText('«Где экономим».')).toBeInTheDocument();
+    // заглушки этапа 4 сняты
+    expect(screen.queryByRole('heading', { name: 'Появится на этапе 5' })).toBeNull();
+    const savings = screen.getByRole('heading', { name: 'Где экономим' }).closest('section')!;
+    expect(within(savings).getByText('Оценка матча на Sonnet 5.5')).toBeInTheDocument();
+    // пары версий с прогонами нет — «До и после» не показывается
+    expect(screen.queryByRole('heading', { name: 'До и после' })).toBeNull();
+    // разбор ставки — строка настроек агента
+    const settings = screen.getByRole('heading', { name: 'Как настроено' }).closest('section')!;
+    expect(within(settings).getByText('Разбор ставки')).toBeInTheDocument();
+    expect(within(settings).getByText(/Sonnet 5\.5 · effort low · Batch −50%/)).toBeInTheDocument();
+  });
+
+  it('этап 5: качество версии — лог-лосс на наборе; «Где экономим» и «До и после» — числа сервера', async () => {
+    const versionEvalOut = (over: Record<string, unknown> = {}) => ({
+      eval_set_code: 'S-2026-08', runs: 1, run_ids: [11], n: 250, log_loss: 0.612, brier: 0.211, ece: 0.031, format_errors: 0,
+      max_tokens: 0, refusals: 0, to_market: null, noise: null, tokens_per_event: 9400, cost_per_event_usd: 0.031, ...over,
+    });
+    const usage = aiUsageFull({
+      versions: [
+        {
+          kind: 'analysis', prompt_version: 'analysis.v1+lessons_block.v1:abc', runs: 5, cost_usd: 1.43, avg_cost_usd: 0.286, version_code: 'v3',
+          quality: { version_id: 1, version_code: 'v3', status: 'active', eval_set_code: 'S-2026-08', n: 250, log_loss: 0.612, brier: 0.211, to_market: null, format_errors: 0 },
+        },
+        { kind: 'news', prompt_version: 'news-v2', runs: 4, cost_usd: 0.38, avg_cost_usd: 0.095, version_code: null, quality: null },
+      ],
+      savings: [
+        {
+          kind: 'version', status: 'waiting', version_id: 2, version_code: 'v4', version_name: 'v4 · сжатое досье', eval_set_code: 'S-2026-08', model: null, cost_change: -0.29, tokens_change: -0.31,
+          log_loss: { a: 0.612, b: 0.615, diff: 0.003, low: -0.004, high: 0.008, margin: 0.01, ok: true }, passed: true,
+          per_run_usd: null, per_run_without_usd: null, month_usd: null, month_forecast_usd: 1.2,
+        },
+        {
+          kind: 'postmortem_batch', status: 'on', version_id: null, version_code: null, version_name: null, eval_set_code: null, model: 'claude-sonnet-5-5', cost_change: null, tokens_change: null,
+          log_loss: null, passed: null, per_run_usd: 0.011, per_run_without_usd: 0.022, month_usd: null, month_forecast_usd: null,
+        },
+      ],
+      before_after: {
+        // цена обеих — на одной основе (прогоны на наборе), хотя у v3 есть и живые вызовы
+        before: { version_id: 1, code: 'v3', name: 'v3 · основная', status: 'active', prompt_version: 'analysis.v1', eval: versionEvalOut(), live_avg_usd: 0.286, live_runs: 5, price_usd: 0.031 },
+        after: {
+          version_id: 2, code: 'v4', name: 'v4 · сжатое досье', status: 'candidate', prompt_version: 'analysis.v2',
+          eval: versionEvalOut({ log_loss: 0.615, brier: 0.212, tokens_per_event: 6500, cost_per_event_usd: 0.022 }), live_avg_usd: null, live_runs: 0, price_usd: 0.022,
+        },
+        comparison: null,
+        price_source: 'eval',
+      },
+    });
+    renderCosts({ api: { 'GET /api/ai/usage': () => json(usage) } });
+    expect(await screen.findByText('лог-лосс 0,612 · v3')).toBeInTheDocument();
+    expect(screen.getByText(/замороженном наборе S-2026-08; экономию/)).toBeInTheDocument();
+    const savings = screen.getByRole('heading', { name: 'Где экономим' }).closest('section')!;
+    expect(within(savings).getByText('Инструкции v4 · сжатое досье')).toBeInTheDocument();
+    expect(within(savings).getByText('Ждет решения')).toBeInTheDocument();
+    expect(within(savings).getByText(/Токенов на анализ −31%, цена −29%, качество не хуже на наборе S-2026-08 \(ДИ лог-лосса −0,004…\+0,008\)/)).toBeInTheDocument();
+    expect(within(savings).getByText('Экономия: ≈ $1,20 в месяц на ваших оценках матча')).toBeInTheDocument();
+    expect(within(savings).getByRole('link', { name: 'Сравнение версий' })).toHaveAttribute('href', '/learning/versions');
+    expect(within(savings).getByText('Экономия: ≈ $0,01 вместо $0,02 за матч')).toBeInTheDocument();
+    const before = screen.getByRole('heading', { name: 'До и после' }).closest('section')!;
+    expect(within(before).getByText('v3 (сейчас) против v4 (кандидат) на одних и тех же 250 матчах набора')).toBeInTheDocument();
+    const row = within(before).getByText('Токенов на анализ').closest('tr')!;
+    expect(row).toHaveTextContent('≈ 9,4 тыс.≈ 6,5 тыс.');
+    // цена «до» и «после» — на одной основе сервера (price_source): прогоны на наборе
+    expect(within(before).getByText('Цена оценки матча на наборе').closest('tr')).toHaveTextContent('$0,031$0,022');
+    expect(within(before).getByText(/цена и токены — по логам прогонов на наборе \(Batch со скидкой, без новостей\)/)).toBeInTheDocument();
+  });
+
+  it('«До и после»: цена по вашим вызовам (live) — своя подпись; основы нет — строки цены нет', async () => {
+    const side = (code: string, price: number | null) => ({
+      version_id: code === 'v3' ? 1 : 2, code, name: null, status: code === 'v3' ? ('archived' as const) : ('active' as const), prompt_version: `analysis.${code}`,
+      eval: { eval_set_code: 'S-2026-08', runs: 1, run_ids: [11], n: 250, log_loss: 0.61, brier: 0.21, ece: 0.03, format_errors: 0, max_tokens: 0, refusals: 0, to_market: null, noise: null, tokens_per_event: 9400, cost_per_event_usd: 0.03 },
+      live_avg_usd: price, live_runs: price === null ? 0 : 4, price_usd: price,
+    });
+    const pair = (source: 'live' | null) => aiUsageFull({ before_after: { before: side('v3', source ? 0.3 : null), after: side('v4', source ? 0.25 : null), comparison: null, price_source: source } });
+    const first = renderCosts({ api: { 'GET /api/ai/usage': () => json(pair('live')) } });
+    const card = (await screen.findByRole('heading', { name: 'До и после' })).closest('section')!;
+    expect(within(card).getByText('Цена оценки матча, ваши вызовы').closest('tr')).toHaveTextContent('$0,300$0,250');
+    expect(within(card).getByText(/цена — ваши вызовы оценки матча за месяц/)).toBeInTheDocument();
+    first.unmount();
+    renderCosts({ api: { 'GET /api/ai/usage': () => json(pair(null)) } });
+    const none = (await screen.findByRole('heading', { name: 'До и после' })).closest('section')!;
+    expect(within(none).queryByText(/^Цена оценки матча/)).toBeNull();
+    expect(within(none).getByText('Токенов на анализ')).toBeInTheDocument();
+  });
+
+  it('администратор: бюджет проверок $30 в первый месяц, дальше $25 — с сервера', async () => {
+    const admin = adminAiUsageOut();
+    renderCosts({ admin: true, api: { 'GET /api/admin/ai/usage': () => json({ ...admin, eval: { ...admin.eval, budget_usd: 30, first_month: true, next_usd: 25 } }) } });
+    expect(await screen.findByText('отдельный бюджет $30 в первый месяц, дальше $25, на вашем ключе, в итог не входят')).toBeInTheDocument();
+    expect(screen.getByText('$4,50 из $30')).toBeInTheDocument();
   });
 
   it('журнал вызовов: строка — вызов с номером в анализе; окно — разбор цены и кто платит', async () => {

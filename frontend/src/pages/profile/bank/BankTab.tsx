@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -18,6 +19,7 @@ import { AdaptCard } from './AdaptCard';
 import { BooksCard } from './BooksCard';
 import { MovesCard } from './MovesCard';
 import { ResponsibleCard } from './ResponsibleCard';
+import { ProposeRulesModal } from './RuleVersions';
 import { StrategyCard } from './StrategyCard';
 import './bank.css';
 
@@ -104,6 +106,7 @@ export function BankTab({ me }: { me: Me }) {
   const { t } = useTranslation();
   // «Лимиты и пауза» в сводке ведет к #profile-rg: прокрутка, когда карточки над ним загружены
   const limits = usePlayLimits();
+  const [proposing, setProposing] = useState(false);
   useHashTarget(Boolean(bank.data) && !strategy.isPending && !limits.isPending);
 
   if (bank.error) return <LoadError error={bank.error} onRetry={() => void bank.refetch()} />;
@@ -118,8 +121,8 @@ export function BankTab({ me }: { me: Me }) {
   const currency = currencyOf(data.currency);
   const admin = me.role === 'admin';
   const openBets = summary.data?.open ?? null;
-  const strategyCard = <StrategyCard strategy={strategy.data} error={strategy.error} onRetry={() => void strategy.refetch()} bank={data} />;
-  const adaptCard = <AdaptCard bank={data} params={strategy.data?.params ?? null} />;
+  const strategyCard = <StrategyCard strategy={strategy.data} error={strategy.error} onRetry={() => void strategy.refetch()} bank={data} onPropose={() => setProposing(true)} />;
+  const adaptCard = <AdaptCard bank={data} params={strategy.data?.params ?? null} onPropose={() => setProposing(true)} />;
   const movesCard = <MovesCard bank={data} />;
   const responsible = <ResponsibleCard tz={me.tz} />;
   const books = <BooksCard />;
@@ -151,6 +154,7 @@ export function BankTab({ me }: { me: Me }) {
           {adaptCard}
         </>
       )}
+      {proposing && <ProposeRulesModal bank={data} strategy={strategy.data} onClose={() => setProposing(false)} />}
     </>
   );
 }

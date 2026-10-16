@@ -14,7 +14,7 @@ import {
   plural,
   signed3,
 } from '../../features/learning/display';
-import { quickRunning, useLessonAction } from '../../features/learning/lessons';
+import { quickRunning, useLessonAction, usePublicCasesMin } from '../../features/learning/lessons';
 import type { Lesson } from '../../features/learning/types';
 import { formatDate, formatNumber, formatPp } from '../../lib/format';
 import { cx } from '../../lib/cx';
@@ -63,12 +63,13 @@ export function shiftText(lesson: Pick<Lesson, 'effect' | 'effect_shrunk'>, t: T
 }
 
 function Meta({ lesson }: { lesson: Lesson }) {
+  const min = usePublicCasesMin();
   const { t } = useTranslation();
   const history = lesson.history;
   const gain = history?.gain ?? null;
   const shift = lesson.kind === 'numeric' && (lesson.status === 'confirmed' || lesson.status === 'ready') ? shiftText(lesson, t) : null;
   const rows: { key: string; label: string; value: string }[] = [];
-  if (lesson.status !== 'hypothesis') rows.push({ key: 'base', label: t('learning.lessons.meta.base'), value: baseText(lesson, t) });
+  if (lesson.status !== 'hypothesis') rows.push({ key: 'base', label: t('learning.lessons.meta.base'), value: baseText(lesson, t, min) });
   if (history && history.log_loss_with !== null && history.log_loss_without !== null && gain) {
     rows.push({
       key: 'effect',
@@ -141,9 +142,10 @@ function HypothesisSide({ lesson }: { lesson: Lesson }) {
   const { t } = useTranslation();
   const toast = useToast();
   const watch = useLessonAction('notify-when-ready');
+  const min = usePublicCasesMin();
   const progress =
     lesson.n_cases === null
-      ? t('learning.lessons.fewOf', { need: lesson.need_cases })
+      ? t('learning.lessons.fewOf', { min, need: lesson.need_cases })
       : t('learning.lessons.ownOf', { n: lesson.n_cases, need: lesson.need_cases });
   return (
     <>

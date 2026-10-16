@@ -7,6 +7,7 @@ import type { Adaptation, BankEntry } from '../../../features/bank/types';
 import { playLimitsOut } from '../../../features/bank/testData';
 import { betsSummary } from '../../../features/bets/testData';
 import { bookmakersOut } from '../../../features/bookmakers/testData';
+import { strategyVersions } from '../../../features/learning/testData';
 import { apiError, json, ME_ADMIN, ME_MEMBER, type Handler } from '../../../test/fetchMock';
 import { bodyOf, renderPage } from '../../../test/renderPage';
 import { ProfilePage } from '../ProfilePage';
@@ -52,6 +53,7 @@ function api(over: Record<string, Handler> = {}): Record<string, Handler> {
   return {
     'GET /api/me/bank': () => json(BANK),
     'GET /api/strategy/active': () => json(strategyV3()),
+    'GET /api/strategy/versions': () => json(strategyVersions()),
     'GET /api/me/bank/entries': () => json(ENTRIES),
     'GET /api/bets/summary': () => json(betsSummary()),
     'GET /api/me/bookmakers': () => json(['Fonbet', 'Winline']),
@@ -90,7 +92,7 @@ describe('Кабинет: банк и стратегия', () => {
   it('правила стратегии — из действующей версии, только просмотр', async () => {
     renderBank();
     const card = (await screen.findByRole('heading', { name: 'Правила стратегии' })).closest('section') as HTMLElement;
-    expect(within(card).getByText('Действует v3 — стратегия этапа 3 · ИИ не предложит событие вне этих рамок')).toBeInTheDocument();
+    expect(await within(card).findByText('Инструкции анализа v3 — общие, правила суммы — ваши · ИИ не предложит событие вне этих рамок')).toBeInTheDocument();
     expect(within(card).getByText('6 исходов')).toBeInTheDocument();
     expect(within(card).getByText('от 65%')).toBeInTheDocument();
     expect(within(card).getByText('в экспрессе из 3 событий — от 70%')).toBeInTheDocument();

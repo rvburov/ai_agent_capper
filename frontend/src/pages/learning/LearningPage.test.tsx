@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { learningSummary, lessonsList } from '../../features/learning/testData';
+import { learningSummary, lessonsList, mlModel, strategyVersions, weeklyReports } from '../../features/learning/testData';
 import type { LearningSummary } from '../../features/learning/types';
 import { strategyV3 } from '../../test/factories';
 import { json, ME_ADMIN, ME_MEMBER, type Handler } from '../../test/fetchMock';
@@ -29,6 +29,9 @@ function api(summary: Partial<LearningSummary> = {}, extra: Record<string, Handl
     'GET /api/learning': () => json(learningSummary(summary)),
     'GET /api/strategy/active': () => json(strategyV3()),
     'GET /api/lessons': () => json(lessonsList()),
+    'GET /api/strategy/versions': () => json(strategyVersions()),
+    'GET /api/ml/model': () => json(mlModel({ active: null, versions: [], walk_forward: [], calibration: [] })),
+    'GET /api/learning/reports': () => json(weeklyReports({ items: [], next_report: '2026-10-19' })),
     ...extra,
   };
 }
@@ -154,30 +157,34 @@ describe('Обучение модели: каркас и пустые состо
   it('«Версии стратегии» участника: набор не заморожен — это делает администратор; свои правила суммы ставки', async () => {
     const { user, router } = renderLearning('/learning/versions');
     const panel = screen.getByRole('tabpanel', { name: 'Версии стратегии' });
-    expect(within(panel).getByText('Набор для проверки версий еще не заморожен.')).toBeInTheDocument();
+    expect(await within(panel).findByText('Набор для проверки версий еще не заморожен.')).toBeInTheDocument();
     expect(within(panel).getByText(/Это делает администратор\.$/)).toBeInTheDocument();
     expect(within(panel).queryByRole('button', { name: 'Оценить на наборе' })).toBeNull();
     expect(await within(panel).findByText('Общие для всех участников. Пока одна версия — v3')).toBeInTheDocument();
     expect(within(panel).getByRole('heading', { name: 'Как принимается новая версия' })).toBeInTheDocument();
     expect(within(panel).getAllByRole('listitem')).toHaveLength(4);
     const stake = within(panel).getByRole('heading', { name: 'Ваши правила суммы ставки' }).closest('section')!;
+    expect(await within(stake).findByText('r2')).toBeInTheDocument();
     expect(within(stake).getByText('Активная')).toBeInTheDocument();
-    await user.click(within(stake).getByRole('link', { name: 'Банк и стратегия' }));
+    await user.click(within(stake).getByRole('link', { name: 'Предложить изменение' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/profile/bank'));
+    expect(router.state.location.hash).toBe('#profile-strategy');
   });
 
   it('«Версии стратегии» администратора: «Оценить на наборе» пока недоступна, подсказка — загрузить файл', async () => {
     renderLearning('/learning/versions', { me: ME_ADMIN });
     const panel = screen.getByRole('tabpanel', { name: 'Версии стратегии' });
+    expect(await within(panel).findByRole('button', { name: 'Заморозить набор' })).toBeEnabled();
     expect(within(panel).getByRole('button', { name: 'Оценить на наборе' })).toBeDisabled();
     expect(within(panel).getByText(/Загрузите свежий файл и заморозьте набор/)).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: /^Сравнить/ })).toBeNull();
     expect(within(panel).queryByText('Ведет администратор')).toBeNull();
   });
 
   it('«Базовая модель» и «Отчеты» — пустые состояния; первый отчет — в понедельник по поясу участника', async () => {
     renderLearning('/learning/model');
     expect(screen.getByRole('heading', { name: 'Эло по покрытиям + калибровка' })).toBeInTheDocument();
-    expect(screen.getByText(/^Версии модели, проверка по месяцам/)).toBeInTheDocument();
+    expect(await screen.findByText(/^Версий модели еще нет: проверка по месяцам/)).toBeInTheDocument();
     // предел поправки — claude_max_shift стратегии (0,1)
     expect(await screen.findByText(/предел поправки Claude \(сейчас ±10 п\.п\.\)/)).toBeInTheDocument();
     expect(screen.getByText(/Включается сама, если не хуже/)).toBeInTheDocument();
@@ -207,10 +214,16 @@ describe('Обучение модели: каркас и пустые состо
   });
 
   it('«Отчеты»: понедельник, 07:00 по времени Хельсинки, первый — день с сервера', async () => {
-    renderLearning('/learning/reports', { summary: { next_report: '2026-10-26' } });
+    renderPage(<LearningPage />, {
+      path: '/learning/:tab?',
+      url: '/learning/reports',
+      me: ME_MEMBER,
+      api: api({ next_report: '2026-10-19' }, { 'GET /api/learning/reports': () => json(weeklyReports({ items: [], next_report: '2026-10-26' })) }),
+    });
     const panel = screen.getByRole('tabpanel', { name: 'Отчеты' });
-    expect(within(panel).getByText('Понедельник, 07:00 по времени Хельсинки · в центре уведомлений')).toBeInTheDocument();
-    expect(await within(panel).findByText(/^Отчетов пока нет\. Первый придет в понедельник 26 окт в 07:00/)).toBeInTheDocument();
+    expect(await within(panel).findByText('Понедельник, 07:00 по времени Хельсинки · в центре уведомлений')).toBeInTheDocument();
+    // день первого отчета — из списка отчетов (по поясу участника)
+    expect(within(panel).getByText(/^Отчетов пока нет\. Первый придет в понедельник 26 окт в 07:00/)).toBeInTheDocument();
   });
 
   it('неизвестная вкладка и «уроки» в адресе — на /learning', async () => {

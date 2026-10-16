@@ -2,6 +2,7 @@ import type { TFunction } from 'i18next';
 
 import type { ChipKind, IconName } from '../../components';
 import { formatInterval, formatNumber, formatOdds } from '../../lib/format';
+import { PUBLIC_CASES_MIN } from './limits';
 import type { Lesson, LessonEstimate, LessonFeature, LessonStatus, ScopeCondition } from './types';
 
 /*
@@ -142,13 +143,13 @@ export function historyReason(code: string | null | undefined): HistoryReason | 
  * пяти (сервер, n_cases); меньше — «меньше 5 случаев»: по малому числу вычислялась бы чужая
  * ставка (n_cases = null).
  */
-export function casesText(lesson: Pick<Lesson, 'n_cases'>, t: TFunction): string {
-  return lesson.n_cases === null ? t('learning.lessons.casesFew') : t('learning.lessons.cases', { count: lesson.n_cases });
+export function casesText(lesson: Pick<Lesson, 'n_cases'>, t: TFunction, min = PUBLIC_CASES_MIN): string {
+  return lesson.n_cases === null ? t('learning.lessons.casesFew', { min }) : t('learning.lessons.cases', { count: lesson.n_cases });
 }
 
 /** «21 случай + 412 из архива · из них ваших 2»: основание проверки. */
-export function baseText(lesson: Pick<Lesson, 'n_cases' | 'n_hist' | 'own_cases'>, t: TFunction): string {
-  const cases = casesText(lesson, t);
+export function baseText(lesson: Pick<Lesson, 'n_cases' | 'n_hist' | 'own_cases'>, t: TFunction, min = PUBLIC_CASES_MIN): string {
+  const cases = casesText(lesson, t, min);
   const base = lesson.n_hist ? t('learning.lessons.baseWithHist', { own: cases, hist: formatNumber(lesson.n_hist) }) : cases;
   return lesson.own_cases > 0 ? t('learning.lessons.baseYours', { base, n: formatNumber(lesson.own_cases) }) : base;
 }

@@ -6,7 +6,7 @@ import { Link } from 'react-router';
 import { paths, type LearningTab } from '../../app/paths';
 import { Icon, type IconName } from '../../components';
 import type { LearningSummary } from '../../features/learning/types';
-import { formatDate, formatNumber } from '../../lib/format';
+import { formatDate, formatDateRange, formatNumber } from '../../lib/format';
 
 // Четыре плитки «Что учится сейчас» (drawTiles макета): уроки в анализе, инструкции анализа,
 // базовая модель и отчет недели. Плитка — ссылка на свою вкладку.
@@ -125,7 +125,7 @@ export function Tiles({ summary: s, active, mobile, onOpen }: TilesProps) {
         active={active === 'reports'}
         icon="calendar"
         label={label('report')}
-        value={s?.last_report ? formatDate(s.last_report) : '—'}
+        value={s?.last_report ? (s.last_report_end ? formatDateRange(s.last_report, s.last_report_end) : formatDate(s.last_report)) : '—'}
         hint={s ? t('learning.tiles.reportNext', { date: formatDate(s.next_report) }) : t('learning.tiles.reportNextNoDate')}
         onOpen={onOpen}
       />

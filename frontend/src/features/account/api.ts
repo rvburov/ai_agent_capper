@@ -39,7 +39,7 @@ export function attachmentName(header: string | null, fallback: string): string 
 }
 
 /** Отдать файл браузеру: ссылка с download, клик и уборка. */
-function saveBlob(blob: Blob, name: string): void {
+export function saveBlob(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

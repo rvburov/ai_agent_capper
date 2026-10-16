@@ -10,6 +10,9 @@ export type UsageSums = Schemas['UsageSumsOut'];
 export type UsageDay = Schemas['UsageDayOut'];
 export type UsageKind = Schemas['UsageKindOut'];
 export type UsageVersion = Schemas['UsageVersionOut'];
+/** «Где экономим» и «До и после» (этап 5): меры и пара версий — с сервера. */
+export type Saving = Schemas['SavingOut'];
+export type BeforeAfter = Schemas['BeforeAfterOut'];
 export type AnalysisCost = Schemas['AnalysisCostOut'];
 export type ModelPrice = Schemas['ModelPriceOut'];
 export type AgentSettings = Schemas['AgentSettingsOut'];

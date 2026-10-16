@@ -100,7 +100,7 @@ export const SCREEN_TEXTS = {
     'profile.key.limit',
     'profile.key.reason',
   ],
-  'learning/LearningPage': ['learning'],
+  'learning/LearningPage': ['learning', 'costs.months'],
   'profile/ProfilePage': ['profile', 'admin.left', 'admin.limitShort', 'admin.limitText', 'admin.months', 'bets.count'],
   'profile/deletion/DeletionPendingScreen': ['profile.deletion'],
   'admin/AdminPage': [

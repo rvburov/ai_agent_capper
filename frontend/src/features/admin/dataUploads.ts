@@ -89,10 +89,11 @@ export function isTooLarge(error: unknown): boolean {
 
 // ---------- запросы ----------
 
-export function useDataUploads() {
+export function useDataUploads({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: adminKeys.dataUploads,
     queryFn: () => unwrap(api.GET('/api/admin/data/uploads')),
+    enabled,
   });
 }
 

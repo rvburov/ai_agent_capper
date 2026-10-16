@@ -8,7 +8,8 @@ import { BASE_URL } from './e2e/support/stack';
  * - desktop (1366 px) и mobile (375 px): сквозные сценарии e2e/flows на настоящем API.
  * - mobile-360: самый узкий телефон из PLAN.md («Готово, когда»: 360 px) — сценарии с меткой
  *   @360 (раскладка экранов на телефоне), чтобы не гонять все сценарии третий раз.
- * - exclusive (1366 px): сценарии, которые меняют общее для всех состояние (валюта программы),
+ * - exclusive (1366 px): сценарии, которые меняют общее для всех состояние (валюта программы,
+ *   инструкции анализа и замороженный набор),
  *   идут после остальных проектов; в других проектах они пропускаются.
  * Стек поднимает scripts/e2e-stack.sh: временная база с миграциями, uvicorn, vite preview с
  * прокси /api. Нужны PostgreSQL и Redis, как для тестов backend. Уже запущенный стек
@@ -59,7 +60,7 @@ export default defineConfig({
     {
       name: 'exclusive',
       testDir: './e2e/flows',
-      testMatch: 'admin-settings-currency.spec.ts',
+      testMatch: ['admin-settings-currency.spec.ts', 'learning-versions.spec.ts'],
       dependencies: ['desktop', 'mobile', 'mobile-360'],
       use: { ...devices['Desktop Chrome'], viewport: { width: 1366, height: 900 } },
     },

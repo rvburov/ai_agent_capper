@@ -42,7 +42,7 @@ test('«Обучение модели»: плитки, цикл и вкладк�
   const tabs = page.getByRole('tablist', { name: 'Разделы обучения' });
   const names = isMobile ? ['Версии', 'Модель', 'Отчеты'] : ['Версии стратегии', 'Базовая модель', 'Отчеты'];
   const urls = [/\/learning\/versions$/, /\/learning\/model$/, /\/learning\/reports$/];
-  const texts = [/^Набор для проверки версий еще не заморожен/, /^Версии модели, проверка по месяцам/, /^Отчетов пока нет\. Первый придет в понедельник/];
+  const texts = [/^Набор для проверки версий еще не заморожен/, /^Версий модели еще нет: проверка по месяцам/, /^Отчетов пока нет\. Первый придет в понедельник/];
   for (const [i, name] of names.entries()) {
     await tabs.getByRole('tab', { name, exact: true }).click();
     await expect(page).toHaveURL(urls[i]!);

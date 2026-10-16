@@ -282,7 +282,7 @@ export function legReview(over: Partial<LegReview> = {}): LegReview {
     what: 'Джокович — Рублев, Ф1(−1.5) не сыграла. Модель давала 74%, рынок без маржи 64%.',
     why: 'Соперники близки по Эло на харде, а модель заложила уверенную победу 2:0.',
     hypothesis: 'Фора −1.5 на харде при разнице Эло меньше 100 — модель завышает шанс.',
-    lesson: { id: 22, code: 'L-022', status: 'hypothesis', in_prompt: false, n_cases: 3, need_cases: 20, text: 'Фора −1.5 на харде при близком Эло' },
+    lesson: { id: 22, code: 'L-022', status: 'hypothesis', in_prompt: false, n_cases: 3, n_cases_few: false, own_cases: 1, need_cases: 20, text: 'Фора −1.5 на харде при близком Эло' },
     model: 'claude-sonnet-5-5',
     cost_usd: 0.0062,
     done_at: '2026-10-12T09:20:00Z',

@@ -5,7 +5,7 @@
 то, что в настоящей работе делает время и архив. Сыгранные матчи после даты среза знаний
 модели для быстрой проверки уже есть: маленький мир стека (seed_world в scripts/e2e-stack.sh).
 
-  ready КОД        — урок-гипотеза прошел проверку на истории (это делает код по архиву за
+  ready КОД [now]  — урок-гипотеза прошел проверку на истории (это делает код по архиву за
                      годы, на стеке архива нет): статус ready, числа проверки; знак смещения и
                      поправки — по направлению условия урока.
   collect          — дождаться отправки пакета быстрой проверки и собрать готовые пакеты тем
@@ -15,6 +15,16 @@
                      удаляются, активной снова становится версия до них; прогоны быстрой
                      проверки урока с их вызовами Claude (расход бюджета проверок) и пакетами
                      удаляются; урок удаляется. Чего нет — пропускается.
+  eval-world       — архив для замороженного набора: на стеке сыгранных матчей после 1 августа
+                     2026 мало (нужно 200–300), поэтому — синтетический основной тур
+                     2025–2026 (игроки «E2E Набор N», кэфы архива); есть — не трогается.
+  eval-collect     — довести идущий прогон версии на наборе до конца тем же кодом, что
+                     задачи воркера (поддельный Claude отвечает сразу): пакет за пакетом.
+  eval-cleanup     — убрать след сценария «Версии стратегии»: прогоны на наборе с их вызовами
+                     Claude, пакетами и прогнозами, сравнения, наборы, досье и синтетический
+                     архив; рейтинги пересчитываются заново.
+  weekly EMAIL     — отчет прошлой недели участнику (задача воркера по понедельникам) и его
+                     уведомление weekly_report.
 """
 
 import asyncio
@@ -36,7 +46,7 @@ BIAS_CI = (0.029, 0.071)
 N_HISTORY = 309
 
 
-async def ready(code: str) -> None:
+async def ready(code: str, *, fresh: bool = False) -> None:
     engine = create_engine()
     try:
         async with create_sessionmaker(engine)() as db:
@@ -76,7 +86,9 @@ async def ready(code: str) -> None:
             lesson.effect_shrunk = shift
             lesson.holdout_effect = 0.009
             lesson.holdout_ci = [0.001, 0.018]
-            lesson.validated_at = now - timedelta(minutes=5)
+            # fresh: проверка «сейчас» — позже заморозки набора (иначе план прогона откажет
+            # eval.lesson_overlap: урок проверялся и на матчах набора)
+            lesson.validated_at = now if fresh else now - timedelta(minutes=5)
             lesson.metrics = {**(lesson.metrics or {}), "history": history}
             await db.commit()
             print(f"ready: {code}")
@@ -169,16 +181,214 @@ async def cleanup(code: str) -> None:
         await engine.dispose()
 
 
+# --- «Версии стратегии»: замороженный набор и прогоны версий ---
+
+WORLD_REF = "e2e-eval"
+
+
+async def eval_world() -> None:
+    from app.db.models import Match, OddsSnapshot, Player, Tournament
+    from app.ml.elo import rebuild_ratings
+    from tests.ml_world import make_world
+
+    engine = create_engine()
+    try:
+        factory = create_sessionmaker(engine)
+        async with factory() as db:
+            exists = await db.scalar(
+                select(Tournament.id).where(Tournament.source_ref.like(f"{WORLD_REF}-%")).limit(1)
+            )
+            if exists is not None:
+                print("eval-world: уже есть")
+                return
+            world = make_world(
+                players=96,
+                years=range(2025, 2027),
+                tournaments_per_year=30,
+                draw=64,
+                seed=11,
+                odds_from=2025,
+                dated_from=2025,
+                retired_share=0.0,
+            )
+            # Только сыгранные: турниры, начавшиеся не позже чем две недели назад
+            last = datetime.now(UTC).date() - timedelta(days=14)
+            keep = {key for key, item in world.tournaments.items() if item.start <= last}
+            people = [Player(name=f"E2E Набор {n}") for n in range(1, world.players + 1)]
+            db.add_all(people)
+            await db.flush()
+            tournaments = {
+                key: Tournament(
+                    name=f"E2E {item.name}",
+                    surface=item.surface,
+                    category=item.level,
+                    start_date=item.start,
+                    source="sackmann",
+                    source_ref=f"{WORLD_REF}-{key}",
+                )
+                for key, item in world.tournaments.items()
+                if key in keep
+            }
+            db.add_all(tournaments.values())
+            await db.flush()
+            rows: dict[int, Match] = {}
+            for match in world.matches:
+                if match.tournament_id not in keep:
+                    continue
+                rows[match.match_id] = Match(
+                    tournament_id=tournaments[match.tournament_id].id,
+                    round=match.round,
+                    match_date=match.match_date,
+                    player1_id=people[match.player1_id - 1].id,
+                    player2_id=people[match.player2_id - 1].id,
+                    winner_id=people[match.winner_id - 1].id,
+                    score="6-4 6-4",
+                    status=match.status,
+                    best_of=3,
+                    source="sackmann",
+                    source_ref=f"{WORLD_REF}-{match.tournament_id}-{match.match_id}",
+                )
+            db.add_all(rows.values())
+            await db.flush()
+            for match_id, row in rows.items():
+                source = next(m for m in world.matches if m.match_id == match_id)
+                day = source.match_date or source.day
+                taken = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
+                for book, pair in world.odds.get(match_id, {}).items():
+                    for selection, value in enumerate(pair, start=1):
+                        db.add(
+                            OddsSnapshot(
+                                match_id=row.id,
+                                market="ML",
+                                selection=selection,
+                                bookmaker=book,
+                                odds=value,
+                                kind="archive",
+                                taken_at=taken,
+                            )
+                        )
+            await db.commit()
+        await rebuild_ratings(db_factory=factory)
+        print(f"eval-world: матчей {len(rows)}")
+    finally:
+        await engine.dispose()
+
+
+async def eval_collect() -> None:
+    from app.services import eval_runs
+    from app.workers.jobs import advance_eval_runs, collect_all
+
+    engine = create_engine()
+    try:
+        factory = create_sessionmaker(engine)
+        deadline = asyncio.get_running_loop().time() + 150
+        while True:
+            async with factory() as db:
+                run = await db.scalar(
+                    select(EvalRun)
+                    .where(EvalRun.metrics["kind"].astext == "eval")
+                    .order_by(EvalRun.id.desc())
+                    .limit(1)
+                )
+                if run is None:
+                    raise SystemExit("прогона на наборе нет")
+                if run.status in ("done", "failed", "abandoned"):
+                    print(f"eval-collect: прогон {run.id} {run.status}")
+                    return
+                if run.status == "pending" and run.batch_job_id is None:
+                    await eval_runs.advance(db, run.id)
+            async with factory() as db:
+                await collect_all(db)
+            async with factory() as db:
+                await advance_eval_runs(db)
+            if asyncio.get_running_loop().time() > deadline:
+                raise SystemExit("прогон на наборе не закончился")
+            await asyncio.sleep(0.3)
+    finally:
+        await engine.dispose()
+
+
+async def eval_cleanup() -> None:
+    from app.db.models import EvalSet, Match, Player, Prediction, Tournament
+    from app.ml.elo import rebuild_ratings
+
+    engine = create_engine()
+    try:
+        factory = create_sessionmaker(engine)
+        async with factory() as db:
+            runs = list(
+                await db.scalars(select(EvalRun).where(EvalRun.metrics["kind"].astext == "eval"))
+            )
+            run_ids = [run.id for run in runs]
+            batch_ids = [run.batch_job_id for run in runs if run.batch_job_id is not None]
+            if run_ids:
+                await db.execute(delete(AgentRun).where(AgentRun.eval_run_id.in_(run_ids)))
+                batch_ids += list(
+                    await db.scalars(
+                        select(BatchJob.id).where(
+                            BatchJob.kind == "eval", BatchJob.params["eval_kind"].astext == "eval"
+                        )
+                    )
+                )
+                await db.execute(delete(EvalRun).where(EvalRun.id.in_(run_ids)))
+            if batch_ids:
+                await db.execute(delete(BatchJob).where(BatchJob.id.in_(set(batch_ids))))
+            await db.execute(delete(EvalSet))
+            tournaments = select(Tournament.id).where(Tournament.source_ref.like(f"{WORLD_REF}-%"))
+            matches = select(Match.id).where(Match.tournament_id.in_(tournaments))
+            await db.execute(delete(Prediction).where(Prediction.match_id.in_(matches)))
+            players = list(
+                await db.scalars(select(Player.id).where(Player.name.like("E2E Набор %")))
+            )
+            await db.execute(delete(Match).where(Match.tournament_id.in_(tournaments)))
+            await db.execute(delete(Tournament).where(Tournament.source_ref.like(f"{WORLD_REF}-%")))
+            if players:
+                await db.execute(delete(Player).where(Player.id.in_(players)))
+            await db.commit()
+        await rebuild_ratings(db_factory=factory)
+        print(f"eval-cleanup: прогонов {len(run_ids)}, игроков {len(players)}")
+    finally:
+        await engine.dispose()
+
+
+async def weekly(email: str) -> None:
+    from app.db.models import User
+    from app.services import weekly_report
+
+    engine = create_engine()
+    try:
+        async with create_sessionmaker(engine)() as db:
+            user = await db.scalar(select(User).where(User.email == email))
+            if user is None:
+                raise SystemExit(f"нет участника {email}")
+            week = weekly_report.due_week(datetime.now(UTC), user.tz)
+            report = await weekly_report.make_report(db, user, week)
+            print(f"weekly: {report.id if report else 'уже есть'}")
+    finally:
+        await engine.dispose()
+
+
 def main() -> None:
     command = sys.argv[1] if len(sys.argv) > 1 else ""
-    if command == "ready" and len(sys.argv) == 3:
-        asyncio.run(ready(sys.argv[2]))
+    if command == "ready" and len(sys.argv) in (3, 4):
+        asyncio.run(ready(sys.argv[2], fresh=sys.argv[3:] == ["now"]))
     elif command == "collect":
         asyncio.run(collect())
     elif command == "cleanup" and len(sys.argv) == 3:
         asyncio.run(cleanup(sys.argv[2]))
+    elif command == "eval-world":
+        asyncio.run(eval_world())
+    elif command == "eval-collect":
+        asyncio.run(eval_collect())
+    elif command == "eval-cleanup":
+        asyncio.run(eval_cleanup())
+    elif command == "weekly" and len(sys.argv) == 3:
+        asyncio.run(weekly(sys.argv[2]))
     else:
-        raise SystemExit("ready КОД | collect | cleanup КОД")
+        raise SystemExit(
+            "ready КОД | collect | cleanup КОД | eval-world | eval-collect | eval-cleanup"
+            " | weekly EMAIL"
+        )
 
 
 if __name__ == "__main__":

@@ -32,12 +32,15 @@ export function useNotificationPrefs({ enabled = true }: { enabled?: boolean } =
  */
 export const PREF_ROWS = [
   'bet',
+  'needs',
+  'weekly',
   'limit',
   'key',
   'decision',
   'login',
   'fails',
   'message',
+  'learningAdmin',
   'requestsAdmin',
   'usersAdmin',
   'budgetAdmin',
@@ -59,6 +62,8 @@ export interface PrefRow {
   kinds: NotificationKind[];
   onSite: boolean;
   required: boolean;
+  /** Вид появился недавно — пометка «новое» (решает сервер). */
+  isNew: boolean;
 }
 
 /** Виды по строкам экрана, в порядке сервера. Группы, которой экран не знает, нет в списке. */
@@ -72,8 +77,9 @@ export function prefRows(prefs: NotificationPrefs | undefined): PrefRow[] {
       row.kinds.push(item.kind);
       row.onSite = row.onSite && item.on_site;
       row.required = row.required || item.required;
+      row.isNew = row.isNew || item.new;
     } else {
-      rows.push({ id, group: item.group, admin: item.admin, kinds: [item.kind], onSite: item.on_site, required: item.required });
+      rows.push({ id, group: item.group, admin: item.admin, kinds: [item.kind], onSite: item.on_site, required: item.required, isNew: item.new });
     }
   }
   return rows;

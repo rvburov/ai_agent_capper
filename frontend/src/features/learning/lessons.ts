@@ -3,6 +3,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient, type QueryClient }
 import { api, unwrap } from '../../api/client';
 import { DASHBOARD_PREFIX } from '../bets/keys';
 import { learningKeys } from './keys';
+import { PUBLIC_CASES_MIN } from './limits';
 import type { Lesson, LessonIn, LessonsList } from './types';
 
 /*
@@ -27,6 +28,11 @@ export function lessonsQuery() {
 /** Все уроки и пороги: общий кэш вкладки «Уроки», плиток и «Модели учится» на главной. */
 export function useLessons({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({ ...lessonsQuery(), enabled });
+}
+
+/** Порог показа общего числа случаев участнику — из списка уроков (кэш), пока его нет — 5. */
+export function usePublicCasesMin(): number {
+  return useLessons().data?.public_cases_min ?? PUBLIC_CASES_MIN;
 }
 
 /** Быстрая проверка идет: ответа пакета еще нет. */
