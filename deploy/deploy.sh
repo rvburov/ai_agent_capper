@@ -285,6 +285,13 @@ main() {
   DOMAIN="$(env_value CAPPER_DOMAIN)"
   [ -n "$DOMAIN" ] || die "в deploy/.env не задан CAPPER_DOMAIN"
 
+  # Лимит процессора api по умолчанию (1.5) больше, чем есть на сервере с 1 vCPU, и docker
+  # тогда не создает контейнер. Если в .env лимит не задан — не больше числа процессоров
+  if [ -z "$(env_value CAPPER_API_CPUS)" ] && [ -z "${CAPPER_API_CPUS:-}" ] && [ "$(nproc)" -lt 2 ]; then
+    export CAPPER_API_CPUS=1
+    log "процессор один: лимит api — CAPPER_API_CPUS=1"
+  fi
+
   remember_images
 
   log "сборка образов"
