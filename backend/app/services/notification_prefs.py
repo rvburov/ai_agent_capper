@@ -18,6 +18,7 @@ notifications.notify спрашивает is_enabled перед записью �
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -30,10 +31,15 @@ from app.schemas.cabinet import (
     NotificationPrefIn,
     NotificationPrefOut,
     NotificationPrefsOut,
+    NotificationScheduleOut,
 )
 
 # Приходят всегда: защита аккаунта и важные новости от администратора
 REQUIRED_KINDS = frozenset({"new_device", "login_failures", "admin_message"})
+# Новые виды (отметка «новое» в макете): этап 5 и сигналы расхода ИИ
+NEW_KINDS = frozenset(
+    {"bet_needs_result", "settle_conflict", "weekly_report", "learning", "ai_alert"}
+)
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,7 @@ async def _stored(db: AsyncSession, user_id: int) -> dict[str, NotificationPref]
 def _out(
     kinds: Sequence[PrefKind],
     stored: dict[str, NotificationPref],
+    schedule: NotificationScheduleOut,
     alert_rules: AlertRulesOut | None = None,
 ) -> NotificationPrefsOut:
     items: list[NotificationPrefOut] = []
@@ -108,9 +115,33 @@ def _out(
                 push=row.push if row is not None else False,
                 required=item.required,
                 admin=item.admin,
+                new=item.kind in NEW_KINDS,
             )
         )
-    return NotificationPrefsOut(items=items, push_available=False, alert_rules=alert_rules)
+    return NotificationPrefsOut(
+        items=items, push_available=False, alert_rules=alert_rules, schedule=schedule
+    )
+
+
+def schedule_of(user: User, now: datetime | None = None) -> NotificationScheduleOut:
+    """Когда приходят виды этапа 5 — те же константы, что у воркера."""
+    # Импорт внутри: сервисы ниже шлют уведомления через этот модуль
+    from app.services.auto_settlement import REMINDER_DAYS
+    from app.services.bank import user_zone
+    from app.services.data_status import UPLOAD_HOUR
+    from app.services.data_uploads import STALE_DAYS
+    from app.services.learning import REPORT_HOUR, next_report_day
+    from app.services.sessions import utcnow
+
+    return NotificationScheduleOut(
+        tz=user_zone(user.tz).key,
+        report_weekday=0,
+        report_hour=REPORT_HOUR,
+        next_report=next_report_day(now or utcnow(), user.tz),
+        settle_reminder_days=REMINDER_DAYS,
+        upload_hour=UPLOAD_HOUR,
+        upload_stale_days=STALE_DAYS,
+    )
 
 
 async def alert_rules(db: AsyncSession) -> AlertRulesOut:
@@ -134,7 +165,7 @@ async def alert_rules(db: AsyncSession) -> AlertRulesOut:
 
 async def get_prefs(db: AsyncSession, user: User) -> NotificationPrefsOut:
     rules = await alert_rules(db) if user.role == "admin" else None
-    return _out(available_kinds(user), await _stored(db, user.id), rules)
+    return _out(available_kinds(user), await _stored(db, user.id), schedule_of(user), rules)
 
 
 async def update_prefs(

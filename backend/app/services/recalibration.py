@@ -300,7 +300,8 @@ async def recalibrate(
             "rule": {"log_loss_margin": LOG_LOSS_MARGIN, "brier_margin": BRIER_MARGIN},
             "reason": reason,
             "started_by": actor_id,
-            "auto": True,
+            # Сама — по расписанию воркера; по кнопке администратора — ручная
+            "auto": actor_id is None,
         },
         status="rejected",
         parent_id=current.id,
@@ -310,6 +311,7 @@ async def recalibrate(
         await db.flush()
         version.status = "active"
         version.activated_at = moment
+        version.activated_by = actor_id
     db.add(version)
     await db.flush()
     await write_audit(
@@ -380,6 +382,17 @@ def _ci_out(raw: Any) -> CiNumOut | None:
     return CiNumOut(**raw) if isinstance(raw, dict) else None
 
 
+def is_auto(model: MlModel) -> bool:
+    """Версия включена (или посчитана) сама — по расписанию, без администратора: не
+    перекалибровка по кнопке и не возврат."""
+    metrics = model.metrics or {}
+    return (
+        model.activated_by is None
+        and metrics.get("started_by") is None
+        and metrics.get("auto") is not False
+    )
+
+
 def version_out(model: MlModel, *, active_id: str | None) -> MlVersionOut:
     metrics = model.metrics or {}
     platt = _platt_of(model.params)
@@ -388,7 +401,7 @@ def version_out(model: MlModel, *, active_id: str | None) -> MlVersionOut:
         status=model.status,  # type: ignore[arg-type]
         created_at=model.created_at,
         activated_at=model.activated_at,
-        auto=model.activated_by is None,
+        auto=is_auto(model),
         parent_id=model.parent_id,
         train_from=model.train_from,
         train_to=model.train_to,

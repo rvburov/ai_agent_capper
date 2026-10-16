@@ -198,7 +198,8 @@ class EvalPlanOut(BaseModel):
     первый день набора (eval_set.since) раньше среза знаний модели анализа
     (set_seen_since); eval.lesson_overlap — урок кандидата (overlap_lesson) проверен на
     архиве до заморозки набора, его надо перепроверить. set_model — модель, для которой
-    набор замораживали."""
+    набор замораживали. estimate_source — откуда цена: live — средняя прошлых ответов
+    проверок, settings — оценка по ценам модели и токенам из настроек (прошлых нет)."""
 
     version_id: int
     version_code: str
@@ -210,6 +211,7 @@ class EvalPlanOut(BaseModel):
     model: str
     max_tokens: int
     estimate_usd: UsdOut
+    estimate_source: Literal["live", "settings"]
     worst_usd: UsdOut
     worst_chunk_usd: UsdOut
     per_event_worst_usd: UsdOut
@@ -317,9 +319,11 @@ class RulesCheckOut(BaseModel):
     """Проверка правил суммы на своих ставках (код, бесплатно): рассчитанные ставки
     приложения с since, у скольких сумма изменилась бы (changed), сумма ставок до и после
     (stake_old/stake_new) и прибыль при тех же исходах (profit_old/profit_new);
-    triggered — сколько раз сработало бы каждое правило адаптации новой версии."""
+    triggered — сколько раз сработало бы каждое правило адаптации новой версии. since — с
+    какого дня проверка (день первой проверенной ставки по поясу участника; ставок нет —
+    день проверки)."""
 
-    since: date | None
+    since: date
     bets: int
     changed: int
     stake_old: DecimalOut
@@ -613,7 +617,9 @@ class LearningOut(BaseModel):
     """Сводка «Обучения модели» и блока «Модель учится» на главной: рассчитано ставок
     приложения (своих), из них по архиву, событий в них; уроки, версии (общая линия и
     свои правила), базовая модель, набор, пороги и цены; следующий отчет — понедельник
-    по поясу участника (отчеты — волна 4, last_report пока null)."""
+    по поясу участника. last_report — понедельник недели последнего отчета (null —
+    отчетов еще не было), last_report_end — ее воскресенье, last_report_id — id отчета
+    (GET /learning/reports/{id})."""
 
     settled: int
     settled_auto: int
@@ -628,3 +634,5 @@ class LearningOut(BaseModel):
     prices: LearningPricesOut
     next_report: date
     last_report: date | None
+    last_report_end: date | None
+    last_report_id: int | None

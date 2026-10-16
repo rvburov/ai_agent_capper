@@ -35,7 +35,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.config import AgentConfig, load_agent_config
 from app.agent.runs import MTOK, USD_STEP
 from app.core.errors import AppError
-from app.db.models import AgentRun, AiLimit, Analysis, EvalRun, ModelPrice, User
+from app.db.models import (
+    AgentRun,
+    AiLimit,
+    Analysis,
+    EvalRun,
+    ModelPrice,
+    StrategyVersion,
+    User,
+)
 from app.schemas.ai import (
     AdminAiUsageOut,
     AgentSettingsOut,
@@ -59,11 +67,13 @@ from app.schemas.ai import (
     UsageSumsOut,
     UsageVersionOut,
 )
+from app.services import ai_savings
 from app.services.admin_users import CHECK_RUN_KINDS
 from app.services.ai_access import access_for, call_need_usd, limits_of
 from app.services.ai_budget import AVG_STEP
 from app.services.analysis_run import ACCEPTANCE_MARK
 from app.services.app_settings import get_app_settings
+from app.services.check_runs import month_budget
 from app.services.sessions import utcnow
 
 ZERO = Decimal(0)
@@ -169,6 +179,7 @@ class _Sums:
     ok_cost: Decimal = ZERO
     ok_prompt: int = 0
     ok_output: int = 0
+    batch_runs: int = 0
     models: set[str] = field(default_factory=set)
     efforts: set[str] = field(default_factory=set)
 
@@ -189,6 +200,7 @@ class _Sums:
         self.ok_cost += Decimal(row.ok_cost)
         self.ok_prompt += int(row.ok_prompt)
         self.ok_output += int(row.ok_output)
+        self.batch_runs += int(row.batch_runs)
         self.models.add(row.model)
         if row.effort:
             self.efforts.add(row.effort)
@@ -231,6 +243,7 @@ def _sum_columns() -> list[Any]:
             0,
         ).label("ok_prompt"),
         func.coalesce(func.sum(AgentRun.output_tokens).filter(ok), 0).label("ok_output"),
+        func.count().filter(AgentRun.batch.is_(True)).label("batch_runs"),
     ]
 
 
@@ -311,6 +324,23 @@ async def usage(
         search_usd += Decimal(row.search_usd)
         cache_saved += Decimal(row.cache_saved)
 
+    versions = await ai_savings.with_quality(
+        db,
+        [
+            UsageVersionOut(
+                kind=kind,
+                prompt_version=version,
+                runs=sums.runs,
+                cost_usd=sums.cost,
+                avg_cost_usd=sums.avg_cost(),
+                version_code=None,
+                quality=None,
+            )
+            for (kind, version), sums in sorted(
+                by_version.items(), key=lambda item: (item[0][0], item[0][1] or "")
+            )
+        ],
+    )
     analyses = await _analysis_costs(db, user, span)
     finished = [item for item in analyses if item.done and not item.acceptance]
     avg = _avg([item.cost_usd for item in finished], USD_STEP)
@@ -358,6 +388,7 @@ async def usage(
                 avg_output_tokens=round(sums.ok_output / sums.ok_runs) if sums.ok_runs else None,
                 models=sorted(sums.models),
                 efforts=sorted(sums.efforts),
+                batch_runs=sums.batch_runs,
             )
             for kind, sums in sorted(by_kind.items(), key=lambda item: (-item[1].cost, item[0]))
         ],
@@ -369,18 +400,7 @@ async def usage(
             UsageStepOut(kind=kind, step=step, runs=sums.runs, cost_usd=sums.cost)
             for (kind, step), sums in sorted(by_step.items(), key=lambda item: item[0][::-1])
         ],
-        versions=[
-            UsageVersionOut(
-                kind=kind,
-                prompt_version=version,
-                runs=sums.runs,
-                cost_usd=sums.cost,
-                avg_cost_usd=sums.avg_cost(),
-            )
-            for (kind, version), sums in sorted(
-                by_version.items(), key=lambda item: (item[0][0], item[0][1] or "")
-            )
-        ],
+        versions=versions,
         analyses=analyses,
         avg_analysis_usd=avg,
         admin_key_avg_usd=admin_avg,
@@ -408,7 +428,23 @@ async def usage(
             soft_cap_usd=settings.per_analysis_soft_usd,
             hard_cap_usd=settings.per_analysis_hard_usd,
             default_per_analysis_usd=config.default_per_analysis_usd,
+            postmortem_enabled=config.postmortem_enabled,
+            postmortem_model=config.postmortem_model,
+            postmortem_effort=config.postmortem_effort,
+            postmortem_batch=True,
         ),
+        savings=await ai_savings.savings(
+            db,
+            user,
+            config,
+            start=span.start,
+            end=span.end,
+            analysis_usd=by_kind["analysis"].cost if "analysis" in by_kind else ZERO,
+            cache_saved_usd=_usd(cache_saved),
+            days_elapsed=span.days_elapsed,
+            days_in_month=span.days_in_month,
+        ),
+        before_after=await ai_savings.before_after(db, versions),
     )
 
 
@@ -750,7 +786,9 @@ async def admin_usage(
 
     # Расход по людям и ключу; user_id NULL — общие задачи без участника
     spent: dict[tuple[int | None, str], Decimal] = {}
-    shared_kinds: dict[str, tuple[int, Decimal, int, int]] = {}
+    # Вид → [вызовов, цена, чтение кэша, вход, модели, через Batch]: общие задачи без
+    # участника (shared_kinds) и задачи участников (tasks)
+    shared_kinds: dict[str, list[Any]] = {}
     tasks: dict[str, list[Any]] = {}
     rows = await db.execute(
         select(
@@ -762,33 +800,27 @@ async def admin_usage(
             func.coalesce(func.sum(AgentRun.cache_read_tokens), 0),
             func.coalesce(func.sum(prompt), 0),
             func.array_agg(AgentRun.model.distinct()),
+            func.count().filter(AgentRun.batch.is_(True)),
         )
         .where(in_month, not_check)
         .group_by(AgentRun.user_id, AgentRun.key_source, AgentRun.kind)
     )
     key_read = key_prompt = 0
-    for user_id, key_source, kind, count, cost, read, total_prompt, models in rows:
+    for user_id, key_source, kind, count, cost, read, total_prompt, models, batch in rows:
         cost = Decimal(cost)
         spent[(user_id, key_source)] = spent.get((user_id, key_source), ZERO) + cost
         if key_source != "admin":
             continue
         key_read += int(read)
         key_prompt += int(total_prompt)
-        if user_id is None:
-            runs_, cost_, read_, prompt_ = shared_kinds.get(kind, (0, ZERO, 0, 0))
-            shared_kinds[kind] = (
-                runs_ + int(count),
-                cost_ + cost,
-                read_ + int(read),
-                prompt_ + int(total_prompt),
-            )
-        else:
-            item = tasks.setdefault(kind, [0, ZERO, 0, 0, set()])
-            item[0] += int(count)
-            item[1] += cost
-            item[2] += int(read)
-            item[3] += int(total_prompt)
-            item[4].update(models or [])
+        target = shared_kinds if user_id is None else tasks
+        item = target.setdefault(kind, [0, ZERO, 0, 0, set(), 0])
+        item[0] += int(count)
+        item[1] += cost
+        item[2] += int(read)
+        item[3] += int(total_prompt)
+        item[4].update(models or [])
+        item[5] += int(batch)
 
     # Анализы по людям и ключу за месяц (по времени запуска, как лимиты)
     analyses: dict[tuple[int | None, str], int] = {}
@@ -874,23 +906,29 @@ async def admin_usage(
             budget_share=_ratio(shared_cost, budget),
             spent_share=_ratio(shared_cost, key_spent_total),
             kinds=sorted(shared_kinds),
+            tasks=_task_rows(shared_kinds, budget),
         ),
-        tasks=[
-            TaskUsageOut(
-                kind=kind,
-                runs=item[0],
-                cost_usd=item[1],
-                cache_share=_share(item[2], item[3]),
-                budget_share=_ratio(item[1], budget),
-                models=_models(item[4]),
-            )
-            for kind, item in sorted(tasks.items(), key=lambda pair: (-pair[1][1], pair[0]))
-        ],
-        eval=await _eval_usage(db, span, Decimal(settings.eval_budget_usd)),
+        tasks=_task_rows(tasks, budget),
+        eval=await _eval_usage(db, span),
         others_ids=[item.user_id for item in others],
         others_count=len(others),
         others_usd=sum((item.key_spent_usd for item in others), ZERO),
     )
+
+
+def _task_rows(groups: dict[str, list[Any]], budget: Decimal) -> list[TaskUsageOut]:
+    return [
+        TaskUsageOut(
+            kind=kind,
+            runs=item[0],
+            cost_usd=item[1],
+            cache_share=_share(item[2], item[3]),
+            budget_share=_ratio(item[1], budget),
+            models=_models(item[4]),
+            batch_runs=item[5],
+        )
+        for kind, item in sorted(groups.items(), key=lambda pair: (-pair[1][1], pair[0]))
+    ]
 
 
 # «Кто тратит» ключ администратора: при больше чем OTHERS_AFTER тративших людях первые
@@ -904,8 +942,9 @@ def _others(spenders: list[PersonUsageOut]) -> list[PersonUsageOut]:
     return spenders[TOP_SPENDERS:] if len(spenders) > OTHERS_AFTER else []
 
 
-async def _eval_usage(db: AsyncSession, span: Month, budget: Decimal) -> EvalUsageOut:
-    """Проверки месяца на ключе администратора по прогонам (eval_runs)."""
+async def _eval_usage(db: AsyncSession, span: Month) -> EvalUsageOut:
+    """Проверки месяца на ключе администратора по прогонам (eval_runs): вид, состояние,
+    версия и худший случай прогона; бюджет месяца — по правилу первого месяца (Р25)."""
     rows = (
         await db.execute(
             select(
@@ -917,15 +956,19 @@ async def _eval_usage(db: AsyncSession, span: Month, budget: Decimal) -> EvalUsa
                 func.count(),
                 func.coalesce(func.sum(AgentRun.cost_usd), 0),
                 func.array_agg(AgentRun.model.distinct()),
+                EvalRun.status,
+                EvalRun.metrics["worst_usd"].astext,
+                StrategyVersion.code,
             )
             .outerjoin(EvalRun, EvalRun.id == AgentRun.eval_run_id)
+            .outerjoin(StrategyVersion, StrategyVersion.id == EvalRun.strategy_version_id)
             .where(
                 _in_month(span),
                 AgentRun.key_source == "admin",
                 AgentRun.kind.in_(CHECK_RUN_KINDS),
             )
             # По первичному ключу прогона: остальные его поля от него зависят
-            .group_by(AgentRun.eval_run_id, EvalRun.id)
+            .group_by(AgentRun.eval_run_id, EvalRun.id, StrategyVersion.id)
             .order_by(EvalRun.created_at.desc().nulls_last(), AgentRun.eval_run_id)
         )
     ).all()
@@ -939,12 +982,40 @@ async def _eval_usage(db: AsyncSession, span: Month, budget: Decimal) -> EvalUsa
             models=_models(models or []),
             runs=int(count),
             cost_usd=Decimal(cost),
+            kind=name,
+            status=status,
+            version_code=code,
+            worst_usd=_decimal(worst),
         )
-        for run_id, created, name, eval_set, n_events, count, cost, models in rows
+        for (
+            run_id,
+            created,
+            name,
+            eval_set,
+            n_events,
+            count,
+            cost,
+            models,
+            status,
+            worst,
+            code,
+        ) in rows
     ]
+    budget, first_month, next_usd = await month_budget(db, span.start)
+    config = await load_agent_config(db)
     return EvalUsageOut(
         budget_usd=budget,
         spent_usd=sum((item.cost_usd for item in items), ZERO),
         runs=sum(item.runs for item in items),
         items=items,
+        first_month=first_month,
+        next_usd=next_usd,
+        batch_size=config.eval_batch_size,
     )
+
+
+def _decimal(raw: str | None) -> Decimal | None:
+    try:
+        return Decimal(raw) if raw else None
+    except ArithmeticError:
+        return None

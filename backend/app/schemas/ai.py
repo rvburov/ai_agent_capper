@@ -20,6 +20,13 @@ from app.schemas.admin import (
     UsdLimitIn,
     UsdOut,
 )
+from app.schemas.learning import (
+    CiNumOut,
+    ComparisonOut,
+    MetricDiffOut,
+    VersionEvalOut,
+    VersionStatus,
+)
 from app.schemas.me import AiMode, Role, TotpCodeStr, UserStatus
 
 KeySource = Literal["admin", "own"]
@@ -364,6 +371,8 @@ class UsageKindOut(UsageSumsOut):
     avg_output_tokens: int | None
     models: list[str]
     efforts: list[str]
+    # Вызовов через Batch (скидка −50%: разборы ставок, этап 5)
+    batch_runs: int
 
 
 class UsageModelOut(UsageSumsOut):
@@ -379,15 +388,106 @@ class UsageStepOut(BaseModel):
     cost_usd: UsdOut
 
 
+class VersionQualityOut(BaseModel):
+    """Качество версии инструкций оценки матча (этап 5): последний прогон версии общей
+    линии на замороженном наборе — лог-лосс, Brier, разница лог-лосса с рынком архива (ДИ),
+    ошибок формата. version_code — версия стратегии с этим prompt_version."""
+
+    version_id: int
+    version_code: str
+    status: VersionStatus
+    eval_set_code: str
+    n: int
+    log_loss: float | None
+    brier: float | None
+    to_market: CiNumOut | None
+    format_errors: int
+
+
 class UsageVersionOut(BaseModel):
     """Версия инструкций вида вызова: цена за месяц и в среднем на вызов без ошибки.
-    Качество версии — этап 5."""
+    version_code — версия общей линии инструкций с этим prompt_version (у оценки матча);
+    quality — ее качество на замороженном наборе (null — прогона нет или вид не оценка
+    матча)."""
 
     kind: str
     prompt_version: str | None
     runs: int
     cost_usd: UsdOut
     avg_cost_usd: UsdOut | None
+    version_code: str | None
+    quality: VersionQualityOut | None
+
+
+SavingKind = Literal["version", "postmortem_batch", "cache"]
+# on — мера действует; waiting — проверена на наборе, ждет решения администратора;
+# off — отклонена или выключена; unchecked — на наборе еще не проверена
+SavingStatus = Literal["on", "waiting", "off", "unchecked"]
+
+
+class SavingOut(BaseModel):
+    """Мера экономии «Где экономим» (этап 5; TOKEN_ECONOMY.md 2.4: включается, только если
+    на замороженном наборе качество не хуже с допуском). Считает код:
+    - version — версия инструкций с целью «экономия»: cost_change и tokens_change —
+      цена и токены на событие набора против базы (b / a − 1, −0,31 — дешевле на 31%),
+      log_loss — разница лог-лосса с ДИ, passed — правило «экономия не хуже»;
+      version_name — имя версии («v4 · сжатое досье»; null — без имени);
+      month_forecast_usd — сколько это сэкономит на ваших оценках матча за месяц по темпу;
+    - postmortem_batch — разбор ставки через Batch: per_run_usd — цена разбора (живая
+      средняя, нет разборов — оценка по настройкам), per_run_without_usd — без скидки;
+      month_usd — сэкономлено за месяц (только администратору: это ключ администратора);
+    - cache — кэш инструкций: month_usd — сэкономлено чтением кэша на ваших вызовах."""
+
+    kind: SavingKind
+    status: SavingStatus
+    version_id: int | None
+    version_code: str | None
+    version_name: str | None
+    eval_set_code: str | None
+    model: str | None
+    cost_change: float | None
+    tokens_change: float | None
+    log_loss: MetricDiffOut | None
+    passed: bool | None
+    per_run_usd: UsdOut | None
+    per_run_without_usd: UsdOut | None
+    month_usd: UsdOut | None
+    month_forecast_usd: UsdOut | None
+
+
+# Основа цены в «До и после»: eval — цена события прогонов на одном наборе (Batch со
+# скидкой, без новостей); live — ваши вызовы оценки матча за месяц (с кэшем и новостями)
+PriceSource = Literal["eval", "live"]
+
+
+class VersionSideOut(BaseModel):
+    """Версия в «До и после»: метрики на наборе и живая цена ее оценки матча за месяц
+    (ваши вызовы с этим prompt_version: средняя на вызов без ошибки, вызовов).
+    price_usd — цена для сравнения, у обеих сторон на одной основе
+    (BeforeAfterOut.price_source); null — сравнить цену не на чем."""
+
+    version_id: int
+    code: str
+    name: str | None
+    status: VersionStatus
+    prompt_version: str | None
+    eval: VersionEvalOut
+    live_avg_usd: UsdOut | None
+    live_runs: int
+    price_usd: UsdOut | None
+
+
+class BeforeAfterOut(BaseModel):
+    """«До и после»: та же оценка матча до и после изменения инструкций на одних и тех же
+    событиях набора. before — действующая (если есть кандидат) или прежняя версия, after —
+    кандидат или действующая; comparison — сравнение кодом на том же наборе (null — еще
+    не посчитано). price_source — основа цены обеих сторон (eval — прогоны на наборе через
+    Batch, live — ваши вызовы; null — цены не сравниваются)."""
+
+    before: VersionSideOut
+    after: VersionSideOut
+    comparison: ComparisonOut | None
+    price_source: PriceSource | None
 
 
 class AnalysisCostOut(BaseModel):
@@ -442,6 +542,11 @@ class AgentSettingsOut(BaseModel):
     soft_cap_usd: UsdOut
     hard_cap_usd: UsdOut
     default_per_analysis_usd: UsdOut
+    # Разбор ставки (этап 5): модель, effort, через Batch (−50%), включен ли
+    postmortem_enabled: bool
+    postmortem_model: str
+    postmortem_effort: str
+    postmortem_batch: bool
 
 
 class AiUsageOut(BaseModel):
@@ -491,6 +596,9 @@ class AiUsageOut(BaseModel):
     pace_usd: UsdOut | None
     prices: list[ModelPriceOut]
     settings: AgentSettingsOut
+    # Этап 5: «Где экономим» и «До и после» (null — нет двух версий с прогоном на наборе)
+    savings: list[SavingOut]
+    before_after: BeforeAfterOut | None
 
 
 class CostPartOut(BaseModel):
@@ -586,7 +694,8 @@ class PersonUsageOut(BaseModel):
 
 
 class TaskUsageOut(BaseModel):
-    """Задача (вид вызова) на ключе администратора: вызовы участников, без общих задач."""
+    """Задача (вид вызова) на ключе администратора: вызовы участников, без общих задач
+    (в SharedUsageOut.tasks — общие по видам). batch_runs — вызовов через Batch (−50%)."""
 
     kind: str
     runs: int
@@ -594,10 +703,12 @@ class TaskUsageOut(BaseModel):
     cache_share: float | None
     budget_share: float | None
     models: list[str]
+    batch_runs: int
 
 
 class SharedUsageOut(BaseModel):
-    """Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke).
+    """Общие задачи без участника на ключе администратора: разборы ставок (этап 5) и
+    приемка agent-smoke.
     spent_share — доля в расходе ключа за месяц."""
 
     runs: int
@@ -606,11 +717,15 @@ class SharedUsageOut(BaseModel):
     budget_share: float | None
     kinds: list[str]
     spent_share: float | None
+    # По видам (этап 5: разбор ставки — общая задача, Sonnet 5.5 через Batch, В3)
+    tasks: list[TaskUsageOut]
 
 
 class EvalRunUsageOut(BaseModel):
     """Проверочный прогон (eval) месяца: вызовы и цена; eval_run_id пустой — вызовы без
-    записи прогона."""
+    записи прогона. kind — eval (прогон версии на наборе), quick (быстрая проверка
+    урока), smoke (smoke-eval этапа 3); status — состояние прогона; version_code — версия
+    инструкций; worst_usd — худший случай, зарезервированный до запуска."""
 
     eval_run_id: int | None
     created_at: datetime | None
@@ -620,15 +735,26 @@ class EvalRunUsageOut(BaseModel):
     models: list[str]
     runs: int
     cost_usd: UsdOut
+    kind: str | None
+    status: str | None
+    version_code: str | None
+    worst_usd: UsdOut | None
 
 
 class EvalUsageOut(BaseModel):
-    """Проверки (eval, shadow) — свой бюджет на ключе администратора, в общий не входят."""
+    """Проверки (eval, shadow) — свой бюджет на ключе администратора, в общий не входят.
+    budget_usd — бюджет этого месяца: в месяц первого замороженного набора — не меньше
+    суммы первого месяца (first_month, Р25: $30), иначе настройка; next_usd — со
+    следующего месяца (настройка, $25); batch_size — событий в пакете прогона (резерв
+    худшего случая — на пакет)."""
 
     budget_usd: UsdOut
     spent_usd: UsdOut
     runs: int
     items: list[EvalRunUsageOut]
+    first_month: bool
+    next_usd: UsdOut
+    batch_size: int
 
 
 class AdminAiUsageOut(BaseModel):

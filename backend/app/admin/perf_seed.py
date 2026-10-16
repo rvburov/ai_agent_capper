@@ -19,6 +19,9 @@
 Детерминированно: случайные числа — хеш (hashint8extended) номера строки и соли seed, а не
 random(); даты — от дня today. Одинаковые seed и today дают одинаковые строки (кроме меток
 времени записи: created_at по умолчанию, журнал загрузок) — это проверяет seed_digest.
+INSERT … SELECT без явного id (номер дает последовательность) — всегда с ORDER BY по
+уникальному ключу: иначе порядок строк, а с ним и номера, зависит от плана запроса, то есть
+от статистики таблиц, которую оставили прежние данные базы (ANALYZE, autovacuum).
 
 Быстро: строки пишет сам PostgreSQL (generate_series, INSERT … SELECT), Python готовит
 только имена игроков; полный сид — около 30 с.
@@ -31,7 +34,7 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -53,6 +56,55 @@ ADMIN_ID = 1
 MEMBER_ID = 2
 DENSE_ID = 3
 PERF_TZ = "Europe/Helsinki"
+# Условие урока сида (словарь, app/ml/lesson_scope.py)
+PERF_SCOPE = {
+    "v": 1,
+    "direction": "lower",
+    "conditions": [{"feature": "role", "op": "eq", "values": ["favorite"]}],
+}
+
+
+def _report_payload() -> dict[str, Any]:
+    """Снимок еженедельного отчета (форма app/services/weekly_report.py)."""
+    return {
+        "version": 1,
+        "tz": PERF_TZ,
+        "currency": "RUB",
+        "empty": False,
+        "bets": {
+            "settled": 95,
+            "auto": 70,
+            "manual": 25,
+            "won": 50,
+            "lost": 42,
+            "void": 3,
+            "turnover": "95000.00",
+            "profit": "1840.00",
+            "roi": 0.0194,
+            "placed": 96,
+            "open": 4,
+        },
+        "clv": {"mean": 0.012, "n": 80, "positive": 47},
+        "accuracy": {"n": 120, "model": 0.205, "market": 0.201, "diff": 0.004, "source": "pred"},
+        "calibration": {"n": 120, "mean_p": 0.61, "hit_rate": 0.58},
+        "reviews": {"done": 60, "pending": 2, "cost_usd": "0.60"},
+        "lessons": {
+            "new": ["L-003"],
+            "confirmed": ["L-002"],
+            "enabled": [],
+            "retired": [],
+            "in_prompt": 3,
+        },
+        "eval": {"spent_usd": "3.10", "runs": 1, "budget_usd": "30", "month_spent_usd": "6.20"},
+        "model": {
+            "id": "elo-v1@perf",
+            "brier": 0.2,
+            "log_loss": 0.58,
+            "recalibrated_at": None,
+            "recalibration_activated": None,
+        },
+        "shared": None,
+    }
 
 
 @dataclass(frozen=True)
@@ -696,6 +748,7 @@ SELECT user_id, analysis_id, match_id, market, selection, as_of + interval '5 mi
     p_base, p_claude, least(0.98, p_final + 0.03), q_market_at_pred, id,
     created_at + interval '5 minutes'
 FROM predictions WHERE id % 100 = 7 AND supersedes IS NULL
+ORDER BY id
 """
 
 _LEGS_SQL = """
@@ -728,7 +781,8 @@ INSERT INTO bankroll_ledger (user_id, at, kind, amount, currency, note, created_
 SELECT b.user_id, CAST(:today_ts AS timestamptz) - make_interval(days => b.span_days + 1),
     'deposit', CASE WHEN b.user_id = 2 THEN 100000 ELSE 20000 END, 'RUB', 'perf',
     CAST(:today_ts AS timestamptz) - make_interval(days => b.span_days + 1)
-FROM perf_bettor AS b;
+FROM perf_bettor AS b
+ORDER BY b.user_id;
 
 INSERT INTO bankroll_ledger (user_id, at, kind, amount, currency, note, created_at)
 SELECT 2, d, kind, amount, 'RUB', 'perf', d
@@ -739,15 +793,17 @@ FROM (
              ELSE 'deposit' END AS kind,
         CASE WHEN g % 4 = 0 THEN -3000 WHEN g % 9 = 0 THEN 50 ELSE 5000 END AS amount
     FROM generate_series(1, :member_days / 30) AS g
-) AS x;
+) AS x
+ORDER BY d;
 
 INSERT INTO bankroll_ledger (user_id, at, kind, amount, currency, bet_id, created_at)
-SELECT user_id, placed_at, 'stake', -stake, 'RUB', id, placed_at FROM bets;
+SELECT user_id, placed_at, 'stake', -stake, 'RUB', id, placed_at FROM bets ORDER BY id;
 
 INSERT INTO bankroll_ledger (user_id, at, kind, amount, currency, bet_id, created_at)
 SELECT user_id, settled_at, CASE status WHEN 'won' THEN 'payout' ELSE 'refund' END,
     stake + profit, 'RUB', id, settled_at
-FROM bets WHERE status IN ('won', 'void');
+FROM bets WHERE status IN ('won', 'void')
+ORDER BY id;
 
 CREATE TEMP TABLE perf_fix ON COMMIT DROP AS
 SELECT l.id AS payout_id, l.user_id, l.at, l.amount, l.bet_id
@@ -757,7 +813,8 @@ WHERE l.kind = 'payout' AND b.source = 'app' AND b.id % 41 = 0;
 INSERT INTO bankroll_ledger (user_id, at, kind, amount, currency, bet_id, note, created_at)
 SELECT user_id, at + interval '1 hour', 'reversal', -amount, 'RUB', bet_id,
     'perf-fix-' || payout_id, at + interval '1 hour'
-FROM perf_fix;
+FROM perf_fix
+ORDER BY payout_id;
 
 UPDATE bankroll_ledger AS l SET reversed_by = r.id
 FROM bankroll_ledger AS r
@@ -766,7 +823,8 @@ WHERE r.note = 'perf-fix-' || l.id AND l.id IN (SELECT payout_id FROM perf_fix);
 INSERT INTO bankroll_ledger (user_id, at, kind, amount, currency, bet_id, created_at)
 SELECT user_id, at + interval '2 hours', 'payout', amount, 'RUB', bet_id,
     at + interval '2 hours'
-FROM perf_fix;
+FROM perf_fix
+ORDER BY payout_id;
 
 UPDATE bets AS b SET updated_at = f.at + interval '2 hours'
 FROM perf_fix AS f WHERE f.bet_id = b.id
@@ -780,7 +838,8 @@ INSERT INTO eval_runs (version_kind, strategy_version_id, eval_set, split, n_eve
 SELECT 'strategy', s.id, 'perf-smoke', 'test', 40, '{"kind": "smoke"}'::jsonb, 0,
     CAST(:today_ts AS timestamptz) - make_interval(days => g * 60)
 FROM strategy_versions AS s CROSS JOIN generate_series(0, 4) AS g
-WHERE s.user_id = 1;
+WHERE s.user_id = 1
+ORDER BY s.id, g;
 
 INSERT INTO agent_runs (user_id, key_source, analysis_id, kind, step, model, effort,
     prompt_version, schema_version, input_tokens, cache_write_tokens, cache_write_5m_tokens,
@@ -811,7 +870,8 @@ CROSS JOIN LATERAL (
              ELSE floor(pg_temp.rnd(a.aid * 8 + k.n, 53) * 4000)::int END AS cache_r,
         200 + floor(pg_temp.rnd(a.aid * 8 + k.n, 54) * 1500)::int AS tokens_out
 ) AS x
-WHERE a.created_at >= CAST(:today_ts AS timestamptz) - interval '365 days';
+WHERE a.created_at >= CAST(:today_ts AS timestamptz) - interval '365 days'
+ORDER BY a.aid, k.n;
 
 INSERT INTO agent_runs (user_id, key_source, kind, step, model, effort, input_tokens,
     cache_read_tokens, output_tokens, web_searches, cost_usd, duration_ms, stop_reason,
@@ -821,7 +881,8 @@ SELECT NULL, 'admin', 'news', 0, 'claude-sonnet-5-5', 'low',
     round(CAST(0.01 + pg_temp.rnd(g, 62) * 0.05 AS numeric), 6), 9000, 'end_turn',
     CAST(:today_ts AS timestamptz) - make_interval(
         secs => floor(pg_temp.rnd(g, 63) * 365 * 86400)::int)
-FROM generate_series(1, :shared_runs) AS g;
+FROM generate_series(1, :shared_runs) AS g
+ORDER BY g;
 
 INSERT INTO agent_runs (user_id, key_source, eval_run_id, kind, step, model, effort,
     input_tokens, cache_read_tokens, output_tokens, cost_usd, duration_ms, stop_reason,
@@ -829,12 +890,150 @@ INSERT INTO agent_runs (user_id, key_source, eval_run_id, kind, step, model, eff
 SELECT 1, 'admin', e.id, 'eval', 0, 'claude-opus-5-5', 'medium', 2000, 6000, 900,
     round(CAST(0.02 + pg_temp.rnd(g, 71) * 0.08 AS numeric), 6), 20000, 'end_turn',
     e.created_at + make_interval(secs => g)
-FROM eval_runs AS e CROSS JOIN generate_series(1, :eval_per_run) AS g;
+FROM eval_runs AS e CROSS JOIN generate_series(1, :eval_per_run) AS g
+ORDER BY e.id, g;
 
 UPDATE analyses AS an SET cost_usd = r.cost
 FROM (SELECT analysis_id, sum(cost_usd) AS cost FROM agent_runs
       WHERE analysis_id IS NOT NULL GROUP BY analysis_id) AS r
 WHERE r.analysis_id = an.id
+"""
+
+# Этап 5 (волна 4): обучение модели — общая линия инструкций (v3 действует, v4 «экономия»
+# — кандидат), свой кандидат правил суммы участника load, 40 общих уроков всех статусов,
+# разборы матчей рассчитанных ставок load за 120 дней, замороженный набор на 250 матчей
+# архива и законченные прогоны (v3 дважды — порог шума, v4 один раз), 8 версий калибровки
+# базовой модели (последняя действует), 52 еженедельных отчета load, загрузки файла
+_LEARNING_SQL = """
+INSERT INTO strategy_versions (user_id, code, name, params, prompt_version, status, goal,
+    approved_at, created_at)
+VALUES (NULL, 'v3', 'v3', '{}'::jsonb, :prompt_version, 'active', 'quality',
+    CAST(:today_ts AS timestamptz) - interval '800 days',
+    CAST(:today_ts AS timestamptz) - interval '800 days');
+
+INSERT INTO strategy_versions (user_id, code, name, params, prompt_version, status, goal,
+    parent_id, changes, created_at)
+SELECT NULL, 'v4', 'v4', '{}'::jsonb, :prompt_version, 'candidate', 'saving', id,
+    ARRAY['perf'], CAST(:today_ts AS timestamptz) - interval '3 days'
+FROM strategy_versions WHERE user_id IS NULL AND code = 'v3';
+
+INSERT INTO strategy_versions (user_id, code, name, params, prompt_version, status, goal,
+    parent_id, changes, created_at)
+SELECT 2, 'v4', 'v4', CAST(:params AS jsonb), :prompt_version, 'candidate', 'rules', id,
+    ARRAY['perf'], CAST(:today_ts AS timestamptz) - interval '1 day'
+FROM strategy_versions WHERE user_id = 2 AND status = 'active';
+
+INSERT INTO lessons (user_id, code, text, scope, kind, status, n_cases, n_hist, effect,
+    effect_ci, effect_shrunk, in_prompt, origin, validated_at, decided_at, metrics,
+    created_at)
+SELECT NULL, 'L-' || lpad(g::text, 3, '0'), 'Perf lesson ' || g, CAST(:scope AS jsonb),
+    'numeric', (ARRAY['hypothesis', 'ready', 'confirmed', 'rejected', 'retired'])[1 + g % 5],
+    3 + g % 30, 200 + g * 7, -0.01, ARRAY[-0.02, 0.0], -0.005, g % 5 = 2 AND g <= 12,
+    'postmortem',
+    CASE WHEN g % 5 IN (1, 2) THEN CAST(:today_ts AS timestamptz) - make_interval(days => g) END,
+    CASE WHEN g % 5 = 2 THEN CAST(:today_ts AS timestamptz) - make_interval(days => g) END,
+    jsonb_build_object('own', jsonb_build_object('leg_ids', jsonb_build_array(g * 10, g * 10 + 1))),
+    CAST(:today_ts AS timestamptz) - make_interval(days => g * 2)
+FROM generate_series(1, 40) AS g;
+
+INSERT INTO postmortems (match_id, prediction_id, bet_id, user_id, status, verdict, summary,
+    why, side, winner, created_at)
+SELECT DISTINCT ON (l.match_id) l.match_id, l.prediction_id, l.bet_id, 2, 'done',
+    (ARRAY['fine', 'luck', 'model_error'])[1 + l.id % 3], 'Perf summary', 'Perf why', 1,
+    CASE WHEN l.result = 'win' THEN l.selection ELSE 3 - l.selection END,
+    b.settled_at + interval '1 hour'
+FROM bet_legs AS l JOIN bets AS b ON b.id = l.bet_id
+WHERE b.user_id = 2 AND b.source = 'app' AND l.prediction_id IS NOT NULL
+    AND l.result IN ('win', 'loss')
+    AND b.settled_at >= CAST(:today_ts AS timestamptz) - interval '120 days'
+ORDER BY l.match_id, l.id;
+
+INSERT INTO eval_sets (code, frozen_at, sha256, n_events, since, rules, created_at)
+VALUES ('perf-eval', CAST(:today_ts AS timestamptz) - interval '10 days', repeat('0', 64), 250,
+    CAST(:today AS date) - 75, '{}'::jsonb,
+    CAST(:today_ts AS timestamptz) - interval '10 days');
+
+INSERT INTO eval_set_items (eval_set_id, match_id, split, hard, with_news)
+SELECT s.id, m.id, 'test', m.id % 6 = 0, false
+FROM eval_sets AS s
+CROSS JOIN LATERAL (
+    SELECT id FROM matches
+    WHERE winner_id IS NOT NULL AND match_date < CAST(:today AS date) - 1
+    ORDER BY match_date DESC, id LIMIT 250
+) AS m
+WHERE s.code = 'perf-eval';
+
+CREATE TEMP TABLE perf_eval_events ON COMMIT DROP AS
+SELECT i.match_id, m.match_date, (i.match_id % 2) AS y, pg_temp.rnd(i.match_id, 91) AS r
+FROM eval_set_items AS i JOIN matches AS m ON m.id = i.match_id;
+
+INSERT INTO eval_runs (version_kind, strategy_version_id, eval_set, eval_set_id, split, n_events,
+    repeat_no, status, metrics, cost_usd, created_at)
+SELECT 'strategy', v.id, 'perf-eval', s.id, 'test', 250, r.repeat_no, 'done',
+    jsonb_build_object(
+        'kind', 'eval', 'worst_usd', '19.00',
+        'summary', jsonb_build_object(
+            'n', 250, 'total', 250, 'unrated', 0, 'format_errors', 0, 'max_tokens', 0,
+            'refusals', 0, 'log_loss', 0.6 + r.shift, 'brier', 0.21 + r.shift / 2,
+            'ece', 0.03, 'cost_usd', '3.00', 'tokens_per_event', 9000 - r.shift * 100000,
+            'cost_per_event_usd', '0.012', 'market_n', 250, 'log_loss_market', 0.59,
+            'brier_market', 0.205,
+            'vs_market', jsonb_build_object('value', 0.01, 'low', -0.01, 'high', 0.03,
+                'n', 250)),
+        'events', (
+            SELECT jsonb_object_agg(e.match_id::text, jsonb_build_object(
+                'match_id', e.match_id, 'day', e.match_date, 'y', e.y, 'outcome', 'ok',
+                'p_claude', greatest(0.05, least(0.95,
+                    CASE WHEN e.y = 1 THEN 0.45 + 0.4 * e.r ELSE 0.15 + 0.4 * e.r END
+                    + r.shift)),
+                'decisions', '[]'::jsonb))
+            FROM perf_eval_events AS e)),
+    3, CAST(:today_ts AS timestamptz) - make_interval(days => 9 - r.repeat_no)
+FROM eval_sets AS s
+CROSS JOIN (VALUES ('v3', 1, 0.0), ('v3', 2, 0.002), ('v4', 1, -0.003))
+    AS r(code, repeat_no, shift)
+JOIN strategy_versions AS v ON v.user_id IS NULL AND v.code = r.code
+WHERE s.code = 'perf-eval'
+ORDER BY r.code, r.repeat_no;
+
+INSERT INTO ml_models (id, kind, train_from, train_to, params, metrics, status, activated_at,
+    created_at)
+SELECT 'elo-v1@' || to_char(CAST(:today AS date) - g * 7, 'YYYY-MM-DD'), 'calibration',
+    CAST(:today AS date) - 730 - g * 7, CAST(:today AS date) - 1 - g * 7,
+    jsonb_build_object('platt', jsonb_build_object('a', 1.0 + g / 100.0, 'b', 0.0)),
+    jsonb_build_object(
+        'brier', 0.2 + g / 1000.0, 'log_loss', 0.58 + g / 1000.0, 'ece', 0.02,
+        'n_train', 20000, 'n_holdout', 6000,
+        'walk_forward', (
+            SELECT jsonb_agg(jsonb_build_object(
+                'month', to_char(date_trunc('month', CAST(:today AS date)) - make_interval(
+                    months => k), 'YYYY-MM-DD'),
+                'n', 1500, 'model_brier', 0.2 + k / 1000.0, 'model_log_loss', 0.58,
+                'market_n', 1400, 'market_brier', 0.198) ORDER BY k)
+            FROM generate_series(1, 6) AS k),
+        'calibration', (
+            SELECT jsonb_agg(jsonb_build_object(
+                'low', k / 10.0, 'high', (k + 1) / 10.0, 'n', 500, 'p', k / 10.0 + 0.05,
+                'actual', k / 10.0 + 0.04, 'ci_low', k / 10.0, 'ci_high', k / 10.0 + 0.08)
+                ORDER BY k)
+            FROM generate_series(0, 9) AS k)),
+    CASE WHEN g = 0 THEN 'active' ELSE 'archived' END,
+    CAST(:today_ts AS timestamptz) - make_interval(days => g * 7),
+    CAST(:today_ts AS timestamptz) - make_interval(days => g * 7)
+FROM generate_series(0, 7) AS g;
+
+INSERT INTO weekly_reports (user_id, week_start, payload, created_at)
+SELECT 2, CAST(:report_monday AS date) - g * 7, CAST(:report_payload AS jsonb),
+    CAST(:today_ts AS timestamptz) - make_interval(days => g * 7)
+FROM generate_series(1, 52) AS g;
+
+INSERT INTO data_uploads (uploaded_by, filename, size_bytes, sha256, year, status, report,
+    started_at, finished_at, created_at)
+SELECT 1, '2026.xlsx', 1500000, md5(g::text) || md5((g + 1000)::text), 2026, 'done',
+    '{}'::jsonb, CAST(:today_ts AS timestamptz) - make_interval(days => g * 7),
+    CAST(:today_ts AS timestamptz) - make_interval(days => g * 7) + interval '2 minutes',
+    CAST(:today_ts AS timestamptz) - make_interval(days => g * 7)
+FROM generate_series(1, 30) AS g
 """
 
 _ACTIVITY_SQL = """
@@ -916,6 +1115,11 @@ _COUNT_TABLES = (
     "bankroll_ledger",
     "analyses",
     "agent_runs",
+    "lessons",
+    "postmortems",
+    "eval_runs",
+    "ml_models",
+    "weekly_reports",
 )
 
 
@@ -990,6 +1194,9 @@ async def seed(
     params["password_hash"] = await hash_password_async(PERF_PASSWORD)
     params["params"] = json.dumps(StrategyParams().to_params())
     params["prompt_version"] = current_prompt_version()
+    params["scope"] = json.dumps(PERF_SCOPE)
+    params["report_monday"] = today - timedelta(days=today.weekday())
+    params["report_payload"] = json.dumps(_report_payload())
 
     def say(step: str) -> None:
         if progress is not None:
@@ -1021,6 +1228,7 @@ async def seed(
             ("legs", _LEGS_SQL),
             ("ledger", _LEDGER_SQL),
             ("runs", _RUNS_SQL),
+            ("learning", _LEARNING_SQL),
             ("activity", _ACTIVITY_SQL),
         ):
             await _run(db, sql, params)

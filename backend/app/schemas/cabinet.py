@@ -50,6 +50,8 @@ class NotificationPrefOut(BaseModel):
     push: bool
     required: bool
     admin: bool
+    # Вид этапа 5 (отметка «новое» в макете profile.js)
+    new: bool
 
 
 class AlertRulesOut(BaseModel):
@@ -70,6 +72,22 @@ class AlertRulesOut(BaseModel):
     rate_limit_window_minutes: int
 
 
+class NotificationScheduleOut(BaseModel):
+    """Числа для подписей видов этапа 5 — те же, что у воркера: еженедельный отчет —
+    день недели report_weekday (0 — понедельник) в report_hour по поясу tz, следующий —
+    next_report; «ставка ждет результата» — через settle_reminder_days дней после матча;
+    «пора загрузить файл» (администратору) — по понедельникам в upload_hour по его поясу,
+    если файл не загружали больше upload_stale_days дней."""
+
+    tz: str
+    report_weekday: int
+    report_hour: int
+    next_report: date
+    settle_reminder_days: int
+    upload_hour: int
+    upload_stale_days: int
+
+
 class NotificationPrefsOut(BaseModel):
     """alert_rules — пороги сигналов расхода ИИ для подсказки (только у администратора,
     у участника null)."""
@@ -78,6 +96,7 @@ class NotificationPrefsOut(BaseModel):
     # Push включится на этапе 6: до этого столбец «Push» неактивен
     push_available: bool
     alert_rules: AlertRulesOut | None
+    schedule: NotificationScheduleOut
 
 
 class NotificationPrefIn(BaseModel):

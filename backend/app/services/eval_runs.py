@@ -54,6 +54,7 @@ import structlog
 from anthropic.types.messages.batch_create_params import Request
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.agent import batches
 from app.agent.calls import estimate_tokens
@@ -240,6 +241,7 @@ async def plan(db: AsyncSession, version_id: int, *, now: datetime | None = None
     worst = batches.round_usd(one_worst * (events + retry))
     worst_chunk = batches.round_usd(one_worst * min(batch, events))
     estimate = Decimal(0)
+    live: Decimal | None = None
     if price is not None:
         live = await lesson_quick.live_request_usd(db, config.analysis_model)
         one = (
@@ -283,6 +285,7 @@ async def plan(db: AsyncSession, version_id: int, *, now: datetime | None = None
         model=config.analysis_model,
         max_tokens=config.eval_max_tokens,
         estimate_usd=estimate,
+        estimate_source="live" if live is not None else "settings",
         worst_usd=worst,
         worst_chunk_usd=worst_chunk,
         per_event_worst_usd=batches.round_usd(one_worst),
@@ -972,6 +975,9 @@ async def collect(
             "retried": retried,
             "attempts": 0,
         }
+        # Потрачено растет с каждым собранным пакетом; у остановленного прогона — сколько
+        # фактически ушло (итог прогона пересчитает то же в _summarize)
+        run.cost_usd = (await _run_costs(session, run.id))[0]
         if canceled:
             _abandoned(run)
             return
@@ -1362,6 +1368,47 @@ async def compare_versions(
         candidate_run=candidate_run,
         baseline_run=baseline_run,
         noise_run_id=noise.id if noise is not None else None,
+        candidate=candidate,
+        baseline=baseline,
+    )
+
+
+async def latest_comparison(
+    db: AsyncSession, candidate: StrategyVersion, baseline: StrategyVersion
+) -> ComparisonOut | None:
+    """Последнее уже посчитанное сравнение candidate с baseline на последнем замороженном
+    наборе — том же, что у version_eval: метрики сторон и сравнение не расходятся после
+    новой заморозки. Только чтение: «ИИ и расходы» бутстрэп не считает (его считает
+    завершение прогона и экран версий). Нет — None."""
+    eval_set = await eval_sets.latest_set(db)
+    if eval_set is None:
+        return None
+    cand, base = aliased(EvalRun), aliased(EvalRun)
+    found = (
+        await db.execute(
+            select(EvalComparison, cand, base)
+            .join(cand, cand.id == EvalComparison.candidate_run_id)
+            .join(base, base.id == EvalComparison.baseline_run_id)
+            .where(
+                cand.strategy_version_id == candidate.id,
+                base.strategy_version_id == baseline.id,
+                cand.eval_set_id == eval_set.id,
+                base.eval_set_id == eval_set.id,
+            )
+            .order_by(EvalComparison.id.desc())
+            .limit(1)
+        )
+    ).first()
+    if found is None:
+        return None
+    stored, candidate_run, baseline_run = found
+    return comparison_out(
+        stored.metrics,
+        row_id=stored.id,
+        created_at=stored.created_at,
+        candidate_run=candidate_run,
+        baseline_run=baseline_run,
+        noise_run_id=stored.noise_run_id,
         candidate=candidate,
         baseline=baseline,
     )

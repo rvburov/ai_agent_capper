@@ -762,6 +762,19 @@ async def activate(
     return version
 
 
+def was_active(version: StrategyVersion) -> bool:
+    """Версию можно вернуть: она в архиве и уже действовала. Исходные правила участника
+    действовали и без approved_at (строки, созданные до того, как его стали писать), если
+    ушли в архив; история старого бота (legacy, без цели) — не правила, ее не вернуть."""
+    if version.status != ARCHIVED:
+        return False
+    if version.approved_at is not None:
+        return True
+    return (
+        version.user_id is not None and version.goal == "rules" and version.archived_at is not None
+    )
+
+
 async def rollback(
     db: AsyncSession, user: User, version_id: int, *, ip: str | None
 ) -> StrategyVersion:
@@ -775,7 +788,7 @@ async def rollback(
     if shared:
         await lock_shared(db)
     version = await owned_version(db, user, version_id, lock=True)
-    if version.status != ARCHIVED or version.approved_at is None:
+    if not was_active(version):
         raise AppError(409, "strategy.cannot_rollback")
     if shared:
         await lessons_allowed(db, version.lessons or [])

@@ -43,7 +43,6 @@ from app.admin.terminal import EXIT_CANCELLED, EXIT_TRIAL, CliError, confirmed, 
 from app.agent.client import client_for
 from app.agent.config import AgentConfig, load_agent_config
 from app.agent.errors import ClaudeStepError
-from app.agent.prompts import load_prompt_id
 from app.agent.runs import price_for
 from app.core.i18n import t
 from app.core.redis import create_redis
@@ -56,7 +55,12 @@ from app.services.ai_access import access_for
 from app.services.app_settings import get_app_settings
 from app.services.claude_key import key_for
 from app.services.sessions import utcnow
-from app.services.strategy_versions import active_version, ensure_active, prompt_version_of
+from app.services.strategy_versions import (
+    active_version,
+    ensure_shared_ready,
+    prompt_version_of,
+    system_prompt_of,
+)
 
 MAX_RUNS = 50
 MAX_EVENTS = 200
@@ -856,8 +860,10 @@ async def _smoke_new(args: argparse.Namespace, maker: Maker) -> None:
             price = await price_for(db, config.analysis_model)
         except ClaudeStepError as exc:
             raise _claude_failed(exc) from None
-        version = await ensure_active(db, admin.id)
-        prompt = load_prompt_id(prompt_version_of(version))
+        # Инструкции — действующая версия общей линии (промпт и уроки в анализе, Р25), а не
+        # личная версия администратора: ответы годятся быстрой проверке как «без урока»
+        version = await ensure_shared_ready(db)
+        prompt = system_prompt_of(version)
         say(t("cli.smoke_eval.preparing", count=len(matches)))
         events = await smoke_eval.prepare_events(db, matches)
         await db.commit()

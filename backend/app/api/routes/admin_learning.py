@@ -9,7 +9,8 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
+from fastapi.responses import StreamingResponse
 
 from app.api.routes.admin import Confirm
 from app.core.deps import AdminUser, ClientIp, DbSession, require_admin
@@ -26,7 +27,14 @@ from app.schemas.learning import (
     RecalibrationOut,
     StrategyVersionOut,
 )
-from app.services import eval_runs, eval_sets, recalibration, strategy_versions, strategy_view
+from app.services import (
+    eval_runs,
+    eval_sets,
+    ml_export,
+    recalibration,
+    strategy_versions,
+    strategy_view,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -117,3 +125,24 @@ async def rollback_model(
 ) -> MlModelOut:
     """Вернуть версию базовой модели, которая уже была активной (404 / 409)."""
     return await recalibration.rollback(db, admin, model_id, ip=ip)
+
+
+@router.get(
+    "/ml/export.jsonl",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {"application/x-ndjson": {}},
+            "description": "JSONL: строка на прогноз (LLM_LEARNING.md 2.3)",
+        }
+    },
+)
+async def export_snapshots(admin: AdminUser, db: DbSession) -> Response:
+    """Снимки прогнозов для учебного трека (В9): по архиву и свои, игроки обезличены,
+    прогнозов участников нет (Р14). Файл отдается частями."""
+    chunks = await ml_export.snapshots(db, admin)
+    return StreamingResponse(
+        chunks,
+        media_type="application/x-ndjson; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{ml_export.FILENAME}"'},
+    )

@@ -74,7 +74,7 @@ jobs:
 
   # Время ответа API (PLAN.md, «Целевые показатели»): сид размера живой программы во
   # временную базу (10 тыс. ставок, 100 тыс. вызовов Claude и плотный месяц, 2 790 игроков с
-  # матчами) и p95 каждого маршрута этапа 4 (python -m app.admin.perf, backend/README.md).
+  # матчами) и p95 каждого маршрута этапов 4 и 5 (python -m app.admin.perf, backend/README.md).
   # Раннер медленнее сервера: падение — если p95 выше цели × 1,5. Отчет — в сводке задания
   perf:
     name: Скорость API (p95)
@@ -125,7 +125,7 @@ jobs:
         if: always()
         run: |
           if [ -f perf.md ]; then
-            { echo "### p95 маршрутов этапа 4 (цель × 1,5)"; echo; cat perf.md; } >> "$GITHUB_STEP_SUMMARY"
+            { echo "### p95 маршрутов этапов 4 и 5 (цель × 1,5)"; echo; cat perf.md; } >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/upload-artifact@v6
         if: always()

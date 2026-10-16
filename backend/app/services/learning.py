@@ -18,7 +18,16 @@ from app.agent import batches
 from app.agent.config import load_agent_config
 from app.agent.errors import ClaudeStepError
 from app.agent.runs import price_for
-from app.db.models import AgentRun, Bet, BetLeg, Lesson, MlModel, StrategyVersion, User
+from app.db.models import (
+    AgentRun,
+    Bet,
+    BetLeg,
+    Lesson,
+    MlModel,
+    StrategyVersion,
+    User,
+    WeeklyReport,
+)
 from app.ml.elo import MODEL_ID
 from app.ml.model_versions import CALIBRATION_KIND, active_calibration
 from app.schemas.learning import (
@@ -166,7 +175,8 @@ async def _versions(db: AsyncSession, user: User) -> LearningVersionsOut:
     )
 
 
-async def _model(db: AsyncSession) -> LearningModelOut | None:
+async def model_brief(db: AsyncSession) -> LearningModelOut | None:
+    """Базовая модель на плитке и в отчете недели."""
     model: MlModel | None = await active_calibration(db)
     if model is None:
         model = await db.get(MlModel, MODEL_ID)
@@ -188,6 +198,7 @@ async def _model(db: AsyncSession) -> LearningModelOut | None:
         activated_at=model.activated_at or model.created_at,
         auto=model.kind == CALIBRATION_KIND
         and model.activated_by is None
+        and metrics.get("started_by") is None
         and metrics.get("source") != MODEL_ID,
         recalibrated_at=recalibrated,
     )
@@ -250,6 +261,12 @@ async def learning_out(db: AsyncSession, user: User, *, now: datetime | None = N
     config = await load_agent_config(db)
     settled, auto, legs = await _settled(db, user)
     eval_set = await eval_sets.latest_set(db)
+    last = await db.scalar(
+        select(WeeklyReport)
+        .where(WeeklyReport.user_id == user.id)
+        .order_by(WeeklyReport.week_start.desc())
+        .limit(1)
+    )
     return LearningOut(
         settled=settled,
         settled_auto=auto,
@@ -258,7 +275,7 @@ async def learning_out(db: AsyncSession, user: User, *, now: datetime | None = N
         events_with_outcome=await events_with_outcome(db),
         lessons=await _lessons(db, user, config.lessons_max_active),
         versions=await _versions(db, user),
-        model=await _model(db),
+        model=await model_brief(db),
         eval_set=eval_sets.set_out(eval_set) if eval_set is not None else None,
         thresholds=LearningThresholdsOut(
             lessons_max=config.lessons_max_active,
@@ -274,5 +291,7 @@ async def learning_out(db: AsyncSession, user: User, *, now: datetime | None = N
         ),
         prices=await _prices(db),
         next_report=next_report_day(moment, user.tz),
-        last_report=None,
+        last_report=last.week_start if last is not None else None,
+        last_report_end=last.week_start + timedelta(days=6) if last is not None else None,
+        last_report_id=last.id if last is not None else None,
     )

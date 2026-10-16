@@ -237,7 +237,7 @@ async def refresh_cases(db: AsyncSession, lesson: Lesson) -> lesson_check.OwnCas
             "n": own.n,
             "legs": own.legs,
             "residual": own.residual,
-            # Ноги случаев: по ним участнику считаются только его случаи (cases_for_viewer)
+            # Ноги случаев: по ним участнику считаются только его случаи (own_cases)
             "leg_ids": list(own.leg_ids),
         },
     }
@@ -697,17 +697,6 @@ def public_cases(user: User, lesson: Lesson) -> int | None:
     return None
 
 
-async def cases_for_viewer(
-    db: AsyncSession, user: User, lessons: Sequence[Lesson]
-) -> dict[int, int]:
-    """Случаи урока, которые видит этот человек: администратору — все (он ведет уроки),
-    участнику — только матчи его собственных ставок под условием (Р14, замечание m2:
-    по общему числу участник узнал бы, на что ставили другие). → урок → случаев."""
-    if user.role == "admin" or not lessons:
-        return {lesson.id: lesson.n_cases for lesson in lessons}
-    return await own_cases(db, user, lessons)
-
-
 async def own_cases(db: AsyncSession, user: User, lessons: Sequence[Lesson]) -> dict[int, int]:
     """Сколько случаев урока — матчи ставок этого человека (у администратора — его
     собственных). → урок → случаев."""
@@ -788,6 +777,7 @@ async def list_lessons(
         min_cases=config.lesson_min_cases,
         min_cases_process=config.lesson_min_cases_process,
         shrink_k=config.lesson_shrink_k,
+        public_cases_min=PUBLIC_CASES_MIN,
     )
 
 

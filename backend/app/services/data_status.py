@@ -21,6 +21,8 @@ STALE_SOURCES = ("sackmann", "tennis_data")
 # Файл tennis-data администратор загружает раз в неделю, напоминание — в понедельник
 # (app/workers/jobs.py, UPLOAD_REMINDER_WEEKDAY)
 UPLOAD_WEEKDAY = 0
+# Час напоминания «пора загрузить файл» по поясу администратора
+UPLOAD_HOUR = 7
 # Минута ночного обновления данных (час — CAPPER_DATA_UPDATE_HOUR_UTC): после очистки
 # (:15) и не в начале часа, когда запускается больше всего чужих задач
 DATA_UPDATE_MINUTE = 25

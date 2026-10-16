@@ -23,7 +23,6 @@ from app.schemas.learning import (
 )
 from app.services import eval_runs, eval_sets
 from app.services.strategy_versions import (
-    ARCHIVED,
     CANDIDATE,
     active_version,
     ensure_shared_ready,
@@ -34,6 +33,7 @@ from app.services.strategy_versions import (
     params_out,
     prompt_version_of,
     shared_active,
+    was_active,
 )
 
 # Сравнений версий у участника — не больше COMPARE_LIMIT в минуту
@@ -91,11 +91,18 @@ async def version_out(
         params=None if shared else params_out(params_of(version)),
         eval=evaluated,
         comparison=comparison,
-        check=RulesCheckOut(**check) if isinstance(check, dict) else None,
+        check=_check_out(check, version) if isinstance(check, dict) else None,
         can_activate=reason is None,
         activate_reason=reason,
-        can_rollback=allowed and version.status == ARCHIVED and version.approved_at is not None,
+        can_rollback=allowed and was_active(version),
     )
+
+
+def _check_out(check: dict[str, Any], version: StrategyVersion) -> RulesCheckOut:
+    """Проверка кандидата на своих ставках; у снимков до волны 4 since не было — день
+    создания кандидата."""
+    since = check.get("since") or version.created_at.date().isoformat()
+    return RulesCheckOut(**{**check, "since": since})
 
 
 async def _codes(db: AsyncSession, versions: list[StrategyVersion]) -> dict[int, str]:

@@ -653,12 +653,15 @@ async def prediction_events(
     исходом по архиву или своей ноге; на пару исходов — сторона с p_final ≥ 50%. Период —
     по дню прогноза в поясе участника."""
     replaced = select(Prediction.supersedes).where(Prediction.supersedes.is_not(None))
+    # Исход своей ноги прогноза — одним соединением с группировкой, а не подзапросом на
+    # каждый прогноз: индекса по bet_legs.prediction_id нет, и подзапрос читал все ноги
+    # на каждый прогноз (замер волны 4: 6,8 с на 13 тыс. прогнозов → доли секунды). У
+    # прогноза одна нога (или ноги одного исхода)
     leg = (
-        select(BetLeg.result)
-        .where(BetLeg.prediction_id == Prediction.id, BetLeg.result.in_(("win", "loss")))
-        .limit(1)
-        .correlate(Prediction)
-        .scalar_subquery()
+        select(BetLeg.prediction_id, func.min(BetLeg.result).label("result"))
+        .where(BetLeg.prediction_id.is_not(None), BetLeg.result.in_(("win", "loss")))
+        .group_by(BetLeg.prediction_id)
+        .subquery("own_leg")
     )
     rows = await db.execute(
         select(
@@ -675,7 +678,7 @@ async def prediction_events(
             Match.status,
             Match.score,
             func.coalesce(Match.best_of, Tournament.best_of, 3).label("best_of"),
-            leg.label("leg_result"),
+            leg.c.result.label("leg_result"),
             # Покрытие прогноза — как у ноги (leg_surface_sql): турнир архива, иначе
             # подтвержденный ввод анализа (досье, features.surface)
             func.coalesce(
@@ -685,6 +688,7 @@ async def prediction_events(
         )
         .join(Match, Match.id == Prediction.match_id)
         .outerjoin(Tournament, Tournament.id == Match.tournament_id)
+        .outerjoin(leg, leg.c.prediction_id == Prediction.id)
         .where(
             Prediction.user_id == user.id,
             Prediction.is_eval.is_(False),

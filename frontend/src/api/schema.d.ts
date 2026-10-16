@@ -1592,6 +1592,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/ml/export.jsonl": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Snapshots
+         * @description Снимки прогнозов для учебного трека (В9): по архиву и свои, игроки обезличены,
+         *     прогнозов участников нет (Р14). Файл отдается частями.
+         */
+        get: operations["export_snapshots_api_admin_ml_export_jsonl_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analyses": {
         parameters: {
             query?: never;
@@ -2551,6 +2572,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/learning/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Learning Reports
+         * @description Свои еженедельные отчеты, новые сверху, и день следующего.
+         */
+        get: operations["learning_reports_api_learning_reports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/learning/reports/{report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Learning Report
+         * @description Свой отчет недели; чужой — 404 report.not_found.
+         */
+        get: operations["learning_report_api_learning_reports__report_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2975,6 +3036,14 @@ export interface components {
             hard_cap_usd: number;
             /** Default Per Analysis Usd */
             default_per_analysis_usd: number;
+            /** Postmortem Enabled */
+            postmortem_enabled: boolean;
+            /** Postmortem Model */
+            postmortem_model: string;
+            /** Postmortem Effort */
+            postmortem_effort: string;
+            /** Postmortem Batch */
+            postmortem_batch: boolean;
         };
         /**
          * AgreementOut
@@ -3252,6 +3321,9 @@ export interface components {
             /** Prices */
             prices: components["schemas"]["ModelPriceOut"][];
             settings: components["schemas"]["AgentSettingsOut"];
+            /** Savings */
+            savings: components["schemas"]["SavingOut"][];
+            before_after: components["schemas"]["BeforeAfterOut"] | null;
         };
         /**
          * AlertRulesOut
@@ -3725,6 +3797,21 @@ export interface components {
             day: string;
             /** Equity */
             equity: string;
+        };
+        /**
+         * BeforeAfterOut
+         * @description «До и после»: та же оценка матча до и после изменения инструкций на одних и тех же
+         *     событиях набора. before — действующая (если есть кандидат) или прежняя версия, after —
+         *     кандидат или действующая; comparison — сравнение кодом на том же наборе (null — еще
+         *     не посчитано). price_source — основа цены обеих сторон (eval — прогоны на наборе через
+         *     Batch, live — ваши вызовы; null — цены не сравниваются).
+         */
+        BeforeAfterOut: {
+            before: components["schemas"]["VersionSideOut"];
+            after: components["schemas"]["VersionSideOut"];
+            comparison: components["schemas"]["ComparisonOut"] | null;
+            /** Price Source */
+            price_source: ("eval" | "live") | null;
         };
         /**
          * BetBrief
@@ -5138,7 +5225,8 @@ export interface components {
          *     первый день набора (eval_set.since) раньше среза знаний модели анализа
          *     (set_seen_since); eval.lesson_overlap — урок кандидата (overlap_lesson) проверен на
          *     архиве до заморозки набора, его надо перепроверить. set_model — модель, для которой
-         *     набор замораживали.
+         *     набор замораживали. estimate_source — откуда цена: live — средняя прошлых ответов
+         *     проверок, settings — оценка по ценам модели и токенам из настроек (прошлых нет).
          */
         EvalPlanOut: {
             /** Version Id */
@@ -5160,6 +5248,11 @@ export interface components {
             max_tokens: number;
             /** Estimate Usd */
             estimate_usd: number;
+            /**
+             * Estimate Source
+             * @enum {string}
+             */
+            estimate_source: "live" | "settings";
             /** Worst Usd */
             worst_usd: number;
             /** Worst Chunk Usd */
@@ -5256,7 +5349,9 @@ export interface components {
         /**
          * EvalRunUsageOut
          * @description Проверочный прогон (eval) месяца: вызовы и цена; eval_run_id пустой — вызовы без
-         *     записи прогона.
+         *     записи прогона. kind — eval (прогон версии на наборе), quick (быстрая проверка
+         *     урока), smoke (smoke-eval этапа 3); status — состояние прогона; version_code — версия
+         *     инструкций; worst_usd — худший случай, зарезервированный до запуска.
          */
         EvalRunUsageOut: {
             /** Eval Run Id */
@@ -5275,6 +5370,14 @@ export interface components {
             runs: number;
             /** Cost Usd */
             cost_usd: number;
+            /** Kind */
+            kind: string | null;
+            /** Status */
+            status: string | null;
+            /** Version Code */
+            version_code: string | null;
+            /** Worst Usd */
+            worst_usd: number | null;
         };
         /** EvalRunsOut */
         EvalRunsOut: {
@@ -5350,6 +5453,10 @@ export interface components {
         /**
          * EvalUsageOut
          * @description Проверки (eval, shadow) — свой бюджет на ключе администратора, в общий не входят.
+         *     budget_usd — бюджет этого месяца: в месяц первого замороженного набора — не меньше
+         *     суммы первого месяца (first_month, Р25: $30), иначе настройка; next_usd — со
+         *     следующего месяца (настройка, $25); batch_size — событий в пакете прогона (резерв
+         *     худшего случая — на пакет).
          */
         EvalUsageOut: {
             /** Budget Usd */
@@ -5360,6 +5467,12 @@ export interface components {
             runs: number;
             /** Items */
             items: components["schemas"]["EvalRunUsageOut"][];
+            /** First Month */
+            first_month: boolean;
+            /** Next Usd */
+            next_usd: number;
+            /** Batch Size */
+            batch_size: number;
         };
         /**
          * EventIn
@@ -5943,7 +6056,9 @@ export interface components {
          * @description Сводка «Обучения модели» и блока «Модель учится» на главной: рассчитано ставок
          *     приложения (своих), из них по архиву, событий в них; уроки, версии (общая линия и
          *     свои правила), базовая модель, набор, пороги и цены; следующий отчет — понедельник
-         *     по поясу участника (отчеты — волна 4, last_report пока null).
+         *     по поясу участника. last_report — понедельник недели последнего отчета (null —
+         *     отчетов еще не было), last_report_end — ее воскресенье, last_report_id — id отчета
+         *     (GET /learning/reports/{id}).
          */
         LearningOut: {
             /** Settled */
@@ -5969,6 +6084,10 @@ export interface components {
             next_report: string;
             /** Last Report */
             last_report: string | null;
+            /** Last Report End */
+            last_report_end: string | null;
+            /** Last Report Id */
+            last_report_id: number | null;
         };
         /**
          * LearningPricesOut
@@ -6367,7 +6486,8 @@ export interface components {
         /**
          * LessonsOut
          * @description Уроки и пороги из настроек: не больше max_active в анализе (сейчас active),
-         *     проверка — с min_cases своих случаев (процессный — min_cases_process), усадка k.
+         *     проверка — с min_cases своих случаев (процессный — min_cases_process), усадка k;
+         *     public_cases_min — порог показа общего числа случаев участнику.
          */
         LessonsOut: {
             /** Items */
@@ -6382,6 +6502,8 @@ export interface components {
             min_cases_process: number;
             /** Shrink K */
             shrink_k: number;
+            /** Public Cases Min */
+            public_cases_min: number;
         };
         /**
          * LimitAlertOut
@@ -7108,6 +7230,8 @@ export interface components {
             required: boolean;
             /** Admin */
             admin: boolean;
+            /** New */
+            new: boolean;
         };
         /**
          * NotificationPrefsIn
@@ -7128,6 +7252,34 @@ export interface components {
             /** Push Available */
             push_available: boolean;
             alert_rules: components["schemas"]["AlertRulesOut"] | null;
+            schedule: components["schemas"]["NotificationScheduleOut"];
+        };
+        /**
+         * NotificationScheduleOut
+         * @description Числа для подписей видов этапа 5 — те же, что у воркера: еженедельный отчет —
+         *     день недели report_weekday (0 — понедельник) в report_hour по поясу tz, следующий —
+         *     next_report; «ставка ждет результата» — через settle_reminder_days дней после матча;
+         *     «пора загрузить файл» (администратору) — по понедельникам в upload_hour по его поясу,
+         *     если файл не загружали больше upload_stale_days дней.
+         */
+        NotificationScheduleOut: {
+            /** Tz */
+            tz: string;
+            /** Report Weekday */
+            report_weekday: number;
+            /** Report Hour */
+            report_hour: number;
+            /**
+             * Next Report
+             * Format: date
+             */
+            next_report: string;
+            /** Settle Reminder Days */
+            settle_reminder_days: number;
+            /** Upload Hour */
+            upload_hour: number;
+            /** Upload Stale Days */
+            upload_stale_days: number;
         };
         /** NotificationsOut */
         NotificationsOut: {
@@ -8183,6 +8335,169 @@ export interface components {
             tz?: string | null;
         };
         /**
+         * ReportAccuracyOut
+         * @description Brier модели против рынка на событиях недели: source pred — рынок при прогнозе,
+         *     closing — закрытие (главный ряд — как в «Аналитике»: закрытие, когда событий с ним
+         *     больше). diff = model − market (меньше нуля — модель точнее). За неделю это почти
+         *     всегда шум: тренд — в «Аналитике».
+         */
+        ReportAccuracyOut: {
+            /** N */
+            n: number;
+            /** Model */
+            model: number | null;
+            /** Market */
+            market: number | null;
+            /** Diff */
+            diff: number | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "pred" | "closing";
+        };
+        /**
+         * ReportBetsOut
+         * @description Ставки приложения, рассчитанные за неделю (по времени расчета): сколько, из них
+         *     сами по архиву (auto) и вручную (manual); оборот и прибыль без возвратов, ROI =
+         *     прибыль / оборот. placed — поставлено за неделю, open — в игре на момент отчета.
+         */
+        ReportBetsOut: {
+            /** Settled */
+            settled: number;
+            /** Auto */
+            auto: number;
+            /** Manual */
+            manual: number;
+            /** Won */
+            won: number;
+            /** Lost */
+            lost: number;
+            /** Void */
+            void: number;
+            /** Turnover */
+            turnover: string;
+            /** Profit */
+            profit: string;
+            /** Roi */
+            roi: number | null;
+            /** Placed */
+            placed: number;
+            /** Open */
+            open: number;
+        };
+        /**
+         * ReportCalibrationOut
+         * @description Калибровка недели в целом: средняя вероятность модели (сторона пары исходов,
+         *     которую выбрала ставка) и доля сбывшихся, n — событий.
+         */
+        ReportCalibrationOut: {
+            /** N */
+            n: number;
+            /** Mean P */
+            mean_p: number | null;
+            /** Hit Rate */
+            hit_rate: number | null;
+        };
+        /**
+         * ReportClvOut
+         * @description Средний CLV рассчитанных за неделю ставок с закрытием у всех ног (доля), сколько
+         *     таких ставок и сколько из них в плюсе.
+         */
+        ReportClvOut: {
+            /** Mean */
+            mean: number | null;
+            /** N */
+            n: number;
+            /** Positive */
+            positive: number;
+        };
+        /**
+         * ReportEvalOut
+         * @description Проверки качества (eval) за неделю: потрачено из бюджета проверок и законченных
+         *     прогонов; бюджет месяца отчета и потрачено за месяц.
+         */
+        ReportEvalOut: {
+            /** Spent Usd */
+            spent_usd: number;
+            /** Runs */
+            runs: number;
+            /** Budget Usd */
+            budget_usd: number;
+            /** Month Spent Usd */
+            month_spent_usd: number;
+        };
+        /**
+         * ReportLessonsOut
+         * @description Уроки недели (общие и свои): новые гипотезы, подтвердились на истории, включены в
+         *     инструкции анализа, списаны; in_prompt — уроков в анализе на момент отчета.
+         */
+        ReportLessonsOut: {
+            /** New */
+            new: string[];
+            /** Confirmed */
+            confirmed: string[];
+            /** Enabled */
+            enabled: string[];
+            /** Retired */
+            retired: string[];
+            /** In Prompt */
+            in_prompt: number;
+        };
+        /**
+         * ReportModelOut
+         * @description Базовая модель на момент отчета; recalibrated_at — перекалибровка за неделю
+         *     (включена или нет), иначе null.
+         */
+        ReportModelOut: {
+            /** Id */
+            id: string | null;
+            /** Brier */
+            brier: number | null;
+            /** Log Loss */
+            log_loss: number | null;
+            /** Recalibrated At */
+            recalibrated_at: string | null;
+            /** Recalibration Activated */
+            recalibration_activated: boolean | null;
+        };
+        /**
+         * ReportReviewsOut
+         * @description Разборы ИИ матчей рассчитанных за неделю ставок (общие, один на матч, В3): готовы,
+         *     ждут; цена готовых — ключ администратора, в лимит участника не входит.
+         */
+        ReportReviewsOut: {
+            /** Done */
+            done: number;
+            /** Pending */
+            pending: number;
+            /** Cost Usd */
+            cost_usd: number;
+        };
+        /**
+         * ReportSharedOut
+         * @description Только у администратора (Р14 — без ставок и сумм участников): со скольких
+         *     участников были рассчитанные ставки, сколько ставок рассчитано (из них по архиву),
+         *     разборов готово и их цена, анализов запущено и расход ключа администратора за неделю
+         *     без проверок.
+         */
+        ReportSharedOut: {
+            /** Members */
+            members: number;
+            /** Settled */
+            settled: number;
+            /** Auto */
+            auto: number;
+            /** Reviews */
+            reviews: number;
+            /** Reviews Usd */
+            reviews_usd: number;
+            /** Analyses */
+            analyses: number;
+            /** Ai Usd */
+            ai_usd: number;
+        };
+        /**
          * ResetCodeCreatedOut
          * @description Выданный код RST-XXXX-XXXX (в базе только хеш). Прежние коды отозваны.
          */
@@ -8309,8 +8624,10 @@ export interface components {
         };
         /**
          * ReviewLessonOut
-         * @description Урок гипотезы разбора: код, статус, случаев из порога (у участника — только по его
-         *     ставкам, Р14), в анализе ли.
+         * @description Урок гипотезы разбора: код, статус, в анализе ли. Случаи — как у уроков (LessonOut):
+         *     n_cases — по ставкам всех участников, администратору всегда, участнику — только с 5
+         *     (иначе null и n_cases_few = true: «меньше 5», Р14); own_cases — сколько из них ваших;
+         *     need_cases — порог проверки урока.
          */
         ReviewLessonOut: {
             /** Id */
@@ -8325,7 +8642,11 @@ export interface components {
             /** In Prompt */
             in_prompt: boolean;
             /** N Cases */
-            n_cases: number;
+            n_cases: number | null;
+            /** N Cases Few */
+            n_cases_few: boolean;
+            /** Own Cases */
+            own_cases: number;
             /** Need Cases */
             need_cases: number;
             /** Text */
@@ -8372,11 +8693,16 @@ export interface components {
          * @description Проверка правил суммы на своих ставках (код, бесплатно): рассчитанные ставки
          *     приложения с since, у скольких сумма изменилась бы (changed), сумма ставок до и после
          *     (stake_old/stake_new) и прибыль при тех же исходах (profit_old/profit_new);
-         *     triggered — сколько раз сработало бы каждое правило адаптации новой версии.
+         *     triggered — сколько раз сработало бы каждое правило адаптации новой версии. since — с
+         *     какого дня проверка (день первой проверенной ставки по поясу участника; ставок нет —
+         *     день проверки).
          */
         RulesCheckOut: {
-            /** Since */
-            since: string | null;
+            /**
+             * Since
+             * Format: date
+             */
+            since: string;
             /** Bets */
             bets: number;
             /** Changed */
@@ -8452,6 +8778,57 @@ export interface components {
             last_day: string | null;
             /** Last Settled At */
             last_settled_at: string | null;
+        };
+        /**
+         * SavingOut
+         * @description Мера экономии «Где экономим» (этап 5; TOKEN_ECONOMY.md 2.4: включается, только если
+         *     на замороженном наборе качество не хуже с допуском). Считает код:
+         *     - version — версия инструкций с целью «экономия»: cost_change и tokens_change —
+         *       цена и токены на событие набора против базы (b / a − 1, −0,31 — дешевле на 31%),
+         *       log_loss — разница лог-лосса с ДИ, passed — правило «экономия не хуже»;
+         *       version_name — имя версии («v4 · сжатое досье»; null — без имени);
+         *       month_forecast_usd — сколько это сэкономит на ваших оценках матча за месяц по темпу;
+         *     - postmortem_batch — разбор ставки через Batch: per_run_usd — цена разбора (живая
+         *       средняя, нет разборов — оценка по настройкам), per_run_without_usd — без скидки;
+         *       month_usd — сэкономлено за месяц (только администратору: это ключ администратора);
+         *     - cache — кэш инструкций: month_usd — сэкономлено чтением кэша на ваших вызовах.
+         */
+        SavingOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "version" | "postmortem_batch" | "cache";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "on" | "waiting" | "off" | "unchecked";
+            /** Version Id */
+            version_id: number | null;
+            /** Version Code */
+            version_code: string | null;
+            /** Version Name */
+            version_name: string | null;
+            /** Eval Set Code */
+            eval_set_code: string | null;
+            /** Model */
+            model: string | null;
+            /** Cost Change */
+            cost_change: number | null;
+            /** Tokens Change */
+            tokens_change: number | null;
+            log_loss: components["schemas"]["MetricDiffOut"] | null;
+            /** Passed */
+            passed: boolean | null;
+            /** Per Run Usd */
+            per_run_usd: number | null;
+            /** Per Run Without Usd */
+            per_run_without_usd: number | null;
+            /** Month Usd */
+            month_usd: number | null;
+            /** Month Forecast Usd */
+            month_forecast_usd: number | null;
         };
         /**
          * ScopeConditionIO
@@ -8710,7 +9087,8 @@ export interface components {
         };
         /**
          * SharedUsageOut
-         * @description Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke).
+         * @description Общие задачи без участника на ключе администратора: разборы ставок (этап 5) и
+         *     приемка agent-smoke.
          *     spent_share — доля в расходе ключа за месяц.
          */
         SharedUsageOut: {
@@ -8726,6 +9104,8 @@ export interface components {
             kinds: string[];
             /** Spent Share */
             spent_share: number | null;
+            /** Tasks */
+            tasks: components["schemas"]["TaskUsageOut"][];
         };
         /**
          * SlicesOut
@@ -9032,7 +9412,8 @@ export interface components {
         };
         /**
          * TaskUsageOut
-         * @description Задача (вид вызова) на ключе администратора: вызовы участников, без общих задач.
+         * @description Задача (вид вызова) на ключе администратора: вызовы участников, без общих задач
+         *     (в SharedUsageOut.tasks — общие по видам). batch_runs — вызовов через Batch (−50%).
          */
         TaskUsageOut: {
             /** Kind */
@@ -9047,6 +9428,8 @@ export interface components {
             budget_share: number | null;
             /** Models */
             models: string[];
+            /** Batch Runs */
+            batch_runs: number;
         };
         /**
          * TextKey
@@ -9432,6 +9815,8 @@ export interface components {
             models: string[];
             /** Efforts */
             efforts: string[];
+            /** Batch Runs */
+            batch_runs: number;
         };
         /** UsageModelOut */
         UsageModelOut: {
@@ -9504,7 +9889,9 @@ export interface components {
         /**
          * UsageVersionOut
          * @description Версия инструкций вида вызова: цена за месяц и в среднем на вызов без ошибки.
-         *     Качество версии — этап 5.
+         *     version_code — версия общей линии инструкций с этим prompt_version (у оценки матча);
+         *     quality — ее качество на замороженном наборе (null — прогона нет или вид не оценка
+         *     матча).
          */
         UsageVersionOut: {
             /** Kind */
@@ -9517,6 +9904,9 @@ export interface components {
             cost_usd: number;
             /** Avg Cost Usd */
             avg_cost_usd: number | null;
+            /** Version Code */
+            version_code: string | null;
+            quality: components["schemas"]["VersionQualityOut"] | null;
         };
         /**
          * UserDeleteIn
@@ -9609,6 +9999,63 @@ export interface components {
             cost_per_event_usd: number | null;
         };
         /**
+         * VersionQualityOut
+         * @description Качество версии инструкций оценки матча (этап 5): последний прогон версии общей
+         *     линии на замороженном наборе — лог-лосс, Brier, разница лог-лосса с рынком архива (ДИ),
+         *     ошибок формата. version_code — версия стратегии с этим prompt_version.
+         */
+        VersionQualityOut: {
+            /** Version Id */
+            version_id: number;
+            /** Version Code */
+            version_code: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "active" | "archived" | "rejected";
+            /** Eval Set Code */
+            eval_set_code: string;
+            /** N */
+            n: number;
+            /** Log Loss */
+            log_loss: number | null;
+            /** Brier */
+            brier: number | null;
+            to_market: components["schemas"]["CiNumOut"] | null;
+            /** Format Errors */
+            format_errors: number;
+        };
+        /**
+         * VersionSideOut
+         * @description Версия в «До и после»: метрики на наборе и живая цена ее оценки матча за месяц
+         *     (ваши вызовы с этим prompt_version: средняя на вызов без ошибки, вызовов).
+         *     price_usd — цена для сравнения, у обеих сторон на одной основе
+         *     (BeforeAfterOut.price_source); null — сравнить цену не на чем.
+         */
+        VersionSideOut: {
+            /** Version Id */
+            version_id: number;
+            /** Code */
+            code: string;
+            /** Name */
+            name: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "active" | "archived" | "rejected";
+            /** Prompt Version */
+            prompt_version: string | null;
+            eval: components["schemas"]["VersionEvalOut"];
+            /** Live Avg Usd */
+            live_avg_usd: number | null;
+            /** Live Runs */
+            live_runs: number;
+            /** Price Usd */
+            price_usd: number | null;
+        };
+        /**
          * WalkForwardOut
          * @description Проверка по месяцам: калибровка — только на матчах до месяца, Brier модели на
          *     матчах месяца (n) против рынка архива (market_n — с кэфами).
@@ -9640,6 +10087,97 @@ export interface components {
             win: string;
             /** Win Add */
             win_add: string;
+        };
+        /**
+         * WeeklyReportBriefOut
+         * @description Строка списка «Прошлые недели».
+         */
+        WeeklyReportBriefOut: {
+            /** Id */
+            id: number;
+            /**
+             * Week Start
+             * Format: date
+             */
+            week_start: string;
+            /**
+             * Week End
+             * Format: date
+             */
+            week_end: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Empty */
+            empty: boolean;
+            /** Currency */
+            currency: string;
+            /** Settled */
+            settled: number;
+            /** Profit */
+            profit: string;
+            /** Roi */
+            roi: number | null;
+            /** Clv */
+            clv: number | null;
+        };
+        /**
+         * WeeklyReportOut
+         * @description Отчет недели. week_start — понедельник, week_end — воскресенье (по поясу tz);
+         *     created_at — когда отчет собран; empty — за неделю ни одна ставка не рассчитана
+         *     (короткий отчет: «ставок не было», расход и состояние модели — есть).
+         */
+        WeeklyReportOut: {
+            /** Id */
+            id: number;
+            /**
+             * Week Start
+             * Format: date
+             */
+            week_start: string;
+            /**
+             * Week End
+             * Format: date
+             */
+            week_end: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Tz */
+            tz: string;
+            /** Currency */
+            currency: string;
+            /** Empty */
+            empty: boolean;
+            bets: components["schemas"]["ReportBetsOut"];
+            clv: components["schemas"]["ReportClvOut"];
+            accuracy: components["schemas"]["ReportAccuracyOut"];
+            calibration: components["schemas"]["ReportCalibrationOut"];
+            reviews: components["schemas"]["ReportReviewsOut"];
+            lessons: components["schemas"]["ReportLessonsOut"];
+            eval: components["schemas"]["ReportEvalOut"];
+            model: components["schemas"]["ReportModelOut"];
+            shared: components["schemas"]["ReportSharedOut"] | null;
+        };
+        /**
+         * WeeklyReportsOut
+         * @description Свои отчеты, новые сверху. next_report — день следующего отчета (понедельник по
+         *     поясу участника), report_hour — час отчета по тому же поясу.
+         */
+        WeeklyReportsOut: {
+            /** Items */
+            items: components["schemas"]["WeeklyReportBriefOut"][];
+            /**
+             * Next Report
+             * Format: date
+             */
+            next_report: string;
+            /** Report Hour */
+            report_hour: number;
         };
         /**
          * WinLossOut
@@ -12527,6 +13065,35 @@ export interface operations {
             };
         };
     };
+    export_snapshots_api_admin_ml_export_jsonl_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSONL: строка на прогноз (LLM_LEARNING.md 2.3) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-ndjson": unknown;
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     list_analyses_api_analyses_get: {
         parameters: {
             query?: {
@@ -14179,6 +14746,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MlModelOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    learning_reports_api_learning_reports_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeeklyReportsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    learning_report_api_learning_reports__report_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeeklyReportOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

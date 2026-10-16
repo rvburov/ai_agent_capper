@@ -6,7 +6,7 @@
 (format.*), в коде только ключи.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
@@ -42,3 +42,29 @@ def format_moment(moment: datetime, zone: ZoneInfo, *, now: datetime | None = No
     current = (now or datetime.now(zone)).astimezone(zone).year
     key = "format.moment" if local.year == current else "format.moment_year"
     return t(key, day=local.day, month=month, year=local.year, time=local.strftime("%H:%M"))
+
+
+def format_pct(share: float, *, digits: int = 1) -> str:
+    """Доля со знаком в процентах: 0.042 → «+4,2%», −0.013 → «−1,3%» (ноль — без знака)."""
+    value = round(share * 100, digits)
+    body = f"{abs(value):.{digits}f}".replace(".", ",")
+    sign = MINUS if value < 0 else ("+" if value > 0 else "")
+    return f"{sign}{body}%"
+
+
+def format_week(first: date, last: date) -> str:
+    """Неделя для заголовка: «5–11 окт», через месяц — «28 сен – 4 окт» (без года)."""
+    months = t("format.months").split(",")
+
+    def month(day: date) -> str:
+        return months[day.month - 1] if len(months) == 12 else f"{day.month:02d}"
+
+    if first.month == last.month:
+        return t("format.week_same_month", first=first.day, last=last.day, month=month(last))
+    return t(
+        "format.week",
+        first=first.day,
+        first_month=month(first),
+        last=last.day,
+        last_month=month(last),
+    )

@@ -135,7 +135,7 @@ async def test_seed_is_deterministic(engine: AsyncEngine, db: AsyncSession) -> N
 
 async def test_measure_runs_every_route(engine: AsyncEngine, app: FastAPI) -> None:
     """Сид и замер по одному запросу на маршрут: все отвечают 2xx, у каждого маршрута
-    этапа 4 есть время ответа (замер в CI не сломается молча)."""
+    этапов 4 и 5 есть время ответа (замер в CI не сломается молча)."""
     await perf_seed.seed(create_sessionmaker(engine), today=datetime.now(UTC).date(), sizes=TINY)
     samples = await perf_measure.measure(app, samples=1, heavy_samples=1)
     keys = set(samples)
@@ -171,6 +171,26 @@ async def test_measure_runs_every_route(engine: AsyncEngine, app: FastAPI) -> No
         "POST /api/me/pause",
         "POST /api/me/deletion",
         "DELETE /api/me/deletion",
+        # Этап 5 (волна 4)
+        "GET /api/learning",
+        "GET /api/learning [admin]",
+        "GET /api/lessons",
+        "GET /api/lessons/{lesson_id}",
+        "GET /api/lessons/{lesson_id}/quick-check",
+        "GET /api/strategy/versions",
+        "GET /api/strategy/versions/{version_id}",
+        "GET /api/strategy/versions/{version_id} [rules]",
+        "GET /api/strategy/versions/compare [admin]",
+        "GET /api/ml/model",
+        "GET /api/learning/reports",
+        "GET /api/learning/reports/{report_id}",
+        "GET /api/bets/{bet_id}/review",
+        "GET /api/admin/eval/sets",
+        "GET /api/admin/eval/runs",
+        "GET /api/admin/eval/runs/{run_id}",
+        "GET /api/admin/eval/runs/preview",
+        "GET /api/admin/data/uploads",
+        "GET /api/admin/data/uploads/{upload_id}",
     ):
         assert expected in keys, expected
     assert all(values and min(values) > 0 for values in samples.values())

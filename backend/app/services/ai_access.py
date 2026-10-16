@@ -63,6 +63,7 @@ from app.db.models import (
 )
 from app.services.admin_users import CHECK_RUN_KINDS, month_start
 from app.services.app_settings import SETTINGS_ROW_ID
+from app.services.check_runs import month_budget
 from app.services.claude_key import SECRET_KIND
 from app.services.notifications import notify
 from app.services.sessions import utcnow
@@ -1055,6 +1056,7 @@ async def budget_overview(db: AsyncSession, now: datetime) -> BudgetOverview:
         forecast_usd=forecast.quantize(CENT, rounding=ROUND_UP),
         members_limits_usd=members_limits,
         alert_pct=settings.budget_alert_pct,
-        eval_budget_usd=settings.eval_budget_usd,
+        # В месяц первого замороженного набора — бюджет первого месяца (Р25: $30)
+        eval_budget_usd=(await month_budget(db, now))[0],
         eval_spent_usd=eval_spent,
     )

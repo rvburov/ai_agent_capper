@@ -644,7 +644,8 @@ async def bet_review(db: AsyncSession, user: User, bet_id: int) -> BetReviewOut:
             )
         )
     }
-    member_cases = await lessons_service.cases_for_viewer(db, user, list(lessons.values()))
+    # Случаи урока — как на «Уроках»: общее число с порога, свои отдельно (Р14)
+    own_cases = await lessons_service.own_cases(db, user, list(lessons.values()))
     runs = {
         run.id: run
         for run in await db.scalars(
@@ -706,7 +707,9 @@ async def bet_review(db: AsyncSession, user: User, bet_id: int) -> BetReviewOut:
                     code=lesson.code,
                     status=lesson.status,  # type: ignore[arg-type]
                     in_prompt=lesson.in_prompt,
-                    n_cases=member_cases.get(lesson.id, lesson.n_cases),
+                    n_cases=lessons_service.public_cases(user, lesson),
+                    n_cases_few=lessons_service.public_cases(user, lesson) is None,
+                    own_cases=own_cases.get(lesson.id, 0),
                     need_cases=lessons_service.need_cases(lesson, config),
                     text=lesson.text,
                 )

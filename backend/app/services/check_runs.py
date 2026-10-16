@@ -95,12 +95,11 @@ class EvalBudget:
         return max(ZERO, self.budget_usd - self.spent_usd - self.reserved_usd)
 
 
-async def eval_budget(
-    db: AsyncSession, now: datetime | None = None, *, exclude_run_id: int | None = None
-) -> EvalBudget:
-    """Бюджет проверок месяца. exclude_run_id — без резерва до отправки этого прогона (его
-    пакет сейчас уходит, худший случай считается заново)."""
-    moment = now or utcnow()
+async def month_budget(db: AsyncSession, moment: datetime) -> tuple[Decimal, bool, Decimal]:
+    """Бюджет проверок месяца moment (UTC): (бюджет, месяц ли первого замороженного
+    набора, настройка — бюджет следующих месяцев). В месяц первого набора — не меньше
+    eval_first_month_usd (Р25: $30), иначе настройка ($25). Одно правило для прогонов,
+    «ИИ и расходов» и «Ключа и бюджета»."""
     setting = Decimal(
         await db.scalar(
             select(AppSettings.eval_budget_usd).where(AppSettings.id == SETTINGS_ROW_ID)
@@ -115,6 +114,16 @@ async def eval_budget(
     if first_month:
         config = await load_agent_config(db)
         budget = max(setting, Decimal(config.eval_first_month_usd))
+    return budget, first_month, setting
+
+
+async def eval_budget(
+    db: AsyncSession, now: datetime | None = None, *, exclude_run_id: int | None = None
+) -> EvalBudget:
+    """Бюджет проверок месяца. exclude_run_id — без резерва до отправки этого прогона (его
+    пакет сейчас уходит, худший случай считается заново)."""
+    moment = now or utcnow()
+    budget, first_month, setting = await month_budget(db, moment)
     spent = await db.scalar(
         select(func.sum(AgentRun.cost_usd)).where(
             AgentRun.kind.in_(CHECK_RUN_KINDS), AgentRun.created_at >= month_start(moment)

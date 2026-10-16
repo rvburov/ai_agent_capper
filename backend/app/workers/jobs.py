@@ -91,10 +91,17 @@ from app.services import (
     lessons,
     postmortems,
     recalibration,
+    weekly_report,
 )
 from app.services.bank import user_zone
 from app.services.claude_key import key_for
-from app.services.data_status import STALE_AFTER, is_stale, last_ok_loads
+from app.services.data_status import (
+    STALE_AFTER,
+    UPLOAD_HOUR,
+    UPLOAD_WEEKDAY,
+    is_stale,
+    last_ok_loads,
+)
 from app.services.notifications import notify
 
 log = structlog.get_logger(__name__)
@@ -367,8 +374,8 @@ async def check_ai_alerts(ctx: dict[Any, Any]) -> list[str]:
 # --- расчет по архиву (этап 5) ---
 
 # Напоминание «пора загрузить файл»: понедельник, 07:00 по поясу администратора
-UPLOAD_REMINDER_WEEKDAY = 0
-UPLOAD_REMINDER_HOUR = 7
+UPLOAD_REMINDER_WEEKDAY = UPLOAD_WEEKDAY
+UPLOAD_REMINDER_HOUR = UPLOAD_HOUR
 # Куда ведет «пора загрузить файл»: «Администрирование → Данные» (волна 2)
 UPLOAD_LINK = "/admin/data"
 # Тексты «пора загрузить файл»: была загрузка и еще не было ни одной
@@ -636,3 +643,17 @@ async def recheck_lessons(ctx: dict[Any, Any]) -> dict[str, int]:
         summary = await lessons.recheck_lessons(db)
     log.info("worker.recheck_lessons", **summary)
     return summary
+
+
+# --- еженедельный отчет (этап 5, волна 4) ---
+
+
+async def weekly_reports(ctx: dict[Any, Any]) -> list[int]:
+    """Задача arq (cron раз в час): отчет за прошлую неделю тем, у кого по их поясу
+    наступил понедельник 07:00, а отчета еще нет (один на неделю, В8)."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        made = await weekly_report.send_due_reports(db)
+    if made:
+        log.info("worker.weekly_reports", reports=len(made))
+    return made

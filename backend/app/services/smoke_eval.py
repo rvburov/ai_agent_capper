@@ -55,7 +55,7 @@ from app.agent.batches import BATCH_NOT_FOUND, RESULTS_EXPIRED, BatchLost
 from app.agent.calls import estimate_tokens
 from app.agent.config import AgentConfig
 from app.agent.errors import ClaudeStepError, parse_output, stop_error
-from app.agent.prompts import ANALYSIS_REQUEST, Prompt, load_prompt
+from app.agent.prompts import ANALYSIS_REQUEST, Prompt, SystemPrompt, load_prompt, system_blocks
 from app.agent.schemas import ASSESSMENT_SCHEMA_VERSION, MatchAssessmentOut, assessment_schema
 from app.db.models import (
     EvalRun,
@@ -267,7 +267,7 @@ def request_text(event: SmokeEvent) -> str:
 
 
 def batch_request(
-    eval_run_id: int, event: SmokeEvent, prompt: Prompt, config: AgentConfig
+    eval_run_id: int, event: SmokeEvent, prompt: Prompt | SystemPrompt, config: AgentConfig
 ) -> Request:
     """Запрос пакета: те же system, сообщение, схема и effort, что у вызова анализа."""
     return cast(
@@ -277,13 +277,8 @@ def batch_request(
             "params": {
                 "model": config.analysis_model,
                 "max_tokens": config.analysis_max_tokens,
-                "system": [
-                    {
-                        "type": "text",
-                        "text": prompt.text,
-                        "cache_control": {"type": "ephemeral", "ttl": "1h"},
-                    }
-                ],
+                # Промпт версии и блок уроков — каждый своей точкой кэша (как в анализе)
+                "system": system_blocks(prompt, ttl="1h"),
                 "messages": [
                     {
                         "role": "user",
@@ -309,7 +304,10 @@ class SmokeEstimate:
 
 
 def estimate(
-    events: Sequence[SmokeEvent], prompt: Prompt, config: AgentConfig, price: ModelPrice
+    events: Sequence[SmokeEvent],
+    prompt: Prompt | SystemPrompt,
+    config: AgentConfig,
+    price: ModelPrice,
 ) -> SmokeEstimate:
     """Оценка и худший случай пакета: половина цены всех токенов. Оценка — как у вызова
     анализа (estimate_analysis_*), худший случай — вход по тексту сверху (2 символа на
@@ -343,7 +341,7 @@ async def create_run(
     db: AsyncSession,
     *,
     version: StrategyVersion,
-    prompt: Prompt,
+    prompt: Prompt | SystemPrompt,
     config: AgentConfig,
     since: date,
     events: Sequence[SmokeEvent],
@@ -384,7 +382,7 @@ async def submit(
     db: AsyncSession,
     run: EvalRun,
     events: Sequence[SmokeEvent],
-    prompt: Prompt,
+    prompt: Prompt | SystemPrompt,
     config: AgentConfig,
 ) -> str:
     """Отправка пакета; id пакета и status = submitted — в eval_runs (commit). Сбой —

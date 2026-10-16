@@ -1,4 +1,4 @@
-"""Замер времени ответа маршрутов этапа 4 на сиде (app/admin/perf_seed.py): p50, p95 и
+"""Замер времени ответа маршрутов этапов 4 и 5 на сиде (app/admin/perf_seed.py): p50, p95 и
 максимум по каждому маршруту, сравнение с целью (PLAN.md, «Целевые показатели»).
 
 Запросы идут в приложение в том же процессе (ASGI, без сети), время берется из записи
@@ -231,6 +231,17 @@ class Ids:
     top_player: int = 1
     mid_player: int = 400
     rival: int = 2
+    # Этап 5: урок, версии (общая линия и свои правила), прогон, отчет, ставка с разбором,
+    # загрузка файла
+    lesson: int = 0
+    ready_lesson: int = 0
+    shared_active: int = 0
+    shared_candidate: int = 0
+    rules_candidate: int = 0
+    eval_run: int = 0
+    report: int = 0
+    reviewed_bet: int = 0
+    upload: int = 0
 
 
 class Runner:
@@ -360,7 +371,36 @@ async def find_ids(db: AsyncSession) -> Ids:
         )
         or 0
     )
+    await _learning_ids(db, ids)
     return ids
+
+
+async def _learning_ids(db: AsyncSession, ids: Ids) -> None:
+    """Строки этапа 5 из сида (app/admin/perf_seed.py, _LEARNING_SQL)."""
+
+    async def one(sql: str) -> int:
+        found = await db.scalar(text(sql))
+        if found is None:
+            raise PerfError(f"в сиде нет строки: {sql}")
+        return int(found)
+
+    ids.lesson = await one("SELECT min(id) FROM lessons WHERE status = 'confirmed'")
+    ids.ready_lesson = await one(
+        "SELECT min(id) FROM lessons WHERE status = 'ready' AND user_id IS NULL"
+    )
+    ids.shared_active = await one(
+        "SELECT id FROM strategy_versions WHERE user_id IS NULL AND status = 'active'"
+    )
+    ids.shared_candidate = await one(
+        "SELECT id FROM strategy_versions WHERE user_id IS NULL AND status = 'candidate'"
+    )
+    ids.rules_candidate = await one(
+        f"SELECT id FROM strategy_versions WHERE user_id = {MEMBER_ID} AND status = 'candidate'"
+    )
+    ids.eval_run = await one("SELECT max(id) FROM eval_runs WHERE eval_set_id IS NOT NULL")
+    ids.report = await one(f"SELECT max(id) FROM weekly_reports WHERE user_id = {MEMBER_ID}")
+    ids.reviewed_bet = await one(f"SELECT max(bet_id) FROM postmortems WHERE user_id = {MEMBER_ID}")
+    ids.upload = await one("SELECT max(id) FROM data_uploads")
 
 
 async def _reads(run: Runner, ids: Ids, samples: int) -> None:
@@ -398,6 +438,18 @@ async def _reads(run: Runner, ids: Ids, samples: int) -> None:
         ("/api/ai/budget", None),
         ("/api/ai/usage", None),
         ("/api/ai/runs", None),
+        # Этап 5: «Обучение модели», уроки, версии, базовая модель, отчеты, разбор ставки
+        ("/api/learning", None),
+        ("/api/lessons", None),
+        ("/api/lessons/dictionary", None),
+        (f"/api/lessons/{ids.lesson}", None),
+        ("/api/strategy/versions", None),
+        (f"/api/strategy/versions/{ids.shared_candidate}", None),
+        (f"/api/strategy/versions/{ids.rules_candidate}", "rules"),
+        ("/api/ml/model", None),
+        ("/api/learning/reports", None),
+        (f"/api/learning/reports/{ids.report}", None),
+        (f"/api/bets/{ids.reviewed_bet}/review", None),
     ):
         await run.repeat(member, "GET", url, count=samples, tag=tag)
     for url in ("/api/ai/budget", "/api/ai/usage", "/api/ai/runs"):
@@ -411,6 +463,21 @@ async def _reads(run: Runner, ids: Ids, samples: int) -> None:
         ("/api/admin/messages", None),
         ("/api/admin/attention", None),
         ("/api/admin/users", None),
+        # Этап 5: набор и прогоны, план прогона, сравнение версий (у участника — предел
+        # 20 в минуту, замер — у администратора), загрузки файла tennis-data
+        ("/api/admin/eval/sets", None),
+        ("/api/admin/eval/runs", None),
+        (f"/api/admin/eval/runs/{ids.eval_run}", None),
+        (f"/api/admin/eval/runs/preview?version_id={ids.shared_candidate}", None),
+        (
+            f"/api/strategy/versions/compare?a={ids.shared_active}&b={ids.shared_candidate}",
+            "admin",
+        ),
+        ("/api/learning", "admin"),
+        # План быстрой проверки урока: подбор матчей и готовые ответы базы
+        (f"/api/lessons/{ids.ready_lesson}/quick-check", None),
+        ("/api/admin/data/uploads", None),
+        (f"/api/admin/data/uploads/{ids.upload}", None),
     ):
         await run.repeat("admin", "GET", url, count=samples, tag=tag)
 

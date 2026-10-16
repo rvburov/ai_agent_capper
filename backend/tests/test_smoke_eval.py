@@ -177,8 +177,10 @@ async def test_smoke_eval_full_run(
     assert run.version_kind == "strategy" and run.split == "test"
     assert "пробный прогон" in printed.out
     assert run.eval_set == f"smoke:d1-nonews:{_since()}:{EVENTS}" and run.n_events == EVENTS
+    # Инструкции — действующая версия общей линии (волна 4 этапа 5), не личная версия
     version = await db.get_one(StrategyVersion, run.strategy_version_id)
-    assert version.user_id == world["admin"]
+    assert version.user_id is None and version.status == "active"
+    assert run.metrics["prompt_version"] == version.prompt_version
     batch_id = run.metrics["batch_id"]
     assert batch_id == "msgbatch_fake1" and "в работе" in printed.out
     # Каждый запрос пакета — как вызов анализа: модель, effort, схема, без потока и поиска

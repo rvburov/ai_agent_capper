@@ -76,6 +76,7 @@ from app.workers.main import (
     REMIND_MINUTE,
     UPLOAD_TIMEOUT_SECONDS,
     WARM_NEW_DAY_MINUTE,
+    WEEKLY_REPORTS_MINUTE,
     WorkerSettings,
     build_cron_jobs,
 )
@@ -281,6 +282,7 @@ def test_worker_settings(settings: Settings) -> None:
         recheck_job,
         eval_job,
         recalibrate_job,
+        weekly_job,
     ) = functions
     assert (cleanup_job, update_job, reaper_job, deletion_job, alerts_job) == (
         cleanup_auth_records,
@@ -323,6 +325,8 @@ def test_worker_settings(settings: Settings) -> None:
     assert eval_job.coroutine is jobs.run_eval and eval_job.name == "run_eval" == eval_runs.RUN_JOB
     assert eval_job.timeout_s == EVAL_RUN_TIMEOUT_SECONDS and eval_job.max_tries == 1
     assert recalibrate_job is jobs.recalibrate_model
+    # Волна 4: еженедельный отчет
+    assert weekly_job is jobs.weekly_reports
     assert WorkerSettings.cron_jobs is not None
     (
         cleanup,
@@ -337,7 +341,23 @@ def test_worker_settings(settings: Settings) -> None:
         lessons_cron,
         recheck,
         recalibrate,
+        weekly,
     ) = WorkerSettings.cron_jobs
+    # Еженедельный отчет — раз в час, без повтора, не в минуты соседних задач
+    assert weekly.coroutine is jobs.weekly_reports and weekly.max_tries == 1
+    assert weekly.hour is None and weekly.minute == WEEKLY_REPORTS_MINUTE
+    assert WEEKLY_REPORTS_MINUTE not in REAP_MINUTES | POSTMORTEM_MINUTES | COLLECT_MINUTES | {
+        0,
+        CLEANUP_MINUTE,
+        DATA_UPDATE_MINUTE,
+        ACCOUNT_DELETION_MINUTE,
+        AI_ALERTS_MINUTE,
+        WARM_NEW_DAY_MINUTE,
+        REMIND_MINUTE,
+        LESSONS_MINUTE,
+        RECHECK_MINUTE,
+        RECALIBRATE_MINUTE,
+    }
     # Перекалибровка — по понедельникам после ночного обновления, до проверки уроков
     assert recalibrate.coroutine is jobs.recalibrate_model and recalibrate.max_tries == 1
     assert (recalibrate.weekday, recalibrate.hour, recalibrate.minute) == (
@@ -428,7 +448,7 @@ def test_worker_cron_can_be_turned_off(settings: Settings) -> None:
     # CAPPER_WORKER_CRON=false (стек сквозных тестов): только задачи из очереди, без
     # ночной загрузки архивов и уборщика
     jobs_on = build_cron_jobs(settings)
-    assert jobs_on is not None and len(jobs_on) == 12
+    assert jobs_on is not None and len(jobs_on) == 13
     assert build_cron_jobs(settings.model_copy(update={"worker_cron": False})) is None
     assert Settings.model_fields["worker_cron"].default is True
 

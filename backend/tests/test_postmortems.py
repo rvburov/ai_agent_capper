@@ -25,6 +25,7 @@ from app.db.models import (
     AppSettings,
     BatchJob,
     Bet,
+    BetLeg,
     Lesson,
     Match,
     Notification,
@@ -187,6 +188,18 @@ async def test_one_review_per_match_shared_and_costed(
     assert lost["legs"][0]["verdict"] == "model_error" and lost["legs"][0]["won"] is False
     assert lost["legs"][0]["lesson"]["code"] == "L-001"
     assert lost["legs"][0]["lesson"]["need_cases"] == 20
+    # Случаи урока — как на «Уроках» (заявка волны 3): общее число участнику — с 5, свои —
+    # отдельно; администратору общее — всегда
+    assert lost["legs"][0]["lesson"]["n_cases"] is None
+    assert lost["legs"][0]["lesson"]["n_cases_few"] is True
+    assert lost["legs"][0]["lesson"]["own_cases"] == 0
+    lost_leg_id = await db.scalar(select(BetLeg.id).where(BetLeg.bet_id == lost_bet.id))
+    lesson.n_cases = 7
+    lesson.metrics = {**(lesson.metrics or {}), "own": {"leg_ids": [lost_leg_id]}}
+    await db.commit()
+    again_lost = (await first.client.get(f"/api/bets/{lost_bet.id}/review")).json()
+    seen = again_lost["legs"][0]["lesson"]
+    assert (seen["n_cases"], seen["n_cases_few"], seen["own_cases"]) == (7, False, 1)
     assert (await stranger.client.get(f"/api/bets/{won_bet.id}/review")).status_code == 404
     assert (await first.client.get("/api/bets/999999/review")).status_code == 404
     void = (await first.client.get(f"/api/bets/{void_bet.id}/review")).json()

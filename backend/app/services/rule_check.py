@@ -19,10 +19,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Bet, BetLeg, Prediction
+from app.db.models import Bet, BetLeg, Prediction, User
 from app.ml.strategy import StrategyParams, make_leg, stake
 from app.services.app_settings import get_app_settings
-from app.services.bank import LedgerEntry, bank_from_entries, ledger_entries
+from app.services.bank import LedgerEntry, bank_from_entries, ledger_entries, user_zone
+from app.services.sessions import utcnow
 
 ZERO = Decimal(0)
 CENT = Decimal("0.01")
@@ -35,10 +36,13 @@ ADAPT_STEPS = {
 
 
 def _entries_at(entries: Sequence[LedgerEntry], moment: datetime) -> list[LedgerEntry]:
-    """Журнал на момент: записи до него; ставка, рассчитанная позже, — еще открыта."""
+    """Журнал на момент: записи до него; ставка, рассчитанная позже, — еще открыта.
+    Пополнение в тот же момент, что и ставка, входит: у нового участника начальный банк
+    записывается одной транзакцией с первой ставкой (без этого она выпала бы из проверки),
+    а записи ставок того же момента (и ее собственное списание) — нет."""
     found: list[LedgerEntry] = []
     for entry in entries:
-        if entry.at >= moment:
+        if entry.at > moment or (entry.at == moment and entry.bet_id is not None):
             continue
         if entry.bet_id is not None and (
             entry.bet_settled_at is None or entry.bet_settled_at >= moment
@@ -69,8 +73,9 @@ async def check_rules(
         .order_by(Bet.placed_at, Bet.id)
     )
     bets = list(await db.scalars(query))
+    zone = user_zone(await db.scalar(select(User.tz).where(User.id == user_id)))
     if since is not None:
-        bets = [bet for bet in bets if bet.placed_at.date() >= since]
+        bets = [bet for bet in bets if bet.placed_at.astimezone(zone).date() >= since]
     legs_by_bet: dict[int, list[tuple[BetLeg, float | None]]] = {}
     if bets:
         rows = await db.execute(
@@ -85,6 +90,7 @@ async def check_rules(
     settled = [(bet.settled_at, bet.status) for bet in bets if bet.settled_at is not None]
     stake_old = stake_new = profit_old = profit_new = ZERO
     checked = changed = 0
+    first: datetime | None = None
     triggered = {key: 0 for key in ("dd10", "dd20", "up15", "week_loss", "week_win")}
     for bet in bets:
         legs = [
@@ -116,6 +122,7 @@ async def check_rules(
         amount_old = before.amount or ZERO
         amount_new = after.amount or ZERO
         checked += 1
+        first = first or bet.placed_at
         if amount_old != amount_new:
             changed += 1
         per_unit = (bet.profit or ZERO) / bet.stake if bet.stake > 0 else ZERO
@@ -130,8 +137,11 @@ async def check_rules(
         if after.drawdown_level is not None:
             triggered[after.drawdown_level.key] += 1
     change = float(stake_new / stake_old - 1) if stake_old > 0 else None
+    # С какого дня проверка: заданный день, иначе день первой проверенной ставки (по поясу
+    # участника); ставок нет — сегодня (проверять было не на чем)
+    start = since or (first or utcnow()).astimezone(zone).date()
     return {
-        "since": since.isoformat() if since is not None else None,
+        "since": start.isoformat(),
         "bets": checked,
         "changed": changed,
         "stake_old": str(stake_old.quantize(CENT)),

@@ -3841,6 +3841,34 @@
         }
       }
     },
+    "/api/admin/ml/export.jsonl": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Export Snapshots",
+        "description": "Снимки прогнозов для учебного трека (В9): по архиву и свои, игроки обезличены,\nпрогнозов участников нет (Р14). Файл отдается частями.",
+        "operationId": "export_snapshots_api_admin_ml_export_jsonl_get",
+        "responses": {
+          "200": {
+            "description": "JSONL: строка на прогноз (LLM_LEARNING.md 2.3)",
+            "content": {
+              "application/x-ndjson": {}
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analyses": {
       "post": {
         "tags": [
@@ -7202,6 +7230,83 @@
           }
         }
       }
+    },
+    "/api/learning/reports": {
+      "get": {
+        "tags": [
+          "learning"
+        ],
+        "summary": "Learning Reports",
+        "description": "Свои еженедельные отчеты, новые сверху, и день следующего.",
+        "operationId": "learning_reports_api_learning_reports_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeeklyReportsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/learning/reports/{report_id}": {
+      "get": {
+        "tags": [
+          "learning"
+        ],
+        "summary": "Learning Report",
+        "description": "Свой отчет недели; чужой — 404 report.not_found.",
+        "operationId": "learning_report_api_learning_reports__report_id__get",
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Report Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeeklyReportOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8206,6 +8311,22 @@
           "default_per_analysis_usd": {
             "type": "number",
             "title": "Default Per Analysis Usd"
+          },
+          "postmortem_enabled": {
+            "type": "boolean",
+            "title": "Postmortem Enabled"
+          },
+          "postmortem_model": {
+            "type": "string",
+            "title": "Postmortem Model"
+          },
+          "postmortem_effort": {
+            "type": "string",
+            "title": "Postmortem Effort"
+          },
+          "postmortem_batch": {
+            "type": "boolean",
+            "title": "Postmortem Batch"
           }
         },
         "type": "object",
@@ -8228,7 +8349,11 @@
           "assessment_reuse_hours",
           "soft_cap_usd",
           "hard_cap_usd",
-          "default_per_analysis_usd"
+          "default_per_analysis_usd",
+          "postmortem_enabled",
+          "postmortem_model",
+          "postmortem_effort",
+          "postmortem_batch"
         ],
         "title": "AgentSettingsOut",
         "description": "Настройки агента только для показа (Р23): меняются командой agent-config.\nПотолки анализа программы — из app_settings."
@@ -8960,6 +9085,23 @@
           },
           "settings": {
             "$ref": "#/components/schemas/AgentSettingsOut"
+          },
+          "savings": {
+            "items": {
+              "$ref": "#/components/schemas/SavingOut"
+            },
+            "type": "array",
+            "title": "Savings"
+          },
+          "before_after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BeforeAfterOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -8990,7 +9132,9 @@
           "analyses_left",
           "pace_usd",
           "prices",
-          "settings"
+          "settings",
+          "savings",
+          "before_after"
         ],
         "title": "AiUsageOut",
         "description": "Свой расход на Claude за месяц (UTC) по вызовам agent_runs, без проверок (eval).\nУ администратора — свои вызовы и общие задачи без участника (shared_usd), прогоны\nприемки — отдельно (acceptance_usd); own_usd — свои остальные вызовы.\n\ndays — с 1-го числа по last_day (сегодня, если месяц текущий). admin_key_usd и\nown_key_usd — чей ключ платил. search_usd — цена поисков, cache_saved_usd — сколько\nсэкономило чтение кэша против обычного входа (по model_prices на момент вызова).\navg_analysis_usd — средняя цена своего законченного анализа месяца без прогонов\nприемки (на обоих ключах). admin_key_avg_usd — то же только на ключе администратора\n(шаг $0,0001): у участника на ключе администратора — то же число, что\navg_analysis_usd в GET /ai/budget; ее показывать рядом с лимитом. forecast_usd —\nпрогноз на конец месяца по темпу (участник на ключе администратора — не выше лимита,\nна паузе — потрачено); у прошедшего месяца — итог. analyses_left — на сколько\nанализов по admin_key_avg_usd хватит остатка лимита (left_usd в GET /ai/budget;\nтолько участник на ключе администратора в текущем месяце); 0 — остатка меньше\nсамого маленького вызова оценки (анализ не запустится). pace_usd — темп под лимит:\nмесячный лимит участника (у администратора — бюджет ключа) на дни месяца; пусто —\nна своем ключе лимита нет. Лимит и бюджет — сегодняшние (истории лимитов нет)."
@@ -10436,6 +10580,50 @@
         ],
         "title": "BankPointOut",
         "description": "Капитал (баланс + ставки в игре) на конец дня по поясу участника."
+      },
+      "BeforeAfterOut": {
+        "properties": {
+          "before": {
+            "$ref": "#/components/schemas/VersionSideOut"
+          },
+          "after": {
+            "$ref": "#/components/schemas/VersionSideOut"
+          },
+          "comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComparisonOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "eval",
+                  "live"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "before",
+          "after",
+          "comparison",
+          "price_source"
+        ],
+        "title": "BeforeAfterOut",
+        "description": "«До и после»: та же оценка матча до и после изменения инструкций на одних и тех же\nсобытиях набора. before — действующая (если есть кандидат) или прежняя версия, after —\nкандидат или действующая; comparison — сравнение кодом на том же наборе (null — еще\nне посчитано). price_source — основа цены обеих сторон (eval — прогоны на наборе через\nBatch, live — ваши вызовы; null — цены не сравниваются)."
       },
       "BetBrief": {
         "properties": {
@@ -14555,6 +14743,14 @@
             "type": "number",
             "title": "Estimate Usd"
           },
+          "estimate_source": {
+            "type": "string",
+            "enum": [
+              "live",
+              "settings"
+            ],
+            "title": "Estimate Source"
+          },
           "worst_usd": {
             "type": "number",
             "title": "Worst Usd"
@@ -14640,6 +14836,7 @@
           "model",
           "max_tokens",
           "estimate_usd",
+          "estimate_source",
           "worst_usd",
           "worst_chunk_usd",
           "per_event_worst_usd",
@@ -14653,7 +14850,7 @@
           "overlap_lesson"
         ],
         "title": "EvalPlanOut",
-        "description": "Прогон до запуска: сколько событий и пакетов (по batch_size), цена по живым числам\n(средняя цена ответа прошлых проверок, иначе оценка настроек), худший случай всего\nпрогона и одного пакета (весь вход по цене записи кэша на 1 час, eval_max_tokens\nвыхода, половина цены — Batch), бюджет проверок. worst_usd — вместе с пакетом повтора\nистекших и сбойных запросов (retry_events, не больше одного пакета). Запуск — если\nхудший случай пакета помещается в остаток; иначе reason (код ошибки): eval.set_model_seen —\nпервый день набора (eval_set.since) раньше среза знаний модели анализа\n(set_seen_since); eval.lesson_overlap — урок кандидата (overlap_lesson) проверен на\nархиве до заморозки набора, его надо перепроверить. set_model — модель, для которой\nнабор замораживали."
+        "description": "Прогон до запуска: сколько событий и пакетов (по batch_size), цена по живым числам\n(средняя цена ответа прошлых проверок, иначе оценка настроек), худший случай всего\nпрогона и одного пакета (весь вход по цене записи кэша на 1 час, eval_max_tokens\nвыхода, половина цены — Batch), бюджет проверок. worst_usd — вместе с пакетом повтора\nистекших и сбойных запросов (retry_events, не больше одного пакета). Запуск — если\nхудший случай пакета помещается в остаток; иначе reason (код ошибки): eval.set_model_seen —\nпервый день набора (eval_set.since) раньше среза знаний модели анализа\n(set_seen_since); eval.lesson_overlap — урок кандидата (overlap_lesson) проверен на\nархиве до заморозки набора, его надо перепроверить. set_model — модель, для которой\nнабор замораживали. estimate_source — откуда цена: live — средняя прошлых ответов\nпроверок, settings — оценка по ценам модели и токенам из настроек (прошлых нет)."
       },
       "EvalRunIn": {
         "properties": {
@@ -14953,6 +15150,50 @@
           "cost_usd": {
             "type": "number",
             "title": "Cost Usd"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "version_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Code"
+          },
+          "worst_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Usd"
           }
         },
         "type": "object",
@@ -14964,10 +15205,14 @@
           "n_events",
           "models",
           "runs",
-          "cost_usd"
+          "cost_usd",
+          "kind",
+          "status",
+          "version_code",
+          "worst_usd"
         ],
         "title": "EvalRunUsageOut",
-        "description": "Проверочный прогон (eval) месяца: вызовы и цена; eval_run_id пустой — вызовы без\nзаписи прогона."
+        "description": "Проверочный прогон (eval) месяца: вызовы и цена; eval_run_id пустой — вызовы без\nзаписи прогона. kind — eval (прогон версии на наборе), quick (быстрая проверка\nурока), smoke (smoke-eval этапа 3); status — состояние прогона; version_code — версия\nинструкций; worst_usd — худший случай, зарезервированный до запуска."
       },
       "EvalRunsOut": {
         "properties": {
@@ -15210,6 +15455,18 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "first_month": {
+            "type": "boolean",
+            "title": "First Month"
+          },
+          "next_usd": {
+            "type": "number",
+            "title": "Next Usd"
+          },
+          "batch_size": {
+            "type": "integer",
+            "title": "Batch Size"
           }
         },
         "type": "object",
@@ -15217,10 +15474,13 @@
           "budget_usd",
           "spent_usd",
           "runs",
-          "items"
+          "items",
+          "first_month",
+          "next_usd",
+          "batch_size"
         ],
         "title": "EvalUsageOut",
-        "description": "Проверки (eval, shadow) — свой бюджет на ключе администратора, в общий не входят."
+        "description": "Проверки (eval, shadow) — свой бюджет на ключе администратора, в общий не входят.\nbudget_usd — бюджет этого месяца: в месяц первого замороженного набора — не меньше\nсуммы первого месяца (first_month, Р25: $30), иначе настройка; next_usd — со\nследующего месяца (настройка, $25); batch_size — событий в пакете прогона (резерв\nхудшего случая — на пакет)."
       },
       "EventIn": {
         "properties": {
@@ -16957,6 +17217,29 @@
               }
             ],
             "title": "Last Report"
+          },
+          "last_report_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Report End"
+          },
+          "last_report_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Report Id"
           }
         },
         "type": "object",
@@ -16973,10 +17256,12 @@
           "thresholds",
           "prices",
           "next_report",
-          "last_report"
+          "last_report",
+          "last_report_end",
+          "last_report_id"
         ],
         "title": "LearningOut",
-        "description": "Сводка «Обучения модели» и блока «Модель учится» на главной: рассчитано ставок\nприложения (своих), из них по архиву, событий в них; уроки, версии (общая линия и\nсвои правила), базовая модель, набор, пороги и цены; следующий отчет — понедельник\nпо поясу участника (отчеты — волна 4, last_report пока null)."
+        "description": "Сводка «Обучения модели» и блока «Модель учится» на главной: рассчитано ставок\nприложения (своих), из них по архиву, событий в них; уроки, версии (общая линия и\nсвои правила), базовая модель, набор, пороги и цены; следующий отчет — понедельник\nпо поясу участника. last_report — понедельник недели последнего отчета (null —\nотчетов еще не было), last_report_end — ее воскресенье, last_report_id — id отчета\n(GET /learning/reports/{id})."
       },
       "LearningPricesOut": {
         "properties": {
@@ -18174,6 +18459,10 @@
           "shrink_k": {
             "type": "integer",
             "title": "Shrink K"
+          },
+          "public_cases_min": {
+            "type": "integer",
+            "title": "Public Cases Min"
           }
         },
         "type": "object",
@@ -18183,10 +18472,11 @@
           "max_active",
           "min_cases",
           "min_cases_process",
-          "shrink_k"
+          "shrink_k",
+          "public_cases_min"
         ],
         "title": "LessonsOut",
-        "description": "Уроки и пороги из настроек: не больше max_active в анализе (сейчас active),\nпроверка — с min_cases своих случаев (процессный — min_cases_process), усадка k."
+        "description": "Уроки и пороги из настроек: не больше max_active в анализе (сейчас active),\nпроверка — с min_cases своих случаев (процессный — min_cases_process), усадка k;\npublic_cases_min — порог показа общего числа случаев участнику."
       },
       "LimitAlertOut": {
         "properties": {
@@ -20189,6 +20479,10 @@
           "admin": {
             "type": "boolean",
             "title": "Admin"
+          },
+          "new": {
+            "type": "boolean",
+            "title": "New"
           }
         },
         "type": "object",
@@ -20198,7 +20492,8 @@
           "on_site",
           "push",
           "required",
-          "admin"
+          "admin",
+          "new"
         ],
         "title": "NotificationPrefOut",
         "description": "Вид уведомления в настройках. group — строка экрана (limit_80 и limit_100 — одна\nстрока); required — приходит всегда, выключить нельзя; admin — раздел «Для\nадминистратора»; push — только показ, push появится на этапе 6."
@@ -20245,16 +20540,65 @@
                 "type": "null"
               }
             ]
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/NotificationScheduleOut"
           }
         },
         "type": "object",
         "required": [
           "items",
           "push_available",
-          "alert_rules"
+          "alert_rules",
+          "schedule"
         ],
         "title": "NotificationPrefsOut",
         "description": "alert_rules — пороги сигналов расхода ИИ для подсказки (только у администратора,\nу участника null)."
+      },
+      "NotificationScheduleOut": {
+        "properties": {
+          "tz": {
+            "type": "string",
+            "title": "Tz"
+          },
+          "report_weekday": {
+            "type": "integer",
+            "title": "Report Weekday"
+          },
+          "report_hour": {
+            "type": "integer",
+            "title": "Report Hour"
+          },
+          "next_report": {
+            "type": "string",
+            "format": "date",
+            "title": "Next Report"
+          },
+          "settle_reminder_days": {
+            "type": "integer",
+            "title": "Settle Reminder Days"
+          },
+          "upload_hour": {
+            "type": "integer",
+            "title": "Upload Hour"
+          },
+          "upload_stale_days": {
+            "type": "integer",
+            "title": "Upload Stale Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tz",
+          "report_weekday",
+          "report_hour",
+          "next_report",
+          "settle_reminder_days",
+          "upload_hour",
+          "upload_stale_days"
+        ],
+        "title": "NotificationScheduleOut",
+        "description": "Числа для подписей видов этапа 5 — те же, что у воркера: еженедельный отчет —\nдень недели report_weekday (0 — понедельник) в report_hour по поясу tz, следующий —\nnext_report; «ставка ждет результата» — через settle_reminder_days дней после матча;\n«пора загрузить файл» (администратору) — по понедельникам в upload_hour по его поясу,\nесли файл не загружали больше upload_stale_days дней."
       },
       "NotificationsOut": {
         "properties": {
@@ -23566,6 +23910,418 @@
         ],
         "title": "RegisterIn"
       },
+      "ReportAccuracyOut": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "pred",
+              "closing"
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "model",
+          "market",
+          "diff",
+          "source"
+        ],
+        "title": "ReportAccuracyOut",
+        "description": "Brier модели против рынка на событиях недели: source pred — рынок при прогнозе,\nclosing — закрытие (главный ряд — как в «Аналитике»: закрытие, когда событий с ним\nбольше). diff = model − market (меньше нуля — модель точнее). За неделю это почти\nвсегда шум: тренд — в «Аналитике»."
+      },
+      "ReportBetsOut": {
+        "properties": {
+          "settled": {
+            "type": "integer",
+            "title": "Settled"
+          },
+          "auto": {
+            "type": "integer",
+            "title": "Auto"
+          },
+          "manual": {
+            "type": "integer",
+            "title": "Manual"
+          },
+          "won": {
+            "type": "integer",
+            "title": "Won"
+          },
+          "lost": {
+            "type": "integer",
+            "title": "Lost"
+          },
+          "void": {
+            "type": "integer",
+            "title": "Void"
+          },
+          "turnover": {
+            "type": "string",
+            "title": "Turnover"
+          },
+          "profit": {
+            "type": "string",
+            "title": "Profit"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "placed": {
+            "type": "integer",
+            "title": "Placed"
+          },
+          "open": {
+            "type": "integer",
+            "title": "Open"
+          }
+        },
+        "type": "object",
+        "required": [
+          "settled",
+          "auto",
+          "manual",
+          "won",
+          "lost",
+          "void",
+          "turnover",
+          "profit",
+          "roi",
+          "placed",
+          "open"
+        ],
+        "title": "ReportBetsOut",
+        "description": "Ставки приложения, рассчитанные за неделю (по времени расчета): сколько, из них\nсами по архиву (auto) и вручную (manual); оборот и прибыль без возвратов, ROI =\nприбыль / оборот. placed — поставлено за неделю, open — в игре на момент отчета."
+      },
+      "ReportCalibrationOut": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "mean_p": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean P"
+          },
+          "hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hit Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "mean_p",
+          "hit_rate"
+        ],
+        "title": "ReportCalibrationOut",
+        "description": "Калибровка недели в целом: средняя вероятность модели (сторона пары исходов,\nкоторую выбрала ставка) и доля сбывшихся, n — событий."
+      },
+      "ReportClvOut": {
+        "properties": {
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "positive": {
+            "type": "integer",
+            "title": "Positive"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mean",
+          "n",
+          "positive"
+        ],
+        "title": "ReportClvOut",
+        "description": "Средний CLV рассчитанных за неделю ставок с закрытием у всех ног (доля), сколько\nтаких ставок и сколько из них в плюсе."
+      },
+      "ReportEvalOut": {
+        "properties": {
+          "spent_usd": {
+            "type": "number",
+            "title": "Spent Usd"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "budget_usd": {
+            "type": "number",
+            "title": "Budget Usd"
+          },
+          "month_spent_usd": {
+            "type": "number",
+            "title": "Month Spent Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "spent_usd",
+          "runs",
+          "budget_usd",
+          "month_spent_usd"
+        ],
+        "title": "ReportEvalOut",
+        "description": "Проверки качества (eval) за неделю: потрачено из бюджета проверок и законченных\nпрогонов; бюджет месяца отчета и потрачено за месяц."
+      },
+      "ReportLessonsOut": {
+        "properties": {
+          "new": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "New"
+          },
+          "confirmed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Confirmed"
+          },
+          "enabled": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Enabled"
+          },
+          "retired": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Retired"
+          },
+          "in_prompt": {
+            "type": "integer",
+            "title": "In Prompt"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new",
+          "confirmed",
+          "enabled",
+          "retired",
+          "in_prompt"
+        ],
+        "title": "ReportLessonsOut",
+        "description": "Уроки недели (общие и свои): новые гипотезы, подтвердились на истории, включены в\nинструкции анализа, списаны; in_prompt — уроков в анализе на момент отчета."
+      },
+      "ReportModelOut": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "brier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brier"
+          },
+          "log_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss"
+          },
+          "recalibrated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recalibrated At"
+          },
+          "recalibration_activated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recalibration Activated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "brier",
+          "log_loss",
+          "recalibrated_at",
+          "recalibration_activated"
+        ],
+        "title": "ReportModelOut",
+        "description": "Базовая модель на момент отчета; recalibrated_at — перекалибровка за неделю\n(включена или нет), иначе null."
+      },
+      "ReportReviewsOut": {
+        "properties": {
+          "done": {
+            "type": "integer",
+            "title": "Done"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "done",
+          "pending",
+          "cost_usd"
+        ],
+        "title": "ReportReviewsOut",
+        "description": "Разборы ИИ матчей рассчитанных за неделю ставок (общие, один на матч, В3): готовы,\nждут; цена готовых — ключ администратора, в лимит участника не входит."
+      },
+      "ReportSharedOut": {
+        "properties": {
+          "members": {
+            "type": "integer",
+            "title": "Members"
+          },
+          "settled": {
+            "type": "integer",
+            "title": "Settled"
+          },
+          "auto": {
+            "type": "integer",
+            "title": "Auto"
+          },
+          "reviews": {
+            "type": "integer",
+            "title": "Reviews"
+          },
+          "reviews_usd": {
+            "type": "number",
+            "title": "Reviews Usd"
+          },
+          "analyses": {
+            "type": "integer",
+            "title": "Analyses"
+          },
+          "ai_usd": {
+            "type": "number",
+            "title": "Ai Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "members",
+          "settled",
+          "auto",
+          "reviews",
+          "reviews_usd",
+          "analyses",
+          "ai_usd"
+        ],
+        "title": "ReportSharedOut",
+        "description": "Только у администратора (Р14 — без ставок и сумм участников): со скольких\nучастников были рассчитанные ставки, сколько ставок рассчитано (из них по архиву),\nразборов готово и их цена, анализов запущено и расход ключа администратора за неделю\nбез проверок."
+      },
       "ResetCodeCreatedOut": {
         "properties": {
           "reset_code": {
@@ -23890,8 +24646,23 @@
             "title": "In Prompt"
           },
           "n_cases": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "N Cases"
+          },
+          "n_cases_few": {
+            "type": "boolean",
+            "title": "N Cases Few"
+          },
+          "own_cases": {
+            "type": "integer",
+            "title": "Own Cases"
           },
           "need_cases": {
             "type": "integer",
@@ -23909,11 +24680,13 @@
           "status",
           "in_prompt",
           "n_cases",
+          "n_cases_few",
+          "own_cases",
           "need_cases",
           "text"
         ],
         "title": "ReviewLessonOut",
-        "description": "Урок гипотезы разбора: код, статус, случаев из порога (у участника — только по его\nставкам, Р14), в анализе ли."
+        "description": "Урок гипотезы разбора: код, статус, в анализе ли. Случаи — как у уроков (LessonOut):\nn_cases — по ставкам всех участников, администратору всегда, участнику — только с 5\n(иначе null и n_cases_few = true: «меньше 5», Р14); own_cases — сколько из них ваших;\nneed_cases — порог проверки урока."
       },
       "RoleChangeIn": {
         "properties": {
@@ -24010,15 +24783,8 @@
       "RulesCheckOut": {
         "properties": {
           "since": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "format": "date",
             "title": "Since"
           },
           "bets": {
@@ -24082,7 +24848,7 @@
           "triggered"
         ],
         "title": "RulesCheckOut",
-        "description": "Проверка правил суммы на своих ставках (код, бесплатно): рассчитанные ставки\nприложения с since, у скольких сумма изменилась бы (changed), сумма ставок до и после\n(stake_old/stake_new) и прибыль при тех же исходах (profit_old/profit_new);\ntriggered — сколько раз сработало бы каждое правило адаптации новой версии."
+        "description": "Проверка правил суммы на своих ставках (код, бесплатно): рассчитанные ставки\nприложения с since, у скольких сумма изменилась бы (changed), сумма ставок до и после\n(stake_old/stake_new) и прибыль при тех же исходах (profit_old/profit_new);\ntriggered — сколько раз сработало бы каждое правило адаптации новой версии. since — с\nкакого дня проверка (день первой проверенной ставки по поясу участника; ставок нет —\nдень проверки)."
       },
       "RunCostOut": {
         "properties": {
@@ -24215,6 +24981,191 @@
         ],
         "title": "SampleOut",
         "description": "Что попало в выборку: bets — рассчитанные ставки (с возвратами), из них singles и\nparlays; events — события (ноги с исходом «выиграл» или «проиграл») под фильтрами\nрынка и покрытия; legacy_bets — ставки старого бота среди bets (в банке и ROI, но не в\nCLV, Brier и калибровке, В5); legacy_parlay_events — события экспрессов бота, которые\nпо отдельности не считаются (Т10); open_bets — ставки в игре под теми же фильтрами (в\nрасчет не входят); first_day и last_day — даты первой и последней ставки выборки по\nпоясу участника; last_settled_at — когда рассчитана последняя."
+      },
+      "SavingOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "version",
+              "postmortem_batch",
+              "cache"
+            ],
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "on",
+              "waiting",
+              "off",
+              "unchecked"
+            ],
+            "title": "Status"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
+          "version_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Code"
+          },
+          "version_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Name"
+          },
+          "eval_set_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Set Code"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "cost_change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Change"
+          },
+          "tokens_change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens Change"
+          },
+          "log_loss": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MetricDiffOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "per_run_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Run Usd"
+          },
+          "per_run_without_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Run Without Usd"
+          },
+          "month_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Month Usd"
+          },
+          "month_forecast_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Month Forecast Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "status",
+          "version_id",
+          "version_code",
+          "version_name",
+          "eval_set_code",
+          "model",
+          "cost_change",
+          "tokens_change",
+          "log_loss",
+          "passed",
+          "per_run_usd",
+          "per_run_without_usd",
+          "month_usd",
+          "month_forecast_usd"
+        ],
+        "title": "SavingOut",
+        "description": "Мера экономии «Где экономим» (этап 5; TOKEN_ECONOMY.md 2.4: включается, только если\nна замороженном наборе качество не хуже с допуском). Считает код:\n- version — версия инструкций с целью «экономия»: cost_change и tokens_change —\n  цена и токены на событие набора против базы (b / a − 1, −0,31 — дешевле на 31%),\n  log_loss — разница лог-лосса с ДИ, passed — правило «экономия не хуже»;\n  version_name — имя версии («v4 · сжатое досье»; null — без имени);\n  month_forecast_usd — сколько это сэкономит на ваших оценках матча за месяц по темпу;\n- postmortem_batch — разбор ставки через Batch: per_run_usd — цена разбора (живая\n  средняя, нет разборов — оценка по настройкам), per_run_without_usd — без скидки;\n  month_usd — сэкономлено за месяц (только администратору: это ключ администратора);\n- cache — кэш инструкций: month_usd — сэкономлено чтением кэша на ваших вызовах."
       },
       "ScopeConditionIO": {
         "properties": {
@@ -24921,6 +25872,13 @@
               }
             ],
             "title": "Spent Share"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskUsageOut"
+            },
+            "type": "array",
+            "title": "Tasks"
           }
         },
         "type": "object",
@@ -24930,10 +25888,11 @@
           "cache_share",
           "budget_share",
           "kinds",
-          "spent_share"
+          "spent_share",
+          "tasks"
         ],
         "title": "SharedUsageOut",
-        "description": "Общие задачи без участника на ключе администратора (сейчас — приемка agent-smoke).\nspent_share — доля в расходе ключа за месяц."
+        "description": "Общие задачи без участника на ключе администратора: разборы ставок (этап 5) и\nприемка agent-smoke.\nspent_share — доля в расходе ключа за месяц."
       },
       "SlicesOut": {
         "properties": {
@@ -25906,6 +26865,10 @@
             },
             "type": "array",
             "title": "Models"
+          },
+          "batch_runs": {
+            "type": "integer",
+            "title": "Batch Runs"
           }
         },
         "type": "object",
@@ -25915,10 +26878,11 @@
           "cost_usd",
           "cache_share",
           "budget_share",
-          "models"
+          "models",
+          "batch_runs"
         ],
         "title": "TaskUsageOut",
-        "description": "Задача (вид вызова) на ключе администратора: вызовы участников, без общих задач."
+        "description": "Задача (вид вызова) на ключе администратора: вызовы участников, без общих задач\n(в SharedUsageOut.tasks — общие по видам). batch_runs — вызовов через Batch (−50%)."
       },
       "TextKey": {
         "properties": {
@@ -26889,6 +27853,10 @@
             },
             "type": "array",
             "title": "Efforts"
+          },
+          "batch_runs": {
+            "type": "integer",
+            "title": "Batch Runs"
           }
         },
         "type": "object",
@@ -26909,7 +27877,8 @@
           "avg_prompt_tokens",
           "avg_output_tokens",
           "models",
-          "efforts"
+          "efforts",
+          "batch_runs"
         ],
         "title": "UsageKindOut",
         "description": "Вид вызова за месяц. avg_* — в среднем на вызов без ошибки (пусто — таких нет);\nmodels и efforts — какие модели и effort были у вызовов. share — доля вида в расходе\nмесяца (пусто — расхода нет)."
@@ -27114,6 +28083,27 @@
               }
             ],
             "title": "Avg Cost Usd"
+          },
+          "version_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Code"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VersionQualityOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -27122,10 +28112,12 @@
           "prompt_version",
           "runs",
           "cost_usd",
-          "avg_cost_usd"
+          "avg_cost_usd",
+          "version_code",
+          "quality"
         ],
         "title": "UsageVersionOut",
-        "description": "Версия инструкций вида вызова: цена за месяц и в среднем на вызов без ошибки.\nКачество версии — этап 5."
+        "description": "Версия инструкций вида вызова: цена за месяц и в среднем на вызов без ошибки.\nversion_code — версия общей линии инструкций с этим prompt_version (у оценки матча);\nquality — ее качество на замороженном наборе (null — прогона нет или вид не оценка\nматча)."
       },
       "UserDeleteIn": {
         "properties": {
@@ -27421,6 +28413,173 @@
         "title": "VersionEvalOut",
         "description": "Версия инструкций на замороженном наборе: прогонов, последний прогон (метрики),\nnoise — насколько разошлись два прогона (лог-лосс), to_market — разница лог-лосса с\nрынком архива с ДИ."
       },
+      "VersionQualityOut": {
+        "properties": {
+          "version_id": {
+            "type": "integer",
+            "title": "Version Id"
+          },
+          "version_code": {
+            "type": "string",
+            "title": "Version Code"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "candidate",
+              "active",
+              "archived",
+              "rejected"
+            ],
+            "title": "Status"
+          },
+          "eval_set_code": {
+            "type": "string",
+            "title": "Eval Set Code"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "log_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Loss"
+          },
+          "brier": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brier"
+          },
+          "to_market": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CiNumOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "format_errors": {
+            "type": "integer",
+            "title": "Format Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version_id",
+          "version_code",
+          "status",
+          "eval_set_code",
+          "n",
+          "log_loss",
+          "brier",
+          "to_market",
+          "format_errors"
+        ],
+        "title": "VersionQualityOut",
+        "description": "Качество версии инструкций оценки матча (этап 5): последний прогон версии общей\nлинии на замороженном наборе — лог-лосс, Brier, разница лог-лосса с рынком архива (ДИ),\nошибок формата. version_code — версия стратегии с этим prompt_version."
+      },
+      "VersionSideOut": {
+        "properties": {
+          "version_id": {
+            "type": "integer",
+            "title": "Version Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "candidate",
+              "active",
+              "archived",
+              "rejected"
+            ],
+            "title": "Status"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "eval": {
+            "$ref": "#/components/schemas/VersionEvalOut"
+          },
+          "live_avg_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Live Avg Usd"
+          },
+          "live_runs": {
+            "type": "integer",
+            "title": "Live Runs"
+          },
+          "price_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version_id",
+          "code",
+          "name",
+          "status",
+          "prompt_version",
+          "eval",
+          "live_avg_usd",
+          "live_runs",
+          "price_usd"
+        ],
+        "title": "VersionSideOut",
+        "description": "Версия в «До и после»: метрики на наборе и живая цена ее оценки матча за месяц\n(ваши вызовы с этим prompt_version: средняя на вызов без ошибки, вызовов).\nprice_usd — цена для сравнения, у обеих сторон на одной основе\n(BeforeAfterOut.price_source); null — сравнить цену не на чем."
+      },
       "WalkForwardOut": {
         "properties": {
           "month": {
@@ -27509,6 +28668,200 @@
           "win_add"
         ],
         "title": "WeekOut"
+      },
+      "WeeklyReportBriefOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "week_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Week Start"
+          },
+          "week_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Week End"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "empty": {
+            "type": "boolean",
+            "title": "Empty"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "settled": {
+            "type": "integer",
+            "title": "Settled"
+          },
+          "profit": {
+            "type": "string",
+            "title": "Profit"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "week_start",
+          "week_end",
+          "created_at",
+          "empty",
+          "currency",
+          "settled",
+          "profit",
+          "roi",
+          "clv"
+        ],
+        "title": "WeeklyReportBriefOut",
+        "description": "Строка списка «Прошлые недели»."
+      },
+      "WeeklyReportOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "week_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Week Start"
+          },
+          "week_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Week End"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "tz": {
+            "type": "string",
+            "title": "Tz"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "empty": {
+            "type": "boolean",
+            "title": "Empty"
+          },
+          "bets": {
+            "$ref": "#/components/schemas/ReportBetsOut"
+          },
+          "clv": {
+            "$ref": "#/components/schemas/ReportClvOut"
+          },
+          "accuracy": {
+            "$ref": "#/components/schemas/ReportAccuracyOut"
+          },
+          "calibration": {
+            "$ref": "#/components/schemas/ReportCalibrationOut"
+          },
+          "reviews": {
+            "$ref": "#/components/schemas/ReportReviewsOut"
+          },
+          "lessons": {
+            "$ref": "#/components/schemas/ReportLessonsOut"
+          },
+          "eval": {
+            "$ref": "#/components/schemas/ReportEvalOut"
+          },
+          "model": {
+            "$ref": "#/components/schemas/ReportModelOut"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportSharedOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "week_start",
+          "week_end",
+          "created_at",
+          "tz",
+          "currency",
+          "empty",
+          "bets",
+          "clv",
+          "accuracy",
+          "calibration",
+          "reviews",
+          "lessons",
+          "eval",
+          "model",
+          "shared"
+        ],
+        "title": "WeeklyReportOut",
+        "description": "Отчет недели. week_start — понедельник, week_end — воскресенье (по поясу tz);\ncreated_at — когда отчет собран; empty — за неделю ни одна ставка не рассчитана\n(короткий отчет: «ставок не было», расход и состояние модели — есть)."
+      },
+      "WeeklyReportsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WeeklyReportBriefOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_report": {
+            "type": "string",
+            "format": "date",
+            "title": "Next Report"
+          },
+          "report_hour": {
+            "type": "integer",
+            "title": "Report Hour"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_report",
+          "report_hour"
+        ],
+        "title": "WeeklyReportsOut",
+        "description": "Свои отчеты, новые сверху. next_report — день следующего отчета (понедельник по\nпоясу участника), report_hour — час отчета по тому же поясу."
       },
       "WinLossOut": {
         "properties": {

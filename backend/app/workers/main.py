@@ -31,7 +31,8 @@ Batch — каждые 15 минут с 6-й, быструю проверку у
 проверка гипотез — раз в сутки в 06:33 UTC (после ночного обновления), перепроверка —
 1-го числа в 06:48 UTC. Волна 3: прогон версии на наборе (run_eval) ставит API, следующие
 пакеты прогона уходят после сбора предыдущих (сбор пакетов, каждые 15 минут);
-перекалибровка базовой модели — по понедельникам в 06:12 UTC.
+перекалибровка базовой модели — по понедельникам в 06:12 UTC. Волна 4: еженедельный отчет —
+каждый час на 1-й минуте (тем, у кого по их поясу наступил понедельник 07:00).
 """
 
 import argparse
@@ -71,6 +72,7 @@ from app.workers.jobs import (
     update_data,
     warm_analytics,
     warm_new_day,
+    weekly_reports,
 )
 from app.workers.queue import make_queue_name
 
@@ -128,6 +130,10 @@ RECALIBRATE_WEEKDAY = 0
 RECALIBRATE_HOUR_UTC = 6
 RECALIBRATE_MINUTE = 12
 RECALIBRATE_TIMEOUT_SECONDS = 1800
+# Еженедельный отчет — раз в час, на свободной 1-й минуте: отчет приходит в 07:01 по поясу
+# участника (у поясов с получасом — на следующем запуске после 07:00)
+WEEKLY_REPORTS_MINUTE = 1
+WEEKLY_REPORTS_TIMEOUT_SECONDS = 900
 
 
 async def startup(ctx: dict[Any, Any]) -> None:
@@ -227,6 +233,12 @@ def build_cron_jobs(settings: Settings) -> tuple[CronJob, ...] | None:
             max_tries=1,
             timeout=RECALIBRATE_TIMEOUT_SECONDS,
         ),
+        cron(
+            weekly_reports,
+            minute=WEEKLY_REPORTS_MINUTE,
+            max_tries=1,
+            timeout=WEEKLY_REPORTS_TIMEOUT_SECONDS,
+        ),
     )
 
 
@@ -252,6 +264,7 @@ class WorkerSettings:
         recheck_lessons,
         job_function(run_eval, timeout=EVAL_RUN_TIMEOUT_SECONDS, max_tries=1),
         recalibrate_model,
+        weekly_reports,
     )
     cron_jobs: Sequence[CronJob] | None = build_cron_jobs(get_settings())
     on_startup: StartupShutdown | None = startup

@@ -189,7 +189,8 @@ class LessonOut(BaseModel):
 
 class LessonsOut(BaseModel):
     """Уроки и пороги из настроек: не больше max_active в анализе (сейчас active),
-    проверка — с min_cases своих случаев (процессный — min_cases_process), усадка k."""
+    проверка — с min_cases своих случаев (процессный — min_cases_process), усадка k;
+    public_cases_min — порог показа общего числа случаев участнику."""
 
     items: list[LessonOut]
     active: int
@@ -197,6 +198,8 @@ class LessonsOut(BaseModel):
     min_cases: int
     min_cases_process: int
     shrink_k: int
+    # С какого числа случаев участнику показывается общее число (меньше — «меньше N»)
+    public_cases_min: int
 
 
 class LessonIn(BaseModel):
@@ -247,14 +250,18 @@ NotReviewedReason = Literal["void", "legacy", "no_prediction"]
 
 
 class ReviewLessonOut(BaseModel):
-    """Урок гипотезы разбора: код, статус, случаев из порога (у участника — только по его
-    ставкам, Р14), в анализе ли."""
+    """Урок гипотезы разбора: код, статус, в анализе ли. Случаи — как у уроков (LessonOut):
+    n_cases — по ставкам всех участников, администратору всегда, участнику — только с 5
+    (иначе null и n_cases_few = true: «меньше 5», Р14); own_cases — сколько из них ваших;
+    need_cases — порог проверки урока."""
 
     id: int
     code: str
     status: LessonStatus
     in_prompt: bool
-    n_cases: int
+    n_cases: int | None
+    n_cases_few: bool
+    own_cases: int
     need_cases: int
     text: str
 
