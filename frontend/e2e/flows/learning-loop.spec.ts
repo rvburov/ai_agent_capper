@@ -55,7 +55,7 @@ async function archiveFile(dir: string): Promise<string> {
   const script = `
 import sys
 from datetime import UTC, datetime
-from tests.test_ingest_tennis_data import make_row, xlsx
+from tests.tennis_data_files import make_row, xlsx
 
 day = datetime.now(UTC).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
 rows = [

@@ -38,7 +38,7 @@ from app.workers import jobs
 from tests.helpers_admin import Signed, admin_signed_in, audit_entries, error_code, signed_in
 from tests.helpers_bets import BetMaker, LegSpec, ledger_rows
 from tests.support import ClientFactory, LoginFn, UserFactory
-from tests.test_ingest_tennis_data import make_row, xlsx
+from tests.tennis_data_files import make_row, xlsx
 
 D = Decimal
 DAY = date(2026, 10, 4)

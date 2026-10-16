@@ -37,14 +37,14 @@ const EVENTS = [
 
 /**
  * 2026.xlsx с сегодняшними матчами этих пар (победил игрок 1, 6:4 6:4) и кэфами Pinnacle —
- * тем же генератором, что тесты backend (tests/test_ingest_tennis_data.py).
+ * тем же генератором, что тесты backend (tests/tennis_data_files.py).
  */
 async function archiveFile(dir: string): Promise<string> {
   const path = join(dir, '2026.xlsx');
   const script = `
 import sys
 from datetime import UTC, datetime
-from tests.test_ingest_tennis_data import make_row, xlsx
+from tests.tennis_data_files import make_row, xlsx
 
 day = datetime.now(UTC).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
 odds = {"PSW": 1.40, "PSL": 3.10, "AvgW": 1.38, "AvgL": 3.00}

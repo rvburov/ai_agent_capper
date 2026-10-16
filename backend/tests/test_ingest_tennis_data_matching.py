@@ -22,16 +22,8 @@ from app.db.session import create_sessionmaker
 from app.ingest import tennis_data as td
 from app.ingest.fetch import DataSource
 from app.services import players as players_service
-from tests.test_ingest_tennis_data import (
-    Factory,
-    count,
-    d,
-    load,
-    make_row,
-    odds_of,
-    own_matches,
-    write_year,
-)
+from tests.tennis_data_files import make_row, write_year
+from tests.test_ingest_tennis_data import Factory, count, d, load, odds_of, own_matches
 
 # Игрок Сакманна: (имя, как его пишет загрузчик Сакманна, id Сакманна)
 SackPlayer = tuple[str, int]

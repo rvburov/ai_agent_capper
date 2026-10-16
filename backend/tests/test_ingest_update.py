@@ -43,7 +43,7 @@ from app.ingest.update import (
 )
 from app.ml import backtest, elo
 from tests.support import SettingsOverride
-from tests.test_ingest_tennis_data import make_row, write_year
+from tests.tennis_data_files import make_row, write_year
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "sackmann"
 YEARS = [2023, 2024]

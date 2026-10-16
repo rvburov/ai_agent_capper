@@ -83,7 +83,7 @@ from app.workers.main import (
 from app.workers.queue import apply_redis_prefix, create_queue_pool
 from tests.claude_mock import seed_prices
 from tests.support import BACKEND_DIR, UserFactory
-from tests.test_ingest_tennis_data import write_year
+from tests.tennis_data_files import write_year
 from tests.test_ingest_update import FIXTURES, rows_2024
 
 NOW = datetime(2026, 10, 8, 3, 15, tzinfo=UTC)
