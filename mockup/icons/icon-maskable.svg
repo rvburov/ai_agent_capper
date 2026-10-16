@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Значок AI Capper (purpose: maskable): фон на весь квадрат, рисунок в безопасной зоне (круг 80% по центру),
+       чтобы Android мог обрезать его кругом, квадратом со скруглением или «каплей». -->
+  <rect width="512" height="512" fill="#14684a"/>
+  <path d="M154 132v248M358 132v248M154 201h204M154 311h204M256 201v110" stroke="#ffffff" stroke-width="18" stroke-linecap="round" fill="none" opacity=".88"/>
+  <circle cx="323" cy="256" r="37" fill="#e6f05a" stroke="#14684a" stroke-width="11"/>
+</svg>

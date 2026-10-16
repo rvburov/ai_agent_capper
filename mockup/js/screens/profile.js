@@ -118,7 +118,7 @@
         { at: '2026-09-21T11:47', device: 'MacBook Air · Chrome', ip: '93.106.xx.xx', city: 'Берлин, Германия', result: 'badpass' },
       ],
       suspicious: { at: '2026-10-04T03:17', device: 'Windows · Firefox', from: 'из Амстердама', place: 'Амстердам, Нидерланды', ip: '185.220.xx.xx' },
-      push: true, passkeyName: 'iPhone 15 — Face ID', unlock: 'Face ID',
+      passkeyName: 'iPhone 15 — Face ID', unlock: 'Face ID',
     },
     u2: {
       sessions: [
@@ -134,7 +134,7 @@
         { at: '2026-09-24T19:41', device: 'Pixel 8 · Chrome', ip: '88.193.xx.xx', city: 'Хельсинки', result: 'ok' },
       ],
       suspicious: null,
-      push: false, passkeyName: 'Pixel 8 — отпечаток пальца', unlock: 'отпечатку пальца',
+      passkeyName: 'Pixel 8 — отпечаток пальца', unlock: 'отпечатку пальца',
     },
   };
   const RESULT = { ok: ['Успешно', 'good', 'check'], badpass: ['Неверный пароль', 'warn', 'alert'], '2fa': ['2FA не пройдена', 'bad', 'x'] };
@@ -188,9 +188,9 @@
       pauseDays: '7', pauseConfirm: false, pause: null,
       // ключ Claude: keyView — какая карточка режима выбрана на экране; сам режим — в DATA.me.aiMode
       keyView: mode, seenMode: mode, keyDraft: '', keyShow: false, keyErr: null, keyReplace: false, keyDelConfirm: false,
-      // что присылать на сайт — по видам уведомлений (notifications.kind); push и тихие часы — этап 6
+      // что присылать — по видам уведомлений (notifications.kind): на сайте (site) и push (push, по умолчанию — PUSH_OFF)
       notif: { bet: { site: true }, limit: { site: true }, key: { site: true }, decision: { site: true }, requests: { site: true }, users: { site: true }, budget: { site: true }, archive: { site: true }, alert: { site: true } },
-      quiet: { from: '23:00', to: '08:00' },
+      quiet: { on: true, from: '23:00', to: '08:00' }, // тихие часы — только для push, по поясу пользователя
       deletion: null,
     };
   }
@@ -435,6 +435,13 @@
     .profile-notif-lock svg { width: 14px; height: 14px; }
     .profile-group-label { font-size: var(--fs-xs); font-weight: 600; color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; padding: 14px 0 0; }
     .profile-time { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    /* push на этом устройстве */
+    .profile-push { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); min-width: 0; }
+    .profile-push-head { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+    .profile-push-head .profile-item-ic { flex: none; }
+    .profile-push-title { font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+    .profile-push .pwa-steps li { font-size: var(--fs-sm); }
+    .profile-notif-off .profile-notif-head span:last-child { color: var(--fg-3); }
     .profile-how { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); }
 
     .profile-del-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -486,7 +493,7 @@
     .profile-stake-pct small { display: block; font-family: inherit; font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
     .profile-notif-head small { display: block; font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; }
     @media (max-width: 960px) { .tabs.profile-tabs button { min-height: 42px; } }
-    /* выключенный переключатель (только просмотр, этап 6) */
+    /* выключенный переключатель: только просмотр или push еще не включен */
     .profile-panel .switch input:disabled { cursor: not-allowed; }
     .profile-panel .switch input:disabled + span { opacity: .5; }
     /* зона нажатия переключателя на телефоне — не меньше 40 px (общий стиль в index.html перекрывается базовым правилом) */
@@ -688,7 +695,7 @@
   function panelProfile() {
     return h('div', { class: 'grid' },
       h('div', { class: 'col-7 profile-col' }, personalCard(), accessCard()),
-      h('div', { class: 'col-5 profile-col' }, regionCard(), appearanceCard()));
+      h('div', { class: 'col-5 profile-col' }, regionCard(), appearanceCard(), UI.pwa.installCard()));
   }
 
   function personalCard() {
@@ -1739,7 +1746,7 @@
   }
 
   // =====================================================================
-  // 5. УВЕДОМЛЕНИЯ (Р3: на сайте; push и тихие часы — этап 6)
+  // 5. УВЕДОМЛЕНИЯ (Р3: на сайте и push; тихие часы — только для push)
   // =====================================================================
   // Настройка — по видам уведомлений кода (notifications.kind). Вход с нового устройства, неудачные попытки входа
   // и сообщение администратора приходят всегда. Центр уведомлений в шапке учитывает настройки (UI.notifPrefs).
@@ -1757,10 +1764,24 @@
     },
   };
 
+  // Push по умолчанию включен у всех видов, кроме обучения модели и сигналов расхода ИИ: их смотрят на сайте
+  const PUSH_OFF = ['learning', 'alert'];
+  const pushPref = (n, v) => (v.push != null ? v.push : !PUSH_OFF.includes(n.id));
+  const PUSH_FIRST = 'Сначала включите push на этом устройстве';
+
+  // На телефоне сначала — push на этом устройстве, потом длинный список видов
   function panelNotifications() {
+    if (UI.isMobile()) return h('div', { class: 'profile-col' }, channelsCard(), devicesCard(), notifCard(), quietCard(), UI.pwa.previewCard());
     return h('div', { class: 'grid' },
-      h('div', { class: 'col-8 profile-col' }, notifCard()),
-      h('div', { class: 'col-4 profile-col' }, channelsCard(), quietCard()));
+      h('div', { class: 'col-8 profile-col' }, notifCard(), quietCard()),
+      h('div', { class: 'col-4 profile-col' }, channelsCard(), devicesCard(), UI.pwa.previewCard()));
+  }
+  // Перерисовать вкладку, не теряя места на странице; focusSel — куда вернуть фокус
+  function redrawNotif(focusSel) {
+    const y = window.scrollY;
+    drawPanel();
+    window.scrollTo(0, y);
+    if (focusSel) { const el = panelEl.querySelector(focusSel); if (el) el.focus({ preventScroll: true }); }
   }
 
   function notifEvents() {
@@ -1794,6 +1815,7 @@
   }
 
   function notifCard() {
+    const pushOn = UI.pwa.hasPush();
     const row = n => {
       const v = st.notif[n.id] || (st.notif[n.id] = { site: true });
       const site = n.lockSite
@@ -1803,7 +1825,11 @@
           if (UI.notifications && UI.notifications.refresh) UI.notifications.refresh();
           UI.toast((val ? 'Включено на сайте: ' : 'Выключено на сайте: ') + lower1(n.t), val ? 'bell' : 'x');
         });
-      const push = switchInput('profile-n-' + n.id + '-push', false, 'Push: ' + n.t + ' — появится на этапе 6', () => {}, true);
+      const push = switchInput('profile-n-' + n.id + '-push', pushOn && pushPref(n, v), 'Push: ' + n.t + (pushOn ? '' : '. ' + PUSH_FIRST), val => {
+        v.push = val;
+        UI.toast((val ? 'Push включен: ' : 'Push выключен: ') + lower1(n.t), val ? 'bell' : 'bellOff');
+      }, !pushOn);
+      if (!pushOn) push.title = PUSH_FIRST;
       return h('div', { class: 'profile-notif-row' },
         h('div', { style: 'min-width:0' }, h('div', { class: 'profile-notif-t' }, n.t, n.isNew ? [' ', chip('новое', 'info')] : null), h('div', { class: 'field-hint' }, n.d)),
         h('div', { class: 'profile-notif-cell' }, site),
@@ -1812,40 +1838,139 @@
     const events = notifEvents();
     const common = events.filter(e => !e.admin), forAdmin = events.filter(e => e.admin);
     return card({
-      id: 'profile-notif', class: 'profile-anchor', title: 'О чем сообщать', subtitle: 'Изменения сохраняются сразу · колокольчик в шапке учитывает эти настройки',
+      id: 'profile-notif', class: 'profile-anchor' + (pushOn ? '' : ' profile-notif-off'), title: 'О чем сообщать', subtitle: 'Изменения сохраняются сразу · колокольчик в шапке учитывает эти настройки',
       body: [
+        pushOn ? null : UI.callout('info', 'bell', h('div', { class: 'stack', style: 'gap:8px' },
+          h('span', null, h('b', null, PUSH_FIRST + '. '), 'Тогда заработает столбец «Push». На сайте уведомления приходят уже сейчас.'),
+          h('div', null, button('Включить push', { kind: 'secondary', size: 'sm', icon: 'bell', onClick: () => scrollToId('profile-channels', '.card-foot .btn') })))),
         h('div', null,
-          h('div', { class: 'profile-notif-head', 'aria-hidden': 'true' }, h('span', null, 'Событие'), h('span', null, 'На сайте'), h('span', null, 'Push', h('small', null, 'этап 6'))),
+          h('div', { class: 'profile-notif-head', 'aria-hidden': 'true' }, h('span', null, 'Событие'), h('span', null, 'На сайте'), h('span', null, 'Push', pushOn ? null : h('small', null, 'не включен'))),
           common.map(row),
           forAdmin.length ? [h('div', { class: 'profile-group-label' }, 'Для администратора'), forAdmin.map(row)] : null),
-        h('p', { class: 'profile-note' }, icon('lock'), h('span', null, 'Вход с нового устройства, неудачные попытки входа и сообщения администратора на сайте приходят всегда: это защита аккаунта и важные новости.')),
+        h('p', { class: 'profile-note' }, icon('lock'), h('span', null, 'Вход с нового устройства, неудачные попытки входа и сообщения администратора на сайте приходят всегда: это защита аккаунта и важные новости. Push для них можно выключить.')),
       ],
     });
   }
 
+  // Как разрешить уведомления, если их запретили в браузере: сайт сам спросить еще раз не может
+  const DENIED_STEPS = {
+    ios: ['Откройте «Настройки» iPhone → «Уведомления».', 'Найдите в списке AI Capper.', 'Включите «Допуск уведомлений» и вернитесь в приложение.'],
+    android: ['Нажмите значок настроек слева от адреса сайта.', 'Откройте «Разрешения» → «Уведомления».', 'Выберите «Разрешить» и вернитесь сюда.'],
+    desktop: ['Нажмите значок настроек слева от адреса сайта.', 'Откройте «Настройки сайтов» → «Уведомления».', 'Выберите «Разрешить» и обновите страницу.'],
+  };
+  const steps = list => h('ol', { class: 'pwa-steps' }, list.map(t => h('li', null, h('div', null, t))));
+
+  function enablePush() {
+    UI.pwa.askPermission(ok => {
+      UI.pwa.setPush(ok ? 'on' : 'denied');
+      redrawNotif('#profile-channels .card-foot .btn');
+      if (ok) UI.toast('Push включен на этом устройстве', 'bell');
+      else UI.toast('Уведомления запрещены в браузере. Как разрешить — в карточке «Каналы»', 'x');
+    });
+  }
+  function testPush() {
+    UI.pwa.banner({ title: 'Тестовое уведомление', body: 'Push работает: так будут приходить уведомления AI Capper', when: 'сейчас' });
+    UI.toast('Тестовое уведомление отправлено на ' + UI.pwa.deviceLabel(), 'send');
+  }
+
   function channelsCard() {
+    const dev = UI.pwa.device(), state = UI.pwa.pushState();
+    const demo = UI.field({ id: 'profile-push-demo', label: 'Push на этом устройстве', value: state, options: UI.pwa.STATES });
+    demo.querySelector('select').addEventListener('change', e => { UI.pwa.setPush(e.target.value); redrawNotif('#profile-push-demo + .dd-trigger'); });
+    const V = {
+      off: { chip: chip('Не включен', 'outline'), body: [h('p', { class: 'small soft', style: 'margin:0' }, 'Push придет, даже когда приложение закрыто. Браузер спросит разрешение — нажмите «Разрешить».')],
+        foot: [button('Включить push', { kind: 'primary', icon: 'bell', onClick: enablePush })] },
+      on: { chip: chip('Включено', 'good', 'check'), body: [h('p', { class: 'small soft', style: 'margin:0' }, 'Приходит то, что включено в столбце «Push». В тихие часы push молчат.')],
+        foot: [button('Прислать тестовое', { kind: 'primary', icon: 'send', onClick: testPush }),
+          button('Выключить', { kind: 'ghost', icon: 'bellOff', onClick: () => { UI.pwa.setPush('off'); redrawNotif('#profile-channels .card-foot .btn'); UI.toast('Push на этом устройстве выключен', 'bellOff'); } })] },
+      denied: { chip: chip('Запрещено в браузере', 'bad', 'ban'), body: [
+        h('p', { class: 'small soft', style: 'margin:0' }, 'Уведомления для этого сайта запрещены, и сайт сам спросить еще раз не может. Разрешите их в настройках:'),
+        steps(DENIED_STEPS[dev.os] || DENIED_STEPS.desktop)],
+        foot: [button('Проверить снова', { kind: 'secondary', icon: 'refresh', onClick: () => { UI.pwa.setPush('on'); redrawNotif('#profile-channels .card-foot .btn'); UI.toast('Разрешение есть — push включен', 'bell'); } })] },
+      ios: { chip: chip('Нужна установка', 'warn', 'alert'), body: [
+        h('p', { class: 'small soft', style: 'margin:0' }, 'На iPhone push работает только из установленного приложения (iOS 16.4 и новее). Сейчас сайт открыт в Safari.'),
+        h('ol', { class: 'pwa-steps' },
+          h('li', null, h('div', null, 'Нажмите ', h('span', { class: 'pwa-key' }, icon('share'), 'Поделиться'), ' внизу экрана.')),
+          h('li', null, h('div', null, 'Выберите ', h('span', { class: 'pwa-key' }, icon('plusSquare'), 'На экран «Домой»'), ' → «Добавить».')),
+          h('li', null, h('div', null, 'Откройте AI Capper с экрана «Домой» и включите push здесь.')))],
+        foot: [button('Как установить', { kind: 'primary', icon: 'download', onClick: () => UI.pwa.installModal('ios') })] },
+      unsupported: { chip: chip('Не поддерживается', 'outline', 'x'), body: [
+        h('p', { class: 'small soft', style: 'margin:0' }, 'Этот браузер не получает push. Подойдут Chrome, Edge и Firefox на компьютере и Android, Safari на Mac, на iPhone — приложение с экрана «Домой» (iOS 16.4+). На сайте уведомления приходят как обычно.')],
+        foot: null },
+    }[state] || null;
     return card({
       id: 'profile-channels', class: 'profile-anchor', title: 'Каналы', subtitle: 'Куда приходят уведомления',
       body: [
         h('div', { class: 'profile-list' },
-          item({ ic: 'bell', icKind: 'good', title: 'На сайте', titleExtra: chip('Всегда включено', 'good', 'check'), meta: 'Колокольчик в шапке и центр уведомлений', below: true }),
-          item({ ic: 'device', title: 'Push на телефон и в браузере', titleExtra: chip('Этап 6', 'outline', 'clock'), meta: 'Появится вместе с установкой сайта на телефон как приложения (PWA). Тогда же заработает столбец «Push» слева', below: true })),
+          item({ ic: 'bell', icKind: 'good', title: 'На сайте', titleExtra: chip('Всегда включено', 'good', 'check'), meta: 'Колокольчик в шапке и центр уведомлений', below: true })),
+        h('div', { class: 'profile-push' },
+          h('div', { class: 'profile-push-head' },
+            h('span', { class: ['profile-item-ic', state === 'on' ? 'good' : null], 'aria-hidden': 'true' }, icon(state === 'on' ? 'bell' : state === 'denied' || state === 'unsupported' ? 'bellOff' : dev.ic)),
+            h('div', { style: 'min-width:0' },
+              h('div', { class: 'profile-push-title' }, 'Push на этом устройстве', V.chip),
+              h('div', { class: 'profile-item-meta' }, UI.pwa.deviceLabel(dev)))),
+          V.body,
+          h('div', { class: 'pwa-demo', role: 'region', 'aria-label': 'Только в макете' }, h('span', { class: 'demo-pill' }, 'Только в макете'), demo)),
       ],
-      foot: [button('Разрешить push', { kind: 'secondary', icon: 'bell', disabled: true, title: 'Push появится на этапе 6' })],
+      foot: V.foot,
+    });
+  }
+
+  function devicesCard() {
+    const list = UI.pwa.devices(), cur = UI.pwa.device();
+    return card({
+      id: 'profile-push-devices', class: 'profile-anchor', title: 'Устройства с push',
+      subtitle: list.length ? list.length + ' ' + pl(list.length, 'устройство', 'устройства', 'устройств') : 'Пока ни одного',
+      body: [
+        list.length
+          ? h('div', { class: 'profile-list' }, list.map(d => item({ ic: d.ic, title: d.name, titleExtra: d.key === cur.key ? chip('это устройство', 'accent') : null,
+            meta: 'подключено ' + (d.at === TODAY ? 'сегодня' : dateDay(d.at)), wrap: true,
+            side: button('Отключить', { kind: 'secondary', size: 'sm', icon: 'bellOff', ariaLabel: 'Отключить push: ' + d.name, onClick: () => {
+              UI.pwa.removeDevice(d.key); redrawNotif('#profile-push-devices');
+              UI.toast('Push отключен: ' + d.name, 'bellOff');
+            } }) })))
+          : h('p', { class: 'small soft', style: 'margin:0' }, 'Push приходит только на устройства, где вы его включили.'),
+        h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Настройки «О чем сообщать» и тихие часы общие для всех ваших устройств. Выход из аккаунта на устройстве отключает push на нем.'),
+      ],
     });
   }
 
   function quietCard() {
-    const q = st.quiet;
+    const q = st.quiet, off = !UI.pwa.hasPush();
     const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0') + ':00');
-    const fromF = UI.field({ label: 'С', id: 'profile-quiet-from', value: q.from, options: HOURS, attrs: { 'aria-label': 'Тихие часы — с', disabled: true } });
-    const toF = UI.field({ label: 'До', id: 'profile-quiet-to', value: q.to, options: HOURS, attrs: { 'aria-label': 'Тихие часы — до', disabled: true } });
+    const fromF = UI.field({ label: 'С', id: 'profile-quiet-from', value: q.from, options: HOURS, attrs: { 'aria-label': 'Тихие часы — с', disabled: off || !q.on } });
+    const toF = UI.field({ label: 'До', id: 'profile-quiet-to', value: q.to, options: HOURS, attrs: { 'aria-label': 'Тихие часы — до', disabled: off || !q.on } });
+    const fromSel = fromF.querySelector('select'), toSel = toF.querySelector('select');
+    const summary = h('p', { class: 'small soft', style: 'margin:0', 'aria-live': 'polite' });
+    const hours = () => (+q.to.slice(0, 2) - +q.from.slice(0, 2) + 24) % 24;
+    const sync = () => {
+      summary.textContent = off ? PUSH_FIRST + ': тихие часы действуют только для push.'
+        : q.on ? 'С ' + q.from + ' до ' + q.to + ' (' + hours() + ' ' + pl(hours(), 'час', 'часа', 'часов') + ') push не приходят. Уведомления за это время ждут вас в колокольчике на сайте.'
+          : 'Выключены: push приходят круглые сутки.';
+    };
+    const pick = (which, sel, f) => () => {
+      const other = which === 'from' ? q.to : q.from;
+      if (sel.value === other) { sel.value = q[which]; setFieldError(f, 'Начало и конец совпадают'); return; }
+      setFieldError(fromF, null); setFieldError(toF, null);
+      q[which] = sel.value; sync();
+      UI.toast('Тихие часы: с ' + q.from + ' до ' + q.to + ' по ' + D.tzCity(myTz()), 'moon');
+    };
+    fromSel.addEventListener('change', pick('from', fromSel, fromF));
+    toSel.addEventListener('change', pick('to', toSel, toF));
+    const sw = switchInput('profile-quiet-on', q.on && !off, off ? 'Тихие часы. ' + PUSH_FIRST : 'Тихие часы', val => {
+      q.on = val; fromSel.disabled = !val; toSel.disabled = !val; sync();
+      UI.toast(val ? 'Тихие часы включены' : 'Тихие часы выключены: push круглые сутки', val ? 'moon' : 'bell');
+    }, off);
+    if (off) sw.title = PUSH_FIRST;
+    sync();
     return card({
-      id: 'profile-quiet', title: 'Тихие часы', subtitle: 'Push без звука · ' + tzTime(),
-      actions: [chip('Этап 6', 'outline', 'clock')],
+      id: 'profile-quiet', class: 'profile-anchor', title: 'Тихие часы', subtitle: 'Ночью без push · ' + tzTime(),
+      actions: [sw],
       body: [
         h('div', { class: 'profile-time' }, fromF, toF),
-        h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Тихие часы нужны только для push — включим их вместе с push на этапе 6. На сайте уведомления копятся как обычно.'),
+        summary,
+        h('p', { class: 'profile-note' }, icon('shield'), h('span', null, 'Вход с нового устройства и неудачные попытки входа приходят всегда, даже в тихие часы.')),
+        h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Время — по вашему поясу (' + tzName(myTz()) + '), сменить его можно во вкладке «Профиль».'),
       ],
     });
   }
@@ -2007,9 +2132,16 @@
     title: 'Личный кабинет',
     render(root, param) {
       useState();
-      const tab = TAB_ALIAS[param] || param;
+      // #profile-install — окно установки; #profile-notifications-<состояние> — состояние push на этом устройстве (для согласования)
+      let p = param || '';
+      const install = p === 'install';
+      const pushDemo = /^notifications-(off|on|denied|ios|unsupported)$/.exec(p);
+      if (install) p = 'profile';
+      if (pushDemo) { p = 'notifications'; UI.pwa.setPush(pushDemo[1]); }
+      const tab = TAB_ALIAS[p] || p;
       st.tab = TABS.some(t => t.id === tab) ? tab : 'profile';
-      if (TAB_ALIAS[param]) setHash(st.tab);
+      if (TAB_ALIAS[p]) setHash(st.tab);
+      if (install) setTimeout(() => UI.pwa.installModal(), 60);
       heroSlot = h('div', { style: 'min-width:0' });
       tabsSlot = h('div', { style: 'min-width:0' });
       panelEl = h('div', { class: 'profile-panel', id: 'profile-panel', role: 'tabpanel', tabindex: '-1' });

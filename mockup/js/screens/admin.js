@@ -173,7 +173,7 @@
     resetUser: '', resetShown: null, // выданный код показывается один раз: до ухода с вкладки или «Скрыть»
     twofaUser: '',
     tz: 'Europe/Helsinki',
-    msg: { to: 'all', user: '', text: '' },
+    msg: { to: 'all', user: '', text: '', push: true },
   };
   const TZ = D.timezones.map(t => ({ value: t.value, label: t.label }));
   const tzLabel = v => (TZ.find(t => t.value === v) || { label: v }).label.replace(/ \(.*\)$/, '');
@@ -358,6 +358,8 @@
     .adm-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: end; }
     .adm-fields.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     @media (max-width: 480px) { .adm-fields { gap: 8px; } .adm-fields .field-label { font-size: var(--fs-xs); } }
+    .adm-check { align-items: center; min-height: 40px; }
+    .adm-check input { margin: 0; }
     .adm-presets { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: var(--fs-xs); color: var(--fg-3); }
     .adm-pill { border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg-2); border-radius: 999px; padding: 4px 12px; min-height: 32px; font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; font-variant-numeric: tabular-nums; }
     .adm-pill:hover { background: var(--surface-2); }
@@ -2125,7 +2127,7 @@
     const TEMPLATES = [
       { label: 'Работы на сервере', text: 'В субботу с 10:00 до 10:30 (Хельсинки) сервер обновляется, анализы будут недоступны.' },
       { label: 'Лимиты', text: 'Напоминаю: на моем ключе лимит — ' + limitText(A.defaults) + '. Если нужно больше, напишите мне.' },
-      { label: 'Push на телефон', text: 'Установите AI Capper на телефон («Поделиться» → «На экран Домой») и разрешите уведомления, чтобы не пропускать расчет ставок.' },
+      { label: 'Push на телефон', text: 'Установите AI Capper на телефон (iPhone: «Поделиться» → «На экран «Домой»», Android: «Установить») и включите push в «Личный кабинет → Уведомления», чтобы не пропускать расчет ставок.' },
     ];
     const ta = h('textarea', { class: 'textarea', id: 'adm-msg-text', rows: 4, maxlength: String(MAX), placeholder: 'Например: в субботу с 10:00 до 10:30 сервер обновляется', 'aria-describedby': 'adm-msg-hint' });
     ta.value = st.msg.text;
@@ -2133,6 +2135,18 @@
     const pBody = h('span', { class: 'notif-body' });
     let send = null;
     const toWhom = () => st.msg.to === 'all' ? rec : rec.filter(u => u.id === st.msg.user);
+    // «Также push»: придет тем из получателей, у кого push включен хотя бы на одном устройстве
+    const pushHint = h('div', { class: 'field-hint', id: 'adm-msg-push-hint' });
+    const pushBox = h('input', { type: 'checkbox', id: 'adm-msg-push', checked: st.msg.push, 'aria-describedby': 'adm-msg-push-hint', on: { change: e => { st.msg.push = e.target.checked; sync(); } } });
+    const pushPreview = h('div', { class: 'stack', style: 'gap:8px' });
+    function syncPush() {
+      const to = toWhom(), k = UI.pwa.withPush(to);
+      pushHint.textContent = to.length === 1
+        ? (k ? 'У получателя push включен — придет и на телефон.' : 'У получателя push не включен — придет только на сайт.')
+        : 'Push включен у ' + k + ' из ' + to.length + ': им придет и на телефон. В их тихие часы push не придет, на сайте сообщение останется.';
+      UI.clear(pushPreview);
+      if (st.msg.push && k) UI.append(pushPreview, [h('div', { class: 'xsmall muted' }, 'Push на телефоне'), UI.pwa.pushItem({ title: 'Сообщение администратора', body: ta.value.trim() || 'Текст сообщения появится здесь', when: 'сейчас', solo: true })]);
+    }
     function sync() {
       st.msg.text = ta.value;
       const n = ta.value.length;
@@ -2141,10 +2155,11 @@
       pBody.textContent = ta.value.trim() || 'Текст сообщения появится здесь';
       pBody.classList.toggle('muted', !ta.value.trim());
       if (send) send.disabled = !ta.value.trim() || !toWhom().length;
+      syncPush();
     }
     ta.addEventListener('input', sync);
     const userSel = UI.field({ id: 'adm-msg-user', label: 'Получатель', options: rec.map(u => ({ value: u.id, label: u.name })), value: st.msg.user });
-    userSel.querySelector('select').addEventListener('change', e => { st.msg.user = e.target.value; });
+    userSel.querySelector('select').addEventListener('change', e => { st.msg.user = e.target.value; sync(); });
     userSel.style.display = st.msg.to === 'one' ? '' : 'none';
     const seg = UI.segmented({ label: 'Кому', items: [{ id: 'all', label: 'Всем участникам · ' + rec.length }, { id: 'one', label: 'Одному' }], active: st.msg.to, onChange: id => { st.msg.to = id; userSel.style.display = id === 'one' ? '' : 'none'; sync(); } });
     send = button('Отправить', { kind: 'primary', icon: 'send', attrs: { id: 'adm-msg-send' }, onClick: () => {
@@ -2156,7 +2171,8 @@
       // участница из демо-роли увидит сообщение в колокольчике, если переключить макет на нее
       if (to.some(u => u.id === D.personas.member.id)) D.notifications.member.unshift({ id: 'adm-' + D.notifications.member.length + '-' + clock, kind: 'admin_message', icon: 'megaphone', tone: 'info', title: 'Сообщение администратора', body: text, at, read: false });
       st.msg.text = '';
-      UI.toast('Отправлено ' + n + ' ' + fmt.plural(n, 'участнику', 'участникам', 'участникам') + ': на сайте и push', 'send');
+      const k = st.msg.push ? UI.pwa.withPush(to) : 0;
+      UI.toast('Отправлено ' + n + ' ' + fmt.plural(n, 'участнику', 'участникам', 'участникам') + ': на сайте' + (k ? ', push — ' + k : ''), 'send');
       refresh();
     } });
     const form = card({
@@ -2167,19 +2183,23 @@
         h('div', { class: 'field' },
           h('label', { class: 'field-label', for: 'adm-msg-text' }, h('span', null, 'Текст'), counter),
           ta,
-          h('div', { class: 'field-hint', id: 'adm-msg-hint' }, 'До ' + MAX + ' символов. Придет в центр уведомлений на сайте и push на телефон тем, кто установил приложение и разрешил уведомления. Заблокированным не приходит.')),
+          h('div', { class: 'field-hint', id: 'adm-msg-hint' }, 'До ' + MAX + ' символов. Придет в центр уведомлений на сайте. Заблокированным не приходит.')),
+        h('div', { class: 'field' },
+          h('label', { class: 'check adm-check', for: 'adm-msg-push' }, pushBox, h('span', null, h('b', null, 'Также push'), ' на телефон')),
+          pushHint),
         h('div', { class: 'adm-presets' }, h('span', null, 'Шаблоны:'), TEMPLATES.map(t => h('button', { type: 'button', class: 'adm-pill', on: { click: () => { ta.value = t.text.slice(0, MAX); sync(); ta.focus(); } } }, t.label))),
       ],
       foot: [send],
     });
     const preview = card({
-      title: 'Так увидят участники', subtitle: 'Центр уведомлений (колокольчик)',
-      body: h('div', { class: 'adm-notif' },
+      title: 'Так увидят участники', subtitle: 'Колокольчик на сайте и push на телефоне',
+      body: [h('div', { class: 'adm-notif' },
         h('div', { class: 'notif-head' }, h('div', { class: 'notif-head-title' }, 'Уведомления')),
         h('div', { class: 'notif-list' }, h('div', { class: 'notif-item unread' },
           h('span', { class: 'notif-ic info' }, icon('megaphone')),
           h('span', { class: 'notif-text' }, h('span', { class: 'notif-title' }, 'Сообщение администратора'), pBody, h('span', { class: 'notif-time' }, 'Сейчас')),
           h('span', { class: 'notif-dot', 'aria-hidden': 'true' })))),
+        pushPreview],
     });
     // Отправленные — те же записи «Сообщение участникам», что в журнале
     const history = A.audit.filter(e => e.action === 'message');

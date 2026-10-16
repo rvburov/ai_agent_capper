@@ -148,7 +148,7 @@
       listEl,
       h('div', { class: 'notif-foot' },
         h('a', { href: '#profile-notifications', on: { click: () => closeNotif(false) } }, icon('sliders'), 'Что присылать'),
-        h('span', { class: 'xsmall muted' }, UI.notifications.hidden() ? 'Часть видов выключена в настройках' : 'На сайте · push — на этапе 6')));
+        h('span', { class: 'xsmall muted' }, UI.notifications.hidden() ? 'Часть видов выключена в настройках' : UI.pwa.hasPush() ? 'На сайте и push' : 'На сайте · push не включен')));
     if (sheet) document.body.appendChild(h('div', { class: 'notif-back', on: { click: () => closeNotif(true) } }));
     document.body.appendChild(pop);
     if (!sheet) {
@@ -228,6 +228,7 @@
         h('div', { class: 'demo-pill', role: 'note', style: 'align-self:flex-start;margin-bottom:8px' }, 'Макет · все цифры вымышлены'),
         h('button', { class: 'nav-link', type: 'button', style: 'border:0;background:none;cursor:pointer;width:100%', on: { click: () => { close(); roleSwitchModal(); } } }, icon('users'), 'Демо: смотреть как ' + (state.role === 'admin' ? 'участник' : 'администратор')),
         items.map(it => h('a', { class: 'nav-link', href: '#' + it.id, 'aria-current': navId === it.id ? 'page' : null, on: { click: close } }, icon(it.icon), it.label)),
+        h('button', { class: 'nav-link', type: 'button', style: 'border:0;background:none;cursor:pointer;width:100%', on: { click: () => { close(); UI.pwa.installModal(); } } }, icon('download'), UI.pwa.installTitle()),
         h('button', { class: 'nav-link', type: 'button', style: 'border:0;background:none;cursor:pointer;width:100%', on: { click: () => { close(); toggleTheme(); } } }, icon(currentTheme() === 'dark' ? 'sun' : 'moon'), currentTheme() === 'dark' ? 'Светлая тема' : 'Темная тема'),
         h('button', { class: 'nav-link', type: 'button', style: 'border:0;background:none;cursor:pointer;width:100%;color:var(--bad-ink)', on: { click: () => { close(); UI.auth.logout(); } } }, icon('logout'), 'Выйти')),
     });
@@ -247,6 +248,7 @@
       ]),
       h('div', { class: 'sidebar-foot' },
         h('a', { class: 'nav-link', href: '#profile', 'aria-current': navId === 'profile' ? 'page' : null }, icon('user'), 'Личный кабинет'),
+        h('button', { class: 'nav-link', type: 'button', style: 'border:0;background:none;cursor:pointer;width:100%;text-align:left', on: { click: () => UI.pwa.installModal() } }, icon('download'), UI.pwa.installTitle()),
         h('button', { class: 'nav-link', type: 'button', style: 'border:0;background:none;cursor:pointer;width:100%;text-align:left', on: { click: toggleTheme } }, icon(currentTheme() === 'dark' ? 'sun' : 'moon'), currentTheme() === 'dark' ? 'Светлая тема' : 'Темная тема'),
         h('button', { class: 'nav-link', type: 'button', style: 'border:0;background:none;cursor:pointer;width:100%;text-align:left', on: { click: () => UI.auth.logout() } }, icon('logout'), 'Выйти')));
 
