@@ -44,6 +44,12 @@ x-backend-env: &backend-env
   CAPPER_DATA_FIRST_YEAR: ${CAPPER_DATA_FIRST_YEAR:-2000}
   CAPPER_TENNIS_DATA_BASE_URL: "${CAPPER_TENNIS_DATA_BASE_URL:-http://www.tennis-data.co.uk}"
   CAPPER_TENNIS_DATA_FIRST_YEAR: ${CAPPER_TENNIS_DATA_FIRST_YEAR:-2013}
+  # Push-уведомления (этап 6): ключи VAPID из deploy/.env (generate-vapid, deploy/README.md).
+  # Пусто — приложение работает, push выключен. API отдает публичный ключ браузеру, воркер
+  # подписывает и шифрует push
+  CAPPER_VAPID_PUBLIC_KEY: ${CAPPER_VAPID_PUBLIC_KEY:-}
+  CAPPER_VAPID_PRIVATE_KEY: ${CAPPER_VAPID_PRIVATE_KEY:-}
+  CAPPER_VAPID_SUBJECT: ${CAPPER_VAPID_SUBJECT:-}
 
 x-backend: &backend
   build:

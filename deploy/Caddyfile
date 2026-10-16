@@ -67,6 +67,24 @@
 		file_server
 	}
 
+	# PWA (этап 6): service worker и манифест браузер всегда сверяет с сервером, иначе
+	# новая версия приложения дойдет до телефона не сразу. У манифеста — свой тип файла
+	handle /sw.js {
+		root * /srv
+		header Cache-Control "no-cache"
+		file_server
+	}
+
+	handle /manifest.webmanifest {
+		root * /srv
+		header {
+			Content-Type "application/manifest+json"
+			Cache-Control "no-cache"
+			defer
+		}
+		file_server
+	}
+
 	# Остальное — приложение на одной странице: неизвестный путь отдает index.html,
 	# маршрут разбирает React. index.html каждый раз сверяется с сервером
 	handle {

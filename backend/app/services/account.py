@@ -69,10 +69,13 @@ async def change_password(
     current_password: str,
     new_password: str,
     client: ClientInfo,
+    session_id: int | None = None,
 ) -> str:
-    """Смена пароля. Все сеансы отзываются, текущий заменяется новым: возвращает токен
-    нового сеанса для cookie. Неверный текущий пароль считается неудачной попыткой
-    пары (email, IP), как при входе: украденный сеанс не поможет подобрать пароль."""
+    """Смена пароля. Все сеансы отзываются, текущий (session_id) заменяется новым:
+    возвращает токен нового сеанса для cookie. Подписка push этого устройства переходит к
+    новому сеансу, подписки остальных отзываются вместе с их сеансами. Неверный текущий
+    пароль считается неудачной попыткой пары (email, IP), как при входе: украденный сеанс
+    не поможет подобрать пароль."""
     attempt = await ratelimit.begin_attempt(redis, user.email, client.ip)
     if attempt.retry_after:
         raise AppError(429, "common.rate_limited", retry_after=attempt.retry_after)
@@ -86,10 +89,12 @@ async def change_password(
     await check_new_password(new_password)
     user.password_hash = await hash_password_async(new_password)
     now = sessions.utcnow()
-    await sessions.revoke_user_sessions(db, user.id, now=now)
     new = await sessions.create_session(
         db, user_id=user.id, ip=client.ip, user_agent=client.user_agent, now=now
     )
+    if session_id is not None:
+        await sessions.move_push(db, from_session_id=session_id, to_session_id=new.session.id)
+    await sessions.revoke_user_sessions(db, user.id, except_session_id=new.session.id, now=now)
     await db.commit()
     return new.token
 

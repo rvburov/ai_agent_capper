@@ -660,6 +660,17 @@ def _print(line: str) -> None:
     print(line, flush=True)
 
 
+async def _update_then_push(**kwargs: Any) -> UpdateResult:
+    """Обновление и постановка push уведомлений расчета (этап 6) до выхода из asyncio.run:
+    иначе задачи постановки не успели бы выполниться."""
+    from app.services.push import drain
+
+    try:
+        return await run_update(**kwargs)
+    finally:
+        await drain()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Код возврата: 0 — все шаги прошли, 1 — хотя бы один шаг с ошибкой."""
     args = build_parser().parse_args(argv)
@@ -669,7 +680,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
     try:
         result = asyncio.run(
-            run_update(
+            _update_then_push(
                 full=args.full,
                 years=args.years,
                 sackmann_dir=args.sackmann_dir,

@@ -100,6 +100,7 @@ async def change_password(
         current_password=body.current_password,
         new_password=body.new_password,
         client=client,
+        session_id=auth.session.id,
     )
     response = _no_content()
     set_cookie(response, "session", token)
@@ -223,8 +224,8 @@ async def read_notification(notification_id: RowId, user: CurrentUser, db: DbSes
 @router.get("/notification-prefs")
 async def notification_prefs(user: CurrentUser, db: DbSession) -> NotificationPrefsOut:
     """Виды уведомлений, которые человек может получать (у администратора — еще архив
-    матчей и сигналы расхода ИИ), с «на сайте» и признаком «обязательное». Push — только
-    показ (этап 6)."""
+    матчей и сигналы расхода ИИ), с «на сайте», «push» и признаком «обязательное»;
+    push_available — есть ли активная подписка push; тихие часы push."""
     return await prefs_service.get_prefs(db, user)
 
 
@@ -232,9 +233,11 @@ async def notification_prefs(user: CurrentUser, db: DbSession) -> NotificationPr
 async def update_notification_prefs(
     body: NotificationPrefsIn, user: CurrentUser, db: DbSession
 ) -> NotificationPrefsOut:
-    """Частичное обновление «на сайте» по видам. Обязательный вид выключить нельзя —
-    422 notification.required; вида нет у человека — 422 notification.kind_unavailable."""
-    return await prefs_service.update_prefs(db, user, body.items)
+    """Частичное обновление «на сайте» и «push» по видам и тихих часов. Обязательный вид
+    выключить на сайте нельзя — 422 notification.required (push — можно); вида нет у
+    человека — 422 notification.kind_unavailable; начало тихих часов равно концу — 422
+    notification.quiet_same."""
+    return await prefs_service.update_prefs(db, user, body.items, body.quiet_hours)
 
 
 # --- ответственная игра ---

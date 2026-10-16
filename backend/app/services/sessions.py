@@ -8,18 +8,24 @@
 Функции делают flush(), commit — за сервисом, который выполняет действие целиком
 (вход, смена пароля, блокировка). Исключение — touch_session(): его вызывает
 зависимость current_user, и он фиксирует свое изменение сам.
+
+Подписка push (этап 6) живет вместе с сеансом, в котором ее включили: отзыв сеанса
+(выход, «выйти на других устройствах», смена пароля, сброс доступа администратором)
+отзывает и его подписки; истекший сеанс push не получает — отправка идет только на
+подписки с действующим сеансом (session_alive).
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.security.tokens import hash_token, new_token
 from app.core.useragent import clip_user_agent, device_label
-from app.db.models import User, UserSession
+from app.db.models import PushSubscription, User, UserSession
 
 TOUCH_INTERVAL = timedelta(minutes=5)
 
@@ -59,6 +65,42 @@ async def create_session(
     db.add(session)
     await db.flush()
     return NewSession(token=token, session=session)
+
+
+def session_alive(now: datetime | None = None) -> tuple[ColumnElement[bool], ...]:
+    """Условия действующего сеанса: не отозван, срок не прошел, без долгого бездействия."""
+    now = now or utcnow()
+    idle_since = now - timedelta(days=get_settings().session_idle_days)
+    return (
+        UserSession.revoked_at.is_(None),
+        UserSession.expires_at > now,
+        UserSession.last_seen_at > idle_since,
+    )
+
+
+async def _revoke_push(db: AsyncSession, session_ids: Sequence[int], now: datetime) -> None:
+    """Подписки push отозванных сеансов — тоже отозваны."""
+    if session_ids:
+        await db.execute(
+            update(PushSubscription)
+            .where(
+                PushSubscription.session_id.in_(list(session_ids)),
+                PushSubscription.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
+
+
+async def move_push(db: AsyncSession, *, from_session_id: int, to_session_id: int) -> None:
+    """Подписки push сеанса переходят к новому сеансу того же браузера (смена пароля)."""
+    await db.execute(
+        update(PushSubscription)
+        .where(
+            PushSubscription.session_id == from_session_id,
+            PushSubscription.revoked_at.is_(None),
+        )
+        .values(session_id=to_session_id)
+    )
 
 
 async def get_active_session(
@@ -113,12 +155,17 @@ async def revoke_session_by_token(
     """Отзывает сеанс по токену из cookie (выход, повторный вход в том же браузере)."""
     if not token:
         return False
-    result = await db.execute(
-        update(UserSession)
-        .where(UserSession.id_hash == hash_token(token), UserSession.revoked_at.is_(None))
-        .values(revoked_at=now or utcnow())
+    now = now or utcnow()
+    ids = list(
+        await db.scalars(
+            update(UserSession)
+            .where(UserSession.id_hash == hash_token(token), UserSession.revoked_at.is_(None))
+            .values(revoked_at=now)
+            .returning(UserSession.id)
+        )
     )
-    return bool(getattr(result, "rowcount", 0))
+    await _revoke_push(db, ids, now)
+    return bool(ids)
 
 
 async def touch_session(
@@ -140,16 +187,20 @@ async def revoke_session(
     user_id: int | None = None,
     now: datetime | None = None,
 ) -> bool:
-    """Отзывает один сеанс. С user_id — только если сеанс принадлежит этому пользователю."""
+    """Отзывает один сеанс (и его подписки push). С user_id — только если сеанс
+    принадлежит этому пользователю."""
+    now = now or utcnow()
     stmt = (
         update(UserSession)
         .where(UserSession.id == session_id, UserSession.revoked_at.is_(None))
-        .values(revoked_at=now or utcnow())
+        .values(revoked_at=now)
+        .returning(UserSession.id)
     )
     if user_id is not None:
         stmt = stmt.where(UserSession.user_id == user_id)
-    result = await db.execute(stmt)
-    return bool(getattr(result, "rowcount", 0))
+    ids = list(await db.scalars(stmt))
+    await _revoke_push(db, ids, now)
+    return bool(ids)
 
 
 async def revoke_user_sessions(
@@ -159,13 +210,17 @@ async def revoke_user_sessions(
     except_session_id: int | None = None,
     now: datetime | None = None,
 ) -> int:
-    """Отзывает все сеансы пользователя (кроме except_session_id). Возвращает их число."""
+    """Отзывает все сеансы пользователя (кроме except_session_id) и их подписки push.
+    Возвращает число сеансов."""
+    now = now or utcnow()
     stmt = (
         update(UserSession)
         .where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
-        .values(revoked_at=now or utcnow())
+        .values(revoked_at=now)
+        .returning(UserSession.id)
     )
     if except_session_id is not None:
         stmt = stmt.where(UserSession.id != except_session_id)
-    result = await db.execute(stmt)
-    return int(getattr(result, "rowcount", 0))
+    ids = list(await db.scalars(stmt))
+    await _revoke_push(db, ids, now)
+    return len(ids)

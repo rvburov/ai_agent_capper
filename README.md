@@ -59,6 +59,10 @@ bash deploy/local.sh perf               # замер скорости API на �
 
 Дальше данные обновляет воркер каждую ночь. Если tennis-data.co.uk ответит 403 (сайт закрыт Cloudflare от программ), скачайте файлы `ГОД.xlsx` в браузере со страницы http://www.tennis-data.co.uk/alldata.php в одну папку и запустите `bash deploy/local.sh data --full --tennis-data-dir ПАПКА` ([deploy/README.md](deploy/README.md#данные-о-матчах-и-бэктест)).
 
+### Push-уведомления и приложение на телефоне
+
+Уведомления приходят в колокольчик на сайте и push-уведомлениями браузера (решения Р3, Р26). Ключи VAPID для push `bash deploy/local.sh up` создает сам в `deploy/.env.local`; включить push — «Личный кабинет → Уведомления» → «Включить push», проверить — «Прислать тестовое». На своем компьютере push работает в Chrome, Edge и Firefox на `https://localhost`. **Телефону нужен сервер с доменом и HTTPS**: push и установка сайта на экран «Домой» работают только так, на iPhone — только из установленного приложения (iOS 16.4 и новее). Как включить push на сервере — [deploy/README.md](deploy/README.md#4-настройки-deployenv), пункт 4. В push нет сумм и банка, только событие: «Ставка №75 рассчитана — откройте, чтобы посмотреть результат».
+
 ### Ключ Claude и первая проверка
 
 Анализы идут на ключе Claude администратора: пока его нет, «Новый анализ» не запускается.
@@ -114,6 +118,8 @@ pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -
 alembic upgrade head                                   # схема базы
 python -m app.admin.cli create-admin --email you@example.com --name "Имя"   # пароль спросит
 uvicorn app.main:app --reload
+# push (по желанию): три строки ключей VAPID в .env, затем перезапустить API и воркер
+python -m app.admin.cli generate-vapid --subject mailto:you@example.com >> ../.env
 
 # frontend (в другом терминале): http://localhost:5173
 cd frontend && npm install && npm run dev

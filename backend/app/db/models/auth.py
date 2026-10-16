@@ -1,7 +1,7 @@
 """Пользователи и вход: учетные записи, сеансы, 2FA, журнал входов, коды доступа,
 уведомления и подписки на push (PLAN.md, разделы 5 и 7)."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     LargeBinary,
     String,
+    Time,
     func,
     text,
 )
@@ -58,6 +59,9 @@ NOTIFICATION_KINDS = (
     "learning",
 )
 DEFAULT_TZ = "Europe/Helsinki"
+# Тихие часы push по умолчанию (этап 6, В3): с 23:00 до 08:00 по поясу пользователя
+DEFAULT_QUIET_START = time(23, 0)
+DEFAULT_QUIET_END = time(8, 0)
 # Удаление аккаунта самим участником (В10): через столько дней после запроса
 ACCOUNT_DELETION_DELAY = timedelta(days=7)
 
@@ -80,6 +84,7 @@ class User(CreatedAtMixin, UpdatedAtMixin, Base):
         check_in("role", ROLES, "role"),
         check_in("status", USER_STATUSES, "status"),
         check_in("ai_mode", AI_MODES, "ai_mode"),
+        CheckConstraint("quiet_start <> quiet_end", name="quiet_range"),
     )
 
     id: Mapped[BigIntPK]
@@ -107,6 +112,11 @@ class User(CreatedAtMixin, UpdatedAtMixin, Base):
     # Участник сам попросил удалить аккаунт: удаление через 7 дней, до этого можно
     # отменить (В10, Р24)
     deletion_requested_at: Mapped[datetime | None]
+    # Тихие часы push (этап 6, В3): в эти часы по поясу tz push не уходят, уведомления
+    # остаются в колокольчике. Начало и конец не совпадают, шаг — 30 минут (проверяет API)
+    quiet_enabled: Mapped[bool] = mapped_column(server_default=text("true"))
+    quiet_start: Mapped[time] = mapped_column(Time, server_default=text("'23:00'"))
+    quiet_end: Mapped[time] = mapped_column(Time, server_default=text("'08:00'"))
 
     @property
     def deletion_at(self) -> datetime | None:
@@ -264,7 +274,9 @@ class Notification(CreatedAtMixin, Base):
 
 class NotificationPref(Base):
     """Что присылать участнику: вид уведомления → на сайте (колокольчик) и push (этап 6).
-    Строки нет — значение по умолчанию: на сайте да, push нет."""
+    Строки нет — значение по умолчанию: на сайте да, push — да у всех видов, кроме
+    обучения модели и сигналов расхода ИИ (В2, app/services/notification_prefs.py). Строку
+    сервис пишет всегда с обоими значениями, server_default push здесь не используется."""
 
     __tablename__ = "notification_prefs"
     __table_args__ = (check_in("kind", NOTIFICATION_KINDS, "kind"),)
@@ -276,17 +288,31 @@ class NotificationPref(Base):
 
 
 class PushSubscription(CreatedAtMixin, Base):
-    """Подписка браузера на push-уведомления (Web Push, этап 6)."""
+    """Подписка браузера на push-уведомления (Web Push, этап 6). Одна строка на endpoint:
+    повторная подписка того же браузера (и после входа в другой аккаунт) — та же строка.
+    Отзыв — revoked_at (кнопка «Отключить», выход из аккаунта, отзыв сеанса, ответ 404 или
+    410 сервиса push). device — коротко из User-Agent при подписке («iPhone · Safari»)."""
 
     __tablename__ = "push_subscriptions"
-    __table_args__ = (Index("ix_push_subscriptions_user_id", "user_id"),)
+    __table_args__ = (
+        Index("ix_push_subscriptions_user_id", "user_id"),
+        Index("ix_push_subscriptions_session_id", "session_id"),
+    )
 
     id: Mapped[BigIntPK]
     user_id: Mapped[int] = mapped_column(BigInteger, _user_fk())
+    # Сеанс, в котором push включили: отзыв сеанса отзывает подписку, а push уходит только
+    # на подписки с действующим сеансом (app/services/sessions.py). Ночная очистка удаляет
+    # мертвые сеансы — здесь остается NULL, и подписка больше push не получает
+    session_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("sessions.id", ondelete="SET NULL")
+    )
     endpoint: Mapped[str] = mapped_column(unique=True)
     p256dh: Mapped[str]
     auth: Mapped[str]
     user_agent: Mapped[str | None]
+    device: Mapped[str] = mapped_column(String(100), server_default="")
+    last_sent_at: Mapped[datetime | None]
     revoked_at: Mapped[datetime | None]
 
 

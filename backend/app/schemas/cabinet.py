@@ -8,7 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.analyses import DecimalOut
 from app.schemas.bets import BookmakerIn
@@ -41,8 +41,9 @@ Currency = Literal["RUB", "USD", "EUR"]
 
 class NotificationPrefOut(BaseModel):
     """Вид уведомления в настройках. group — строка экрана (limit_80 и limit_100 — одна
-    строка); required — приходит всегда, выключить нельзя; admin — раздел «Для
-    администратора»; push — только показ, push появится на этапе 6."""
+    строка); required — на сайте приходит всегда, выключить нельзя (push — можно); admin —
+    раздел «Для администратора»; push — присылать ли push (по умолчанию да, кроме learning
+    и ai_alert, В2)."""
 
     kind: NotificationKind
     group: str
@@ -88,30 +89,71 @@ class NotificationScheduleOut(BaseModel):
     upload_stale_days: int
 
 
+# Время тихих часов: «ЧЧ:ММ», шаг 30 минут
+QuietTime = Annotated[str, Field(pattern=r"^([01][0-9]|2[0-3]):(00|30)$")]
+
+
+class QuietHoursOut(BaseModel):
+    """Тихие часы push по поясу пользователя (schedule.tz): с start до end push не
+    приходят, кроме входа с нового устройства и неудачных попыток входа (В3)."""
+
+    enabled: bool
+    start: str
+    end: str
+
+
+class QuietHoursIn(BaseModel):
+    """Тихие часы целиком. Начало равно концу — 422 notification.quiet_same."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    start: QuietTime
+    end: QuietTime
+
+
 class NotificationPrefsOut(BaseModel):
     """alert_rules — пороги сигналов расхода ИИ для подсказки (только у администратора,
-    у участника null)."""
+    у участника null). push_available — есть хоть одна активная подписка push: пока нет,
+    столбец «Push» неактивен (В5)."""
 
     items: list[NotificationPrefOut]
-    # Push включится на этапе 6: до этого столбец «Push» неактивен
     push_available: bool
+    quiet_hours: QuietHoursOut
     alert_rules: AlertRulesOut | None
     schedule: NotificationScheduleOut
 
 
 class NotificationPrefIn(BaseModel):
+    """Вид и что поменять: на сайте, push или оба (непереданное не меняется)."""
+
     model_config = ConfigDict(extra="forbid")
 
     kind: NotificationKind
-    on_site: bool
+    on_site: bool | None = None
+    push: bool | None = None
+
+    @model_validator(mode="after")
+    def _something(self) -> "NotificationPrefIn":
+        if self.on_site is None and self.push is None:
+            raise ValueError("on_site or push")
+        return self
 
 
 class NotificationPrefsIn(BaseModel):
-    """Частичное обновление: только переданные виды."""
+    """Частичное обновление: только переданные виды и, если переданы, тихие часы. Нужно
+    хотя бы одно из двух."""
 
     model_config = ConfigDict(extra="forbid")
 
-    items: list[NotificationPrefIn] = Field(min_length=1, max_length=32)
+    items: list[NotificationPrefIn] = Field(default_factory=list, max_length=32)
+    quiet_hours: QuietHoursIn | None = None
+
+    @model_validator(mode="after")
+    def _something(self) -> "NotificationPrefsIn":
+        if not self.items and self.quiet_hours is None:
+            raise ValueError("items or quiet_hours")
+        return self
 
 
 # --- букмекеры ---

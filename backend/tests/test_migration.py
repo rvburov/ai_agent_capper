@@ -4,7 +4,8 @@
 данные этапа 2 (откат переводит новые статусы анализов в старые и не теряет строк),
 миграция этапа 4 — данные этапа 3 (история бота помечена, букмекеры собраны из ставок,
 правила роста ставки выключены у версий в работе), миграция этапа 5 — данные этапа 4
-(версии модели, общие уроки и версии инструкций, новые виды уведомлений и журнала).
+(версии модели, общие уроки и версии инструкций, новые виды уведомлений и журнала),
+миграция этапа 6 — тихие часы и push по умолчанию у прежних строк.
 
 Расхождение моделей и миграции ловится двумя способами:
 - compare_metadata, как alembic check: таблицы, колонки, типы, DEFAULT, индексы, FK;
@@ -1186,6 +1187,72 @@ async def test_stage5_wave2_migration(settings: Settings) -> None:
                 assert "lesson_watches" not in await conn.run_sync(_table_names)
                 assert await conn.scalar(text("SELECT count(*) FROM admin_audit_log")) == 0
                 assert await conn.scalar(text("SELECT count(*) FROM lessons")) == 1
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+        finally:
+            await engine.dispose()
+
+
+async def test_stage6_migration_push_and_quiet_hours(settings: Settings) -> None:
+    """0009 → 0010: у прежних пользователей тихие часы по умолчанию (включены, 23:00–08:00),
+    у подписок push — пустое устройство и нет доставок; push в прежних строках настроек —
+    по В2 (выключен только у learning и ai_alert); CHECK начала и конца тихих часов. Откат
+    до 0009 убирает колонки, строки остаются; повторный upgrade проходит."""
+    async with _temp_database(settings, "stage6") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0009")
+                await conn.execute(text("INSERT INTO users (email) VALUES ('m@example.com')"))
+                await conn.execute(
+                    text(
+                        "INSERT INTO notification_prefs (user_id, kind, on_site, push) VALUES"
+                        " (1, 'bet_settled', false, false), (1, 'learning', true, false),"
+                        " (1, 'ai_alert', true, false)"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)"
+                        " VALUES (1, 'https://fcm.googleapis.com/x', 'p', 'a')"
+                    )
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                user = (
+                    await conn.execute(
+                        text("SELECT quiet_enabled, quiet_start, quiet_end FROM users")
+                    )
+                ).one()
+                assert (user[0], str(user[1]), str(user[2])) == (True, "23:00:00", "08:00:00")
+                sub = (
+                    await conn.execute(
+                        text("SELECT device, last_sent_at, session_id FROM push_subscriptions")
+                    )
+                ).one()
+                # Прежние подписки без сеанса: push не получают, пока их не включат заново
+                assert tuple(sub) == ("", None, None)
+                prefs: dict[str, bool] = dict(
+                    (
+                        await conn.execute(
+                            text("SELECT kind, push FROM notification_prefs ORDER BY kind")
+                        )
+                    ).all()
+                )
+                assert prefs == {"ai_alert": False, "bet_settled": True, "learning": False}
+                assert await _refused(
+                    conn, "UPDATE users SET quiet_start = '07:00', quiet_end = '07:00'"
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0009")
+            async with engine.begin() as conn:
+                columns = await conn.run_sync(
+                    lambda sync: {item["name"] for item in inspect(sync).get_columns("users")}
+                )
+                assert not columns & {"quiet_enabled", "quiet_start", "quiet_end"}
+                assert await conn.scalar(text("SELECT count(*) FROM push_subscriptions")) == 1
+                assert await conn.scalar(text("SELECT count(*) FROM notification_prefs")) == 3
             async with engine.begin() as conn:
                 await conn.run_sync(run_alembic_upgrade, "head")
         finally:

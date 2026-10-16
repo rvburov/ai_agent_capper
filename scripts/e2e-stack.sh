@@ -18,7 +18,11 @@
 #   E2E_API_PORT=8000  E2E_WEB_PORT=4173      порты API и фронтенда
 #   E2E_FAKE_CLAUDE_PORT                       порт поддельного Claude (по умолчанию порт API + 99);
 #                      сбой шага для теста: POST http://127.0.0.1:ПОРТ/_fake/fail
-#                      {"step": "analysis", "error": "overloaded", "times": 3}, сброс — /_fake/reset
+#                      {"step": "analysis", "error": "overloaded", "times": 3}, сброс — /_fake/reset.
+#                      На том же порту — поддельный сервис push (backend/tests/fake_push.py):
+#                      подписка — POST /_fake/push/subscription, полученные push — GET /_fake/push.
+#                      Ключи VAPID стек создает сам (E2E_STATE_DIR/vapid.env), подписки по http
+#                      разрешены (CAPPER_PUSH_ALLOW_HTTP)
 #   E2E_PG_ADMIN_URL   служебная база, из которой создается временная
 #                      (по умолчанию CAPPER_TEST_ADMIN_DATABASE_URL или capper:capper@localhost)
 #   E2E_REDIS_URL      Redis (по умолчанию CAPPER_REDIS_URL или redis://localhost:6379/0)
@@ -74,6 +78,18 @@ backend_env() {
   export CAPPER_ANTHROPIC_BASE_URL="http://127.0.0.1:$FAKE_PORT"
   # Воркер без расписания: ночная загрузка архивов и уборщик не начнутся посреди прогона
   export CAPPER_WORKER_CRON=false
+  # Push (этап 6): подписки на поддельный сервис push этого стека — по http
+  export CAPPER_PUSH_ALLOW_HTTP=true
+  if [[ -f "$STATE_DIR/vapid.env" ]]; then set -a; . "$STATE_DIR/vapid.env"; set +a; fi
+}
+
+# Ключи VAPID стека: создаются один раз в E2E_STATE_DIR/vapid.env (без них push выключен)
+vapid_env() {
+  [[ -s "$STATE_DIR/vapid.env" ]] && return
+  (cd "$BACKEND" && "$PY" -m app.admin.cli generate-vapid --subject "mailto:$ADMIN_EMAIL") \
+    >"$STATE_DIR/vapid.env.tmp" || die "ключи VAPID не созданы"
+  mv "$STATE_DIR/vapid.env.tmp" "$STATE_DIR/vapid.env"
+  set -a; . "$STATE_DIR/vapid.env"; set +a
 }
 
 # Создать (drop=0) или удалить (drop=1) временную базу через служебную
@@ -149,6 +165,7 @@ cmd_up() {
   port_busy "$FAKE_PORT" && die "порт $FAKE_PORT занят (другой стек или поддельный Claude?)"
   mkdir -p "$STATE_DIR"
   backend_env
+  vapid_env
   trap cleanup EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
@@ -240,6 +257,6 @@ cmd_cli() {
 case "${1:-up}" in
   up) cmd_up ;;
   cli) shift; cmd_cli "$@" ;;
-  -h|--help|help) sed -n '2,30p' "${BASH_SOURCE[0]}" ;;
+  -h|--help|help) sed -n '2,34p' "${BASH_SOURCE[0]}" ;;
   *) die "неизвестная команда: $1 (up, cli)" ;;
 esac

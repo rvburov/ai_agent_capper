@@ -883,7 +883,7 @@
           "me"
         ],
         "summary": "Notification Prefs",
-        "description": "Виды уведомлений, которые человек может получать (у администратора — еще архив\nматчей и сигналы расхода ИИ), с «на сайте» и признаком «обязательное». Push — только\nпоказ (этап 6).",
+        "description": "Виды уведомлений, которые человек может получать (у администратора — еще архив\nматчей и сигналы расхода ИИ), с «на сайте», «push» и признаком «обязательное»;\npush_available — есть ли активная подписка push; тихие часы push.",
         "operationId": "notification_prefs_api_me_notification_prefs_get",
         "responses": {
           "200": {
@@ -913,7 +913,7 @@
           "me"
         ],
         "summary": "Update Notification Prefs",
-        "description": "Частичное обновление «на сайте» по видам. Обязательный вид выключить нельзя —\n422 notification.required; вида нет у человека — 422 notification.kind_unavailable.",
+        "description": "Частичное обновление «на сайте» и «push» по видам и тихих часов. Обязательный вид\nвыключить на сайте нельзя — 422 notification.required (push — можно); вида нет у\nчеловека — 422 notification.kind_unavailable; начало тихих часов равно концу — 422\nnotification.quiet_same.",
         "operationId": "update_notification_prefs_api_me_notification_prefs_put",
         "requestBody": {
           "content": {
@@ -1191,6 +1191,215 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/push-config": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Push Config",
+        "description": "Публичный ключ VAPID для подписки браузера; null — ключей на сервере нет, push не\nподдерживается сервером.",
+        "operationId": "push_config_api_me_push_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushConfigOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/push-subscriptions": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "List Subscriptions",
+        "description": "Устройства с push (активные подписки), новые сверху.",
+        "operationId": "list_subscriptions_api_me_push_subscriptions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushSubscriptionsOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Subscribe",
+        "description": "Подписка этого браузера, привязанная к текущему сеансу: выход, отзыв сеанса или\nего истечение выключают push на устройстве. Повтор той же подписки — та же строка\n(если браузер был у другого аккаунта или вошли заново — переходит к текущему сеансу).\nАктивных подписок не больше 10: самая старая отзывается. endpoint не https сервиса\npush или ключи не base64url нужной длины — 422 push.endpoint_invalid или\npush.keys_invalid; ключей VAPID на сервере нет — 409 push.not_configured.",
+        "operationId": "subscribe_api_me_push_subscriptions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushSubscriptionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushSubscriptionOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/push-subscriptions/{subscription_id}": {
+      "delete": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Revoke Subscription",
+        "description": "«Отключить» устройство: подписка отозвана. Чужая или несуществующая — 404\npush.subscription_not_found.",
+        "operationId": "revoke_subscription_api_me_push_subscriptions__subscription_id__delete",
+        "parameters": [
+          {
+            "name": "subscription_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Subscription Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/push-subscriptions/revoke": {
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Revoke By Endpoint",
+        "description": "Отзыв подписки этого браузера по endpoint: перед выходом из аккаунта и по\n«Выключить». Неизвестный или чужой endpoint — тоже 204, ничего не меняется.",
+        "operationId": "revoke_by_endpoint_api_me_push_subscriptions_revoke_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushRevokeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/push-subscriptions/test": {
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Send Test",
+        "description": "Тестовый push «Проверка: push работает» на все свои устройства (без тихих часов).\nsent — сколько сервисов push его приняли. Подписок нет — 409 push.no_subscriptions;\nчаще 5 раз в час — 429 push.test_limit; ключей VAPID нет — 409 push.not_configured.",
+        "operationId": "send_test_api_me_push_subscriptions_test_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushTestOut"
+                }
+              }
+            }
           },
           "4XX": {
             "description": "Ошибка: {error: {code, message}}",
@@ -3237,7 +3446,7 @@
           "admin"
         ],
         "summary": "List Messages",
-        "description": "Отправленные сообщения, новые сверху (не больше 50): кому, текст, когда, сколько\nполучили, кто отправил; recipients_all — сколько получит сообщение «всем» сейчас.",
+        "description": "Отправленные сообщения, новые сверху (не больше 50): кому, текст, когда, сколько\nполучили (и push), кто отправил; recipients_all — сколько получит сообщение «всем»\nсейчас, push_recipients_all — у скольких из них push включен.",
         "operationId": "list_messages_api_admin_messages_get",
         "responses": {
           "200": {
@@ -3267,7 +3476,7 @@
           "admin"
         ],
         "summary": "Send Message",
-        "description": "Сообщение (1–280 знаков) всем активным участникам (user_id = null) или одному —\nв центр уведомлений; запись message в журнал. preview=true — без отправки: кому и\nсколько получат. Получателя нет — 404 admin.message_recipient.",
+        "description": "Сообщение (1–280 знаков) всем активным участникам (user_id = null) или одному —\nв центр уведомлений и, с also_push (по умолчанию), push тем, у кого он включен; запись\nmessage в журнал. preview=true — без отправки: кому, сколько получат и у скольких из\nних push (push_recipients). Получателя нет — 404 admin.message_recipient.",
         "operationId": "send_message_api_admin_messages_post",
         "requestBody": {
           "content": {
@@ -19451,6 +19660,11 @@
             "type": "boolean",
             "title": "Preview",
             "default": false
+          },
+          "also_push": {
+            "type": "boolean",
+            "title": "Also Push",
+            "default": true
           }
         },
         "additionalProperties": false,
@@ -19459,7 +19673,7 @@
           "text"
         ],
         "title": "MessageIn",
-        "description": "Кому: всем (user_id = null) или одному участнику. preview — без отправки."
+        "description": "Кому: всем (user_id = null) или одному участнику. preview — без отправки.\nalso_push — «Также push» (этап 6, В8): тем, у кого push включен, придет и на телефон."
       },
       "MessageOut": {
         "properties": {
@@ -19523,6 +19737,14 @@
               }
             ],
             "title": "Actor Name"
+          },
+          "also_push": {
+            "type": "boolean",
+            "title": "Also Push"
+          },
+          "push_recipients": {
+            "type": "integer",
+            "title": "Push Recipients"
           }
         },
         "type": "object",
@@ -19534,7 +19756,9 @@
           "user_id",
           "recipient_name",
           "recipients",
-          "actor_name"
+          "actor_name",
+          "also_push",
+          "push_recipients"
         ],
         "title": "MessageOut",
         "description": "Отправленное сообщение (или что будет отправлено, sent = false): текст, кому\n(user_id null — всем), имя получателя, сколько получили, когда и кто отправил."
@@ -19551,15 +19775,20 @@
           "recipients_all": {
             "type": "integer",
             "title": "Recipients All"
+          },
+          "push_recipients_all": {
+            "type": "integer",
+            "title": "Push Recipients All"
           }
         },
         "type": "object",
         "required": [
           "items",
-          "recipients_all"
+          "recipients_all",
+          "push_recipients_all"
         ],
         "title": "MessagesOut",
-        "description": "Отправленные сообщения и сколько людей получит сообщение «всем» сейчас (по правилу\nсервера: активные, кроме вас) — число для переключателя «Всем участникам · N»."
+        "description": "Отправленные сообщения и сколько людей получит сообщение «всем» сейчас (по правилу\nсервера: активные, кроме вас) — число для переключателя «Всем участникам · N»;\npush_recipients_all — у скольких из них push включен («Push включен у N из M»)."
       },
       "MetricDiffOut": {
         "properties": {
@@ -20482,17 +20711,35 @@
             "title": "Kind"
           },
           "on_site": {
-            "type": "boolean",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "On Site"
+          },
+          "push": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Push"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "kind",
-          "on_site"
+          "kind"
         ],
-        "title": "NotificationPrefIn"
+        "title": "NotificationPrefIn",
+        "description": "Вид и что поменять: на сайте, push или оба (непереданное не меняется)."
       },
       "NotificationPrefOut": {
         "properties": {
@@ -20555,7 +20802,7 @@
           "new"
         ],
         "title": "NotificationPrefOut",
-        "description": "Вид уведомления в настройках. group — строка экрана (limit_80 и limit_100 — одна\nстрока); required — приходит всегда, выключить нельзя; admin — раздел «Для\nадминистратора»; push — только показ, push появится на этапе 6."
+        "description": "Вид уведомления в настройках. group — строка экрана (limit_80 и limit_100 — одна\nстрока); required — на сайте приходит всегда, выключить нельзя (push — можно); admin —\nраздел «Для администратора»; push — присылать ли push (по умолчанию да, кроме learning\nи ai_alert, В2)."
       },
       "NotificationPrefsIn": {
         "properties": {
@@ -20565,17 +20812,23 @@
             },
             "type": "array",
             "maxItems": 32,
-            "minItems": 1,
             "title": "Items"
+          },
+          "quiet_hours": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuietHoursIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "items"
-        ],
         "title": "NotificationPrefsIn",
-        "description": "Частичное обновление: только переданные виды."
+        "description": "Частичное обновление: только переданные виды и, если переданы, тихие часы. Нужно\nхотя бы одно из двух."
       },
       "NotificationPrefsOut": {
         "properties": {
@@ -20589,6 +20842,9 @@
           "push_available": {
             "type": "boolean",
             "title": "Push Available"
+          },
+          "quiet_hours": {
+            "$ref": "#/components/schemas/QuietHoursOut"
           },
           "alert_rules": {
             "anyOf": [
@@ -20608,11 +20864,12 @@
         "required": [
           "items",
           "push_available",
+          "quiet_hours",
           "alert_rules",
           "schedule"
         ],
         "title": "NotificationPrefsOut",
-        "description": "alert_rules — пороги сигналов расхода ИИ для подсказки (только у администратора,\nу участника null)."
+        "description": "alert_rules — пороги сигналов расхода ИИ для подсказки (только у администратора,\nу участника null). push_available — есть хоть одна активная подписка push: пока нет,\nстолбец «Push» неактивен (В5)."
       },
       "NotificationScheduleOut": {
         "properties": {
@@ -23592,6 +23849,160 @@
         "title": "PublicSettingsOut",
         "description": "Валюта программы (Р17): в ней показываются банки, ставки и прибыль у всех."
       },
+      "PushConfigOut": {
+        "properties": {
+          "vapid_public_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vapid Public Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vapid_public_key"
+        ],
+        "title": "PushConfigOut",
+        "description": "Публичный ключ VAPID (applicationServerKey для PushManager.subscribe); null — на\nсервере ключей нет, push не поддерживается сервером."
+      },
+      "PushKeysIn": {
+        "properties": {
+          "p256dh": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "P256Dh"
+          },
+          "auth": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Auth"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "p256dh",
+          "auth"
+        ],
+        "title": "PushKeysIn"
+      },
+      "PushRevokeIn": {
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Endpoint"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "endpoint"
+        ],
+        "title": "PushRevokeIn"
+      },
+      "PushSubscriptionIn": {
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Endpoint"
+          },
+          "keys": {
+            "$ref": "#/components/schemas/PushKeysIn"
+          }
+        },
+        "type": "object",
+        "required": [
+          "endpoint",
+          "keys"
+        ],
+        "title": "PushSubscriptionIn",
+        "description": "PushSubscription.toJSON() браузера: endpoint и ключи. Остальные поля (например,\nexpirationTime) не нужны и пропускаются. endpoint — https сервиса push браузера (на\nlocalhost и в тестах — и http), ключи — base64url; иначе 422."
+      },
+      "PushSubscriptionOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "device": {
+            "type": "string",
+            "title": "Device"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sent At"
+          },
+          "endpoint_hash": {
+            "type": "string",
+            "title": "Endpoint Hash"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "device",
+          "created_at",
+          "last_sent_at",
+          "endpoint_hash"
+        ],
+        "title": "PushSubscriptionOut",
+        "description": "Устройство с push: device — «iPhone · Safari» (неизвестное — «Браузер»), когда\nподключено и когда последний раз доставлен push; endpoint_hash — первые 16 hex\nsha256(endpoint)."
+      },
+      "PushSubscriptionsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PushSubscriptionOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "PushSubscriptionsOut",
+        "description": "Активные подписки, новые сверху."
+      },
+      "PushTestOut": {
+        "properties": {
+          "sent": {
+            "type": "integer",
+            "title": "Sent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sent"
+        ],
+        "title": "PushTestOut",
+        "description": "Сколько устройств приняли тестовый push (сервис push ответил 2xx)."
+      },
       "QuickCheckOut": {
         "properties": {
           "lesson_id": {
@@ -23712,6 +24123,57 @@
         ],
         "title": "QuickCheckOut",
         "description": "Быстрая проверка урока до запуска (цена по живым числам и худший случай) и после\n(eval_run_id, status). requests — запросов в пакете: по матчу с уроком и, где нет\nготового прогона без урока, еще по одному без него. reason — почему запустить нельзя\n(ключ errors.*): нет матчей, мало бюджета проверок, проверка уже идет, урок не готов."
+      },
+      "QuietHoursIn": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "start": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):(00|30)$",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):(00|30)$",
+            "title": "End"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled",
+          "start",
+          "end"
+        ],
+        "title": "QuietHoursIn",
+        "description": "Тихие часы целиком. Начало равно концу — 422 notification.quiet_same."
+      },
+      "QuietHoursOut": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "title": "End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "start",
+          "end"
+        ],
+        "title": "QuietHoursOut",
+        "description": "Тихие часы push по поясу пользователя (schedule.tz): с start до end push не\nприходят, кроме входа с нового устройства и неудачных попыток входа (В3)."
       },
       "RecalibrationOut": {
         "properties": {

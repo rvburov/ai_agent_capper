@@ -85,6 +85,15 @@ bash server-setup.sh --admin roman --domain capper.example.com \
    В `.env`: `BACKUP_AGE_RECIPIENTS=<публичный ключ владельца>,<публичный ключ сервера>` (строки `age1...`), `BACKUP_AGE_IDENTITY=<секретный ключ сервера>` (строка `AGE-SECRET-KEY-1...`). Копию расшифрует любой из двух ключей: даже если сервер пропадет целиком, ключ владельца остается.
 3. **S3 для копий вне сервера.** Hetzner Console → Object Storage → бакет в Helsinki (`hel1`), затем ключ доступа (S3 credentials). В `.env`: `BACKUP_S3_ENDPOINT=https://hel1.your-objectstorage.com`, `BACKUP_S3_REGION=hel1`, `BACKUP_S3_BUCKET`, `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY`. Подойдет любое S3-совместимое хранилище в ЕС. Без этих значений копии лежат только на сервере, в логе бэкапа будет предупреждение.
 
+4. **Push-уведомления (этап 6).** Ключи VAPID: без них сайт работает, но push выключен (в «Личный кабинет → Уведомления» — «не поддерживается сервером»). После первой сборки образов (раздел 5):
+
+   ```bash
+   docker compose run --rm --no-deps -T api python -m app.admin.cli generate-vapid --subject mailto:you@example.com >> .env
+   docker compose up -d api worker
+   ```
+
+   Команда печатает три строки — `CAPPER_VAPID_PUBLIC_KEY`, `CAPPER_VAPID_PRIVATE_KEY`, `CAPPER_VAPID_SUBJECT` (ваш email: по нему сервис push браузера свяжется с владельцем сайта). Закрытый ключ — секрет, как `CAPPER_MASTER_KEYS`: сохраните строку в менеджер паролей. Новые ключи отключают push на всех устройствах — его включают заново. Push на телефоне работает только на сайте с HTTPS и доменом (Caddy выпускает сертификат сам); на iPhone — только из приложения, установленного на экран «Домой» (iOS 16.4 и новее). Серверу нужен исходящий HTTPS к сервисам push браузеров: `fcm.googleapis.com` (Chrome, Android, Edge на Android), `*.push.services.mozilla.com` (Firefox), `*.push.apple.com` (Safari, iPhone), `*.notify.windows.com` (Edge на Windows); подписку на другой адрес сервер не примет.
+
 ## 5. Первый запуск
 
 ```bash
@@ -324,6 +333,20 @@ bash deploy/local.sh ml-recalibrate                # перекалиброва�
 Еженедельный отчет участнику воркер собирает сам: в понедельник в 07:00 по поясу участника (задача раз в час), один на неделю.
 
 На сервере те же команды: `docker compose exec api python -m app.admin.cli <команда>`.
+
+### Этап 6: push-уведомления и установка на телефон
+
+```bash
+bash deploy/local.sh up                  # сам дописывает ключи VAPID в deploy/.env.local, если их нет
+bash deploy/local.sh vapid-keys          # то же без перезапуска; покажет публичный ключ
+bash deploy/local.sh vapid-keys --print  # новые строки для deploy/.env сервера (ничего не меняет)
+```
+
+На `https://localhost` push проверяется в Chrome, Edge и Firefox этого же компьютера: «Личный кабинет → Уведомления» → «Включить push» → «Прислать тестовое». Браузер должен доверять сертификату Caddy (иначе service worker не регистрируется): в Chrome откройте сайт, примите предупреждение, либо добавьте корневой сертификат из контейнера (`docker compose -p capper-local cp caddy:/data/caddy/pki/authorities/local/root.crt .`) в доверенные. На телефоне push и установка работают только с настоящим доменом и HTTPS (раздел 4) — с `localhost` компьютера телефон их не получит.
+
+Push уходят от воркера (задача `send_push`), после записи уведомления. Тексты push — без сумм, банка и прибыли: «Ставка №75 рассчитана — откройте, чтобы посмотреть результат». В тихие часы участника (по умолчанию 23:00–08:00 по его поясу) push не уходят и потом не досылаются — уведомление остается в колокольчике; вход с нового устройства и неудачные попытки входа приходят всегда. Ответ сервиса push 404 или 410 — подписка отозвана; 429 и 5xx — один повтор через 30 секунд — 10 минут. Что ушло — в логе воркера (`worker.send_push`: sent, gone, failed, skipped).
+
+Service worker (`/sw.js`) и манифест (`/manifest.webmanifest`) Caddy отдает с `Cache-Control: no-cache`, манифест — с типом `application/manifest+json`: новая версия приложения доходит до установленного приложения при следующем открытии.
 
 ### Приемка этапа 3
 

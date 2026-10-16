@@ -105,13 +105,15 @@ MessageText = Annotated[
 
 
 class MessageIn(BaseModel):
-    """Кому: всем (user_id = null) или одному участнику. preview — без отправки."""
+    """Кому: всем (user_id = null) или одному участнику. preview — без отправки.
+    also_push — «Также push» (этап 6, В8): тем, у кого push включен, придет и на телефон."""
 
     model_config = ConfigDict(extra="forbid")
 
     text: MessageText
     user_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
     preview: bool = False
+    also_push: bool = True
 
 
 class MessageOut(BaseModel):
@@ -126,11 +128,19 @@ class MessageOut(BaseModel):
     recipient_name: str | None
     recipients: int
     actor_name: str | None
+    # «Также push» и у скольких получателей push включен (активная подписка и push
+    # сообщений администратора не выключен). Только число, без устройств (Р14). В
+    # предпросмотре — сколько получат push сейчас, у отправленного — скольким он ушел
+    # (0 без флажка; у сообщений до этапа 6 — 0)
+    also_push: bool
+    push_recipients: int
 
 
 class MessagesOut(BaseModel):
     """Отправленные сообщения и сколько людей получит сообщение «всем» сейчас (по правилу
-    сервера: активные, кроме вас) — число для переключателя «Всем участникам · N»."""
+    сервера: активные, кроме вас) — число для переключателя «Всем участникам · N»;
+    push_recipients_all — у скольких из них push включен («Push включен у N из M»)."""
 
     items: list[MessageOut]
     recipients_all: int
+    push_recipients_all: int

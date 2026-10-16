@@ -283,6 +283,7 @@ def test_worker_settings(settings: Settings) -> None:
         eval_job,
         recalibrate_job,
         weekly_job,
+        push_job,
     ) = functions
     assert (cleanup_job, update_job, reaper_job, deletion_job, alerts_job) == (
         cleanup_auth_records,
@@ -327,6 +328,10 @@ def test_worker_settings(settings: Settings) -> None:
     assert recalibrate_job is jobs.recalibrate_model
     # Волна 4: еженедельный отчет
     assert weekly_job is jobs.weekly_reports
+    # Этап 6: push (ставит notify после commit), без повтора arq — повтор подписок сам
+    assert isinstance(push_job, arq.worker.Function)
+    assert push_job.coroutine is jobs.send_push and push_job.name == "send_push"
+    assert push_job.max_tries == 1
     assert WorkerSettings.cron_jobs is not None
     (
         cleanup,

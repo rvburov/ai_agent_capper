@@ -29,6 +29,9 @@ dependencies = [
   "numpy>=2.5",
   # Файлы .xlsx tennis-data.co.uk (app/ingest)
   "openpyxl>=3.1.5",
+  # Push-уведомления браузера (этап 6): шифрование aes128gcm (RFC 8291) и подпись VAPID
+  # (RFC 8292); запрос к сервису push отправляет httpx (app/services/push.py)
+  "pywebpush>=2.5",
 ]
 
 [project.optional-dependencies]
@@ -84,6 +87,11 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 # у asyncpg нет аннотаций типов; в коде он нужен только тестам (создание базы)
 module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# у pywebpush, py_vapid и http_ece нет аннотаций типов (push, этап 6)
+module = ["pywebpush", "pywebpush.*", "py_vapid", "py_vapid.*", "http_ece", "http_ece.*"]
 ignore_missing_imports = true
 
 [tool.pydantic-mypy]

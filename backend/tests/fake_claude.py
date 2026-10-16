@@ -37,6 +37,9 @@ bad_scope — условие гипотезы не из словаря. Паке
 canceled (результат запроса пакета такого вида), step batch_create — ошибка из списка
 выше при отправке.
 
+Этап 6: в том же сервере — поддельный сервис push (tests/fake_push.py: /push/<id> и
+/_fake/push*), ответы сервера — с CORS «*».
+
 Запуск сервера:
     cd backend && .venv/bin/uvicorn tests.fake_claude:app --port 8099
     CAPPER_ANTHROPIC_BASE_URL=http://127.0.0.1:8099 (API и воркер)
@@ -55,9 +58,13 @@ from typing import Any
 
 import httpx2
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
+
+from tests import fake_push
 
 MODELS = ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-4-5")
 STEPS = ("parse", "news", "analysis", "postmortem")
@@ -974,5 +981,9 @@ app = Starlette(
         Route("/_fake/fail", _set_fail, methods=["POST"]),
         Route("/_fake/reset", _reset, methods=["POST"]),
         Route("/_fake/calls", _calls, methods=["GET"]),
-    ]
+        *fake_push.ROUTES,
+    ],
+    middleware=[
+        Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+    ],
 )

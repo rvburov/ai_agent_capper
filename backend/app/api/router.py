@@ -29,6 +29,7 @@ from app.api.routes import (
     lessons,
     me,
     players,
+    push,
     settings,
     strategy,
 )
@@ -42,6 +43,7 @@ api_router = APIRouter(responses=ERROR_RESPONSES)
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(me.router)
+api_router.include_router(push.router)
 api_router.include_router(bookmakers.router)
 api_router.include_router(settings.router)
 api_router.include_router(admin.router)

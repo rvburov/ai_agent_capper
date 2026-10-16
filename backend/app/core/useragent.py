@@ -3,6 +3,9 @@
 Имена браузеров и систем не переводятся, поэтому хранятся в БД как есть
 (sessions.device_label, trusted_devices.device_label). Не удалось узнать ни браузер,
 ни систему — пустая строка, и фронтенд показывает свою подпись «Неизвестное устройство».
+
+Для подписок push (этап 6) — устройство впереди и короче: «iPhone · Safari», «Mac ·
+Chrome» (push_device_parts); подпись собирает сервис push по ключам локали.
 """
 
 import re
@@ -26,6 +29,16 @@ _SYSTEMS = (
     ("Linux", re.compile(r"Linux|X11")),
 )
 
+# Устройство подписки push: iPhone и iPad отдельно, macOS — «Mac»
+_PUSH_SYSTEMS = (
+    ("iPhone", re.compile(r"iPhone|iPod")),
+    ("iPad", re.compile(r"iPad")),
+    ("Android", re.compile(r"Android")),
+    ("Windows", re.compile(r"Windows")),
+    ("Mac", re.compile(r"Mac OS X|Macintosh")),
+    ("Linux", re.compile(r"Linux|X11")),
+)
+
 
 def clip_user_agent(user_agent: str | None) -> str | None:
     if not user_agent:
@@ -39,3 +52,12 @@ def device_label(user_agent: str | None) -> str:
     browser = next((name for name, rx in _BROWSERS if rx.search(user_agent)), "")
     system = next((name for name, rx in _SYSTEMS if rx.search(user_agent)), "")
     return " · ".join(part for part in (browser, system) if part)
+
+
+def push_device_parts(user_agent: str | None) -> tuple[str, str]:
+    """(устройство, браузер) для списка подписок push; неизвестное — пустая строка."""
+    if not user_agent:
+        return "", ""
+    system = next((name for name, rx in _PUSH_SYSTEMS if rx.search(user_agent)), "")
+    browser = next((name for name, rx in _BROWSERS if rx.search(user_agent)), "")
+    return system, browser

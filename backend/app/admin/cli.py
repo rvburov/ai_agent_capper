@@ -38,6 +38,11 @@ Claude (этап 3):
 
     python -m app.admin.cli data-upload ФАЙЛ.xlsx
 
+Push-уведомления (этап 6): новые ключи VAPID — строки для .env (на сервере — deploy/.env,
+--subject mailto:<ваш email>); база не нужна:
+
+    python -m app.admin.cli generate-vapid [--subject mailto:admin@example.com]
+
 Пароль и ключ вводятся без отображения (getpass) или одной строкой из stdin
 (--password-stdin, --key-stdin) — так их не видно в истории команд и в списке процессов.
 Каждая команда, которая меняет пользователей, игроков или настройки агента, пишет
@@ -75,9 +80,11 @@ from app.agent import config as agent_config
 from app.agent.client import close_client
 from app.agent.errors import ClaudeStepError
 from app.agent.runs import list_prices
+from app.core.config import VAPID_SUBJECT
 from app.core.errors import AppError
 from app.core.i18n import t
 from app.core.security.passwords import check_new_password, hash_password_async
+from app.core.vapid import generate_keys as generate_vapid_keys
 from app.db.models import BetLeg, Match, OddsSnapshot, Player, Tournament, User
 from app.db.session import create_engine, create_sessionmaker, get_session
 from app.ingest import players_link
@@ -99,9 +106,12 @@ from app.services import (
     strategy_versions,
 )
 from app.services.app_settings import get_app_settings
+from app.services.push import drain as push_drain
 
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _NAME_MAX_LENGTH = 100
+# Контакт VAPID по умолчанию — для своего компьютера; на сервере — свой email
+DEFAULT_VAPID_SUBJECT = "mailto:admin@localhost"
 
 
 def _normalize_email(raw: str) -> str:
@@ -829,6 +839,18 @@ async def _elo_current(args: argparse.Namespace) -> None:
     _say(t("cli.elo_current_done", players=players_count, ranked=ranked))
 
 
+async def _generate_vapid(args: argparse.Namespace) -> None:
+    """Новая пара ключей VAPID: три строки для .env. Смена ключей отключает все подписки
+    push (браузеры подпишутся заново, когда человек включит push)."""
+    subject = str(args.subject).strip()
+    if not VAPID_SUBJECT.match(subject):
+        raise CliError("vapid_subject")
+    public, private = generate_vapid_keys()
+    _say(f"CAPPER_VAPID_PUBLIC_KEY={public}")
+    _say(f"CAPPER_VAPID_PRIVATE_KEY={private}")
+    _say(f"CAPPER_VAPID_SUBJECT={subject}")
+
+
 async def _data_upload(args: argparse.Namespace) -> None:
     """Файл tennis-data тем же кодом, что кнопка на сайте: загрузка в data_uploads, журнал
     (data_upload, source = terminal) и обработка сразу, без очереди воркера."""
@@ -1124,6 +1146,10 @@ def _add_player_commands(command: Callable[[str, str], argparse.ArgumentParser])
     current = command("elo-current", "elo_current")
     current.set_defaults(handler=_elo_current)
 
+    vapid = command("generate-vapid", "generate_vapid")
+    vapid.add_argument("--subject", default=DEFAULT_VAPID_SUBJECT, help=t("cli.help.vapid_subject"))
+    vapid.set_defaults(handler=_generate_vapid)
+
     upload = command("data-upload", "data_upload")
     upload.add_argument("file", help=t("cli.help.data_upload_file"))
     upload.set_defaults(handler=_data_upload)
@@ -1241,6 +1267,9 @@ async def _run(args: argparse.Namespace) -> None:
     try:
         await args.handler(args)
     finally:
+        # Push уведомлений, которые команда создала (расчет ставок и т. п.), — в очередь
+        # до выхода: после asyncio.run задачи постановки уже не выполнятся
+        await push_drain()
         await close_client()
 
 

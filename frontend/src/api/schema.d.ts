@@ -429,14 +429,16 @@ export interface paths {
         /**
          * Notification Prefs
          * @description Виды уведомлений, которые человек может получать (у администратора — еще архив
-         *     матчей и сигналы расхода ИИ), с «на сайте» и признаком «обязательное». Push — только
-         *     показ (этап 6).
+         *     матчей и сигналы расхода ИИ), с «на сайте», «push» и признаком «обязательное»;
+         *     push_available — есть ли активная подписка push; тихие часы push.
          */
         get: operations["notification_prefs_api_me_notification_prefs_get"];
         /**
          * Update Notification Prefs
-         * @description Частичное обновление «на сайте» по видам. Обязательный вид выключить нельзя —
-         *     422 notification.required; вида нет у человека — 422 notification.kind_unavailable.
+         * @description Частичное обновление «на сайте» и «push» по видам и тихих часов. Обязательный вид
+         *     выключить на сайте нельзя — 422 notification.required (push — можно); вида нет у
+         *     человека — 422 notification.kind_unavailable; начало тихих часов равно концу — 422
+         *     notification.quiet_same.
          */
         put: operations["update_notification_prefs_api_me_notification_prefs_put"];
         post?: never;
@@ -559,6 +561,120 @@ export interface paths {
          * @description Отменить удаление (в течение 7 дней). Запроса нет — 409 account.no_deletion.
          */
         delete: operations["cancel_deletion_api_me_deletion_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/push-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Push Config
+         * @description Публичный ключ VAPID для подписки браузера; null — ключей на сервере нет, push не
+         *     поддерживается сервером.
+         */
+        get: operations["push_config_api_me_push_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/push-subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Subscriptions
+         * @description Устройства с push (активные подписки), новые сверху.
+         */
+        get: operations["list_subscriptions_api_me_push_subscriptions_get"];
+        put?: never;
+        /**
+         * Subscribe
+         * @description Подписка этого браузера, привязанная к текущему сеансу: выход, отзыв сеанса или
+         *     его истечение выключают push на устройстве. Повтор той же подписки — та же строка
+         *     (если браузер был у другого аккаунта или вошли заново — переходит к текущему сеансу).
+         *     Активных подписок не больше 10: самая старая отзывается. endpoint не https сервиса
+         *     push или ключи не base64url нужной длины — 422 push.endpoint_invalid или
+         *     push.keys_invalid; ключей VAPID на сервере нет — 409 push.not_configured.
+         */
+        post: operations["subscribe_api_me_push_subscriptions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/push-subscriptions/{subscription_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke Subscription
+         * @description «Отключить» устройство: подписка отозвана. Чужая или несуществующая — 404
+         *     push.subscription_not_found.
+         */
+        delete: operations["revoke_subscription_api_me_push_subscriptions__subscription_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/push-subscriptions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke By Endpoint
+         * @description Отзыв подписки этого браузера по endpoint: перед выходом из аккаунта и по
+         *     «Выключить». Неизвестный или чужой endpoint — тоже 204, ничего не меняется.
+         */
+        post: operations["revoke_by_endpoint_api_me_push_subscriptions_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/push-subscriptions/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Test
+         * @description Тестовый push «Проверка: push работает» на все свои устройства (без тихих часов).
+         *     sent — сколько сервисов push его приняли. Подписок нет — 409 push.no_subscriptions;
+         *     чаще 5 раз в час — 429 push.test_limit; ключей VAPID нет — 409 push.not_configured.
+         */
+        post: operations["send_test_api_me_push_subscriptions_test_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1333,15 +1449,17 @@ export interface paths {
         /**
          * List Messages
          * @description Отправленные сообщения, новые сверху (не больше 50): кому, текст, когда, сколько
-         *     получили, кто отправил; recipients_all — сколько получит сообщение «всем» сейчас.
+         *     получили (и push), кто отправил; recipients_all — сколько получит сообщение «всем»
+         *     сейчас, push_recipients_all — у скольких из них push включен.
          */
         get: operations["list_messages_api_admin_messages_get"];
         put?: never;
         /**
          * Send Message
          * @description Сообщение (1–280 знаков) всем активным участникам (user_id = null) или одному —
-         *     в центр уведомлений; запись message в журнал. preview=true — без отправки: кому и
-         *     сколько получат. Получателя нет — 404 admin.message_recipient.
+         *     в центр уведомлений и, с also_push (по умолчанию), push тем, у кого он включен; запись
+         *     message в журнал. preview=true — без отправки: кому, сколько получат и у скольких из
+         *     них push (push_recipients). Получателя нет — 404 admin.message_recipient.
          */
         post: operations["send_message_api_admin_messages_post"];
         delete?: never;
@@ -6862,6 +6980,7 @@ export interface components {
         /**
          * MessageIn
          * @description Кому: всем (user_id = null) или одному участнику. preview — без отправки.
+         *     also_push — «Также push» (этап 6, В8): тем, у кого push включен, придет и на телефон.
          */
         MessageIn: {
             /** Text */
@@ -6873,6 +6992,11 @@ export interface components {
              * @default false
              */
             preview: boolean;
+            /**
+             * Also Push
+             * @default true
+             */
+            also_push: boolean;
         };
         /**
          * MessageOut
@@ -6899,17 +7023,24 @@ export interface components {
             recipients: number;
             /** Actor Name */
             actor_name: string | null;
+            /** Also Push */
+            also_push: boolean;
+            /** Push Recipients */
+            push_recipients: number;
         };
         /**
          * MessagesOut
          * @description Отправленные сообщения и сколько людей получит сообщение «всем» сейчас (по правилу
-         *     сервера: активные, кроме вас) — число для переключателя «Всем участникам · N».
+         *     сервера: активные, кроме вас) — число для переключателя «Всем участникам · N»;
+         *     push_recipients_all — у скольких из них push включен («Push включен у N из M»).
          */
         MessagesOut: {
             /** Items */
             items: components["schemas"]["MessageOut"][];
             /** Recipients All */
             recipients_all: number;
+            /** Push Recipients All */
+            push_recipients_all: number;
         };
         /**
          * MetricDiffOut
@@ -7228,7 +7359,10 @@ export interface components {
             /** Outcome */
             outcome?: ("won" | "lost" | "void") | null;
         };
-        /** NotificationPrefIn */
+        /**
+         * NotificationPrefIn
+         * @description Вид и что поменять: на сайте, push или оба (непереданное не меняется).
+         */
         NotificationPrefIn: {
             /**
              * Kind
@@ -7236,13 +7370,16 @@ export interface components {
              */
             kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert" | "bet_needs_result" | "settle_conflict" | "weekly_report" | "learning";
             /** On Site */
-            on_site: boolean;
+            on_site?: boolean | null;
+            /** Push */
+            push?: boolean | null;
         };
         /**
          * NotificationPrefOut
          * @description Вид уведомления в настройках. group — строка экрана (limit_80 и limit_100 — одна
-         *     строка); required — приходит всегда, выключить нельзя; admin — раздел «Для
-         *     администратора»; push — только показ, push появится на этапе 6.
+         *     строка); required — на сайте приходит всегда, выключить нельзя (push — можно); admin —
+         *     раздел «Для администратора»; push — присылать ли push (по умолчанию да, кроме learning
+         *     и ai_alert, В2).
          */
         NotificationPrefOut: {
             /**
@@ -7265,22 +7402,26 @@ export interface components {
         };
         /**
          * NotificationPrefsIn
-         * @description Частичное обновление: только переданные виды.
+         * @description Частичное обновление: только переданные виды и, если переданы, тихие часы. Нужно
+         *     хотя бы одно из двух.
          */
         NotificationPrefsIn: {
             /** Items */
-            items: components["schemas"]["NotificationPrefIn"][];
+            items?: components["schemas"]["NotificationPrefIn"][];
+            quiet_hours?: components["schemas"]["QuietHoursIn"] | null;
         };
         /**
          * NotificationPrefsOut
          * @description alert_rules — пороги сигналов расхода ИИ для подсказки (только у администратора,
-         *     у участника null).
+         *     у участника null). push_available — есть хоть одна активная подписка push: пока нет,
+         *     столбец «Push» неактивен (В5).
          */
         NotificationPrefsOut: {
             /** Items */
             items: components["schemas"]["NotificationPrefOut"][];
             /** Push Available */
             push_available: boolean;
+            quiet_hours: components["schemas"]["QuietHoursOut"];
             alert_rules: components["schemas"]["AlertRulesOut"] | null;
             schedule: components["schemas"]["NotificationScheduleOut"];
         };
@@ -8222,6 +8363,75 @@ export interface components {
             currency: "RUB" | "USD" | "EUR";
         };
         /**
+         * PushConfigOut
+         * @description Публичный ключ VAPID (applicationServerKey для PushManager.subscribe); null — на
+         *     сервере ключей нет, push не поддерживается сервером.
+         */
+        PushConfigOut: {
+            /** Vapid Public Key */
+            vapid_public_key: string | null;
+        };
+        /** PushKeysIn */
+        PushKeysIn: {
+            /** P256Dh */
+            p256dh: string;
+            /** Auth */
+            auth: string;
+        };
+        /** PushRevokeIn */
+        PushRevokeIn: {
+            /** Endpoint */
+            endpoint: string;
+        };
+        /**
+         * PushSubscriptionIn
+         * @description PushSubscription.toJSON() браузера: endpoint и ключи. Остальные поля (например,
+         *     expirationTime) не нужны и пропускаются. endpoint — https сервиса push браузера (на
+         *     localhost и в тестах — и http), ключи — base64url; иначе 422.
+         */
+        PushSubscriptionIn: {
+            /** Endpoint */
+            endpoint: string;
+            keys: components["schemas"]["PushKeysIn"];
+        };
+        /**
+         * PushSubscriptionOut
+         * @description Устройство с push: device — «iPhone · Safari» (неизвестное — «Браузер»), когда
+         *     подключено и когда последний раз доставлен push; endpoint_hash — первые 16 hex
+         *     sha256(endpoint).
+         */
+        PushSubscriptionOut: {
+            /** Id */
+            id: number;
+            /** Device */
+            device: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Last Sent At */
+            last_sent_at: string | null;
+            /** Endpoint Hash */
+            endpoint_hash: string;
+        };
+        /**
+         * PushSubscriptionsOut
+         * @description Активные подписки, новые сверху.
+         */
+        PushSubscriptionsOut: {
+            /** Items */
+            items: components["schemas"]["PushSubscriptionOut"][];
+        };
+        /**
+         * PushTestOut
+         * @description Сколько устройств приняли тестовый push (сервис push ответил 2xx).
+         */
+        PushTestOut: {
+            /** Sent */
+            sent: number;
+        };
+        /**
          * QuickCheckOut
          * @description Быстрая проверка урока до запуска (цена по живым числам и худший случай) и после
          *     (eval_run_id, status). requests — запросов в пакете: по матчу с уроком и, где нет
@@ -8263,6 +8473,31 @@ export interface components {
             eval_run_id: number | null;
             /** Status */
             status: ("pending" | "running" | "done" | "failed") | null;
+        };
+        /**
+         * QuietHoursIn
+         * @description Тихие часы целиком. Начало равно концу — 422 notification.quiet_same.
+         */
+        QuietHoursIn: {
+            /** Enabled */
+            enabled: boolean;
+            /** Start */
+            start: string;
+            /** End */
+            end: string;
+        };
+        /**
+         * QuietHoursOut
+         * @description Тихие часы push по поясу пользователя (schedule.tz): с start до end push не
+         *     приходят, кроме входа с нового устройства и неудачных попыток входа (В3).
+         */
+        QuietHoursOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Start */
+            start: string;
+            /** End */
+            end: string;
         };
         /**
          * RecalibrationOut
@@ -11201,6 +11436,186 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    push_config_api_me_push_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushConfigOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_subscriptions_api_me_push_subscriptions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushSubscriptionsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    subscribe_api_me_push_subscriptions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PushSubscriptionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushSubscriptionOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    revoke_subscription_api_me_push_subscriptions__subscription_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subscription_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    revoke_by_endpoint_api_me_push_subscriptions_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PushRevokeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    send_test_api_me_push_subscriptions_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushTestOut"];
+                };
             };
             /** @description Ошибка: {error: {code, message}} */
             "4XX": {

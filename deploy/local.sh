@@ -52,6 +52,10 @@
 #                                           на этом же PostgreSQL, синтетика (10 тыс. ставок, 100 тыс.
 #                                           вызовов Claude), замер, база удаляется. Рабочую базу не
 #                                           трогает. Отчет — deploy/reports/perf-ДАТА.md
+#   bash deploy/local.sh vapid-keys [--print]
+#                                           ключи VAPID для push-уведомлений: up добавляет их в
+#                                           deploy/.env.local сам; --print — новые строки для .env
+#                                           сервера, ничего не меняя (замените email на свой)
 #   bash deploy/local.sh backup             ночной бэкап вручную и проверка восстановления
 #   bash deploy/local.sh restore latest | --list | <вид>/<файл>
 #                                           восстановить рабочую базу из копии
@@ -130,6 +134,32 @@ ensure_backup_keys() {
   printf 'BACKUP_AGE_RECIPIENTS=%s\nBACKUP_AGE_IDENTITY=%s\n' "$pub" "$sec" >> "$ENV_FILE"
 }
 
+# Ключи VAPID для push (этап 6): без них push выключен. Создаются один раз командой
+# generate-vapid в контейнере api и дописываются в .env.local; после смены ключей push
+# включают на устройствах заново
+ensure_vapid() {
+  grep -q '^CAPPER_VAPID_PRIVATE_KEY=.' "$ENV_FILE" && return
+  say "Создаю ключи VAPID для push-уведомлений"
+  local out
+  out="$(dc run --rm --no-deps -T api python -m app.admin.cli generate-vapid --subject mailto:admin@localhost)" \
+    || die "не удалось создать ключи VAPID: $out"
+  grep -q '^CAPPER_VAPID_PRIVATE_KEY=.' <<<"$out" || die "не удалось создать ключи VAPID: $out"
+  printf '%s\n' "$out" >> "$ENV_FILE"
+}
+
+cmd_vapid_keys() {
+  need_docker
+  ensure_env
+  if [[ "${1:-}" == --print ]]; then
+    dc run --rm --no-deps -T api python -m app.admin.cli generate-vapid --subject mailto:you@example.com
+    return
+  fi
+  ensure_vapid
+  printf 'Ключи VAPID — в %s. Публичный: %s\n' "$ENV_FILE" \
+    "$(sed -n 's/^CAPPER_VAPID_PUBLIC_KEY=//p' "$ENV_FILE")"
+  echo "Чтобы API и воркер их увидели: bash deploy/local.sh up"
+}
+
 wait_health() {
   say "Жду, пока $URL/api/health ответит"
   local i body=""
@@ -154,6 +184,7 @@ cmd_up() {
   say "Сборка образов"
   dc build
   ensure_backup_keys
+  ensure_vapid
   say "База и Redis"
   dc up -d --wait postgres redis
   say "Миграции базы"
@@ -429,11 +460,12 @@ case "${1:-}" in
   eval-freeze|eval-cancel|postmortems|lessons-check|ml-recalibrate)
     dc exec -T api python -m app.admin.cli "$@" ;;
   perf) shift; cmd_perf "$@" ;;
+  vapid-keys) shift; cmd_vapid_keys "$@" ;;
   backup) cmd_backup ;;
   restore) shift; cmd_restore "$@" ;;
   status) dc ps ;;
   logs) shift; dc logs -f --tail 200 "$@" ;;
   down) dc down ;;
   wipe) cmd_wipe ;;
-  *) sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,64p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

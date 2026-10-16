@@ -16,7 +16,8 @@ router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(requir
 @router.get("/messages")
 async def list_messages(db: DbSession, admin: AdminUser) -> MessagesOut:
     """Отправленные сообщения, новые сверху (не больше 50): кому, текст, когда, сколько
-    получили, кто отправил; recipients_all — сколько получит сообщение «всем» сейчас."""
+    получили (и push), кто отправил; recipients_all — сколько получит сообщение «всем»
+    сейчас, push_recipients_all — у скольких из них push включен."""
     return await admin_messages.history(db, sender=admin)
 
 
@@ -25,8 +26,15 @@ async def send_message(
     db: DbSession, admin: AdminUser, ip: ClientIp, body: MessageIn
 ) -> MessageOut:
     """Сообщение (1–280 знаков) всем активным участникам (user_id = null) или одному —
-    в центр уведомлений; запись message в журнал. preview=true — без отправки: кому и
-    сколько получат. Получателя нет — 404 admin.message_recipient."""
+    в центр уведомлений и, с also_push (по умолчанию), push тем, у кого он включен; запись
+    message в журнал. preview=true — без отправки: кому, сколько получат и у скольких из
+    них push (push_recipients). Получателя нет — 404 admin.message_recipient."""
     return await admin_messages.send(
-        db, text=body.text, user_id=body.user_id, actor=admin, preview=body.preview, ip=ip
+        db,
+        text=body.text,
+        user_id=body.user_id,
+        actor=admin,
+        preview=body.preview,
+        ip=ip,
+        also_push=body.also_push,
     )

@@ -7,8 +7,9 @@
 Только свое: каждая таблица выбирается по id вошедшего. Колонки перечислены явно, поэтому
 в экспорт не попадают хэш пароля, секрет 2FA, резервные коды, токены сеансов и устройств и
 ключи Claude в любом виде (даже последние 4 символа); тексты промптов в agent_runs не
-хранятся. Общая база игроков, матчей и новостей в архив не входит — она общая для всех;
-у событий ставок есть имена игроков и день матча.
+хранятся. У подписок push (этап 6) — устройство и даты, без адреса и ключей подписки: по ним
+можно слать push на устройство. Общая база игроков, матчей и новостей в архив не входит —
+она общая для всех; у событий ставок есть имена игроков и день матча.
 """
 
 import csv
@@ -17,7 +18,7 @@ import json
 import zipfile
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
 
@@ -56,6 +57,7 @@ from app.db.models import (
     PlayLimit,
     Postmortem,
     Prediction,
+    PushSubscription,
     StrategyVersion,
     TrustedDevice,
     User,
@@ -99,6 +101,9 @@ def _profile(uid: int) -> _Query:
         User.created_at,
         User.last_login_at,
         User.deletion_requested_at,
+        User.quiet_enabled,
+        User.quiet_start,
+        User.quiet_end,
     ).where(User.id == uid)
 
 
@@ -398,6 +403,21 @@ def _notification_prefs(uid: int) -> _Query:
     )
 
 
+def _push_subscriptions(uid: int) -> _Query:
+    """Устройства с push (и отозванные): без endpoint и ключей подписки."""
+    return (
+        select(
+            PushSubscription.id,
+            PushSubscription.device,
+            PushSubscription.created_at,
+            PushSubscription.last_sent_at,
+            PushSubscription.revoked_at,
+        )
+        .where(PushSubscription.user_id == uid)
+        .order_by(PushSubscription.id)
+    )
+
+
 def _notifications(uid: int) -> _Query:
     return (
         select(
@@ -476,6 +496,7 @@ TABLES: tuple[_Table, ...] = (
     _Table("ai_runs", _agent_runs),
     _Table("ai_limit", _ai_limit),
     _Table("notification_prefs", _notification_prefs),
+    _Table("push_subscriptions", _push_subscriptions),
     _Table("notifications", _notifications),
     _Table("login_events", _logins),
     _Table("sessions", _sessions),
@@ -488,7 +509,7 @@ def _plain(value: Any) -> Any:
     """Значение для JSON: деньги и кэфы — строкой (точность не теряется), время — ISO."""
     if isinstance(value, Decimal):
         return str(value)
-    if isinstance(value, datetime | date):
+    if isinstance(value, datetime | date | time):
         return value.isoformat()
     return value
 

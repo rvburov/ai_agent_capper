@@ -56,6 +56,12 @@ tennis-data», если его не загружали больше 7 дней (
 (app/services/lesson_quick.py). check_lessons (раз в сутки): свои случаи гипотез и
 проверка на архиве на пороге; recheck_lessons (1-го числа): перепроверка уроков
 (app/services/lessons.py).
+
+Этап 6: send_push — push-уведомление браузера по одному уведомлению (ставит notify после
+commit, app/services/push.py). Подписки, которым сервис push ответил 429 или 5xx (или не
+ответил), повторяются один раз — новой задачей с этими подписками через Retry-After
+(от 30 секунд до 10 минут); после второго сбоя — пропуск, уведомление остается в
+колокольчике.
 """
 
 from dataclasses import asdict, dataclass
@@ -93,6 +99,7 @@ from app.services import (
     recalibration,
     weekly_report,
 )
+from app.services import push as push_service
 from app.services.bank import user_zone
 from app.services.claude_key import key_for
 from app.services.data_status import (
@@ -657,3 +664,38 @@ async def weekly_reports(ctx: dict[Any, Any]) -> list[int]:
     if made:
         log.info("worker.weekly_reports", reports=len(made))
     return made
+
+
+# --- push-уведомления (этап 6) ---
+
+
+async def send_push(
+    ctx: dict[Any, Any],
+    message: dict[str, Any],
+    attempt: int = 0,
+    only: list[int] | None = None,
+) -> dict[str, Any]:
+    """Задача arq: push одного уведомления на устройства человека (attempt 1 — повтор
+    подписок only после 429 и 5xx)."""
+    push = push_service.PushMessage.from_job(message)
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        result = await push_service.send_message(db, push, only=only)
+    if result.retry_ids and attempt == 0:
+        await ctx["redis"].enqueue_job(
+            push_service.PUSH_JOB,
+            message,
+            1,
+            list(result.retry_ids),
+            _defer_by=result.retry_after,
+        )
+    log.info(
+        "worker.send_push",
+        kind=push.kind,
+        attempt=attempt,
+        sent=result.sent,
+        gone=result.gone,
+        failed=result.failed,
+        skipped=result.skipped,
+    )
+    return asdict(result)

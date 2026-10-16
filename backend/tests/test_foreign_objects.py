@@ -28,6 +28,7 @@ from app.db.models import (
     Lesson,
     LessonWatch,
     Notification,
+    PushSubscription,
     StrategyVersion,
     TrustedDevice,
     UserSession,
@@ -101,6 +102,23 @@ async def _notification(env: Env, owner: MadeUser) -> int:
 async def _notification_unread(db: AsyncSession, row_id: int) -> bool:
     row = await db.get_one(Notification, row_id, populate_existing=True)
     return row.read_at is None
+
+
+async def _push_subscription(env: Env, owner: MadeUser) -> int:
+    row = PushSubscription(
+        user_id=owner.id,
+        endpoint=f"https://fcm.googleapis.com/fcm/send/owner-{owner.id}",
+        p256dh="p",
+        auth="a",
+    )
+    env.db.add(row)
+    await env.db.commit()
+    return row.id
+
+
+async def _push_subscription_active(db: AsyncSession, row_id: int) -> bool:
+    row = await db.get_one(PushSubscription, row_id, populate_existing=True)
+    return row.revoked_at is None
 
 
 async def _analysis(env: Env, owner: MadeUser) -> int:
@@ -195,6 +213,10 @@ FOREIGN_CASES: dict[tuple[str, str], tuple[Create, Untouched]] = {
     ("POST", "/api/me/notifications/{notification_id}/read"): (
         _notification,
         _notification_unread,
+    ),
+    ("DELETE", "/api/me/push-subscriptions/{subscription_id}"): (
+        _push_subscription,
+        _push_subscription_active,
     ),
     ("GET", "/api/analyses/{analysis_id}"): (_analysis, _analysis_untouched),
     ("GET", "/api/analyses/{analysis_id}/events"): (_analysis, _analysis_untouched),

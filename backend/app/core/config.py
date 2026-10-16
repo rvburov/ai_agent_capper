@@ -8,6 +8,7 @@
 import base64
 import binascii
 import hashlib
+import re
 from functools import lru_cache
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -16,6 +17,7 @@ from pydantic import Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.i18n import t
+from app.core.vapid import keys_match
 
 # Значения только для разработки и тестов, они лежат в открытом репозитории. Годятся только
 # для запуска на http://localhost; в prod и на любом другом адресе нужны свои ключи.
@@ -23,6 +25,18 @@ _DEV_SECRET_KEY = b"capper-dev-secret-key-not-for-production"
 _DEV_MASTER_KEY = hashlib.sha256(b"capper-dev-master-key-not-for-production").digest()
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 MIN_SECRET_KEY_LENGTH = 32
+# Контакт VAPID (RFC 8292): mailto: с адресом почты или https:// с адресом сайта без пути —
+# та же проверка, что у подписи py_vapid
+VAPID_SUBJECT = re.compile(
+    r"^(mailto:[^@\s]+@(localhost|[\w%-]+(\.[\w%-]+)+)|https://(localhost|[\w-]+\.[\w.-]+))$"
+)
+# Серверы push браузеров (Web Push): Chrome, Android, Opera, Яндекс — FCM, Firefox — Mozilla,
+# Safari — Apple, Edge — Windows. Подписка на другой адрес не принимается: сервер не шлет
+# запросы куда попало. Совпадение — сам адрес или его поддомен
+DEFAULT_PUSH_HOSTS = (
+    "fcm.googleapis.com,android.googleapis.com,push.services.mozilla.com,"
+    "push.apple.com,notify.windows.com"
+)
 
 
 def is_local_origin(origin: str) -> bool:
@@ -94,6 +108,19 @@ class Settings(BaseSettings):
     # сервер tests/fake_claude.py. В prod — только https (ключ уходит в заголовке)
     anthropic_base_url: str = "https://api.anthropic.com"
 
+    # Push-уведомления браузера (Web Push, этап 6): ключи VAPID. Без них приложение работает,
+    # push выключен (GET /api/me/push-config отвечает null). Новые ключи:
+    # python -m app.admin.cli generate-vapid. Закрытый ключ в логи и ответы не попадает
+    vapid_public_key: str = ""
+    vapid_private_key: SecretStr = SecretStr("")
+    # Контакт для сервисов push: mailto:<email администратора> или https://<сайт>
+    vapid_subject: str = ""
+    # Подписка с адресом http:// и на любом сервере — только localhost, тесты и стек
+    # сквозных тестов (поддельный сервис push). В prod запрещено
+    push_allow_http: bool = False
+    # Серверы push, которым приложение шлет уведомления, через запятую
+    push_service_hosts: str = DEFAULT_PUSH_HOSTS
+
     # Только для тестов: подключение к служебной базе, из которой создается тестовая
     test_admin_database_url: str = "postgresql://capper:capper@localhost:5432/postgres"
 
@@ -108,8 +135,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_secrets(self) -> "Settings":
+        self._check_vapid()
         if self.env != "prod":
             return self._check_dev_keys()
+        if self.push_allow_http:
+            raise ValueError(t("config.push_allow_http_prod"))
         if len(self.secret_key.get_secret_value()) < MIN_SECRET_KEY_LENGTH:
             raise ValueError(t("config.secret_key_required"))
         if not self.master_keys.get_secret_value().strip():
@@ -134,6 +164,33 @@ class Settings(BaseSettings):
             raise ValueError(t("config.dev_keys_local_only", name="CAPPER_MASTER_KEYS"))
         parse_master_keys(self.master_keys.get_secret_value())
         return self
+
+    def _check_vapid(self) -> None:
+        """Ключи VAPID: все три настройки или ни одной; ключи — пара P-256."""
+        values = (
+            self.vapid_public_key.strip(),
+            self.vapid_private_key.get_secret_value().strip(),
+            self.vapid_subject.strip(),
+        )
+        if not any(values):
+            return
+        if not all(values):
+            raise ValueError(t("config.vapid_incomplete"))
+        if not keys_match(values[0], values[1]):
+            raise ValueError(t("config.vapid_keys"))
+        if not VAPID_SUBJECT.match(values[2]):
+            raise ValueError(t("config.vapid_subject"))
+
+    @property
+    def push_enabled(self) -> bool:
+        """Push включен: ключи VAPID заданы (их проверяет _check_vapid)."""
+        return bool(self.vapid_public_key.strip())
+
+    @property
+    def push_hosts(self) -> tuple[str, ...]:
+        return tuple(
+            host.strip().lower() for host in self.push_service_hosts.split(",") if host.strip()
+        )
 
     @property
     def secret_key_bytes(self) -> bytes:

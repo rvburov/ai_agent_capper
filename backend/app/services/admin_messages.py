@@ -4,12 +4,14 @@ admin_message всем или одному участнику.
 Получатели — активные пользователи (не заблокированные и не удаленные), кроме самого
 отправителя. Сообщение администратора приходит всегда: выключить его в настройках нельзя.
 Отправленные — те же записи message, что в журнале администратора: текст, кому, сколько
-получили. Push появится на этапе 6 и будет читать те же уведомления.
+получили. Этап 6 (В8): флажок «Также push» (по умолчанию включен) — сообщение уходит и
+push тем, у кого он включен; администратор видит только их число (Р14), в журнал пишутся
+флажок и это число.
 """
 
 from collections.abc import Sequence
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -18,7 +20,8 @@ from app.db.models import AdminAuditLog, User
 from app.schemas.admin_settings import MessageOut, MessagesOut
 from app.services.access_codes import person_name
 from app.services.audit import write_audit
-from app.services.notifications import notify
+from app.services.notifications import create as create_notification
+from app.services.push import users_with_push
 from app.services.sessions import utcnow
 
 HISTORY_LIMIT = 50
@@ -44,16 +47,19 @@ async def send(
     actor: User,
     preview: bool,
     ip: str | None,
+    also_push: bool = True,
 ) -> MessageOut:
     """Отправить сообщение (или только показать, кому уйдет, preview). Одному — только
     активному участнику, не себе (иначе 404 admin.message_recipient); всем — если
-    получателей нет, 409 admin.message_no_recipients. Делает commit."""
+    получателей нет, 409 admin.message_no_recipients. also_push — и push тем, у кого он
+    включен. Делает commit."""
     people = await _recipients(db, actor, user_id)
     if user_id is not None and not people:
         raise AppError(404, "admin.message_recipient")
     if not people:
         raise AppError(409, "admin.message_no_recipients")
     recipient_name = people[0].display_name if user_id is not None else None
+    with_push = await users_with_push(db, [person.id for person in people], "admin_message")
     if preview:
         return MessageOut(
             id=None,
@@ -64,9 +70,18 @@ async def send(
             recipient_name=recipient_name,
             recipients=len(people),
             actor_name=actor.display_name,
+            also_push=also_push,
+            push_recipients=with_push,
         )
     for person in people:
-        await notify(db, user_id=person.id, kind="admin_message", text=text)
+        await create_notification(
+            db,
+            user_id=person.id,
+            kind="admin_message",
+            params={"text": text},
+            push=also_push,
+        )
+    pushed = with_push if also_push else 0
     entry = await write_audit(
         db,
         action="message",
@@ -76,6 +91,8 @@ async def send(
             "text": text,
             "to": "one" if user_id is not None else "all",
             "recipients": len(people),
+            "also_push": also_push,
+            "push_recipients": pushed,
         },
         ip=ip,
     )
@@ -89,6 +106,8 @@ async def send(
         recipient_name=recipient_name,
         recipients=len(people),
         actor_name=actor.display_name,
+        also_push=also_push,
+        push_recipients=pushed,
     )
 
 
@@ -130,7 +149,13 @@ async def history(db: AsyncSession, *, sender: User, limit: int = HISTORY_LIMIT)
                 ),
                 recipients=int(details.get("recipients", 0)),
                 actor_name=person_name(entry.actor_id, actor_name, actor_status) or None,
+                also_push=bool(details.get("also_push", False)),
+                push_recipients=int(details.get("push_recipients", 0)),
             )
         )
-    everyone = await db.scalar(select(func.count(User.id)).where(*_recipient_filter(sender)))
-    return MessagesOut(items=items, recipients_all=int(everyone or 0))
+    everyone = list(await db.scalars(select(User.id).where(*_recipient_filter(sender))))
+    return MessagesOut(
+        items=items,
+        recipients_all=len(everyone),
+        push_recipients_all=await users_with_push(db, everyone, "admin_message"),
+    )
