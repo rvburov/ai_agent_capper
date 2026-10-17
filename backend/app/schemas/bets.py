@@ -9,9 +9,17 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from app.schemas.analyses import DecimalOut, FormCurrency, Market, Surface
+from app.schemas.common import without_as_user
 
 OddsTakenIn = Annotated[Decimal, Field(gt=0, max_digits=6, decimal_places=3)]
 StakeIn = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=2)]
@@ -158,6 +166,11 @@ class BetFiltersIn(BaseModel):
     surface: list[SurfaceFilter] = Field(default_factory=list, max_length=5)
     source: BetSource | None = None
     q: SearchText | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_as_user(cls, data: Any) -> Any:
+        return without_as_user(data)
 
 
 class BetPageIn(BetFiltersIn):

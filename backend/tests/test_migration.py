@@ -1257,3 +1257,36 @@ async def test_stage6_migration_push_and_quiet_hours(settings: Settings) -> None
                 await conn.run_sync(run_alembic_upgrade, "head")
         finally:
             await engine.dispose()
+
+
+async def test_member_view_audit_migration(settings: Settings) -> None:
+    """0010 → 0011 (Р27): журнал принимает member_view и member_export, прежние записи
+    остаются. Откат до 0010 удаляет только их (прежний CHECK их не пропустит), повторный
+    upgrade проходит."""
+    inserts = [
+        f"INSERT INTO admin_audit_log (action, details) VALUES ('{action}', '{{\"user_id\": 1}}')"
+        for action in ("member_view", "member_export")
+    ]
+    async with _temp_database(settings, "r27audit") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0010")
+                await conn.execute(
+                    text("INSERT INTO admin_audit_log (action, details) VALUES ('message', '{}')")
+                )
+                for insert in inserts:
+                    assert await _refused(conn, insert)
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                for insert in inserts:
+                    await conn.execute(text(insert))
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0010")
+            async with engine.begin() as conn:
+                actions = await conn.scalars(text("SELECT action FROM admin_audit_log"))
+                assert list(actions) == ["message"]
+                await conn.run_sync(run_alembic_upgrade, "head")
+        finally:
+            await engine.dispose()

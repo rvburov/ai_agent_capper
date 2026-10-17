@@ -2,14 +2,15 @@
 
 GET /api/me/bookmakers — как раньше, только названия для выбора в формах «Нового анализа»
 и ставки (скрытые не предлагаются). Список кабинета с id, скрытыми и числом ставок —
-GET /api/me/bookmakers/list. Чужой букмекер — 404, как несуществующий.
+GET /api/me/bookmakers/list. Чужой букмекер — 404, как несуществующий. Оба GET читает и
+администратор с as_user (Р27, только просмотр).
 """
 
 from typing import Annotated
 
 from fastapi import APIRouter, Path, Response, status
 
-from app.core.deps import CurrentUser, DbSession
+from app.core.deps import AS_USER_DOC, CurrentUser, DbSession, ViewBank
 from app.schemas.cabinet import (
     BookmakerCreateIn,
     BookmakerOut,
@@ -23,16 +24,16 @@ router = APIRouter(prefix="/me/bookmakers", tags=["me"])
 RowId = Annotated[int, Path(ge=1, le=2**63 - 1)]
 
 
-@router.get("")
-async def bookmaker_names(user: CurrentUser, db: DbSession) -> list[str]:
+@router.get("", openapi_extra=AS_USER_DOC)
+async def bookmaker_names(viewed: ViewBank, db: DbSession) -> list[str]:
     """Названия для выбора в формах: не скрытые, частые первыми."""
-    return await bookmakers_service.form_names(db, user)
+    return await bookmakers_service.form_names(db, viewed.user)
 
 
-@router.get("/list")
-async def list_bookmakers(user: CurrentUser, db: DbSession) -> BookmakersOut:
+@router.get("/list", openapi_extra=AS_USER_DOC)
+async def list_bookmakers(viewed: ViewBank, db: DbSession) -> BookmakersOut:
     """Список кабинета: действующие и скрытые, у каждого — число ставок, в игре и сумма."""
-    return await bookmakers_service.list_bookmakers(db, user)
+    return await bookmakers_service.list_bookmakers(db, viewed.user)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

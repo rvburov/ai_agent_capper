@@ -252,6 +252,16 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 
 Маршруты: `GET /api/me/push-config` (публичный ключ или `null` — push выключен на сервере), `POST`, `GET /api/me/push-subscriptions`, `DELETE /api/me/push-subscriptions/{id}`, `POST /api/me/push-subscriptions/revoke` (по endpoint, перед выходом из аккаунта), `POST /api/me/push-subscriptions/test` (не чаще 5 раз в час); в `GET`/`PUT /api/me/notification-prefs` — `push` у видов, `push_available` и `quiet_hours`; в `/api/admin/messages` — `also_push`, `push_recipients`, `push_recipients_all`. Настройки: `CAPPER_VAPID_PUBLIC_KEY`, `CAPPER_VAPID_PRIVATE_KEY`, `CAPPER_VAPID_SUBJECT` (новые — `python -m app.admin.cli generate-vapid`), `CAPPER_PUSH_ALLOW_HTTP` (только localhost и стек сквозных тестов), `CAPPER_PUSH_SERVICE_HOSTS` (серверы push браузеров, подписка на другой адрес — 422). Задача воркера `send_push`: 404 и 410 — подписка отозвана, 429 и 5xx — один повтор этих подписок через Retry-After (30 с — 10 мин).
 
+## Администратор видит данные участников (Р27)
+
+| Модуль | Что делает |
+|---|---|
+| `core/deps.py` | зависимости просмотра `ViewDashboard`, `ViewBets`, `ViewAnalytics`, `ViewBank`, `ViewAnalyses`, `ViewLearning`, `ViewAi`, `ViewExport`: чьи данные отдает маршрут чтения (свои или, у администратора с `as_user=<id>`, участника); `current_auth` отвечает 403 на `as_user` у любого другого маршрута и у не-GET. Маршрут просмотра добавляет параметр в схему (`openapi_extra=AS_USER_DOC`) |
+| `services/member_view.py` | кого смотрим (удаленный — 404), журнал `member_view` (раз в 10 минут на экран, метка в Redis) и `member_export` (каждая выгрузка CSV) |
+| `services/admin_summary.py` | «Сводка» по всем: показатели периода — кэш «Главной» каждого, банк — `bank_state`, анализы и расход ИИ за месяц — `month_usage` |
+
+Маршруты: параметр `as_user` у GET-маршрутов «Главной», «Ставок», «Аналитики», «Банка и стратегии», анализов, `GET /api/learning` и лимита и расхода ИИ (список — `docs/PLAN.md`, раздел 3; сверяет `tests/test_route_permissions.py`), `GET /api/admin/summary?period=`. В журнале — действия `member_view` и `member_export` (миграция 0011). Модели фильтров с `extra="forbid"` (`BetFiltersIn`, `AnalyticsFiltersIn`) пропускают `as_user` мимо себя (`schemas/common.without_as_user`).
+
 ## Скорость API (этап 4)
 
 Время ответа каждого запроса — в логе `http.request` (`core/timing.py`, мс до последнего байта, без фоновых задач маршрута). Замер p95 на синтетике размера живой программы:

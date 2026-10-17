@@ -10,12 +10,13 @@ Decimal, доли (ROI, винрейт, CLV, вероятности, Brier) — 
 """
 
 from datetime import date, datetime
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from app.schemas.analyses import DecimalOut, Market, TextKey
 from app.schemas.bets import DATE_MAX, DATE_MIN, BetSource, Period, SurfaceFilter
+from app.schemas.common import without_as_user
 
 # Часть выгрузки CSV (В13): ставки, события, калибровка, скользящий Brier
 ExportPart = Literal["bets", "events", "calibration", "brier"]
@@ -53,6 +54,11 @@ class AnalyticsFiltersIn(BaseModel):
     selection: int | None = Field(default=None, ge=1, le=2)
     surface: list[SurfaceFilter] = Field(default_factory=list, max_length=5)
     source: BetSource | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_as_user(cls, data: Any) -> Any:
+        return without_as_user(data)
 
     @model_validator(mode="after")
     def _selection_needs_market(self) -> Self:

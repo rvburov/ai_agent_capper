@@ -2,8 +2,9 @@
 
 Доступ только у роли admin: зависимость require_admin стоит на уровне роутера,
 поэтому любой маршрут здесь без сеанса отвечает 401, участнику — 403 (это проверяет
-параметризованный тест по всем маршрутам роутера). Р14: ставок, банка и стратегии
-участников здесь нет.
+параметризованный тест по всем маршрутам роутера). Р27: ставки, банк, стратегию и анализы
+участника администратор читает маршрутами самого участника с as_user (app/core/deps.py),
+здесь — только «Сводка» по всем (GET /admin/summary); каждый просмотр — в журнале.
 Опасные действия (роль, сброс 2FA, удаление, приглашение администратора, блокировка
 администратора и завершение его сеансов) требуют в теле totp_code — текущий код 2FA
 администратора. Пятый неверный код подряд завершает сеанс (app/services/admin_confirm.py).
@@ -41,8 +42,18 @@ from app.schemas.admin import (
     TotpConfirmIn,
     UserDeleteIn,
 )
+from app.schemas.admin_summary import AdminSummaryOut
+from app.schemas.bets import Period
 from app.schemas.dashboard import AdminAttentionOut
-from app.services import access_codes, admin_activity, admin_users, analytics_cache, dashboard
+from app.services import (
+    access_codes,
+    admin_activity,
+    admin_summary,
+    admin_users,
+    analytics_cache,
+    dashboard,
+    member_view,
+)
 from app.services.admin_confirm import TotpConfirm
 from app.services.sessions import utcnow
 
@@ -86,6 +97,20 @@ async def get_activity(
     """Активность за период (1d, 7d, 30d или 90d): входы и число запущенных анализов по
     людям (Р14: без адресов, устройств и содержимого анализов)."""
     return await admin_activity.activity(db, admin, period)
+
+
+@router.get("/summary")
+async def get_summary(
+    db: DbSession, redis: RedisClient, admin: AdminUser, ip: ClientIp, period: Period = "30d"
+) -> AdminSummaryOut:
+    """Сводка по всем участникам вместе с администратором (Р27): банк сейчас; ставки, ROI,
+    прибыль и CLV за период (по поясу каждого, как на его «Главной»); анализы и расход ИИ
+    за текущий месяц. Открытие пишется в журнал (member_view, screen=summary, раз в 10 минут)."""
+    await member_view.log_view(
+        db, redis, viewer_id=admin.id, user_id=None, screen="summary", ip=ip,
+        extra={"period": period},
+    )  # fmt: skip
+    return await admin_summary.summary(db, redis, admin, period)
 
 
 @router.get("/users/{user_id}")

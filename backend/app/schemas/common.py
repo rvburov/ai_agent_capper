@@ -1,8 +1,19 @@
 """Общие схемы API: формат ошибки и проверка здоровья."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+# Query-параметр просмотра данных участника администратором (Р27, app/core/deps.py)
+AS_USER_QUERY = "as_user"
+
+
+def without_as_user(data: Any) -> Any:
+    """Входные данные query-модели фильтров без as_user. Модели с extra="forbid" иначе
+    отклонили бы его: as_user читает зависимость просмотра, а не модель."""
+    if isinstance(data, dict) and AS_USER_QUERY in data:
+        return {key: value for key, value in data.items() if key != AS_USER_QUERY}
+    return data
 
 
 class ErrorField(BaseModel):

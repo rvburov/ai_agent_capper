@@ -978,7 +978,28 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
+          }
+        ]
       },
       "put": {
         "tags": [
@@ -988,14 +1009,14 @@
         "description": "Лимиты целиком (null — без лимита): строже — сразу, мягче — через 24 часа (pending).\nЗапрос без смягчений отменяет ждущее повышение. currency формы не валюта программы —\n409 common.currency_changed.",
         "operationId": "update_play_limits_api_me_play_limits_put",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PlayLimitsIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -1428,10 +1449,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "type": "string"
                   },
-                  "type": "array",
                   "title": "Response Bookmaker Names Api Me Bookmakers Get"
                 }
               }
@@ -1447,7 +1468,28 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -1457,14 +1499,14 @@
         "description": "Добавить букмекера. Название занято (без учета регистра, и у скрытого) — 409\nbookmaker.name_taken; «Другой» — 422 bookmaker.reserved.",
         "operationId": "create_bookmaker_api_me_bookmakers_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BookmakerCreateIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -1519,7 +1561,28 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
+          }
+        ]
       }
     },
     "/api/me/bookmakers/{bookmaker_id}": {
@@ -1757,6 +1820,56 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ActivityOut"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Ошибка: {error: {code, message}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/summary": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Summary",
+        "description": "Сводка по всем участникам вместе с администратором (Р27): банк сейчас; ставки, ROI,\nприбыль и CLV за период (по поясу каждого, как на его «Главной»); анализы и расход ИИ\nза текущий месяц. Открытие пишется в журнал (member_view, screen=summary, раз в 10 минут).",
+        "operationId": "get_summary_api_admin_summary_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "30d",
+              "title": "Period"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSummaryOut"
                 }
               }
             }
@@ -2475,7 +2588,9 @@
                       "version_on",
                       "lesson_on",
                       "model_on",
-                      "lesson_off"
+                      "lesson_off",
+                      "member_view",
+                      "member_export"
                     ],
                     "type": "string"
                   }
@@ -2545,7 +2660,28 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
+          }
+        ]
       }
     },
     "/api/ai/usage": {
@@ -2572,6 +2708,25 @@
                 }
               ],
               "title": "Month"
+            }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
             }
           }
         ],
@@ -4166,6 +4321,25 @@
               "default": false,
               "title": "Launched"
             }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
           }
         ],
         "responses": {
@@ -4209,6 +4383,25 @@
               "maximum": 9223372036854775807,
               "minimum": 1,
               "title": "Analysis Id"
+            }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
             }
           }
         ],
@@ -4752,6 +4945,25 @@
               "default": 20,
               "title": "Limit"
             }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
           }
         ],
         "responses": {
@@ -4938,6 +5150,25 @@
               ],
               "title": "Q"
             }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
           }
         ],
         "responses": {
@@ -4993,7 +5224,28 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
+          }
+        ]
       }
     },
     "/api/bets/export.csv": {
@@ -5156,6 +5408,25 @@
               ],
               "title": "Q"
             }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
           }
         ],
         "responses": {
@@ -5196,6 +5467,25 @@
               "maximum": 9223372036854775807,
               "minimum": 1,
               "title": "Bet Id"
+            }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
             }
           }
         ],
@@ -5241,6 +5531,25 @@
               "maximum": 9223372036854775807,
               "minimum": 1,
               "title": "Bet Id"
+            }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
             }
           }
         ],
@@ -5473,7 +5782,28 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
+          }
+        ]
       }
     },
     "/api/me/bank/history": {
@@ -5499,6 +5829,25 @@
               "type": "string",
               "default": "30d",
               "title": "Period"
+            }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
             }
           }
         ],
@@ -5573,6 +5922,25 @@
               "type": "boolean",
               "default": false,
               "title": "Flows Only"
+            }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
             }
           }
         ],
@@ -5777,6 +6145,25 @@
               ],
               "title": "Source"
             }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
           }
         ],
         "responses": {
@@ -5955,6 +6342,25 @@
               "type": "string",
               "default": "bets",
               "title": "Part"
+            }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
             }
           }
         ],
@@ -6135,6 +6541,25 @@
               "maxItems": 4,
               "title": "Part"
             }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
           }
         ],
         "responses": {
@@ -6180,6 +6605,25 @@
               "type": "string",
               "default": "30d",
               "title": "Period"
+            }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
             }
           }
         ],
@@ -6669,7 +7113,28 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
+          }
+        ]
       }
     },
     "/api/strategy/versions": {
@@ -6701,7 +7166,28 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -6711,14 +7197,14 @@
         "description": "Кандидат своих правил суммы (адаптации, доли банка по итоговому кэфу) с проверкой\nна своих ставках. Ничего не изменилось — 422 strategy.no_changes.",
         "operationId": "create_rules_candidate_api_strategy_versions_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RulesCandidateIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -6774,6 +7260,25 @@
               "minimum": 1,
               "title": "B"
             }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
           }
         ],
         "responses": {
@@ -6817,6 +7322,25 @@
               "maximum": 9223372036854775807,
               "minimum": 1,
               "title": "Version Id"
+            }
+          },
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
             }
           }
         ],
@@ -7405,7 +7929,28 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "as_user",
+            "in": "query",
+            "required": false,
+            "description": "Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As User"
+            }
+          }
+        ]
       }
     },
     "/api/ml/model": {
@@ -8208,6 +8753,49 @@
         ],
         "title": "AdminSettingsOut",
         "description": "Настройки программы: валюта (одна на всех, Р17) и часовой пояс новых участников.\nРасходы на Claude всегда в долларах."
+      },
+      "AdminSummaryOut": {
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "30d",
+              "90d",
+              "all"
+            ],
+            "title": "Period"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "month_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Month Start"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SummaryTotalsOut"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/SummaryMemberOut"
+            },
+            "type": "array",
+            "title": "Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period",
+          "currency",
+          "month_start",
+          "totals",
+          "members"
+        ],
+        "title": "AdminSummaryOut",
+        "description": "Сводка за период (7d, 30d, 90d или all — по поясу каждого участника). members —\nсначала сам администратор, потом участники с данными по убыванию прибыли, потом без\nданных; удаленных нет. month_start — начало месяца анализов и расхода ИИ."
       },
       "AdminUserDetailOut": {
         "properties": {
@@ -10347,7 +10935,9 @@
               "version_on",
               "lesson_on",
               "model_on",
-              "lesson_off"
+              "lesson_off",
+              "member_view",
+              "member_export"
             ],
             "title": "Action"
           },
@@ -10396,7 +10986,7 @@
           "ip"
         ],
         "title": "AuditOut",
-        "description": "Запись журнала. actor_id пустой и actor_name \"\" — действие из терминала.\nУдаленный автор или участник — имя «Удаленный пользователь» (имя стерто по Р15).\n\nР14: в details нет сведений о ставках, банке и стратегии участника."
+        "description": "Запись журнала. actor_id пустой и actor_name \"\" — действие из терминала.\nУдаленный автор или участник — имя «Удаленный пользователь» (имя стерто по Р15).\n\nВ details нет сумм, ставок, банка и стратегии участника. Просмотр данных участника\n(Р27): member_view — {user_id, screen} (screen: dashboard, bets, analytics, bank,\nanalyses, learning, ai; summary — сводка по всем, user_id null, еще period);\nmember_export — {user_id, what} (what: bets или analytics, у analytics — еще parts)."
       },
       "BankEntriesOut": {
         "properties": {
@@ -27198,6 +27788,218 @@
         ],
         "title": "StrategyVersionsOut",
         "description": "Версии: общая линия инструкций (новые сверху) и свои правила суммы ставки;\nзамороженный набор, на котором проверяются инструкции."
+      },
+      "SummaryMemberOut": {
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ],
+            "title": "Role"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "blocked",
+              "deleted"
+            ],
+            "title": "Status"
+          },
+          "me": {
+            "type": "boolean",
+            "title": "Me"
+          },
+          "empty": {
+            "type": "boolean",
+            "title": "Empty"
+          },
+          "bank": {
+            "type": "string",
+            "title": "Bank"
+          },
+          "bets": {
+            "type": "integer",
+            "title": "Bets"
+          },
+          "turnover": {
+            "type": "string",
+            "title": "Turnover"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "profit": {
+            "type": "string",
+            "title": "Profit"
+          },
+          "clv_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv Avg"
+          },
+          "clv_n": {
+            "type": "integer",
+            "title": "Clv N"
+          },
+          "analyses": {
+            "type": "integer",
+            "title": "Analyses"
+          },
+          "ai_spend_usd": {
+            "type": "number",
+            "title": "Ai Spend Usd"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "name",
+          "role",
+          "status",
+          "me",
+          "empty",
+          "bank",
+          "bets",
+          "turnover",
+          "roi",
+          "profit",
+          "clv_avg",
+          "clv_n",
+          "analyses",
+          "ai_spend_usd",
+          "last_login_at"
+        ],
+        "title": "SummaryMemberOut",
+        "description": "Строка участника. bank — текущий баланс банка (как GET /me/bank: balance); empty —\nжурнал банка пуст (ставок и банка нет). bets, roi, profit, clv_avg (и clv_n) — за период,\nкак на его «Главной». analyses и ai_spend_usd — за текущий месяц (UTC, с month_start) на\nключе администратора, как в списке участников. me — это строка самого администратора."
+      },
+      "SummaryTotalsOut": {
+        "properties": {
+          "bets": {
+            "type": "integer",
+            "title": "Bets"
+          },
+          "turnover": {
+            "type": "string",
+            "title": "Turnover"
+          },
+          "profit": {
+            "type": "string",
+            "title": "Profit"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "clv_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clv Avg"
+          },
+          "clv_n": {
+            "type": "integer",
+            "title": "Clv N"
+          },
+          "brier_model": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brier Model"
+          },
+          "brier_market": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brier Market"
+          },
+          "brier_n": {
+            "type": "integer",
+            "title": "Brier N"
+          },
+          "members_with_bets": {
+            "type": "integer",
+            "title": "Members With Bets"
+          },
+          "bank": {
+            "type": "string",
+            "title": "Bank"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bets",
+          "turnover",
+          "profit",
+          "roi",
+          "clv_avg",
+          "clv_n",
+          "brier_model",
+          "brier_market",
+          "brier_n",
+          "members_with_bets",
+          "bank"
+        ],
+        "title": "SummaryTotalsOut",
+        "description": "Итоги за период по всем вместе. bets — рассчитанные ставки (с возвратами), turnover и\nprofit — без возвратов, roi = profit / turnover (пусто — оборота нет). clv_avg — средний\nCLV по clv_n ставкам приложения с закрытием. brier_model и brier_market — Brier модели и\nрынка при прогнозе на одних и тех же brier_n событиях (пусто — событий нет).\nmembers_with_bets — у скольких людей есть рассчитанные ставки за период. bank — сумма\nтекущих банков."
       },
       "SurfaceEloOut": {
         "properties": {

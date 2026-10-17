@@ -3,8 +3,11 @@
 ответственная игра, экспорт своих данных, удаление аккаунта).
 
 Каждый маршрут берет пользователя из сеанса (CurrentAuth / CurrentUser) и видит только
-свои данные: чужой id отвечает 404, как несуществующий. Пока участник ждет удаления
-аккаунта, открыты только GET /api/me и DELETE /api/me/deletion (app/core/deps.py).
+свои данные: чужой id отвечает 404, как несуществующий. Исключение — GET
+/api/me/play-limits: его читает и администратор с as_user (Р27, «Банк и стратегия»
+участника, только просмотр). Сеансы, входы, 2FA, резервные коды, уведомления и push
+as_user не принимают (403). Пока участник ждет удаления аккаунта, открыты только
+GET /api/me и DELETE /api/me/deletion (app/core/deps.py).
 """
 
 from typing import Annotated
@@ -14,7 +17,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.routes.auth import RequestClient, read_cookie
 from app.core.cookies import clear_cookie, set_cookie
-from app.core.deps import CurrentAuth, CurrentUser, DbSession, RedisClient
+from app.core.deps import AS_USER_DOC, CurrentAuth, CurrentUser, DbSession, RedisClient, ViewBank
 from app.db.models import User
 from app.schemas.cabinet import (
     DeletionIn,
@@ -243,11 +246,11 @@ async def update_notification_prefs(
 # --- ответственная игра ---
 
 
-@router.get("/play-limits")
-async def play_limits(user: CurrentUser, db: DbSession) -> PlayLimitsOut:
+@router.get("/play-limits", openapi_extra=AS_USER_DOC)
+async def play_limits(viewed: ViewBank, db: DbSession) -> PlayLimitsOut:
     """Лимиты ставок в день (число и сумма), ждущее повышение, пауза и сколько поставлено
     сегодня по поясу участника; blocked — что сейчас не дает поставить и запустить анализ."""
-    return await play_service.get_limits(db, user)
+    return await play_service.get_limits(db, viewed.user)
 
 
 @router.put("/play-limits")

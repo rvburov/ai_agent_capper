@@ -831,6 +831,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Summary
+         * @description Сводка по всем участникам вместе с администратором (Р27): банк сейчас; ставки, ROI,
+         *     прибыль и CLV за период (по поясу каждого, как на его «Главной»); анализы и расход ИИ
+         *     за текущий месяц. Открытие пишется в журнал (member_view, screen=summary, раз в 10 минут).
+         */
+        get: operations["get_summary_api_admin_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/users/{user_id}": {
         parameters: {
             query?: never;
@@ -3017,6 +3039,29 @@ export interface components {
             updated_at: string;
         };
         /**
+         * AdminSummaryOut
+         * @description Сводка за период (7d, 30d, 90d или all — по поясу каждого участника). members —
+         *     сначала сам администратор, потом участники с данными по убыванию прибыли, потом без
+         *     данных; удаленных нет. month_start — начало месяца анализов и расхода ИИ.
+         */
+        AdminSummaryOut: {
+            /**
+             * Period
+             * @enum {string}
+             */
+            period: "7d" | "30d" | "90d" | "all";
+            /** Currency */
+            currency: string;
+            /**
+             * Month Start
+             * Format: date-time
+             */
+            month_start: string;
+            totals: components["schemas"]["SummaryTotalsOut"];
+            /** Members */
+            members: components["schemas"]["SummaryMemberOut"][];
+        };
+        /**
          * AdminUserDetailOut
          * @description Карточка участника: плюс число действующих сеансов и последние 20 входов.
          */
@@ -3740,7 +3785,10 @@ export interface components {
          * @description Запись журнала. actor_id пустой и actor_name "" — действие из терминала.
          *     Удаленный автор или участник — имя «Удаленный пользователь» (имя стерто по Р15).
          *
-         *     Р14: в details нет сведений о ставках, банке и стратегии участника.
+         *     В details нет сумм, ставок, банка и стратегии участника. Просмотр данных участника
+         *     (Р27): member_view — {user_id, screen} (screen: dashboard, bets, analytics, bank,
+         *     analyses, learning, ai; summary — сводка по всем, user_id null, еще period);
+         *     member_export — {user_id, what} (what: bets или analytics, у analytics — еще parts).
          */
         AuditOut: {
             /** Id */
@@ -3758,7 +3806,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change" | "data_upload" | "eval_set" | "eval_run" | "version_on" | "lesson_on" | "model_on" | "lesson_off";
+            action: "invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change" | "data_upload" | "eval_set" | "eval_run" | "version_on" | "lesson_on" | "model_on" | "lesson_off" | "member_view" | "member_export";
             /** Target User Id */
             target_user_id: number | null;
             /** Target Name */
@@ -9627,6 +9675,86 @@ export interface components {
             eval_set: components["schemas"]["EvalSetOut"] | null;
         };
         /**
+         * SummaryMemberOut
+         * @description Строка участника. bank — текущий баланс банка (как GET /me/bank: balance); empty —
+         *     журнал банка пуст (ставок и банка нет). bets, roi, profit, clv_avg (и clv_n) — за период,
+         *     как на его «Главной». analyses и ai_spend_usd — за текущий месяц (UTC, с month_start) на
+         *     ключе администратора, как в списке участников. me — это строка самого администратора.
+         */
+        SummaryMemberOut: {
+            /** User Id */
+            user_id: number;
+            /** Name */
+            name: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "blocked" | "deleted";
+            /** Me */
+            me: boolean;
+            /** Empty */
+            empty: boolean;
+            /** Bank */
+            bank: string;
+            /** Bets */
+            bets: number;
+            /** Turnover */
+            turnover: string;
+            /** Roi */
+            roi: number | null;
+            /** Profit */
+            profit: string;
+            /** Clv Avg */
+            clv_avg: number | null;
+            /** Clv N */
+            clv_n: number;
+            /** Analyses */
+            analyses: number;
+            /** Ai Spend Usd */
+            ai_spend_usd: number;
+            /** Last Login At */
+            last_login_at: string | null;
+        };
+        /**
+         * SummaryTotalsOut
+         * @description Итоги за период по всем вместе. bets — рассчитанные ставки (с возвратами), turnover и
+         *     profit — без возвратов, roi = profit / turnover (пусто — оборота нет). clv_avg — средний
+         *     CLV по clv_n ставкам приложения с закрытием. brier_model и brier_market — Brier модели и
+         *     рынка при прогнозе на одних и тех же brier_n событиях (пусто — событий нет).
+         *     members_with_bets — у скольких людей есть рассчитанные ставки за период. bank — сумма
+         *     текущих банков.
+         */
+        SummaryTotalsOut: {
+            /** Bets */
+            bets: number;
+            /** Turnover */
+            turnover: string;
+            /** Profit */
+            profit: string;
+            /** Roi */
+            roi: number | null;
+            /** Clv Avg */
+            clv_avg: number | null;
+            /** Clv N */
+            clv_n: number;
+            /** Brier Model */
+            brier_model: number | null;
+            /** Brier Market */
+            brier_market: number | null;
+            /** Brier N */
+            brier_n: number;
+            /** Members With Bets */
+            members_with_bets: number;
+            /** Bank */
+            bank: string;
+        };
+        /**
          * SurfaceEloOut
          * @description Эло на покрытии: значение (null — матчей на нем нет), матчей и разница с общим.
          */
@@ -11234,7 +11362,10 @@ export interface operations {
     };
     play_limits_api_me_play_limits_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11630,7 +11761,10 @@ export interface operations {
     };
     bookmaker_names_api_me_bookmakers_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11692,7 +11826,10 @@ export interface operations {
     };
     list_bookmakers_api_me_bookmakers_list_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11890,6 +12027,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_summary_api_admin_summary_get: {
+        parameters: {
+            query?: {
+                period?: "7d" | "30d" | "90d" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSummaryOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */
@@ -12325,7 +12493,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 before_id?: number | null;
-                action?: ("invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change" | "data_upload" | "eval_set" | "eval_run" | "version_on" | "lesson_on" | "model_on" | "lesson_off")[] | null;
+                action?: ("invite" | "invite_revoke" | "reset_code" | "reset_code_revoke" | "reset_2fa" | "block" | "unblock" | "delete" | "role_change" | "sessions_revoke" | "limit_change" | "key_change" | "currency_change" | "create_admin" | "import" | "message" | "confirm_failed" | "player_merge" | "player_edit" | "ai_mode_change" | "budget_change" | "agent_config_change" | "settings_change" | "data_upload" | "eval_set" | "eval_run" | "version_on" | "lesson_on" | "model_on" | "lesson_off" | "member_view" | "member_export")[] | null;
             };
             header?: never;
             path?: never;
@@ -12355,7 +12523,10 @@ export interface operations {
     };
     budget_api_ai_budget_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12386,6 +12557,8 @@ export interface operations {
         parameters: {
             query?: {
                 month?: string | null;
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -13545,6 +13718,8 @@ export interface operations {
                 before?: number | null;
                 limit?: number;
                 launched?: boolean;
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -13607,7 +13782,10 @@ export interface operations {
     };
     get_analysis_api_analyses__analysis_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path: {
                 analysis_id: number;
@@ -13818,6 +13996,8 @@ export interface operations {
                 q?: string | null;
                 before?: number | null;
                 limit?: number;
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -13889,6 +14069,8 @@ export interface operations {
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
                 q?: string | null;
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -13918,7 +14100,10 @@ export interface operations {
     };
     bet_counts_api_bets_counts_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13956,6 +14141,8 @@ export interface operations {
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
                 q?: string | null;
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -13985,7 +14172,10 @@ export interface operations {
     };
     get_bet_api_bets__bet_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path: {
                 bet_id: number;
@@ -14016,7 +14206,10 @@ export interface operations {
     };
     bet_review_api_bets__bet_id__review_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path: {
                 bet_id: number;
@@ -14153,7 +14346,10 @@ export interface operations {
     };
     my_bank_api_me_bank_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14184,6 +14380,8 @@ export interface operations {
         parameters: {
             query?: {
                 period?: "7d" | "30d" | "90d" | "all";
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -14217,6 +14415,8 @@ export interface operations {
                 before?: number | null;
                 limit?: number;
                 flows_only?: boolean;
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -14287,6 +14487,8 @@ export interface operations {
                 selection?: number | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -14325,6 +14527,8 @@ export interface operations {
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
                 part?: "bets" | "events" | "calibration" | "brier";
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -14363,6 +14567,8 @@ export interface operations {
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
                 part?: ("bets" | "events" | "calibration" | "brier")[];
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -14394,6 +14600,8 @@ export interface operations {
         parameters: {
             query?: {
                 period?: "7d" | "30d" | "90d" | "all";
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -14622,7 +14830,10 @@ export interface operations {
     };
     active_strategy_api_strategy_active_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14651,7 +14862,10 @@ export interface operations {
     };
     list_versions_api_strategy_versions_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14716,6 +14930,8 @@ export interface operations {
             query: {
                 a: number;
                 b: number;
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
             };
             header?: never;
             path?: never;
@@ -14745,7 +14961,10 @@ export interface operations {
     };
     get_version_api_strategy_versions__version_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path: {
                 version_id: number;
@@ -15148,7 +15367,10 @@ export interface operations {
     };
     learning_summary_api_learning_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
+                as_user?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;

@@ -1,13 +1,14 @@
 """«Обучение модели»: сводка экрана (GET /api/learning), базовая модель
 (GET /api/ml/model) — этап 5, волна 3; еженедельные отчеты (GET /api/learning/reports) —
 волна 4. Свое (рассчитанные ставки, свои правила, отчеты) — только свое, остальное общее
-(Р25). Числа считает сервер (Т15)."""
+(Р25). Числа считает сервер (Т15). GET /api/learning (и блок «Модель учится» на главной
+участника) читает и администратор с as_user (Р27, только просмотр)."""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Path
 
-from app.core.deps import CurrentUser, DbSession
+from app.core.deps import AS_USER_DOC, CurrentUser, DbSession, ViewLearning
 from app.schemas.learning import LearningOut, MlModelOut
 from app.schemas.reports import WeeklyReportOut, WeeklyReportsOut
 from app.services import learning, recalibration, weekly_report
@@ -17,10 +18,10 @@ router = APIRouter(tags=["learning"])
 RowId = Annotated[int, Path(ge=1, le=2**63 - 1)]
 
 
-@router.get("/learning")
-async def learning_summary(user: CurrentUser, db: DbSession) -> LearningOut:
+@router.get("/learning", openapi_extra=AS_USER_DOC)
+async def learning_summary(viewed: ViewLearning, db: DbSession) -> LearningOut:
     """Плитки, шапка и пороги «Обучения модели» (и блок «Модель учится» на главной)."""
-    return await learning.learning_out(db, user)
+    return await learning.learning_out(db, viewed.user)
 
 
 @router.get("/ml/model")

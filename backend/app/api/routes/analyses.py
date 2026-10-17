@@ -2,7 +2,8 @@
 результат, отмена, решение, список.
 
 Каждый маршрут видит только свои анализы: чужой id отвечает 404 analysis.not_found,
-как несуществующий. Поток прогресса до начала отдачи освобождает соединение БД: дальше
+как несуществующий. Список и готовый анализ читает и администратор с as_user (Р27, только
+просмотр; ход анализа SSE — нет). Поток прогресса до начала отдачи освобождает соединение БД: дальше
 он читает только Redis.
 """
 
@@ -11,7 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, Path, Query, status
 from fastapi.responses import StreamingResponse
 
-from app.core.deps import CurrentUser, DbSession, RedisClient
+from app.core.deps import AS_USER_DOC, CurrentUser, DbSession, RedisClient, ViewAnalyses
 from app.schemas.analyses import (
     AnalysisCreateIn,
     AnalysisListOut,
@@ -64,9 +65,9 @@ async def create_analysis(
     return await analyses_service.analysis_view(db, user, analysis)
 
 
-@router.get("")
+@router.get("", openapi_extra=AS_USER_DOC)
 async def list_analyses(
-    user: CurrentUser,
+    viewed: ViewAnalyses,
     db: DbSession,
     before: Annotated[int | None, Query(ge=1, le=2**63 - 1)] = None,
     limit: Annotated[int, Query(ge=1, le=50)] = analyses_service.LIST_LIMIT,
@@ -75,14 +76,14 @@ async def list_analyses(
     """Свои анализы, новые сверху. Следующая страница — before=next_cursor; launched=true —
     без черновиков (только запущенные)."""
     return await analyses_service.list_analyses(
-        db, user, before=before, limit=limit, launched=launched
+        db, viewed.user, before=before, limit=limit, launched=launched
     )
 
 
-@router.get("/{analysis_id}")
-async def get_analysis(analysis_id: RowId, user: CurrentUser, db: DbSession) -> AnalysisOut:
-    analysis = await analyses_service.get_owned(db, user, analysis_id)
-    return await analyses_service.analysis_view(db, user, analysis)
+@router.get("/{analysis_id}", openapi_extra=AS_USER_DOC)
+async def get_analysis(analysis_id: RowId, viewed: ViewAnalyses, db: DbSession) -> AnalysisOut:
+    analysis = await analyses_service.get_owned(db, viewed.user, analysis_id)
+    return await analyses_service.analysis_view(db, viewed.user, analysis)
 
 
 @router.post("/{analysis_id}/preview")

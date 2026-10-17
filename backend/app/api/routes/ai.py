@@ -3,14 +3,16 @@
 (/api/me/ai-*), решения Р7, Р9, Р12, Р13.
 
 Каждый маршрут берет пользователя из сеанса и меняет только его данные. Ключ Claude
-наружу не отдается: в ответах только последние 4 символа.
+наружу не отдается: в ответах только последние 4 символа. Лимит и расход участника
+(GET /ai/budget, /ai/usage) читает и администратор с as_user (Р27, только просмотр): там
+о своем ключе участника нет ничего, даже последних 4 символов.
 """
 
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response, status
 
-from app.core.deps import ClientIp, CurrentUser, DbSession, RedisClient
+from app.core.deps import AS_USER_DOC, ClientIp, CurrentUser, DbSession, RedisClient, ViewAi
 from app.schemas.ai import (
     AiBudgetOut,
     AiModeIn,
@@ -29,22 +31,24 @@ from app.services import ai_budget, ai_keys, ai_usage
 router = APIRouter(tags=["ai"])
 
 
-@router.get("/ai/budget")
-async def budget(user: CurrentUser, db: DbSession) -> AiBudgetOut:
+@router.get("/ai/budget", openapi_extra=AS_USER_DOC)
+async def budget(viewed: ViewAi, db: DbSession) -> AiBudgetOut:
     """Режим ключа, лимит и расход за месяц (UTC), анализы сегодня, потолок анализа,
     свой ключ (последние 4 символа) и причина, по которой анализ сейчас не запустится.
     Администратору — еще общий бюджет ключа администратора."""
-    return await ai_budget.member_budget(db, user)
+    out = await ai_budget.member_budget(db, viewed.user)
+    # Ключ Claude участника чужим глазам не показывается (Р27)
+    return out.model_copy(update={"own_key": None}) if viewed.foreign else out
 
 
-@router.get("/ai/usage")
-async def usage(user: CurrentUser, db: DbSession, month: MonthStr | None = None) -> AiUsageOut:
+@router.get("/ai/usage", openapi_extra=AS_USER_DOC)
+async def usage(viewed: ViewAi, db: DbSession, month: MonthStr | None = None) -> AiUsageOut:
     """Свой расход на Claude за месяц (UTC, по умолчанию текущий; формат 2026-10): по
     дням, видам вызовов, моделям, шагам и версиям инструкций, доля кэша, свои анализы,
     цены моделей и настройки агента (только показ, Р23). Администратору — еще общие
     задачи без участника; прогоны приемки отдельно. Проверки (eval) не входят. Будущий
     месяц — 422 ai.usage_month."""
-    return await ai_usage.usage(db, user, month)
+    return await ai_usage.usage(db, viewed.user, month)
 
 
 @router.get("/ai/runs")

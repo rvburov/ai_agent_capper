@@ -13,6 +13,14 @@
 - CurrentAuth / CurrentSession / CurrentUser — вошедший пользователь по cookie сеанса,
   иначе 401 errors.auth.not_authenticated.
 - AdminUser — только роль admin, иначе 403 errors.common.forbidden.
+- ViewDashboard, ViewBets, ViewAnalytics, ViewBank, ViewAnalyses, ViewLearning, ViewAi,
+  ViewExport — чьи данные отдает маршрут чтения (Р27, app/services/member_view.py): свои
+  или, у администратора с query-параметром as_user=<id>, участника. Просмотр пишется в
+  журнал по экрану маршрута (ViewExport не пишет: выгрузку записывает сам маршрут).
+  Маршрут с такой зависимостью добавляет в схему параметр: openapi_extra=AS_USER_DOC.
+
+as_user — только для чтения: на любом другом запросе (не GET или GET без зависимости
+просмотра) — 403 common.forbidden. Это проверяет current_auth, в одном месте.
 
 Пока участник ждет удаления своего аккаунта (В10, users.deletion_requested_at), вход
 возможен, но открыты только GET /api/me и отмена DELETE /api/me/deletion (выход и вход
@@ -21,11 +29,13 @@
 """
 
 import ipaddress
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 from fastapi import Depends, Request
+from fastapi.exceptions import RequestValidationError
+from pydantic import Field, TypeAdapter, ValidationError
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -33,7 +43,9 @@ from app.core.cookies import cookie_name
 from app.core.errors import AppError
 from app.core.timing import route_template
 from app.db.models import ACCOUNT_DELETION_DELAY, User, UserSession
+from app.services import member_view
 from app.services import sessions as sessions_service
+from app.services.member_view import Viewed, ViewScreen
 
 UNKNOWN_IP = "0.0.0.0"
 # Маршруты, открытые участнику, который ждет удаления аккаунта: метод и полный шаблон
@@ -87,6 +99,11 @@ async def current_auth(request: Request, db: DbSession) -> Auth:
         if route not in DELETION_ALLOWED:
             delete_at = user.deletion_requested_at + ACCOUNT_DELETION_DELAY
             raise AppError(403, "account.deletion_pending", delete_at=delete_at.isoformat())
+    if AS_USER in request.query_params and (
+        request.method != "GET" or not accepts_as_user(request.scope.get("route"))
+    ):
+        # Чужие данные — только чтение и только на маршрутах просмотра (Р27)
+        raise AppError(403, "common.forbidden")
     return Auth(session=session, user=user)
 
 
@@ -112,3 +129,94 @@ async def require_admin(user: CurrentUser) -> User:
 
 
 AdminUser = Annotated[User, Depends(require_admin)]
+
+
+# --- просмотр данных участника администратором (Р27) ---
+
+AS_USER = "as_user"
+# Метка зависимости просмотра: по ней current_auth узнает маршрут, который принимает as_user
+_VIEW_MARK = "_capper_member_view"
+_AS_USER_ID: TypeAdapter[int] = TypeAdapter(Annotated[int, Field(ge=1, le=2**63 - 1)])
+# Параметр as_user в схеме OpenAPI. Объявить его обычным Query нельзя: у маршрутов с
+# моделью фильтров (BetFiltersIn, AnalyticsFiltersIn) второй query-параметр ломает
+# разворот модели в отдельные параметры схемы
+AS_USER_DOC: dict[str, Any] = {
+    "parameters": [
+        {
+            "name": AS_USER,
+            "in": "query",
+            "required": False,
+            "description": (
+                "Только администратор: id участника, чьи данные показать (только просмотр, "
+                "запись в журнал администратора). Не задан или свой id — свои данные"
+            ),
+            "schema": {
+                "anyOf": [
+                    {"type": "integer", "minimum": 1, "maximum": 2**63 - 1},
+                    {"type": "null"},
+                ],
+                "title": "As User",
+            },
+        }
+    ]
+}
+
+
+def accepts_as_user(route: object) -> bool:
+    """Маршрут читает данные через зависимость просмотра (view_of)."""
+    dependant = getattr(route, "dependant", None)
+    stack = list(dependant.dependencies) if dependant is not None else []
+    while stack:
+        dependency = stack.pop()
+        if getattr(dependency.call, _VIEW_MARK, False):
+            return True
+        stack.extend(dependency.dependencies)
+    return False
+
+
+def _as_user_id(raw: str) -> int:
+    try:
+        return _AS_USER_ID.validate_python(raw)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{**error, "loc": ("query", AS_USER)} for error in exc.errors(include_input=False)]
+        ) from exc
+
+
+def view_of(screen: ViewScreen | None) -> Callable[..., Awaitable[Viewed]]:
+    """Зависимость маршрута чтения: чьи данные отдать. screen — экран для журнала
+    (None — не писать просмотр). as_user принимает только администратор (иначе 403);
+    удаленный участник — 404."""
+
+    async def viewed_user(
+        request: Request, auth: CurrentAuth, db: DbSession, redis: RedisClient, ip: ClientIp
+    ) -> Viewed:
+        viewer = auth.user
+        raw = request.query_params.get(AS_USER)
+        if raw is None:
+            return Viewed(user=viewer, viewer=viewer, ip=ip)
+        if viewer.role != "admin":
+            raise AppError(403, "common.forbidden")
+        user_id = _as_user_id(raw)
+        if user_id == viewer.id:
+            return Viewed(user=viewer, viewer=viewer, ip=ip)
+        user = await member_view.find_member(db, user_id)
+        if screen is not None:
+            await member_view.log_view(
+                db, redis, viewer_id=viewer.id, user_id=user.id, screen=screen, ip=ip
+            )
+        return Viewed(user=user, viewer=viewer, ip=ip)
+
+    setattr(viewed_user, _VIEW_MARK, True)
+    return viewed_user
+
+
+ViewDashboard = Annotated[Viewed, Depends(view_of("dashboard"))]
+ViewBets = Annotated[Viewed, Depends(view_of("bets"))]
+ViewAnalytics = Annotated[Viewed, Depends(view_of("analytics"))]
+ViewBank = Annotated[Viewed, Depends(view_of("bank"))]
+ViewAnalyses = Annotated[Viewed, Depends(view_of("analyses"))]
+ViewLearning = Annotated[Viewed, Depends(view_of("learning"))]
+ViewAi = Annotated[Viewed, Depends(view_of("ai"))]
+# Выгрузка CSV: просмотр не пишется, маршрут пишет member_export (member_view.log_export)
+ViewExport = Annotated[Viewed, Depends(view_of(None))]

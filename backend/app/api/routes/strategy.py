@@ -10,13 +10,15 @@
   прогона на замороженном наборе (409 strategy.eval_needed).
 
 Ни одна версия не включается сама: кандидат после проверки остается кандидатом.
+GET-маршруты читает и администратор с as_user (Р27, только просмотр «Банка и стратегии»
+участника).
 """
 
 from typing import Annotated
 
 from fastapi import APIRouter, Path, Query, status
 
-from app.core.deps import ClientIp, CurrentUser, DbSession, RedisClient
+from app.core.deps import AS_USER_DOC, ClientIp, CurrentUser, DbSession, RedisClient, ViewBank
 from app.schemas.learning import (
     RulesCandidateIn,
     StrategyVersionOut,
@@ -33,32 +35,32 @@ RowId = Annotated[int, Path(ge=1, le=2**63 - 1)]
 QueryId = Annotated[int, Query(ge=1, le=2**63 - 1)]
 
 
-@router.get("/active")
-async def active_strategy(user: CurrentUser, db: DbSession) -> StrategyOut:
+@router.get("/active", openapi_extra=AS_USER_DOC)
+async def active_strategy(viewed: ViewBank, db: DbSession) -> StrategyOut:
     """Активная версия; ее еще нет (не было анализов) — значения v3 по умолчанию."""
-    return strategy_out(await active_version(db, user.id))
+    return strategy_out(await active_version(db, viewed.user.id))
 
 
-@router.get("/versions")
-async def list_versions(user: CurrentUser, db: DbSession) -> StrategyVersionsOut:
+@router.get("/versions", openapi_extra=AS_USER_DOC)
+async def list_versions(viewed: ViewBank, db: DbSession) -> StrategyVersionsOut:
     """Версии: общая линия инструкций (метрики на наборе, сравнение кандидата) и свои
     правила суммы (проверка на своих ставках)."""
-    return await strategy_view.list_versions(db, user)
+    return await strategy_view.list_versions(db, viewed.user)
 
 
-@router.get("/versions/compare")
+@router.get("/versions/compare", openapi_extra=AS_USER_DOC)
 async def compare_versions(
-    a: QueryId, b: QueryId, user: CurrentUser, db: DbSession, redis: RedisClient
+    a: QueryId, b: QueryId, viewed: ViewBank, db: DbSession, redis: RedisClient
 ) -> VersionCompareOut:
     """Сравнение двух версий одной линии: a — база, b — кандидат. Разные линии — 422;
     участнику — не больше 20 сравнений в минуту (429 common.rate_limited)."""
-    await strategy_view.hit_compare_limit(redis, user)
-    return await strategy_view.compare(db, user, a, b)
+    await strategy_view.hit_compare_limit(redis, viewed.viewer)
+    return await strategy_view.compare(db, viewed.user, a, b)
 
 
-@router.get("/versions/{version_id}")
-async def get_version(version_id: RowId, user: CurrentUser, db: DbSession) -> StrategyVersionOut:
-    return await strategy_view.version_detail(db, user, version_id)
+@router.get("/versions/{version_id}", openapi_extra=AS_USER_DOC)
+async def get_version(version_id: RowId, viewed: ViewBank, db: DbSession) -> StrategyVersionOut:
+    return await strategy_view.version_detail(db, viewed.user, version_id)
 
 
 @router.post("/versions", status_code=status.HTTP_201_CREATED)
