@@ -16,15 +16,17 @@ import io
 import zipfile
 from datetime import timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import httpx2
 import pytest
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User
+from app.services.member_view import log_view
 from app.services.sessions import utcnow
 from tests.analysis_helpers import set_own_key
 from tests.claude_mock import OTHER_KEY
@@ -352,7 +354,7 @@ async def test_summary_reference_sums(
         home = (await person.client.get("/api/dashboard", params={"period": "30d"})).json()
         assert row["bets"] == home["kpi"]["settled"]
         assert D(row["profit"]) == D(home["kpi"]["profit"])
-        assert D(row["bank"]) == D(home["bank"]["balance"])
+        assert D(row["bank"]) == D(home["bank"]["equity"])
 
     # Период «7 дней» без ставок старше; «все» — те же ставки
     assert (await _summary(admin, "all"))["totals"]["bets"] == 2
@@ -374,3 +376,27 @@ async def test_summary_journal_and_rights(
     response = await member.client.get("/api/admin/summary")
     assert response.status_code == 403
     assert (await admin.client.get("/api/admin/summary?period=1y")).status_code == 422
+
+
+class _RedisDown:
+    """Redis недоступен: любая команда — RedisError."""
+
+    async def set(self, *args: object, **kwargs: object) -> bool:
+        raise RedisConnectionError("down")
+
+    async def delete(self, *args: object) -> int:
+        raise RedisConnectionError("down")
+
+
+async def test_view_journal_without_redis(db: AsyncSession, make_user: UserFactory) -> None:
+    """Redis недоступен: просмотр не падает, запись member_view пишется без дедупликации."""
+    admin = await make_user(role="admin")
+    member = await make_user()
+    redis_down = cast(Redis, _RedisDown())
+    for _ in range(2):
+        written = await log_view(
+            db, redis_down, viewer_id=admin.id, user_id=member.id, screen="bets", ip=None
+        )
+        assert written
+    entries = await audit_entries(db, "member_view")
+    assert [entry.details for entry in entries] == [{"user_id": member.id, "screen": "bets"}] * 2

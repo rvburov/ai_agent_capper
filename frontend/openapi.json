@@ -27907,7 +27907,7 @@
           "last_login_at"
         ],
         "title": "SummaryMemberOut",
-        "description": "Строка участника. bank — текущий баланс банка (как GET /me/bank: balance); empty —\nжурнал банка пуст (ставок и банка нет). bets, roi, profit, clv_avg (и clv_n) — за период,\nкак на его «Главной». analyses и ai_spend_usd — за текущий месяц (UTC, с month_start) на\nключе администратора, как в списке участников. me — это строка самого администратора."
+        "description": "Строка участника. bank — капитал сейчас (как GET /me/bank: equity — баланс и ставки\nв игре, то же число, что в плашке банка); empty — журнал банка пуст (ставок и банка\nнет). bets, roi, profit, clv_avg (и clv_n) — за период, как на его «Главной». analyses и\nai_spend_usd — за текущий месяц (UTC, с month_start) на ключе администратора, как в\nсписке участников. me — это строка самого администратора."
       },
       "SummaryTotalsOut": {
         "properties": {

@@ -9676,10 +9676,11 @@ export interface components {
         };
         /**
          * SummaryMemberOut
-         * @description Строка участника. bank — текущий баланс банка (как GET /me/bank: balance); empty —
-         *     журнал банка пуст (ставок и банка нет). bets, roi, profit, clv_avg (и clv_n) — за период,
-         *     как на его «Главной». analyses и ai_spend_usd — за текущий месяц (UTC, с month_start) на
-         *     ключе администратора, как в списке участников. me — это строка самого администратора.
+         * @description Строка участника. bank — капитал сейчас (как GET /me/bank: equity — баланс и ставки
+         *     в игре, то же число, что в плашке банка); empty — журнал банка пуст (ставок и банка
+         *     нет). bets, roi, profit, clv_avg (и clv_n) — за период, как на его «Главной». analyses и
+         *     ai_spend_usd — за текущий месяц (UTC, с month_start) на ключе администратора, как в
+         *     списке участников. me — это строка самого администратора.
          */
         SummaryMemberOut: {
             /** User Id */

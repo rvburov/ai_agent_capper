@@ -11,16 +11,21 @@
 what} каждый раз. Участнику даты просмотров не показываются (В1 Р27).
 """
 
+import contextlib
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import structlog
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.redis import redis_key
 from app.db.models import User
 from app.services.audit import write_audit
+
+log = structlog.get_logger(__name__)
 
 # Экран (группа маршрутов) в записи member_view; summary — «Администрирование → Сводка»
 ViewScreen = Literal[
@@ -68,8 +73,17 @@ async def log_view(
 ) -> bool:
     """Запись member_view, если за VIEW_DEDUP_SECONDS такой еще не было. user_id None —
     просмотр по всем участникам (сводка). True — запись сделана. commit."""
-    key = redis_key("member_view", viewer_id, user_id if user_id is not None else "all", screen)
-    if not await redis.set(key, "1", nx=True, ex=VIEW_DEDUP_SECONDS):
+    whose = user_id if user_id is not None else "all"
+    dedup = redis_key("member_view", viewer_id, whose, screen)
+    key: str | None = dedup
+    try:
+        fresh = await redis.set(dedup, "1", nx=True, ex=VIEW_DEDUP_SECONDS)
+    except RedisError:
+        # Redis недоступен: просмотр не ломаем и пишем запись без дедупликации — лишняя
+        # запись в журнале лучше, чем пропущенная
+        log.warning("member_view.dedup_unavailable", viewer_id=viewer_id, screen=screen)
+        fresh, key = True, None
+    if not fresh:
         return False
     try:
         await write_audit(
@@ -83,7 +97,9 @@ async def log_view(
         await db.commit()
     except BaseException:
         # Запись не легла — следующий запрос экрана попробует снова
-        await redis.delete(key)
+        if key is not None:
+            with contextlib.suppress(RedisError):
+                await redis.delete(key)
         raise
     return True
 

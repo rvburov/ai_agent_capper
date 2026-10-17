@@ -85,7 +85,8 @@ function Shell() {
           <div className="view-screen" hidden={pending !== null}>
             <Suspense fallback={<PageLoading />}>
               <ScreenTitleContext.Provider value={setScreenTitle}>
-                {view.denied ? <ViewDenied /> : <Outlet />}
+                {/* key: смена владельца данных — новый экран, без данных прежнего под новым именем */}
+                {view.denied ? <ViewDenied /> : <Outlet key={view.asUser ?? 'own'} />}
               </ScreenTitleContext.Provider>
             </Suspense>
           </div>

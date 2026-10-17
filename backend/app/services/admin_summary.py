@@ -58,7 +58,7 @@ async def summary(
                 status=user.status,  # type: ignore[arg-type]
                 me=user.id == admin.id,
                 empty=bank.empty,
-                bank=bank.balance,
+                bank=bank.equity,
                 bets=kpi.settled,
                 turnover=kpi.turnover,
                 roi=kpi.roi,
