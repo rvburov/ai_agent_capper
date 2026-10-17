@@ -86,12 +86,16 @@
     '',
     'События:',
     'Синнер vs Руне, Шанхай, хард',
-    'Кэфы: П1 = 1.17, П2 = 5.10',
+    'Кэфы: П1 = 1.22, П2 = 4.40',
     'Фора по сетам: П1(-1.5) = 1.62, П2(+1.5) = 2.30',
+    'Тотал геймов: Б(22.5) = 1.90, М(22.5) = 1.90',
+    'Фора по геймам: П1(-4.5) = 1.85, П2(+4.5) = 1.95',
     '',
     'Джокович vs Рублев, Шанхай, хард',
     'Кэфы: П1 = 1.34, П2 = 3.35',
-    'Фора по сетам: П1(-1.5) = 2.05, П2(+1.5) = 1.72',
+    'Ф1(-1.5) = 2.05, Ф2(+1.5) = 1.72',
+    'Тотал сетов: Б(2.5) = 2.30, М(2.5) = 1.60',
+    'Тотал геймов: Б(22) = 1.75, М(22) = 2.05',
   ].join('\n');
   const template = () => [
     'Текущий банк: ' + fmt.money(S.bank),
@@ -101,6 +105,8 @@
     'Игрок 1 vs Игрок 2, турнир, покрытие, раунд',
     'Кэфы: П1 = 1.00, П2 = 1.00',
     'Фора по сетам: П1(-1.5) = 1.00, П2(+1.5) = 1.00',
+    'Тотал геймов: Б(22.5) = 1.00, М(22.5) = 1.00',
+    'Фора по геймам: П1(-3.5) = 1.00, П2(+3.5) = 1.00',
   ].join('\n');
 
   // ---------- утилиты ----------
@@ -166,7 +172,7 @@
   const isDirty = () => state.parsedText !== state.text;
 
   function blankEvent() {
-    return { id: uid(), raw1: '', raw2: '', conf1: null, conf2: null, n1: '', n2: '', tournament: 'Шанхай', category: 'Masters 1000', surface: 'hard', round: '', time: '', court: '', odds: {}, todayId: null, blank: true };
+    return { id: uid(), raw1: '', raw2: '', conf1: null, conf2: null, n1: '', n2: '', tournament: 'Шанхай', category: 'Masters 1000', surface: 'hard', round: '', time: '', court: '', odds: {}, extra: [], ambig: [], todayId: null, blank: true };
   }
   function attachToday(ev) {
     const a = resolve(ev.n1), b = resolve(ev.n2);
@@ -189,15 +195,94 @@
   }
 
   // ---------- разбор текста (в продукте — Claude Haiku со строгой JSON-схемой) ----------
-  function oddsInto(str, odds) {
-    const re = /([ПФ])\s*([12])\s*(?:\(\s*([+\-−–])\s*1[.,]5\s*\))?\s*[=:]\s*(\d+(?:[.,]\d+)?)/gi;
-    let m, found = 0;
-    while ((m = re.exec(str))) {
-      const key = m[3] ? 'h' + m[2] + (m[3] === '+' ? 'p' : 'm') : 'p' + m[2];
-      odds[key] = m[4].replace(',', '.'); found++;
+  // ---------- Р28: рынки и линии ----------
+  // Фора и тотал — строка extra { market, line, o1, o2 }: у фор line — фора игрока 1 (o1 — Ф1, o2 — Ф2),
+  // у тоталов o1 — больше, o2 — меньше. Фора ±1.5 по сетам — прежние поля h1m … h2p.
+  const FR = D.fresh;
+  const XM = [
+    { value: 'shcp', label: 'Фора по сетам ±2.5' }, { value: 'stot', label: 'Тотал сетов' },
+    { value: 'ghcp', label: 'Фора по геймам' }, { value: 'gtot', label: 'Тотал геймов' },
+  ];
+  const bestOf = ev => (/grand slam/i.test(ev.category || '') ? 5 : 3);
+  const setLines = (market, bo) => (market === 'shcp' ? [-2.5, 2.5] : bo === 5 ? [3.5, 4.5] : [2.5]);
+  const defaultLine = (market, bo) => (market === 'shcp' ? -2.5 : market === 'stot' ? setLines(market, bo)[0] : market === 'ghcp' ? -3.5 : 22.5);
+  const signed = x => FR.lineText(x, true);
+  // подписи сторон: «Ф1(−3.5)» и «Ф2(+3.5)» или «Больше 22.5» и «Меньше 22.5»
+  const sideLabels = x => (FR.FAMILY[x.market].hcp ? ['Ф1(' + signed(x.line) + ')', 'Ф2(' + signed(-x.line) + ')'] : ['Больше ' + x.line, 'Меньше ' + x.line]);
+  const halfOk = x => Number.isFinite(x) && Math.abs(x * 2 - Math.round(x * 2)) < 1e-9; // .5 или целая, без .25 и .75
+  let xseq = 0;
+  function addExtra(ev, market, line, side, odds) {
+    let x = ev.extra.find(y => y.market === market && y.line === line);
+    if (!x) { x = { id: ev.id + '-x' + (++xseq), market, line, o1: '', o2: '' }; ev.extra.push(x); }
+    x['o' + side] = odds;
+    return x;
+  }
+  // знак линии из текста («-», «−», «–» — минус)
+  const lineOf = (sign, n) => (sign === '+' ? 1 : -1) * parseFloat(n.replace(',', '.'));
+  function applyHcp(ev, unit, side, line, odds) {
+    const p1Line = side === '1' ? line : -line;
+    if (unit === 'sets' && Math.abs(line) === 1.5) { ev.odds['h' + side + (line > 0 ? 'p' : 'm')] = odds; return; }
+    addExtra(ev, unit === 'sets' ? 'shcp' : 'ghcp', p1Line, side === '1' ? 1 : 2, odds);
+  }
+  // Разбор кэфов строки (в продукте — Claude Haiku со строгой схемой, parse_input v2). ctx — из заголовка:
+  // 'sets', 'games' или '' — не сказано. Без слова «сет» или «гейм» фора ±1.5 и ±2.5 спорная: спрашиваем участника.
+  // Тотал до 5 — сеты, от 15 — геймы. Четвертные линии (22.25) не принимаем.
+  function oddsInto(str, ev, ctx, res, n, text) {
+    let found = 0;
+    const odd = v => v.replace(',', '.');
+    const reH = /([ПФ])\s*([12])\s*\(\s*([+\-−–])\s*(\d+(?:[.,]\d+)?)\s*\)\s*[=:]\s*(\d+(?:[.,]\d+)?)/gi;
+    const reT = /(?:^|[\s,;:])Т?([БМ])\s*\(?\s*(\d+(?:[.,]\d+)?)\s*\)?\s*[=:]\s*(\d+(?:[.,]\d+)?)/gi;
+    const reW = /П\s*([12])\s*[=:]\s*(\d+(?:[.,]\d+)?)/gi;
+    let m;
+    while ((m = reW.exec(str))) { ev.odds['p' + m[1]] = odd(m[2]); found++; }
+    while ((m = reH.exec(str))) {
+      const line = lineOf(m[3], m[4]);
+      if (!halfOk(line)) { res.unknown.push({ n, text, why: 'четвертные линии (' + m[4] + ') не принимаем' }); continue; }
+      const abs = Math.abs(line), side = m[2];
+      const unit = ctx || (abs >= 3 ? 'games' : '');
+      if (!unit) {
+        let a = ev.ambig.find(x => x.abs === abs && !x.answer);
+        if (!a) { a = { abs, text, toks: [] }; ev.ambig.push(a); }
+        a.toks.push({ side, line, odds: odd(m[5]) });
+      } else applyHcp(ev, unit, side, line, odd(m[5]));
+      found++;
+    }
+    while ((m = reT.exec(str))) {
+      const line = parseFloat(m[2].replace(',', '.'));
+      if (!halfOk(line)) { res.unknown.push({ n, text, why: 'четвертные линии (' + m[2] + ') не принимаем' }); continue; }
+      const unit = ctx || (line <= 5 ? 'sets' : line >= 15 ? 'games' : '');
+      if (!unit) { res.unknown.push({ n, text, why: 'тотал ' + m[2] + ' — сеты или геймы?' }); continue; }
+      addExtra(ev, unit === 'sets' ? 'stot' : 'gtot', line, /Б/i.test(m[1]) ? 1 : 2, odd(m[3]));
+      found++;
     }
     return found;
   }
+  // ответ участника на спорную фору: по сетам или по геймам
+  function answerAmbig(ev, a, unit) {
+    a.answer = unit;
+    a.toks.forEach(t => applyHcp(ev, unit, t.side, t.line, t.odds));
+    refreshAfterAnswer(ev, a);
+  }
+  // подсказка: кэф форы −1.5 почти как у победы — похоже на геймы; заметно дороже — на сеты (2:0 реже победы)
+  function ambigGuess(ev, a) {
+    const t = a.toks.find(x => x.line < 0); if (!t) return null;
+    const win = num(ev.odds['p' + t.side]), o = num(t.odds);
+    if (!(win > 1 && o > 1)) return null;
+    return Math.abs(o - win) <= 0.15 ? { unit: 'games', why: 'кэф ' + fmt.odds(o) + ' почти как у победы (' + fmt.odds(win) + ') — так бывает у форы по геймам' }
+      : { unit: 'sets', why: 'кэф ' + fmt.odds(o) + ' заметно выше, чем у победы (' + fmt.odds(win) + ') — так бывает у форы по сетам: 2:0 реже победы' };
+  }
+  function checkExtra(ev, errors) {
+    const bo = bestOf(ev);
+    ev.extra.forEach(x => {
+      const f = FR.FAMILY[x.market], name = XM.find(o => o.value === x.market).label;
+      [x.o1, x.o2].forEach(v => { if (v != null && v !== '' && !validOdd(v)) errors.push(name + ': кэф от 1.01 до 50'); });
+      if (!halfOk(x.line)) errors.push(name + ': линия половинная (22.5) или целая (22), четвертных нет');
+      else if (f.unit === 'sets' && !setLines(x.market, bo).includes(x.line)) errors.push(x.market === 'shcp' ? 'Фора по сетам ±2.5 — только в матчах до 3 побед (Большой шлем)' : 'Тотал сетов в матче до ' + (bo === 5 ? '3 побед — 3.5 или 4.5' : '2 побед — только 2.5'));
+      else if (x.market === 'gtot' && x.line < 12) errors.push('Тотал геймов ' + x.line + ' — похоже на сеты, проверьте рынок');
+    });
+    ev.ambig.filter(a => !a.answer).forEach(a => errors.push('Уточните «Ф1(−' + a.abs + ')»: фора по сетам или по геймам'));
+  }
+
   function roundOf(s) {
     let m;
     if ((m = s.match(/1\s*\/\s*(64|32|16|8|4|2)/))) return '1/' + m[1] + ' финала';
@@ -219,8 +304,15 @@
       }
       if ((m = line.match(/^(?:букмекер|бк|контора)\s*[:=-]\s*(.+)$/i))) { res.bookmaker = m[1].trim(); return; }
       if (/^события\s*:?\s*$/i.test(line)) return;
-      if (/^(кэфы?|коэффициенты|исходы?|фора[^:]*)\s*:/i.test(line)) {
-        if (cur && oddsInto(line.slice(line.indexOf(':') + 1), cur.odds)) return;
+      if ((m = line.match(/^(кэфы?|коэффициенты|исходы?|фора[^:]*|тотал[^:]*)\s*:/i))) {
+        // Р28: слово «сет» или «гейм» в заголовке говорит, к чему относятся линии строки
+        const ctx = /сет/i.test(m[1]) ? 'sets' : /гейм/i.test(m[1]) ? 'games' : '';
+        if (cur && oddsInto(line.slice(line.indexOf(':') + 1), cur, ctx, res, i + 1, line)) return;
+        res.unknown.push({ n: i + 1, text: line }); return;
+      }
+      // строка с кэфами без заголовка: «Ф1(-1.5) = 2.05, Ф2(+1.5) = 1.72», «ТБ 22.5 = 1.90»
+      if (cur && /^(?:[ПФ]\s*[12]|Т?[БМ]\s*\(?\s*\d)/i.test(line) && /[=:]/.test(line)) {
+        if (oddsInto(line, cur, '', res, i + 1, line)) return;
         res.unknown.push({ n: i + 1, text: line }); return;
       }
       if ((m = line.match(/^(.+?)\s+(?:vs\.?|против|—|–|-)\s+(.+)$/i))) {
@@ -281,6 +373,7 @@
     MK.forEach(mk => { const v = ev.odds[mk.key]; if (v != null && v !== '' && !validOdd(v)) bad.add(mk.key); });
     if (bad.size) errors.push('Кэф ' + [...bad].map(k => MK.find(m => m.key === k).label).join(', ') + ' — допустимо от 1.01 до 50');
     if (!ev.odds.p1 || !ev.odds.p2) errors.push('Нужны кэфы П1 и П2');
+    checkExtra(ev, errors);
     return { errors, bad };
   }
 
@@ -430,6 +523,21 @@
     .new-odd.invalid input, .new-odd.invalid small { color: var(--bad-ink); }
 
     .new-ev-foot { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    /* Р28: другие рынки */
+    .new-xm-block { gap: 8px; }
+    .new-xm-list { display: flex; flex-direction: column; gap: 8px; }
+    .new-xm { border: 1px dashed var(--line-strong); border-radius: var(--r-md); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .new-xm-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 150px) 40px; gap: 8px; align-items: end; }
+    .new-xm-top .field { margin: 0; min-width: 0; }
+    .new-xm-rm .btn, .new-xm-head .btn { width: 40px; height: 40px; padding: 0; }
+    .new-xm-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+    .new-xm-head b { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+    .new-xm-odds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .new-xm-odds .new-odd small { text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); }
+    .new-xm-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--fs-xs); color: var(--fg-2); }
+    .new-xm-note .chip { white-space: nowrap; }
+    .new-xm-add.btn { align-self: flex-start; min-height: 40px; }
+    @container (max-width: 460px) { .new-xm-top { grid-template-columns: minmax(0, 1fr) 40px; } .new-xm-top > .field:nth-child(2) { grid-column: 1 / -1; grid-row: 2; } .new-xm-rm { grid-column: 2; grid-row: 1; } }
     .new-foot-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: var(--fs-sm); color: var(--fg-2); }
     .new-novig b { font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
     .new-corr { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-xs); color: var(--fg-2); }
@@ -636,7 +744,9 @@
       events: state.events.map(ev => {
         const r1 = resolve(ev.n1), r2 = resolve(ev.n2);
         return { p1: r1.p ? r1.p.id : r1.name, p2: r2.p ? r2.p.id : r2.name, tournament: ev.tournament, surface: ev.surface, round: ev.round,
-          odds: Object.fromEntries(MK.filter(mk => validOdd(ev.odds[mk.key])).map(mk => [mk.key, num(ev.odds[mk.key])])) };
+          odds: Object.fromEntries(MK.filter(mk => validOdd(ev.odds[mk.key])).map(mk => [mk.key, num(ev.odds[mk.key])])),
+          // Р28: другие рынки — семейство, линия (у фор — игрока 1) и кэфы двух сторон
+          extra: ev.extra.filter(x => validOdd(x.o1) || validOdd(x.o2)).map(x => ({ market: x.market, line: x.line, o1: validOdd(x.o1) ? num(x.o1) : null, o2: validOdd(x.o2) ? num(x.o2) : null })) };
       }),
     };
     UI.toast('Анализ запущен: ' + evWord(a.n) + ', режим «' + a.mode.label + '»', 'spark');
@@ -653,6 +763,8 @@
           h('li', null, h('b', null, 'Игроки: '), '«Синнер vs Руне», «Синнер — Руне» или «Sinner vs Rune». Достаточно фамилии.'),
           h('li', null, h('b', null, 'После игроков через запятую: '), 'турнир, покрытие и, если знаете, раунд — «Шанхай, хард, 1/8».'),
           h('li', null, h('b', null, 'Кэфы: '), 'П1 и П2 обязательны. Форы по сетам — П1(-1.5), П1(+1.5), П2(-1.5), П2(+1.5).'),
+          h('li', null, h('b', null, 'Другие рынки: '), 'тотал — «Тотал геймов: Б(22.5) = 1.90, М(22.5) = 1.90» или «ТБ 22.5 = 1.90»; фора по геймам — «Фора по геймам: П1(-3.5) = 1.85». Линии половинные (22.5) или целые (22, при «ровно» — возврат), четвертных нет.'),
+          h('li', null, 'Пишите «сет» или «гейм» в заголовке строки: «Ф1(-1.5)» без него бывает и тем и другим — тогда переспросим. Тотал до 5 считаем сетами, от 15 — геймами.'),
           h('li', null, 'Дробную часть можно писать через точку или запятую: 1.62 или 1,62.'),
           h('li', null, 'Банк и букмекер необязательны — по умолчанию возьмем из кабинета.'),
           h('li', null, 'Банк — в валюте программы (' + curName() + '). Сумму в другой валюте (' + Object.values(UI.currency.list).map(c => c.sym).join(', ') + ', «руб», «usd», «eur») пересчитаем по курсу программы.'),
@@ -664,6 +776,84 @@
         button('Понятно', { kind: 'primary', onClick: close }),
       ],
     });
+  }
+
+  // ---------- Р28: другие рынки в карточке события ----------
+  function refreshAfterAnswer(ev, a) {
+    renderPanel(); renderSide();
+    UI.toast('«Ф1(−' + a.abs + ')» — фора по ' + (a.answer === 'sets' ? 'сетам' : 'геймам') + '. Записал', 'check');
+  }
+  function ambigCallout(ev, a) {
+    const g = ambigGuess(ev, a);
+    const btn = unit => button(unit === 'sets' ? 'По сетам' : 'По геймам', { kind: g && g.unit === unit ? 'secondary' : 'ghost', size: 'sm', icon: g && g.unit === unit ? 'check' : null, onClick: () => answerAmbig(ev, a, unit) });
+    return UI.callout('warn', 'alert',
+      h('div', null, h('b', null, '«' + a.toks.map(t => 'Ф' + t.side + '(' + signed(t.line) + ') = ' + t.odds).join(', ') + '» — фора по сетам или по геймам?'), ' В строке нет слов «сет» или «гейм», а линия ' + a.abs + ' бывает и там и там. Без ответа анализ не запустим.'),
+      g && h('div', { class: 'xsmall', style: 'margin-top:2px' }, 'Похоже на ' + (g.unit === 'sets' ? 'сеты' : 'геймы') + ': ' + g.why + '.'),
+      h('div', { class: 'row new-callout-actions' }, btn('sets'), btn('games')));
+  }
+  const xStatus = market => FR.statusOf({ market });
+  function extraRow(ev, x, editable) {
+    const s = slots.get(ev.id);
+    const f = FR.FAMILY[x.market], bo = bestOf(ev);
+    const labs = sideLabels(x);
+    const lineCtl = () => {
+      const id = x.id + '-line';
+      if (f.unit === 'sets') {
+        const opts = setLines(x.market, bo).concat(setLines(x.market, bo).includes(x.line) ? [] : [x.line]);
+        const fl = UI.field({ label: 'Линия', id, value: String(x.line), options: opts.map(v => ({ value: String(v), label: f.hcp ? signed(v) + ' у игрока 1' : String(v) })), attrs: { 'data-fk': id } });
+        fl.querySelector('select').addEventListener('change', e => { x.line = parseFloat(e.target.value); redraw(); });
+        return fl;
+      }
+      const fl = UI.field({ label: f.hcp ? 'Фора игрока 1' : 'Линия', id, value: f.hcp ? signed(x.line).replace('−', '-') : String(x.line), inputmode: 'decimal', placeholder: f.hcp ? '-3.5' : '22.5', autocomplete: 'off', attrs: { maxlength: '6', 'data-fk': id } });
+      const inp = fl.querySelector('input');
+      inp.addEventListener('input', () => { const v = parseFloat(inp.value.replace(',', '.').replace(/[−–]/, '-')); x.line = Number.isFinite(v) ? v : NaN; const l2 = sideLabels(x); row.querySelectorAll('.new-odd small .new-xm-lab').forEach((el, k) => { el.textContent = halfOk(x.line) ? l2[k] : (k ? 'Сторона 2' : 'Сторона 1'); }); syncNote(); refreshEvent(ev); });
+      return fl;
+    };
+    const oddBox = k => {
+      const id = x.id + '-o' + k;
+      const inp = h('input', { type: 'text', id, inputmode: 'decimal', autocomplete: 'off', maxlength: '6', placeholder: '—', value: x['o' + k] || '', 'data-fk': id, 'aria-label': 'Кэф ' + labs[k - 1] });
+      inp.addEventListener('input', () => { x['o' + k] = inp.value.trim(); ev.blank = false; refreshEvent(ev); });
+      inp.addEventListener('blur', () => { if (validOdd(inp.value)) { inp.value = num(inp.value).toFixed(2); x['o' + k] = inp.value; } });
+      return h('label', { class: 'new-odd', for: id }, h('small', null, h('span', { class: 'new-xm-lab' }, labs[k - 1])), inp);
+    };
+    const st = xStatus(x.market);
+    const note = h('div', { class: 'new-xm-note' });
+    const syncNote = () => {
+      UI.clear(note).append(
+        chip('для сравнения · ' + st.n + ' из ' + FR.NEED, 'info', 'flask'),
+        h('span', null, Number.isInteger(x.line) ? 'целая линия: ровно ' + Math.abs(x.line) + ' — возврат. ' : '', 'Оценку и валуй покажем, в экспресс пока не возьмем'));
+    };
+    syncNote();
+    const rm = button('', { kind: 'ghost', size: 'sm', icon: 'trash', title: 'Убрать рынок', onClick: () => { ev.extra = ev.extra.filter(y => y !== x); renderPanel(); renderSide(); } });
+    let row;
+    const redraw = () => { const nr = extraRow(ev, x, editable); row.replaceWith(nr); refreshEvent(ev); };
+    if (editable) {
+      const sel = UI.field({ label: 'Рынок', id: x.id + '-mk', value: x.market, options: XM, attrs: { 'data-fk': x.id + '-mk' } });
+      sel.querySelector('select').addEventListener('change', e => { x.market = e.target.value; x.line = defaultLine(x.market, bo); redraw(); });
+      row = h('div', { class: 'new-xm', role: 'group', 'aria-label': 'Рынок ' + XM.find(o => o.value === x.market).label },
+        h('div', { class: 'new-xm-top' }, sel, lineCtl(), h('div', { class: 'new-xm-rm' }, rm)),
+        h('div', { class: 'new-xm-odds' }, oddBox(1), oddBox(2)), note);
+    } else {
+      row = h('div', { class: 'new-xm', role: 'group', 'aria-label': FR.FAMILY[x.market].label },
+        h('div', { class: 'new-xm-head' }, h('b', null, f.label + (f.hcp ? ': ' + shortOf(ev.n1, 'игрок 1') + ' ' + signed(x.line) : ' ' + x.line)), rm),
+        h('div', { class: 'new-xm-odds' }, oddBox(1), oddBox(2)), note);
+    }
+    if (s) s.xrows = (s.xrows || []).concat([row]);
+    return row;
+  }
+  function extraBlock(ev, editable) {
+    const list = h('div', { class: 'new-xm-list' }, ev.extra.map(x => extraRow(ev, x, editable)));
+    const add = button('Добавить рынок', { kind: 'ghost', size: 'sm', icon: 'plus', attrs: { class: 'btn ghost sm new-xm-add', 'data-fk': ev.id + '-xadd' }, onClick: () => {
+      const used = new Set(ev.extra.map(x => x.market));
+      const market = (XM.find(o => !used.has(o.value) && (o.value !== 'shcp' || bestOf(ev) === 5)) || XM[3]).value;
+      ev.extra.push({ id: ev.id + '-x' + (++xseq), market, line: defaultLine(market, bestOf(ev)), o1: '', o2: '' });
+      ev.blank = false; renderPanel(); renderSide();
+      focusLater('#' + ev.extra[ev.extra.length - 1].id + '-o1');
+    } });
+    if (!ev.extra.length && !editable) return null;
+    return h('div', { class: 'field new-xm-block' },
+      h('span', { class: 'field-label' }, h('span', null, 'Другие рынки'), h('span', { class: 'new-odds-hint' }, 'тоталы и форы — для сравнения')),
+      list, editable && add);
   }
 
   // ---------- карточки событий ----------
@@ -722,6 +912,7 @@
 
   function fillWarn(node, ev) {
     clear(node);
+    ev.ambig.filter(a => !a.answer).forEach(a => node.appendChild(ambigCallout(ev, a)));
     const seen = new Set();
     [1, 2].forEach(k => {
       const r = resolve(ev['n' + k]); if (!r) return;
@@ -752,14 +943,16 @@
     const kind = m < 0 ? 'bad' : m > 0.08 ? 'warn' : 'outline';
     const text = m < 0 ? 'Маржа меньше нуля — проверьте кэфы' : 'Маржа БК ' + fmt.pct(m * 100) + (mh != null && mh >= 0 ? ' · фора ' + fmt.pct(mh * 100) : '');
     const i1 = 1 / num(o.p1), i2 = 1 / num(o.p2), q1 = i1 / (i1 + i2);
-    const corr = MK.filter(mk => validOdd(o[mk.key]) && inCorridor(o[mk.key]));
-    node.append(
+    const corr = MK.filter(mk => mk.main && validOdd(o[mk.key]) && inCorridor(o[mk.key]));
+    const others = MK.some(mk => !mk.main && validOdd(o[mk.key])) || ev.extra.some(x => validOdd(x.o1) || validOdd(x.o2));
+    UI.append(node, [
       h('div', { class: 'new-foot-row' },
         h('span', { title: 'Маржа = 1/П1 + 1/П2 − 1' }, chip(text, kind, kind === 'outline' ? 'info' : 'alert')),
         h('span', { class: 'new-novig' }, 'Рынок без маржи: ', h('b', null, shortOf(ev.n1, 'П1') + ' ' + fmt.prob(q1)), ' · ', h('b', null, shortOf(ev.n2, 'П2') + ' ' + fmt.prob(1 - q1)))),
       corr.length
         ? h('div', { class: 'new-corr' }, icon('check'), 'В коридоре стратегии ' + fmt.odds(ST.oddsMin) + '–' + fmt.odds(ST.oddsMax) + ': ' + corr.map(mk => mk.label + ' ' + fmt.odds(num(o[mk.key]))).join(', '))
-        : h('div', { class: 'new-corr out' }, icon('alert'), 'Ни один кэф не попадает в коридор ' + fmt.odds(ST.oddsMin) + '–' + fmt.odds(ST.oddsMax) + ' — в экспресс событие, скорее всего, не войдет.'));
+        : h('div', { class: 'new-corr out' }, icon('alert'), 'Ни П1, ни П2 не попадают в коридор ' + fmt.odds(ST.oddsMin) + '–' + fmt.odds(ST.oddsMax) + ' — в экспресс событие, скорее всего, не войдет.'),
+      others && h('div', { class: 'new-corr' }, icon('flask'), 'В экспресс сейчас идут только П1 и П2, один рынок на матч. Фора ±1.5 — на проверке, тоталы и форы — для сравнения: оценку и валуй покажем, поставить можно своей ставкой.')]);
   }
 
   function refreshEvent(ev, side = true) {
@@ -771,7 +964,7 @@
       fillWarn(s.warn, ev);
       fillFoot(s.foot, ev);
       const c = check(ev);
-      s.odds.forEach((box, key) => { box.classList.toggle('invalid', c.bad.has(key)); box.classList.toggle('in', validOdd(ev.odds[key]) && inCorridor(ev.odds[key])); box.querySelector('input').setAttribute('aria-invalid', String(c.bad.has(key))); });
+      s.odds.forEach((box, key) => { box.classList.toggle('invalid', c.bad.has(key)); box.classList.toggle('in', (key === 'p1' || key === 'p2') && validOdd(ev.odds[key]) && inCorridor(ev.odds[key])); box.querySelector('input').setAttribute('aria-invalid', String(c.bad.has(key))); });
       clear(s.msg);
       if (c.errors.length && !ev.blank) s.msg.appendChild(h('div', { class: 'field-error' }, c.errors.join('. ') + '.'));
     }
@@ -787,7 +980,7 @@
       const inp = h('input', { type: 'text', id, inputmode: 'decimal', autocomplete: 'off', maxlength: '6', placeholder: '—', value: ev.odds[mk.key] || '', 'data-fk': id, 'aria-label': 'Кэф ' + mk.label + (mk.main ? '' : ', необязательно') });
       inp.addEventListener('input', () => { ev.odds[mk.key] = inp.value.trim(); ev.blank = false; refreshEvent(ev); });
       inp.addEventListener('blur', () => { if (validOdd(inp.value)) { inp.value = num(inp.value).toFixed(2); ev.odds[mk.key] = inp.value; } });
-      const box = h('label', { class: 'new-odd', for: id, title: mk.main ? null : 'Фора по сетам' },
+      const box = h('label', { class: 'new-odd', for: id, title: mk.main ? null : 'Фора по сетам ±1.5 — рынок на проверке, в экспресс пока не берем' },
         h('small', null, mk.label, h('span', { class: 'new-odd-tick', title: 'В коридоре стратегии' }, icon('check'))), inp);
       s.odds.set(mk.key, box);
       return box;
@@ -814,6 +1007,7 @@
       h('div', { class: 'new-ev-players' }, s.pl1, s.pl2),
       s.warn,
       oddsGrid(ev, list),
+      extraBlock(ev, false),
       s.foot, s.msg);
     refreshEvent(ev, false);
     return el;
@@ -853,7 +1047,8 @@
       h('div', { class: 'new-edit-grid' }, nameField(1), nameField(2), tour, round,
         h('div', { class: 'field full' }, h('span', { class: 'field-label' }, 'Покрытие'), seg)),
       s.warn,
-      h('div', { class: 'field' }, h('span', { class: 'field-label' }, h('span', null, 'Кэфы'), h('span', { class: 'new-odds-hint' }, 'П1 и П2 обязательны, форы — если есть в линии')), oddsGrid(ev, MK)),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, h('span', null, 'Кэфы'), h('span', { class: 'new-odds-hint' }, 'П1 и П2 обязательны, фора ±1.5 по сетам — если есть в линии')), oddsGrid(ev, MK)),
+      extraBlock(ev, true),
       s.foot, s.msg,
       inline && h('div', { class: 'new-edit-foot' },
         button('Готово', { kind: 'primary', icon: 'check', onClick: () => finishEdit(ev), attrs: { 'data-fk': 'done-' + ev.id } }),
@@ -893,7 +1088,7 @@
     if (pr.unknown.length) {
       wrap.appendChild(UI.callout('bad', 'alert',
         h('div', null, h('b', null, 'Не понял ' + pr.unknown.length + ' ' + fmt.plural(pr.unknown.length, 'строку', 'строки', 'строк') + ':')),
-        h('ul', { style: 'margin:4px 0 0;padding-left:18px' }, pr.unknown.slice(0, 4).map(u => h('li', null, 'строка ' + u.n + ': «' + u.text + '»'))),
+        h('ul', { style: 'margin:4px 0 0;padding-left:18px' }, pr.unknown.slice(0, 4).map(u => h('li', null, 'строка ' + u.n + ': «' + u.text + '»' + (u.why ? ' — ' + u.why : '')))),
         h('div', { class: 'row new-callout-actions' }, button('Формат текста', { kind: 'ghost', size: 'sm', icon: 'book', onClick: formatModal }))));
     }
     if (!n) {
@@ -906,7 +1101,7 @@
   }
 
   function textPanel() {
-    const ta = h('textarea', { class: 'textarea new-textarea', id: 'new-text', rows: 12, spellcheck: 'false', 'data-fk': 'text', 'aria-describedby': 'new-text-hint', placeholder: 'Синнер vs Руне, Шанхай, хард\nКэфы: П1 = 1.17, П2 = 5.10' });
+    const ta = h('textarea', { class: 'textarea new-textarea', id: 'new-text', rows: 12, spellcheck: 'false', 'data-fk': 'text', 'aria-describedby': 'new-text-hint', placeholder: 'Синнер vs Руне, Шанхай, хард\nКэфы: П1 = 1.22, П2 = 4.40' });
     ta.value = state.text;
     const status = h('div', { 'aria-live': 'polite' });
     const btnLabel = h('span');
@@ -1078,7 +1273,9 @@
           ['Кэф события', fmt.odds(ST.oddsMin) + '–' + fmt.odds(ST.oddsMax)],
           ['Событий в экспрессе', LEGS],
           ['Итоговый кэф', '≤ ' + fmt.odds(ST.totalMax)],
+          ['Рынки в экспрессе', 'П1, П2 · один на матч'],
         ]),
+        h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Фора ±1.5 — на проверке, тоталы и форы — для сравнения: оценку покажем, в экспресс пока не берем. Кроме экспресса анализ предложит ординары.'),
         a.n > ST.maxLegs
           ? UI.callout('info', 'info', 'Событий больше ' + ST.maxLegs + ' — в экспресс попадут не больше ' + ST.maxLegs + ' лучших, остальные получат отдельную оценку.')
           : a.n === 1

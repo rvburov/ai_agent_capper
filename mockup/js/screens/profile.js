@@ -486,6 +486,13 @@
       .profile-del-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     }
     /* правила стратегии — только просмотр */
+    .profile-mk { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); }
+    .profile-mk li { display: flex; flex-direction: column; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+    .profile-mk li:last-child { border-bottom: 0; }
+    .profile-mk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .profile-mk-head b { font-weight: 500; }
+    .profile-mk-head small { display: block; font-size: var(--fs-xs); color: var(--fg-3); }
+    .profile-mk-prog { display: flex; flex-direction: column; gap: 4px; }
     .profile-srules { margin: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); }
     .profile-srule { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--line); }
     .profile-srule:last-child { border-bottom: 0; }
@@ -1149,6 +1156,30 @@
         button('Отклонить', { kind: 'ghost', size: 'sm', ro: true, onClick: () => { cand.status = 'archived'; drawPanel(); UI.toast('Кандидат ' + cand.id + ' отклонен', 'x'); } })),
       !cand && act && act.rollback && button('Вернуть ' + act.rollback, { kind: 'ghost', size: 'sm', icon: 'history', ro: true, onClick: () => { const prev = R.find(v => v.id === act.rollback); act.status = 'archived'; applyRuleChange(act, true); if (prev) prev.status = 'active'; drawPanel(); UI.toast('Снова действует ' + act.rollback, 'history'); } }));
   }
+  // Р28: какие рынки идут в экспресс, какие на проверке, какие «для сравнения» — со счетчиком событий
+  function marketsBlock() {
+    const F = D.fresh;
+    const stChip = m => (m.status === 'express' ? chip('в экспрессе', 'good', 'ticket') : m.status === 'paused' ? chip('на проверке', 'warn', 'flask') : chip('для сравнения', 'info', 'flask'));
+    return h('div', { class: 'stack', style: 'gap:8px' },
+      h('div', { class: 'profile-section-title' }, h('h4', null, 'Рынки'), h('span', { class: 'xsmall muted' }, 'общие для всех · меняет администратор')),
+      h('ul', { class: 'profile-mk' }, F.status.map(m => h('li', null,
+        h('div', { class: 'profile-mk-head' }, h('div', { style: 'min-width:0' }, h('b', null, m.label), h('small', null, m.lines)), stChip(m)),
+        m.status === 'compare' && h('div', { class: 'profile-mk-prog' }, UI.meter(m.n, F.NEED), h('span', { class: 'xsmall muted' }, m.n + ' из ' + F.NEED + ' событий · CLV ' + (m.clv == null ? '—' : fmt.signedPct(m.clv)))),
+        m.status === 'paused' && h('div', { class: 'xsmall muted' }, m.why)))),
+      h('p', { class: 'xsmall muted', style: 'margin:0' }, h('b', null, 'Один рынок на матч: '), 'в экспрессе не больше одного исхода каждого матча — исходы одного матча связаны. Рынок «для сравнения» анализ оценивает, но в экспресс и варианты не берет, пока не наберется ' + F.NEED + '–' + F.NEED_MAX + ' событий и CLV не покажет перевес (нижняя граница 95% ДИ выше нуля). Тогда администратор включает его новой версией инструкций. Поставить такой рынок можно своей ставкой.'));
+  }
+  // Р29: ординары из вариантов анализа и свои ставки
+  function ownBetsBlock(stakeMoney, rule2) {
+    return h('div', { class: 'stack', style: 'gap:8px' },
+      h('div', { class: 'profile-section-title' }, h('h4', null, 'Ординары и свои ставки'), h('span', { class: 'xsmall muted' }, 'настоящие ставки, меняют банк')),
+      h('dl', { class: 'profile-srules' },
+        rule2('Ординар · кэф до 1.60', '1,5%', 'сейчас это ' + stakeMoney(1.5)),
+        rule2('Ординар · 1.61–2.20', '1,25%', 'сейчас это ' + stakeMoney(1.25)),
+        rule2('Ординар · от 2.21', '1%', 'сейчас это ' + stakeMoney(1)),
+        rule2('Своя ставка', 'сумму выбираете вы', 'стратегия ее не считает')),
+      h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Анализ кроме экспресса предлагает ординары: «надежнее» (наибольшая вероятность при кэфе от 1.30 и валуе от нуля) и «лучший валуй» (при вероятности от 50%). Адаптации у ординара те же; в защитном режиме — не больше 1% банка; валуя нет — суммы нет. ',
+        h('b', null, 'Ординары и свои ставки меняют банк, '), 'поэтому входят в просадку от пика и итог недели для адаптаций, в лимиты ответственной игры, в калибровку и CLV модели. В «Аналитике» их видно отдельно; версии стратегии сравниваются только по ее экспрессам.'));
+  }
   function strategyCard() {
     const b = bankNow();
     const step = isRub() ? 10 : 1; // сумма округляется вниз: рубли — до 10, доллары и евро — до целых
@@ -1166,17 +1197,18 @@
         h('div', { class: 'stack', style: 'gap:8px' },
           h('h4', null, 'Отбор событий'),
           h('dl', { class: 'profile-srules' },
-            rule('Рынки', '6 исходов', 'победа и фора ±1.5 по сетам на каждого игрока'),
+            rule('Рынки в экспрессе', 'П1 и П2', 'один рынок на матч; остальные — ниже, в «Рынках»'),
             rule('Вероятность события', 'от ' + STRAT.minProb + '%', 'в экспрессе из 3 событий — от ' + (T.minProb || 70) + '%'),
             rule('Кэф события', fmt.odds(STRAT.oddsMin) + '–' + fmt.odds(STRAT.oddsMax), 'в экспрессе из 3 событий — до ' + fmt.odds(T.legOddsMax || 1.6)),
             rule('Валуй', 'обязателен', 'нет перевеса над рынком — нет ставки'),
-            rule('Фора −1.5', 'от ' + (STRAT.coverMinProb || 55) + '%', 'вероятность победы с разницей в 2 сета и больше'),
+            rule('Фора −1.5', 'от ' + (STRAT.coverMinProb || 55) + '%', 'когда фора вернется в экспресс: сейчас она на проверке'),
             rule('Форма', 'от ' + (STRAT.formMinWins || 3) + '–' + (5 - (STRAT.formMinWins || 3)), 'побед в последних 5 матчах'))),
         h('div', { class: 'stack', style: 'gap:8px' },
           h('h4', null, 'Экспресс'),
           h('dl', { class: 'profile-srules' },
             rule('Из 2 событий', 'итоговый кэф ' + fmt.odds(1.28) + '–' + fmt.odds(STRAT.totalMax)),
             rule('Из 3 событий', 'итоговый кэф ' + fmt.odds(T.totalMin || 1.44) + '–' + fmt.odds(T.totalMax || 4.10)))),
+        marketsBlock(),
         h('hr', { class: 'divider' }),
         h('div', { class: 'stack', style: 'gap:8px' },
           h('div', { class: 'profile-section-title' }, h('h4', null, 'Ставка по итоговому кэфу'), h('span', { class: 'xsmall muted' }, '% от банка ' + fmt.money(b))),
@@ -1189,6 +1221,7 @@
           h('div', { class: 'profile-section-title', style: 'margin-top:6px' }, h('h4', null, 'Поправка на валуй'), h('span', { class: 'xsmall muted' }, 'средний перевес ног экспресса')),
           h('dl', { class: 'profile-value', 'aria-label': 'Поправка ставки на валуй, в процентах банка' }, VALUE_ADJ.map(x => h('div', null, h('dt', null, x.t, h('small', null, x.d)), h('dd', null, x.v)))),
           h('p', { class: 'xsmall muted' }, 'Процент из таблицы, затем поправка на валуй и адаптации ниже; потолок — 3% банка. Сумма округляется вниз до ' + fmt.money(fmt.fromMoney(step)) + '; меньше ' + minStake + ' — ставки нет.')),
+        ownBetsBlock(stakeMoney, rule),
         h('p', { class: 'profile-note' }, icon('history'), h('span', null, 'Правила суммы меняются новой версией: «Предложить изменение» → кандидат с проверкой на ваших ставках → «Включить». Отбор событий и инструкции анализа общие — их меняет администратор в «Обучении модели».')),
       ],
     });

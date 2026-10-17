@@ -19,8 +19,8 @@
   const monthName = ym => MONTHS_NOM[+ym.slice(5, 7) - 1] + ' ' + ym.slice(0, 4);
   const pname = id => D.playerName(id);
   const betsWord = n => plural(n, 'ставка', 'ставки', 'ставок');
-  const betKind = b => (b.legs.length > 1 ? 'Экспресс × ' + b.legs.length : 'Ординар');
-  const betKindLong = b => (b.legs.length > 1 ? 'Экспресс из ' + b.legs.length + ' ' + plural(b.legs.length, 'события', 'событий', 'событий') : 'Ординар');
+  const betKind = b => (b.single ? 'Вариант анализа' : b.legs.length > 1 ? 'Экспресс × ' + b.legs.length : 'Ординар');
+  const betKindLong = b => (b.single ? 'Вариант анализа' : b.legs.length > 1 ? 'Экспресс из ' + b.legs.length + ' ' + plural(b.legs.length, 'события', 'событий', 'событий') : 'Ординар');
   const matchOf = l => D.matchesToday.find(m => m.p1 === l.p1 && m.p2 === l.p2);
   // Т10: у проигранных экспрессов старого бота исходы ног не записаны
   const legRes = (b, l) => (b.status === 'void' ? 'void' : l.noResult ? 'unknown' : l.result);
@@ -114,9 +114,41 @@
       case 'h2m': return b - a >= 2 ? 'win' : 'loss';
       case 'h1p': return b - a >= 2 ? 'loss' : 'win';
       case 'h2p': return a - b >= 2 ? 'loss' : 'win';
-      default: return null;
+      default: return null; // новые рынки — freshSetsResult и gamesResult
     }
   }
+  // Р28: исход новых рынков. Тотал и фора по сетам — по счету по сетам; тотал и фора по геймам — по счету по геймам.
+  // При «ровно» на целой линии — возврат (кэф 1,00). Четвертных линий нет
+  const isGamesLeg = l => l.market === 'ghcp' || l.market === 'gtot';
+  const isSetsFresh = l => l.market === 'shcp' || l.market === 'stot';
+  const cmpRes = v => (v > 0 ? 'win' : v < 0 ? 'loss' : 'void');
+  function freshSetsResult(l, a, b) {
+    if (l.market === 'stot') return cmpRes(l.sel === 1 ? a + b - l.line : l.line - (a + b));
+    return cmpRes((l.sel === 1 ? a - b : b - a) + l.line);
+  }
+  // «6:4 7:6(5) 6:3» → [[6, 4], [7, 6], [6, 3]]; первым — игрок 1
+  function parseGames(s, bestOf) {
+    const parts = String(s || '').trim().split(/[\s,;]+/).filter(Boolean);
+    const need = bestOf === 5 ? 3 : 2;
+    const g = parts.map(x => x.replace(/\(\d+\)$/, '').match(/^(\d{1,2})[:\-–](\d{1,2})$/));
+    if (!g.length || g.some(m => !m)) return null;
+    const sets = g.map(m => [+m[1], +m[2]]);
+    if (sets.some(([a, b]) => a === b || Math.max(a, b) < 6)) return null;
+    const w1 = sets.filter(([a, b]) => a > b).length, w2 = sets.length - w1;
+    return Math.max(w1, w2) === need ? sets : null;
+  }
+  function gamesResult(l, sets) {
+    const A = sum(sets, x => x[0]), B = sum(sets, x => x[1]);
+    if (l.market === 'gtot') {
+      const t = A + B, r = cmpRes(l.sel === 1 ? t - l.line : l.line - t);
+      return { r, text: t + ' ' + plural(t, 'гейм', 'гейма', 'геймов') + (r === 'void' ? ' — ровно линия ' + l.line + ': возврат, кэф 1,00' : ' против линии ' + l.line) };
+    }
+    const diff = l.sel === 1 ? A - B : B - A, r = cmpRes(diff + l.line);
+    const who = pname(l.sel === 1 ? l.p1 : l.p2);
+    return { r, text: who + ' ' + (diff > 0 ? '+' : diff < 0 ? '−' : '') + Math.abs(diff) + ' ' + plural(Math.abs(diff), 'гейм', 'гейма', 'геймов') + ' с форой ' + D.fresh.lineText(l.line, true) + (r === 'void' ? ': ровно — возврат, кэф 1,00' : '') };
+  }
+  // Р29: ставка не по экспрессу стратегии — ординар варианта анализа или своя ставка
+  const kindChip = b => (b.own ? chip('Своя', 'warn', 'user') : b.single ? chip('Ординар', 'info', 'target') : null);
   function parseOdds(s) {
     const v = parseFloat(String(s).replace(',', '.'));
     return isFinite(v) && v >= 1.01 && v <= 50 ? r2(v) : null;
@@ -621,7 +653,7 @@
     const pay = payRub(b.stake, b.total);
     return h('article', { class: ['card bets-open', justSaved === b.id && 'is-new'], 'aria-label': 'Открытая ставка №' + b.id, 'data-open-bet': String(b.id) },
       h('div', { class: 'bets-open-head' },
-        h('div', { style: 'min-width:0' }, h('div', { class: 'bets-open-title' }, betKindLong(b)),
+        h('div', { style: 'min-width:0' }, h('div', { class: 'bets-open-title' }, betKindLong(b), kindChip(b) ? [' ', kindChip(b)] : null),
           h('div', { class: 'xsmall muted' }, '№' + b.id + ' · ' + b.bookmaker + ' · ' + b.tournament + ', ' + dateLabel(b.date))),
         b.awaiting ? chip('Ждет результата', 'warn', 'clock') : UI.statusChip('open')),
       h('ul', { class: 'bets-olegs' }, b.legs.map(l => {
@@ -748,7 +780,7 @@
       h('td', null, h('div', { class: 'bets-date' }, fmt.date(b.date)),
         h('div', { class: 'bets-sub' }, h('i', { class: 'bets-dot', style: { background: D.surfaces[b.surface].color } }), b.tournament + ' · ' + surfLabel(b.surface).toLowerCase()),
         isBot(b) && h('span', { class: 'chip outline bets-src', title: 'Перенесена из старого Telegram-бота' }, 'старый бот'),
-        byTag(b)),
+        kindChip(b), byTag(b)),
       h('td', null, b.legs.map(l => legLine(b, l))),
       h('td', { class: 'r' }, h('span', { class: 'odds' }, fmt.odds(b.total))),
       h('td', { class: 'r' }, fmt.money(b.stake)),
@@ -776,7 +808,7 @@
       h('tbody', null, b.legs.map((l, i) => {
         const implied = 1 / l.odds, edge = (l.p - implied) * 100, clv = legClv(l), sc = legScore(b, l, i);
         return h('tr', null,
-          h('td', null, h('div', { style: 'white-space:nowrap;font-weight:500' }, plink(l.p1), ' — ', plink(l.p2)), h('div', { class: 'xsmall muted' }, l.marketLabel + ' · ' + surfLabel(l.surface).toLowerCase() + (l.bestOf === 5 ? ' · до 3 побед' : ''))),
+          h('td', null, h('div', { style: 'white-space:nowrap;font-weight:500' }, plink(l.p1), ' — ', plink(l.p2)), h('div', { class: 'xsmall muted' }, l.marketLabel + (l.fresh ? ' · для сравнения' : '') + ' · ' + surfLabel(l.surface).toLowerCase() + (l.bestOf === 5 ? ' · до 3 побед' : ''))),
           h('td', { class: 'c' }, h('span', { class: 'mono' }, sc || '—')),
           h('td', { class: 'r' }, h('span', { class: 'odds' }, fmt.odds(l.odds))),
           h('td', { class: 'r' }, l.closing ? [h('span', { class: 'odds' }, fmt.odds(l.closing)), h('div', { class: 'xsmall muted', style: 'white-space:nowrap', title: l.closingSource === 'archive' ? ARCH_NOTE : null }, closingWho(l))] : isBot(b) ? botDash() : noClosing(b, l)),
@@ -847,7 +879,9 @@
   }
   function settledNote(b) {
     if (isBot(b)) return 'Перенесена из старого бота.';
-    if (b.settledBy === 'auto') return 'Рассчитана автоматически ' + fmt.date(b.settledAt) + ', ' + b.settledAt.slice(11, 16) + ' по архиву tennis-data (файл от ' + fmt.date(b.archiveFile) + '). Ошибся архив — «Исправить результат», как при ручном расчете.';
+    const fresh = b.legs.filter(l => isGamesLeg(l) && l.score);
+    const freshTxt = fresh.length ? ' Новые рынки — по счету по геймам: ' + fresh.map(l => l.marketLabel + ' — ' + l.score + ', ' + gamesResult(l, parseGames(l.score, l.bestOf) || []).text).join('; ') + '. Закрывающего кэфа таких рынков в архиве нет — внесите его сами.' : '';
+    if (b.settledBy === 'auto') return 'Рассчитана автоматически ' + fmt.date(b.settledAt) + ', ' + b.settledAt.slice(11, 16) + ' по архиву tennis-data (файл от ' + fmt.date(b.archiveFile) + ').' + freshTxt + ' Ошибся архив — «Исправить результат», как при ручном расчете.';
     return 'Результат внесли вы' + (b.settledAt ? ' ' + fmt.date(b.settledAt) : '') + '. Ручной расчет главнее: архив его не меняет, а при расхождении приходит уведомление.';
   }
   // Т3: архив разошелся с ручным расчетом — деньги не трогаем, предлагаем проверить
@@ -905,7 +939,7 @@
       'aria-label': 'Ставка №' + b.id + ', ' + fmt.date(b.date) + ', ' + UI.statusChip(b.status).textContent + ', ' + fmt.signedMoney(b.profit) + '. Открыть детали',
       on: { click: open, keydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } } } },
       h('div', { class: 'bets-mcard-top' },
-        h('div', null, h('div', { class: 'bets-mcard-date' }, fmt.date(b.date) + ' · ' + betKind(b)),
+        h('div', null, h('div', { class: 'bets-mcard-date' }, fmt.date(b.date) + ' · ' + betKind(b), kindChip(b) ? [' ', kindChip(b)] : null),
           h('div', { class: 'bets-sub' }, h('i', { class: 'bets-dot', style: { background: D.surfaces[b.surface].color } }), b.tournament + ' · ' + surfLabel(b.surface).toLowerCase() + ' · №' + b.id + (isBot(b) ? ' · старый бот' : ''))),
         UI.statusChip(b.status)),
       h('ul', { class: 'bets-mlegs' }, b.legs.map(l => h('li', null, resIcon(legRes(b, l)), h('span', { class: 'm' }, D.match(l)), h('span', { class: 'k' }, l.marketLabel, h('span', { class: 'odds' }, fmt.odds(l.odds)))))),
@@ -924,7 +958,7 @@
         return [
           h('div', { class: 'bets-dm-top' },
             h('div', null,
-              h('div', { class: 'xsmall muted' }, fmt.dateFull(b.date) + ' · ' + betKind(b) + ' · ' + b.bookmaker),
+              h('div', { class: 'xsmall muted' }, fmt.dateFull(b.date) + ' · ' + betKind(b) + ' · ' + b.bookmaker, kindChip(b) ? [' ', kindChip(b)] : null),
               h('div', { class: ['bets-dm-profit', toneCls(b.profit)] }, b.status === 'open' ? fmt.money(b.stake) : fmt.signedMoney(b.profit))),
             UI.statusChip(b.status)),
           b.status !== 'open' && !isBot(b) && h('div', { class: 'bets-detail-box' }, reviewBlock(b)),
@@ -1062,9 +1096,14 @@
         checkConflict();
         drawSum();
       };
+      const fromScoreOf = v => {
+        if (!v) return null;
+        if (isGamesLeg(l)) { const g = parseGames(v, l.bestOf); return g ? gamesResult(l, g).r : null; }
+        const sc = parseScore(v, l.bestOf);
+        return sc ? (isSetsFresh(l) ? freshSetsResult(l, sc[0], sc[1]) : resultFromScore(l.market, sc[0], sc[1])) : null;
+      };
       const checkConflict = () => {
-        const sc = s.score && parseScore(s.score, l.bestOf);
-        const fromScore = sc ? resultFromScore(l.market, sc[0], sc[1]) : null;
+        const fromScore = fromScoreOf(s.score);
         if (s.auto) { autoNote.hidden = false; autoNote.className = 'field-hint bets-auto'; autoNote.textContent = 'Отметили по счету — можно поправить'; }
         else if (fromScore && s.result && fromScore !== s.result) { autoNote.hidden = false; autoNote.className = 'field-hint bets-auto warn'; autoNote.textContent = 'По счету ставка ' + RES_WORD[fromScore] + ' — проверьте, что выбрано верно'; }
         else autoNote.hidden = true;
@@ -1072,25 +1111,27 @@
       const seg = h('div', { class: 'bets-resseg', role: 'group', 'aria-label': 'Исход ставки на матч ' + D.match(l) },
         RES_OPTS.map(o => (btns[o.id] = h('button', { type: 'button', class: o.id, 'aria-pressed': String(s.result === o.id), on: { click: () => setRes(o.id, false) } }, icon(o.icon), o.label))));
 
-      const scoreHintText = 'первым — ' + pname(l.p1) + ' · ' + (l.bestOf === 5 ? 'до 3 побед' : 'до 2 побед');
-      const scoreF = UI.field({ id: formId + '-score-' + i, label: 'Счет по сетам', placeholder: l.bestOf === 5 ? '3:1' : '2:0', value: s.score, hint: scoreHintText, attrs: { autocomplete: 'off', maxlength: '5' } });
+      const games = isGamesLeg(l);
+      const scoreHintText = games ? 'по сетам через пробел, первым — ' + pname(l.p1) + '; тай-брейк — 7:6' : 'первым — ' + pname(l.p1) + ' · ' + (l.bestOf === 5 ? 'до 3 побед' : 'до 2 побед');
+      const scoreF = UI.field({ id: formId + '-score-' + i, label: games ? 'Счет по геймам' : 'Счет по сетам', placeholder: games ? (l.bestOf === 5 ? '6:4 3:6 7:6 6:3' : '6:4 7:6') : l.bestOf === 5 ? '3:1' : '2:0', value: s.score, hint: scoreHintText, attrs: { autocomplete: 'off', maxlength: games ? '30' : '5' } });
       const scoreIn = scoreF.querySelector('input'), scoreHint = scoreF.querySelector('.field-hint');
       scoreIn.classList.add('mono');
       scoreIn.addEventListener('input', () => {
         const v = scoreIn.value.trim();
         s.score = v || null;
-        const sc = parseScore(v, l.bestOf);
+        const sc = games ? parseGames(v, l.bestOf) : parseScore(v, l.bestOf);
         if (!v) {
           scoreIn.classList.remove('invalid'); scoreHint.className = 'field-hint'; scoreHint.textContent = scoreHintText;
           if (s.auto) setRes(null); else checkConflict();
           return;
         }
         if (!sc) {
-          if (v.replace(/\D/g, '').length >= 2) { scoreIn.classList.add('invalid'); scoreHint.className = 'field-error'; scoreHint.textContent = 'Матч ' + bestOfText(l) + ': ' + scoreExamples(l.bestOf); }
+          if (v.replace(/\D/g, '').length >= (games ? 4 : 2)) { scoreIn.classList.add('invalid'); scoreHint.className = 'field-error'; scoreHint.textContent = games ? 'Счет по геймам каждого сета, например ' + (l.bestOf === 5 ? '6:4 3:6 7:6 6:3' : '6:4 7:6') : 'Матч ' + bestOfText(l) + ': ' + scoreExamples(l.bestOf); }
           return;
         }
-        scoreIn.classList.remove('invalid'); scoreHint.className = 'field-hint'; scoreHint.textContent = scoreHintText;
-        const r = resultFromScore(l.market, sc[0], sc[1]);
+        scoreIn.classList.remove('invalid'); scoreHint.className = 'field-hint';
+        scoreHint.textContent = games ? gamesResult(l, sc).text : scoreHintText;
+        const r = fromScoreOf(v);
         if (!s.result || s.auto) setRes(r, true); else checkConflict();
       });
 
@@ -1121,12 +1162,12 @@
       wide: true,
       body: close => {
         const form = h('form', { id: formId, class: 'stack', novalidate: true, on: { submit: e => { e.preventDefault(); save(close); } } },
-          h('div', { class: 'bets-settle-intro' }, b.awaiting ? chip('Ждет результата', 'warn', 'clock') : UI.statusChip('open'), h('span', null, betKindLong(b) + ' · ' + b.bookmaker + ' · сумма ' + fmt.money(b.stake) + ' · кэф ', h('span', { class: 'odds' }, fmt.odds(b.total)))),
+          h('div', { class: 'bets-settle-intro' }, b.awaiting ? chip('Ждет результата', 'warn', 'clock') : UI.statusChip('open'), kindChip(b), h('span', null, betKindLong(b) + ' · ' + b.bookmaker + ' · сумма ' + fmt.money(b.stake) + ' · кэф ', h('span', { class: 'odds' }, fmt.odds(b.total)))),
           b.awaiting && !prefill && UI.callout('info', 'database', h('b', null, 'Матчи сыграны ' + fmt.date(b.date) + '. '), 'В архиве tennis-data матчи по ' + fmt.date(D.archive.matchesTo) + ' — ставка рассчитается сама после загрузки файла ≈ ' + fmt.date(D.archive.next) + ', с закрытием П1/П2 из архива. Внесете сейчас — ручной расчет главнее, архив его не изменит.'),
           prefill && UI.callout('warn', 'edit', h('b', null, b.correctedFrom === 'loss' ? 'Прошлый расчет уже отменен. ' : 'Прошлый расчет уже отменен сторно. '), 'Поля заполнены прежними значениями — исправьте неверное и сохраните. Если закрыть окно, ставка останется открытой.'),
           b.legs.map(legBlock),
           sumHost,
-          UI.callout('', 'info', h('b', null, 'Снятие и отказ. '), 'Если игрок снялся или не вышел на матч, выберите исход по правилам вашего букмекера: у одних ставка проигрывает, у других — возврат. Счет можно не вносить.'));
+          UI.callout('', 'info', h('b', null, 'Снятие и отказ. '), 'Если игрок снялся или не вышел на матч, выберите исход по правилам вашего букмекера: у одних ставка проигрывает, у других — возврат. Счет можно не вносить.' + (b.legs.some(isGamesLeg) ? ' Для тоталов и фор по геймам подсказываем «возврат»: так считает большинство букмекеров, если матч не доигран.' : '')));
         drawSum();
         return form;
       },
@@ -1222,8 +1263,8 @@
   function applySettle(b, st, o, corrected) {
     b.legs.forEach((l, i) => {
       l.result = st[i].result;
-      const sc = st[i].score && parseScore(st[i].score, l.bestOf);
-      l.score = sc ? sc[0] + ':' + sc[1] : null;
+      if (isGamesLeg(l)) { const g = st[i].score && parseGames(st[i].score, l.bestOf); l.score = g ? g.map(x => x[0] + ':' + x[1]).join(' ') : null; }
+      else { const sc = st[i].score && parseScore(st[i].score, l.bestOf); l.score = sc ? sc[0] + ':' + sc[1] : null; }
       applyClosing(l, st[i]);
     });
     b.status = o.status;

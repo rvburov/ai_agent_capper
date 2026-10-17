@@ -538,7 +538,7 @@
         const form = h('form', { id: 'learning-lesson-form', class: 'stack', style: 'gap:14px', novalidate: true },
           textField,
           h('div', { class: 'learning-form-2' },
-            UI.field({ id: 'learning-lesson-market', label: 'Рынок', options: ['Любой', 'П1 / П2', 'Фора −1.5', 'Фора +1.5'] }),
+            UI.field({ id: 'learning-lesson-market', label: 'Рынок', options: ['Любой', 'П1 / П2', 'Фора −1.5', 'Фора +1.5', 'Фора по сетам ±2.5', 'Тотал сетов', 'Фора по геймам', 'Тотал геймов'] }),
             UI.field({ id: 'learning-lesson-surface', label: 'Покрытие', options: ['Все покрытия', 'Хард', 'Грунт', 'Трава', 'Крытый хард'] })),
           h('div', { class: 'learning-form-2' }, condF, valF),
           UI.callout('info', 'flask', 'Условие собирается из словаря — так его можно проверить на архиве. Урок проходит ту же проверку, что и гипотезы из разборов: ' + NEED + ' своих случаев, архив с 95% ДИ, затем быстрая проверка и решение администратора.'));

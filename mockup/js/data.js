@@ -54,10 +54,46 @@
   const tourAt = d => calendar.find(t => d >= t.from && d <= t.to) || calendar[calendar.length - 1];
 
   // Генерация истории ставок
-  // Шесть исходов, как в коде (ml/sets.py): победа и фора ±1.5 по сетам на каждого игрока
+  // Шесть исходов, как в коде (ml/sets.py): победа и фора ±1.5 по сетам на каждого игрока.
+  // Р28 — новые рынки, по семейству на строку: фора по сетам ±2.5 (только до 3 побед), тотал сетов, фора и тотал геймов
   const markets = [
     { id: 'p1', label: 'П1' }, { id: 'p2', label: 'П2' }, { id: 'h1m', label: 'Ф1(−1.5)' }, { id: 'h2m', label: 'Ф2(−1.5)' }, { id: 'h1p', label: 'Ф1(+1.5)' }, { id: 'h2p', label: 'Ф2(+1.5)' },
+    { id: 'shcp', label: 'Фора по сетам ±2.5', fresh: true }, { id: 'stot', label: 'Тотал сетов', fresh: true },
+    { id: 'ghcp', label: 'Фора по геймам', fresh: true }, { id: 'gtot', label: 'Тотал геймов', fresh: true },
   ];
+  // Р28: код нового рынка — семейство (market), сторона (sel) и линия (line) со стороны выбранного исхода.
+  // У фор sel — игрок (1 или 2) и линия его форы, у тоталов sel 1 — больше, 2 — меньше. Линии половинные (22.5)
+  // и целые (22, при «ровно» — возврат); четвертных (22.25) нет. Победа и фора ±1.5 по сетам — прежние коды.
+  const FAMILY = {
+    shcp: { label: 'Фора по сетам', unit: 'sets', hcp: true },
+    stot: { label: 'Тотал сетов', unit: 'sets' },
+    ghcp: { label: 'Фора по геймам', unit: 'games', hcp: true },
+    gtot: { label: 'Тотал геймов', unit: 'games' },
+  };
+  const lineText = (x, signed) => (signed ? (x > 0 ? '+' : x < 0 ? '−' : '') : '') + String(Math.abs(x));
+  const shortName = id => (P[id] ? P[id].short : id);
+  // «Фора по геймам Синнер −3.5», «Тотал геймов больше 21.5», «Тотал сетов меньше 2.5»
+  function legLabel(l) {
+    const f = FAMILY[l.market];
+    if (!f) return (markets.find(m => m.id === l.market) || { label: l.market }).label;
+    return f.hcp ? f.label + ' ' + shortName(l.sel === 2 ? l.p2 : l.p1) + ' ' + lineText(l.line, true)
+      : f.label + ' ' + (l.sel === 1 ? 'больше' : 'меньше') + ' ' + lineText(l.line);
+  }
+  // Что сейчас можно брать в экспресс (Р28): победа — да; фора ±1.5 — временно нет (модель сетов исправляется);
+  // новые рынки — «для сравнения», пока по рынку не наберется 150–200 событий и CLV не покажет перевес.
+  // Счетчик общий по всем участникам: событие — исход рынка с кэфом, введенным в анализ, и известным итогом матча.
+  // ROI — как ординары на равную сумму по кэфам из ввода, CLV — по закрытию, которое внесли сами (в архиве его нет)
+  const marketStatus = [
+    { id: 'ml', label: 'Победа в матче', lines: 'П1 и П2', status: 'express', n: 412, roi: 3.1, clv: 1.4 },
+    { id: 'h15', label: 'Фора по сетам ±1.5', lines: 'Ф1 и Ф2, −1.5 и +1.5', status: 'paused', n: 238, roi: 1.2, clv: 0.6,
+      why: 'По ориентировочной проверке на 2023–2025 модель сетов завышает вероятность решающего сета примерно на 9 п.п. — тогда валуй на ±1.5, особенно Ф(+1.5) фаворита, завышен. Пока это проверяют на модели проекта, фору в экспресс и варианты не берем; вернем, когда модель исправят' },
+    { id: 'shcp', label: 'Фора по сетам ±2.5', lines: 'только матчи до 3 побед', status: 'compare', n: 3, need: 150, roi: null, clv: null, clvN: 0 },
+    { id: 'stot', label: 'Тотал сетов', lines: '2.5; до 3 побед — 3.5 и 4.5', status: 'compare', n: 21, need: 150, roi: -3.1, roiCi: [-38.0, 31.7], clv: 0.4, clvCi: [-2.2, 3.0], clvN: 9 },
+    { id: 'ghcp', label: 'Фора по геймам', lines: 'например −3.5, +4.5, −3', status: 'compare', n: 47, need: 150, roi: 4.2, roiCi: [-11.8, 20.3], clv: 1.2, clvCi: [-0.9, 3.3], clvN: 18 },
+    { id: 'gtot', label: 'Тотал геймов', lines: 'например 21.5, 22.5, 22', status: 'compare', n: 38, need: 150, roi: -6.5, roiCi: [-24.9, 12.0], clv: -0.6, clvCi: [-2.8, 1.6], clvN: 14 },
+  ];
+  const statusKey = l => (l.market === 'p1' || l.market === 'p2' ? 'ml' : FAMILY[l.market] ? l.market : 'h15');
+  const marketStatusOf = l => marketStatus.find(m => m.id === statusKey(l));
   // Доля банка по таблице стратегии (Т20): диапазоны итогового кэфа 1.28–1.70, 1.71–2.20, 2.21–3.24
   const stakePct = k => k <= 1.70 ? 2.75 : k <= 2.20 ? 2.25 : 1.75;
   const TOTAL_MIN = 1.28; // ниже первого диапазона таблицы ставку стратегия не предлагает
@@ -147,21 +183,38 @@
     });
   });
 
+  // Р28: новые рынки стратегия пока не предлагает, но участник может поставить их сам. В истории две такие ноги:
+  // меняем только рынок (кэф, вероятность и исход те же), поэтому банк и статистика не меняются.
+  // Счет по геймам нужен для расчета: по нему считается и ручной расчет, и авторасчет по архиву
+  const relabel = (b, l, o) => {
+    const twin = allLegs.find(a => a.betId === b.id && a.market === l.market && a.odds === l.odds && a.result === l.result);
+    Object.assign(l, o); l.marketLabel = legLabel(l);
+    if (twin) Object.assign(twin, o, { marketLabel: l.marketLabel });
+  };
+  const freshPick = manual => bets.filter(b => b.date >= '2026-08-01' && b.date <= '2026-09-27' && b.id !== 70 && (b.id % 4 === 2) === manual && b.status === 'win' && b.legs.length > 1)
+    .map(b => ({ b, l: b.legs.find(l => l.market === 'p1' && l.bestOf === 3 && P[l.p1] && P[l.p2]) })).filter(x => x.l).pop();
+  const fa = freshPick(false), fm = freshPick(true);
+  // Р29: такие ставки участник собирает сам — это «своя ставка» (own), стратегия ее не предлагала и сумму не считала
+  if (fa) { relabel(fa.b, fa.l, { market: 'ghcp', sel: 1, line: -3.5, score: '6:4 6:3', fresh: true }); fa.b.own = true; } // авторасчет по архиву: 12–7, +5 > 3.5
+  if (fm) { relabel(fm.b, fm.l, { market: 'stot', sel: 2, line: 2.5, score: '2:0', fresh: true }); fm.b.own = true; }     // внесено вами: два сета
+
   // Этап 5: ставка вчерашнего дня ждет результата — в загруженном файле tennis-data матчи только по 4 окт.
   // Новости перед анализом уже нашли исходы (player_news, вид «результат») — это подсказка в окне расчета, не расчет (В1)
   // Открытая ставка на сегодня: экспресс по матчам вне демо-анализа #A-0142 (его экспресс создается на экране «Анализ»)
   const openLegs = [
-    { date: '2026-10-06', bookmaker: 'Unibet', legs: [
-      { p1: 'fritz', p2: 'Лехечка', market: 'p1', marketLabel: 'П1', odds: 1.36, p: 0.79, surface: 'hard', tournament: 'Шанхай', bestOf: 3, news: { text: 'Фриц выиграл 6:4 7:6(5)', score: '2:0', source: 'atptour.com', at: '2026-10-06T19:40' } },
+    { date: '2026-10-06', bookmaker: 'Unibet', own: true, legs: [
+      // Р28: рынок «для сравнения», участник поставил его сам; целая линия 23 — при 23 геймах возврат
+      { p1: 'fritz', p2: 'Лехечка', market: 'gtot', sel: 2, line: 23, fresh: true, odds: 1.85, p: 0.52, pPush: 0.07, surface: 'hard', tournament: 'Шанхай', bestOf: 3, news: { text: 'Фриц выиграл 6:4 7:6(5)', score: '6:4 7:6', source: 'atptour.com', at: '2026-10-06T19:40' } },
       { p1: 'deminaur', p2: 'Бергс', market: 'p1', marketLabel: 'П1', odds: 1.42, p: 0.76, surface: 'hard', tournament: 'Шанхай', bestOf: 3, news: { text: 'де Минор выиграл 6:3 3:6 6:4', score: '2:1', source: 'tennis.com', at: '2026-10-06T21:15' } }] },
     { date: TODAY, bookmaker: 'bet365', legs: [
       { p1: 'zverev', p2: 'musetti', market: 'p1', marketLabel: 'П1', odds: 1.48, p: 0.71, surface: 'hard', tournament: 'Шанхай', bestOf: 3 }, { p1: 'alcaraz', p2: 'shelton', market: 'p1', marketLabel: 'П1', odds: 1.30, p: 0.82, surface: 'hard', tournament: 'Шанхай', bestOf: 3 }] },
   ];
   openLegs.forEach(o => {
     const legs = o.legs;
+    legs.forEach(l => { if (!l.marketLabel) l.marketLabel = legLabel(l); });
     const total = round(legs.reduce((a, l) => a * l.odds, 1), 2);
     const stake = Math.round(bank * stakePct(total) / 100 / 10) * 10;
-    bets.push({ id, date: o.date, tournament: 'Шанхай', surface: 'hard', legs: legs.map(l => Object.assign({ closing: null, result: 'open' }, l)), total, stake, status: 'open', profit: 0, bankAfter: null, clv: null, bookmaker: o.bookmaker, awaiting: o.date < TODAY });
+    bets.push({ id, date: o.date, tournament: 'Шанхай', surface: 'hard', legs: legs.map(l => Object.assign({ closing: null, result: 'open' }, l)), total, stake, status: 'open', profit: 0, bankAfter: null, clv: null, bookmaker: o.bookmaker, awaiting: o.date < TODAY, own: !!o.own });
     id++;
   });
 
@@ -204,6 +257,8 @@
   }
   bets.forEach(b => {
     b.source = b.date < BOT_UNTIL ? 'bot' : 'app';
+    // Р29: одиночная ставка приложения — ординар из вариантов анализа (настоящая ставка, сумма по таблице ординаров)
+    if (b.source === 'app' && b.legs.length === 1) b.single = true;
     b.legs.forEach((l, i) => enrichLeg(l, b, i));
     const live = b.legs.filter(l => l.result !== 'open');
     if (live.length && live.some(l => !l.closing)) b.clv = null;
@@ -319,7 +374,7 @@
   // Матчи сегодня (Шанхай, 1/8 финала): матчи, которые участники ввели в анализы (matches.scheduled_at), с примером кэфов.
   // Расписания и линии в программе нет (Р10): на главной — только «Мои матчи сегодня» из своих ставок и анализов (В6).
   const matchesToday = [
-    { id: 'm1', p1: 'sinner', p2: 'rune', time: '10:30', round: '1/8 финала', court: 'Stadium Court', odds: { p1: 1.17, p2: 5.10, h1m: 1.62, h2p: 2.30 } },
+    { id: 'm1', p1: 'sinner', p2: 'rune', time: '10:30', round: '1/8 финала', court: 'Stadium Court', odds: { p1: 1.22, p2: 4.40, h1m: 1.62, h2p: 2.30 } },
     { id: 'm2', p1: 'djokovic', p2: 'rublev', time: '12:00', round: '1/8 финала', court: 'Grand Stand', odds: { p1: 1.34, p2: 3.35, h1m: 2.05, h2p: 1.72 } },
     { id: 'm3', p1: 'zverev', p2: 'musetti', time: '13:30', round: '1/8 финала', court: 'Court 3', odds: { p1: 1.48, p2: 2.70, h1m: 2.45, h2p: 1.52 } },
     { id: 'm4', p1: 'alcaraz', p2: 'shelton', time: '15:00', round: '1/8 финала', court: 'Stadium Court', odds: { p1: 1.30, p2: 3.60, h1m: 1.98, h2p: 1.80 } },
@@ -909,6 +964,10 @@
     // tzCity: «время по Хельсинки» — город в дательном падеже
     tzCity: tz => (timezones.find(t => t.value === tz) || timezones[0]).city,
     surfaces, players, P, calendar, markets,
+    // Р28: новые рынки — подписи, статус рынка (в экспрессе, временно нет, «для сравнения») и счетчик событий
+    fresh: { FAMILY, lineText, legLabel, status: marketStatus, statusOf: marketStatusOf, NEED: 150, NEED_MAX: 200 },
+    // Р29: вид ставки — экспресс стратегии, ординар из вариантов анализа или своя ставка
+    betKind: b => (b.own ? 'own' : b.single ? 'single' : 'strategy'),
     bets, bankHistory,
     stats: {
       bank, start: 40000, profit, turnover, roi: round(profit / turnover * 100, 1), settled: settled.length, wins, losses, voids,

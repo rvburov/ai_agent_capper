@@ -394,7 +394,8 @@
       const payout = payoutOf(b.stake, b.total);
       return h('article', { class: 'dashboard-bet', 'aria-label': 'Ставка №' + b.id },
         h('div', { class: 'dashboard-bet-head' },
-          h('div', null, h('strong', null, b.legs.length > 1 ? 'Экспресс из ' + b.legs.length + ' ' + fmt.plural(b.legs.length, 'события', 'событий', 'событий') : 'Ординар'), h('div', { class: 'xsmall muted' }, '№' + b.id + ' · ' + b.bookmaker + ' · ' + b.tournament + (b.awaiting ? ', ' + fmt.date(b.date) : ''))),
+          // Р29: своя ставка — с меткой «Своя»; ординар варианта анализа виден по заголовку
+          h('div', null, h('strong', null, b.legs.length > 1 ? 'Экспресс из ' + b.legs.length + ' ' + fmt.plural(b.legs.length, 'события', 'событий', 'событий') : 'Ординар', b.own ? [' ', chip('Своя', 'warn', 'user')] : null), h('div', { class: 'xsmall muted' }, '№' + b.id + ' · ' + b.bookmaker + ' · ' + b.tournament + (b.awaiting ? ', ' + fmt.date(b.date) : ''))),
           b.awaiting ? chip('Ждет результата', 'warn', 'clock') : UI.statusChip('open')),
         h('ul', { class: 'dashboard-legs' }, b.legs.map(l => {
           const m = matchOf(l);

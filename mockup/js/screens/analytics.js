@@ -38,7 +38,9 @@
     { id: 'all', label: 'Все время', days: null, ctx: 'за все время', prev: null },
   ];
   // Описания рынков для матча до 2 побед; в скобках — для матча до 3 побед (Большой шлем, Т21)
-  const MARKET_SHORT = { p1: 'победа игрока 1', p2: 'победа игрока 2', h1m: 'игрок 1 — 2:0 (3:0, 3:1)', h2m: 'игрок 2 — 2:0 (3:0, 3:1)', h1p: 'игрок 1 — хотя бы сет (два)', h2p: 'игрок 2 — хотя бы сет (два)' };
+  const MARKET_SHORT = { p1: 'победа игрока 1', p2: 'победа игрока 2', h1m: 'игрок 1 — 2:0 (3:0, 3:1)', h2m: 'игрок 2 — 2:0 (3:0, 3:1)', h1p: 'игрок 1 — хотя бы сет (два)', h2p: 'игрок 2 — хотя бы сет (два)',
+    // Р28: новые рынки — для сравнения, ставки по ним — свои
+    shcp: 'только матчи до 3 побед · для сравнения', stot: 'число сетов против линии · для сравнения', ghcp: 'разница геймов с форой · для сравнения', gtot: 'сумма геймов против линии · для сравнения' };
   const MARKETS = D.markets.filter(m => D.allLegs.some(l => l.market === m.id));
   const mLabel = id => (D.markets.find(m => m.id === id) || { label: id }).label;
   const SURF_KEYS = Object.keys(D.surfaces);
@@ -47,7 +49,10 @@
   // source — источник ставок (В5): приложение, старый бот или все; ставки бота входят в банк и ROI,
   // но не в CLV, Brier против рынка и калибровку p_final (под фильтром «бот» калибровка — по p_claude бота)
   const SOURCES = [{ value: 'all', label: 'Все источники' }, { value: 'app', label: 'Приложение' }, { value: 'bot', label: 'Старый бот' }];
-  const DEFAULTS = { period: 'all', market: 'all', surface: 'all', source: 'all' };
+  // Р29: вид ставки — экспресс стратегии, ординар из вариантов анализа, своя ставка. По умолчанию все: так сходится банк.
+  // Версии стратегии в «Обучении модели» сравниваются только по экспрессам стратегии
+  const KINDS = [{ value: 'all', label: 'Все ставки' }, { value: 'strategy', label: 'Стратегия' }, { value: 'single', label: 'Ординары' }, { value: 'own', label: 'Свои' }];
+  const DEFAULTS = { period: 'all', market: 'all', surface: 'all', source: 'all', kind: 'all' };
   const state = Object.assign({}, DEFAULTS);
   try {
     const saved = JSON.parse(sessionStorage.getItem('capper.analytics') || 'null');
@@ -56,10 +61,11 @@
       if (saved.market === 'all' || MARKETS.some(m => m.id === saved.market)) state.market = saved.market;
       if (saved.surface === 'all' || SURF_KEYS.includes(saved.surface)) state.surface = saved.surface;
       if (SOURCES.some(x => x.value === saved.source)) state.source = saved.source;
+      if (KINDS.some(x => x.value === saved.kind)) state.kind = saved.kind;
     }
   } catch (e) { /* хранилище недоступно — работаем в памяти */ }
   const save = () => { try { sessionStorage.setItem('capper.analytics', JSON.stringify(state)); } catch (e) { /* ок */ } };
-  const isDefault = () => state.period === DEFAULTS.period && state.market === 'all' && state.surface === 'all' && state.source === 'all';
+  const isDefault = () => state.period === DEFAULTS.period && state.market === 'all' && state.surface === 'all' && state.source === 'all' && state.kind === 'all';
 
   // ---------- расчеты (формулы как в data.js) ----------
   const won = l => (l.result === 'win' ? 1 : 0);
@@ -194,7 +200,9 @@
   function compute() {
     const p = PERIODS.find(x => x.id === state.period) || PERIODS[2];
     const anchor = p.days ? addDays(TODAY, -p.days) : firstDate(); // начало периода (не включительно)
-    const srcOk = x => state.source === 'all' || x.source === state.source;
+    const betOf = id => D.bets.find(b => b.id === id);
+    const srcOk = x => (state.source === 'all' || x.source === state.source)
+      && (state.kind === 'all' || D.betKind(x.legs ? x : betOf(x.betId) || {}) === state.kind);
     // события экспрессов старого бота в разрезы не входят — ни без исхода, ни выигранные (Т10, см. botParlayLeg)
     const legOk = (l, from, to, ignore) => l.date > from && l.date <= to && srcOk(l) && !botParlayLeg(l)
       && (ignore === 'market' || state.market === 'all' || l.market === state.market)
@@ -212,7 +220,7 @@
     }
     // Калибровка (В3): ноги рассчитанных ставок; p_final — только у ставок приложения, у бота — p_claude его ординаров
     // Прогнозы без ставки (матчи из анализов с исходом из архива) — только у приложения
-    const preds = state.source === 'bot' ? [] : (D.predictions || []).filter(l => l.date > anchor && l.date <= TODAY
+    const preds = state.source === 'bot' || state.kind !== 'all' ? [] : (D.predictions || []).filter(l => l.date > anchor && l.date <= TODAY
       && (state.market === 'all' || l.market === state.market) && (state.surface === 'all' || l.surface === state.surface));
     const own = state.source === 'bot' ? legs : legs.filter(l => l.pKind === 'final');
     const calibLegs = sample === 'all' && state.source !== 'bot' ? own.concat(preds) : own;
@@ -259,6 +267,13 @@
     /* узкий телефон: фильтры в одну колонку, чтобы значения («Все рынки», «Старый бот») не обрезались */
     @media (max-width: 420px) { .analytics-filters { grid-template-columns: minmax(0, 1fr); } }
 
+    .analytics-fresh-prog { display: flex; flex-direction: column; gap: 4px; min-width: 110px; }
+    .analytics-fresh-val { display: inline-flex; flex-direction: column; align-items: flex-end; }
+    .analytics-fresh-list { display: none; list-style: none; margin: 0; padding: 0; flex-direction: column; gap: 10px; }
+    .analytics-fresh-list li { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); }
+    .analytics-fresh-list li:first-child { border-top: 0; padding-top: 0; }
+    .analytics-fresh-nums { display: flex; gap: 16px; font-size: var(--fs-sm); }
+    @media (max-width: 720px) { .analytics-fresh-table { display: none; } .analytics-fresh-list { display: flex; } }
     .analytics-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; }
     .analytics-kpis > .card { height: 100%; }
     .analytics-kpis .stat { padding: 14px 16px; }
@@ -472,15 +487,20 @@
       id: 'analytics-source', label: 'Источник', value: state.source, options: SOURCES,
       attrs: { on: { change: e => { state.source = e.target.value; onChange(); } } },
     });
+    const kindField = UI.field({
+      id: 'analytics-kind', label: 'Вид ставки', value: state.kind, options: KINDS,
+      attrs: { on: { change: e => { state.kind = e.target.value; onChange(); } } },
+    });
     const reset = button('Сбросить фильтры', { kind: 'ghost', size: 'sm', icon: 'refresh', onClick: () => { Object.assign(state, DEFAULTS); onChange(true); }, attrs: { class: 'btn ghost sm analytics-filter-reset' } });
     const scope = h('div', { class: 'analytics-scope', 'aria-live': 'polite' });
     const el = h('section', { class: 'analytics-filters', 'aria-label': 'Фильтры: применяются ко всем блокам ниже' },
-      periodBox, h('div', { class: 'analytics-filter' }, marketField), h('div', { class: 'analytics-filter' }, surfaceField), h('div', { class: 'analytics-filter' }, sourceField), reset, scope);
+      periodBox, h('div', { class: 'analytics-filter' }, marketField), h('div', { class: 'analytics-filter' }, surfaceField), h('div', { class: 'analytics-filter' }, sourceField), h('div', { class: 'analytics-filter' }, kindField), reset, scope);
 
     function sync(s, periodChanged) {
       marketField.querySelector('select').value = state.market;
       surfaceField.querySelector('select').value = state.surface;
       sourceField.querySelector('select').value = state.source;
+      kindField.querySelector('select').value = state.kind;
       if (periodChanged) drawPeriod();
       reset.hidden = isDefault();
       UI.clear(scope);
@@ -489,12 +509,14 @@
       const chips = [];
       if (state.market !== 'all') chips.push(h('button', { type: 'button', class: 'chip accent analytics-chip-btn', title: 'Убрать фильтр по рынку', on: { click: () => { state.market = 'all'; onChange(); } } }, 'Рынок: ' + mLabel(state.market), icon('x')));
       if (state.surface !== 'all') chips.push(h('button', { type: 'button', class: 'chip accent analytics-chip-btn', title: 'Убрать фильтр по покрытию', on: { click: () => { state.surface = 'all'; onChange(); } } }, 'Покрытие: ' + D.surfaces[state.surface].label, icon('x')));
+      if (state.kind !== 'all') chips.push(h('button', { type: 'button', class: 'chip accent analytics-chip-btn', title: 'Убрать фильтр по виду ставки', on: { click: () => { state.kind = 'all'; onChange(); } } }, 'Вид: ' + KINDS.find(x => x.value === state.kind).label, icon('x')));
       if (state.source !== 'all') chips.push(h('button', { type: 'button', class: 'chip accent analytics-chip-btn', title: 'Убрать фильтр по источнику', on: { click: () => { state.source = 'all'; onChange(); } } }, 'Источник: ' + SOURCES.find(x => x.value === state.source).label, icon('x')));
       UI.append(scope, [
         h('span', null, 'В выборке ', h('b', null, nBets(s.sum.n)), ' и ', h('b', null, nEv(s.legs.length)), range),
         chips,
         s.sum.bot > 0 && state.source === 'all' && h('span', { class: 'muted xsmall' }, 'из них ' + nBets(s.sum.bot) + ' старого бота — в банке и ROI, но не в CLV, Brier и калибровке'),
         s.botParlayLegs > 0 && h('span', { class: 'muted xsmall' }, nEv(s.botParlayLegs) + ' из экспрессов старого бота не считаются по отдельности: бот записывал их исходы только у выигранных экспрессов'),
+        state.kind === 'all' && h('span', { class: 'muted xsmall' }, 'ординары и свои ставки — в банке, калибровке и CLV; версии стратегии сравниваются только по ее экспрессам (фильтр «Стратегия»)'),
         openN() > 0 && h('span', { class: 'muted xsmall' }, openN() + ' ' + fmt.plural(openN(), 'ставка в игре не учитывается', 'ставки в игре не учитываются', 'ставок в игре не учитываются')),
       ]);
     }
@@ -1037,6 +1059,40 @@
     });
   }
 
+  // ---------- Р28: новые рынки «для сравнения» ----------
+  // Счетчик и цифры общие по всем участникам (модель общая): событие — исход рынка с кэфом из ввода и известным итогом.
+  // В экспресс рынок пойдет, когда наберется 150–200 событий и CLV покажет перевес (нижняя граница 95% ДИ выше нуля)
+  function freshCard() {
+    const F = D.fresh, list = F.status;
+    const stChip = m => (m.status === 'express' ? chip('в экспрессе', 'good', 'ticket') : m.status === 'paused' ? chip('на проверке', 'warn', 'flask') : chip('для сравнения', 'info', 'flask'));
+    const prog = m => (m.status !== 'compare' ? h('span', { class: 'muted xsmall' }, nEv(m.n)) : h('div', { class: 'analytics-fresh-prog' },
+      h('span', { class: 'xsmall' }, h('b', null, String(m.n)), ' из ' + F.NEED + ' событий'), UI.meter(m.n, F.NEED, m.n / F.NEED >= 1 ? 'good' : null)));
+    const ciOf = c => (c ? h('span', { class: 'muted xsmall analytics-nowrap' }, ciPct(c)) : null);
+    const val = (v, c, small) => (v == null ? h('span', { class: 'muted' }, '—') : h('span', { class: 'analytics-fresh-val' }, roiText(v), small ? null : ciOf(c)));
+    const tbl = mtable({
+      columns: [
+        { key: 'label', label: 'Рынок', render: m => h('div', { style: 'min-width:0' }, h('div', { class: 'analytics-mname' }, m.label), h('div', { class: 'analytics-mdesc' }, m.lines || 'П1 и П2')) },
+        { key: 'st', label: 'Статус', render: stChip },
+        { key: 'n', label: 'События', render: prog },
+        { key: 'roi', label: 'ROI', align: 'r', render: m => val(m.roi, m.roiCi) },
+        { key: 'clv', label: 'CLV', align: 'r', render: m => h('div', null, val(m.clv, m.clvCi), m.clvN != null ? h('div', { class: 'muted xsmall' }, 'с закрытием: ' + m.clvN) : null) },
+      ], rows: list,
+    });
+    const items = h('ul', { class: 'analytics-fresh-list' }, list.map(m => h('li', null,
+      h('div', { class: 'row-between', style: 'gap:8px;align-items:flex-start' }, h('div', { style: 'min-width:0' }, h('div', { class: 'analytics-mname' }, m.label), h('div', { class: 'analytics-mdesc' }, m.lines || 'П1 и П2')), stChip(m)),
+      prog(m),
+      h('div', { class: 'analytics-fresh-nums' }, h('span', null, 'ROI ', m.roi == null ? '—' : roiText(m.roi)), h('span', null, 'CLV ', m.clv == null ? '—' : roiText(m.clv))),
+      m.why && h('div', { class: 'muted xsmall' }, m.why))));
+    return card({
+      class: 'analytics-card analytics-fresh', title: 'Рынки: в экспрессе, на проверке, для сравнения',
+      subtitle: 'Общий счетчик по всем участникам · ординары на равную сумму по вашим кэфам',
+      body: [
+        h('div', { class: 'analytics-fresh-table analytics-tablebox' }, tbl), items,
+        howto(h('b', null, 'Как читать: '), 'кэфов тоталов и фор в бесплатных архивах нет, поэтому проверить модель против рынка можно только на своих событиях. Рынок «для сравнения» идет в экспресс, когда наберется ' + F.NEED + '–' + F.NEED_MAX + ' событий и CLV покажет перевес: нижняя граница 95% ДИ выше нуля. Фора ±1.5 на проверке: модель сетов, похоже, завышает третий сет. CLV — только по закрытию, которое внесли сами.'),
+      ],
+    });
+  }
+
   // ---------- экспорт ----------
   // В13: в этапе 4 — только CSV (ставки, события, калибровка и Brier); Excel и PDF — не сейчас
   function exportModal(s) {
@@ -1099,6 +1155,7 @@
       h('div', { class: 'analytics-grid' }, calibrationCard(s, mobile), brierCard(s, mobile)),
       section('Цена и рынки', 'Качество взятых кэфов и итог по типам ставок.'),
       h('div', { class: 'analytics-grid' }, clvCard(s, mobile), marketTableCard(s)),
+      freshCard(),
     ]);
   }
 
