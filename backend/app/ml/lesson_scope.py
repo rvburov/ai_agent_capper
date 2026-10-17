@@ -632,7 +632,8 @@ def ratings_select(
 ) -> Select[*tuple[Any, ...]]:
     """Сыгранные матчи архива с днем в [since, until) и рейтинги модели сторон до дня
     матча (r1 — игрок 1, r2 — игрок 2, с весом покрытия): для замороженного eval-набора и
-    перекалибровки базовой модели. levels — уровни турниров (основной тур); None — все."""
+    перекалибровки базовой модели (score — для поправки модели сетов). levels — уровни
+    турниров (основной тур); None — все."""
     day = func.coalesce(Match.match_date, Tournament.start_date)
     where: list[ColumnElement[bool]] = [
         Match.status == "finished",
@@ -653,6 +654,7 @@ def ratings_select(
             _surface(Tournament.surface).label("surface"),
             Match.round.label("round"),
             func.coalesce(Match.best_of, Tournament.best_of, 3).label("best_of"),
+            Match.score.label("score"),
         )
         .join(Tournament, Tournament.id == Match.tournament_id)
         .where(*where)

@@ -1,5 +1,6 @@
 """Версии базовой модели (этап 5, Т12, Т13): строки ml_models вида calibration с id
-«elo-v1@ГГГГ-ММ-ДД» — калибровка Платта поверх Эло elo-v1 (params.platt), со статусом
+«elo-v1@ГГГГ-ММ-ДД» — калибровка Платта поверх Эло elo-v1 (params.platt) и поправка
+модели сетов p(−1.5) по формату (params.sets_platt, app/ml/sets.py), со статусом
 (одна активная), parent_id и тем, кто включил.
 
 Строка elo-v1 остается моделью Эло (вес покрытия, параметры рейтинга; ее пишут пересчет
@@ -26,6 +27,8 @@ from app.ml.elo import MODEL_ID
 
 # Вид строки версии калибровки (одна активная на вид — частичный UNIQUE)
 CALIBRATION_KIND = "calibration"
+# Ключ поправки модели сетов в params версии; нет ключа — SETS_PLATT (app/ml/sets.py)
+SETS_KEY = "sets_platt"
 
 
 def version_id(day: str, number: int = 1) -> str:
@@ -44,10 +47,14 @@ class ModelSnapshot:
 
     def to_json(self) -> dict[str, Any]:
         platt = self.params.get("platt")
-        return {
+        found: dict[str, Any] = {
             "model_id": self.model_id,
             "platt": dict(platt) if isinstance(platt, dict) else None,
         }
+        sets_platt = self.params.get(SETS_KEY)
+        if isinstance(sets_platt, dict):
+            found[SETS_KEY] = dict(sets_platt)
+        return found
 
 
 async def active_calibration(db: AsyncSession) -> MlModel | None:
@@ -77,8 +84,11 @@ async def _base_params(db: AsyncSession) -> dict[str, Any]:
 
 def _with_platt(base: dict[str, Any], version: Any) -> dict[str, Any]:
     merged = dict(base)
-    if isinstance(version, dict) and isinstance(version.get("platt"), dict):
-        merged["platt"] = dict(version["platt"])
+    if not isinstance(version, dict):
+        return merged
+    for key in ("platt", SETS_KEY):
+        if isinstance(version.get(key), dict):
+            merged[key] = dict(version[key])
     return merged
 
 
@@ -159,13 +169,13 @@ def _base_fit_to(params: dict[str, Any], train_to: date | None) -> date | None:
 
 
 def stored_snapshot(raw: Any, base: dict[str, Any]) -> ModelSnapshot | None:
-    """Снимок, закрепленный в eval_sets.rules.calibration (model_id и Платт) поверх
-    параметров Эло elo-v1. Нет записи — None."""
+    """Снимок, закрепленный в eval_sets.rules.calibration (model_id, Платт и поправка
+    сетов) поверх параметров Эло elo-v1. Нет записи — None."""
     if not isinstance(raw, dict):
         return None
-    params = {key: value for key, value in base.items() if key != "platt"}
-    platt = raw.get("platt")
-    if isinstance(platt, dict):
-        params["platt"] = dict(platt)
+    params = {key: value for key, value in base.items() if key not in ("platt", SETS_KEY)}
+    for key in ("platt", SETS_KEY):
+        if isinstance(raw.get(key), dict):
+            params[key] = dict(raw[key])
     model_id = raw.get("model_id")
     return ModelSnapshot(str(model_id) if model_id else None, params)

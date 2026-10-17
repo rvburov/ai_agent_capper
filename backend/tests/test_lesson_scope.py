@@ -24,6 +24,7 @@ from app.ml.lesson_scope import (
     scope_key,
     validate_scope,
 )
+from app.ml.sets import MARKET_MINUS, MARKET_ML, MARKET_PLUS, SETS_PLATT, base_probs
 from app.services import lesson_check
 from app.services.lesson_check import Case, evaluate, read_only, shrink
 from tests.learning_helpers import mini_archive, own_leg
@@ -293,3 +294,16 @@ def test_shrink() -> None:
     assert shrink(-0.05, 200, 200) == pytest.approx(-0.025)
     assert shrink(-0.05, 1800, 200) == pytest.approx(-0.045)
     assert shrink(0.1, 0, 0) == 0.0
+
+
+def test_selection_prob_uses_sets_calibration() -> None:
+    # Случаи истории урока считаются той же моделью сетов, что и досье: с поправкой p(−1.5)
+    fixed = base_probs(0.7, 3, SETS_PLATT)
+    assert lesson_check.selection_prob(0.7, 3, MARKET_ML) == 0.7
+    assert lesson_check.selection_prob(0.7, 3, MARKET_MINUS) == fixed.p1_cover
+    assert lesson_check.selection_prob(0.7, 3, MARKET_PLUS) == 1.0 - fixed.p2_cover
+    # Неизвестный формат — как до 2 побед; без поправки — независимые сеты
+    assert lesson_check.selection_prob(0.7, 4, MARKET_MINUS) == fixed.p1_cover
+    raw = lesson_check.selection_prob(0.7, 5, MARKET_PLUS, {})
+    assert raw == 1.0 - base_probs(0.7, 5).p2_cover
+    assert lesson_check.selection_prob(0.7, 5, MARKET_PLUS) < raw

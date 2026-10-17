@@ -52,13 +52,17 @@ from app.ml.metrics import (
     clip_probabilities,
     log_losses,
 )
+from app.ml.model_versions import SETS_KEY
 from app.ml.sets import (
     MARKET_MINUS,
     MARKET_ML,
     MARKET_PLUS,
+    SETS_PLATT,
+    SetsCalibration,
     base_probs,
     leg_result,
     set_count_from_score,
+    sets_calibration_of,
 )
 from app.services.dossier import calibrated_p1, model_params
 
@@ -123,9 +127,12 @@ class Case:
     y: int
 
 
-def selection_prob(p_side: float, best_of: int, market: str) -> float:
-    """Вероятность исхода стороны по ее вероятности победы в матче (модель сетов)."""
-    probs = base_probs(p_side, best_of if best_of in (3, 5) else 3)
+def selection_prob(
+    p_side: float, best_of: int, market: str, calibration: SetsCalibration = SETS_PLATT
+) -> float:
+    """Вероятность исхода стороны по ее вероятности победы в матче (модель сетов с
+    поправкой p(−1.5) по формату, как в досье)."""
+    probs = base_probs(p_side, best_of if best_of in (3, 5) else 3, calibration)
     if market == MARKET_ML:
         return probs.p1_win
     if market == MARKET_MINUS:
@@ -149,7 +156,10 @@ def selection_outcome(row: RowMapping, market: str) -> int | None:
 
 
 def archive_cases(
-    rows: Sequence[RowMapping], scope: Scope, platt: PlattScaling | None
+    rows: Sequence[RowMapping],
+    scope: Scope,
+    platt: PlattScaling | None,
+    calibration: SetsCalibration = SETS_PLATT,
 ) -> list[Case]:
     found: list[Case] = []
     for row in rows:
@@ -159,7 +169,7 @@ def archive_cases(
             y = selection_outcome(row, market)
             if y is None:
                 continue
-            p = selection_prob(p_side, int(row["best_of"] or 3), market)
+            p = selection_prob(p_side, int(row["best_of"] or 3), market, calibration)
             found.append(Case(int(row["match_id"]), row["day"], p, y))
     return found
 
@@ -179,11 +189,14 @@ async def history_cases(db: AsyncSession, scope: Scope, *, today: date) -> list[
     """Случаи истории урока без матчей замороженных наборов (M1 волны 3): поправка урока
     подбирается и отбирается не на тех матчах, на которых потом сравнивается кандидат
     инструкций с этим уроком, — исходы набора не протекают в инструкции."""
-    model, platt = await elo_model(db)
+    params = await model_params(db)
+    model, platt = elo_model_of(params)
+    calibration = sets_calibration_of(params.get(SETS_KEY))
     since = today - timedelta(days=365 * HISTORY_YEARS)
     rows = await read_only(db, cases_select(scope, model=model, since=since, until=today))
     frozen = await frozen_match_ids(db)
-    return archive_cases([row for row in rows if int(row["match_id"]) not in frozen], scope, platt)
+    kept = [row for row in rows if int(row["match_id"]) not in frozen]
+    return archive_cases(kept, scope, platt, calibration)
 
 
 @dataclass(frozen=True)

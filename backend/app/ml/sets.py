@@ -6,6 +6,13 @@
   3:1) — s³ + 3s³(1 − s).
 Обе функции p(s) строго возрастают на (0, 1), поэтому s по p находится бисекцией.
 
+Независимые сеты завышают решающий сет: на тесте 2023–2025 на 10 п.п. в обоих форматах,
+отсюда завышенная Ф(+1.5) и заниженная Ф(−1.5) (проверка фор ±1.5 от 17.10.2026, PLAN.md,
+Р28). Поэтому p(−1.5) каждой стороны поправляется калибровкой Платта своего формата
+(CoverPlatt): cover' = σ(a + b·logit cover), затем cover' не больше победы стороны, как в
+apply_claude. Решающий сет = 1 − cover'₁ − cover'₂, победа в матче не меняется.
+Коэффициенты хранит версия базовой модели (ml_models.params.sets_platt), без них — SETS_PLATT.
+
 Анализ оперирует тремя числами матча (Probs3): p1_win — П1 выигрывает матч, p1_cover —
 П1 выигрывает с разницей ≥ 2 сета (П1(−1.5)), p2_cover — то же для П2. Остальные исходы
 выводятся: П2 = 1 − p1_win, П2(+1.5) = 1 − p1_cover, П1(+1.5) = 1 − p2_cover.
@@ -16,8 +23,12 @@
 участник по правилам своего букмекера (решение В16, Р24).
 """
 
+import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any
 
 from app.core.i18n import t
 
@@ -110,14 +121,81 @@ PROBS3_FIELDS: tuple[str, ...] = ("p1_win", "p1_cover", "p2_cover")
 SHOWN_DIGITS = 3
 
 
-def base_probs(p1_win: float, best_of: int) -> Probs3:
-    """Три числа матча по модели сетов из вероятности победы игрока 1."""
+# Край вероятности для logit, как EPS в app/ml/metrics.py
+_COVER_EPS = 1e-6
+
+
+@dataclass(frozen=True)
+class CoverPlatt:
+    """Калибровка Платта для p(−1.5): σ(a + b·logit p). a = 0, b = 1 — без изменений."""
+
+    a: float = 0.0
+    b: float = 1.0
+
+    def apply(self, p: float) -> float:
+        clipped = min(1.0 - _COVER_EPS, max(_COVER_EPS, p))
+        z = self.a + self.b * math.log(clipped / (1.0 - clipped))
+        # σ(z) без переполнения exp при больших |z|
+        if z >= 0:
+            return 1.0 / (1.0 + math.exp(-z))
+        e = math.exp(z)
+        return e / (1.0 + e)
+
+    def to_json(self) -> dict[str, float]:
+        return {"a": self.a, "b": self.b}
+
+
+# Формат матча (best_of) → поправка p(−1.5)
+SetsCalibration = Mapping[int, CoverPlatt]
+
+# Поправка по умолчанию: подобрана на матчах основного тура 2016–2022 (Эло проекта с
+# калибровкой Платта бэктеста, обе стороны каждого матча; проверка фор ±1.5 от
+# 17.10.2026). Действует, пока у версии базовой модели нет своих чисел (params.sets_platt):
+# хранить их в ml_models.params можно без миграции, но первая версия с ними появится только
+# при перекалибровке. На тесте 2023–2025 решающий сет: +9.9 → +0.4 п.п. до 2 побед,
+# +10.6 → −2.8 п.п. до 3 побед (числа коэффициентов округлены до 3 знаков).
+SETS_PLATT: SetsCalibration = MappingProxyType(
+    {3: CoverPlatt(a=0.179, b=0.921), 5: CoverPlatt(a=0.554, b=1.325)}
+)
+
+
+def sets_calibration_of(raw: Any) -> SetsCalibration:
+    """Поправка из params.sets_platt версии модели: {"3": {"a", "b"}, "5": {...}}. Формата
+    нет или запись неверна — его число из SETS_PLATT."""
+    found = dict(SETS_PLATT)
+    if not isinstance(raw, Mapping):
+        return MappingProxyType(found)
+    for best_of in BEST_OF:
+        item = raw.get(str(best_of))
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            platt = CoverPlatt(a=float(item["a"]), b=float(item["b"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(platt.a) and math.isfinite(platt.b) and platt.b > 0:
+            found[best_of] = platt
+    return MappingProxyType(found)
+
+
+def sets_calibration_json(calibration: SetsCalibration) -> dict[str, dict[str, float]]:
+    """Поправка для ml_models.params.sets_platt (ключ — формат строкой)."""
+    return {str(best_of): platt.to_json() for best_of, platt in sorted(calibration.items())}
+
+
+def base_probs(p1_win: float, best_of: int, calibration: SetsCalibration | None = None) -> Probs3:
+    """Три числа матча по модели сетов из вероятности победы игрока 1. calibration —
+    поправка p(−1.5) по формату (SETS_PLATT или версии модели); None — независимые сеты
+    без поправки."""
     s = set_prob_from_match(p1_win, best_of)
-    return Probs3(
-        p1_win=p1_win,
-        p1_cover=cover_prob(s, best_of),
-        p2_cover=cover_prob(1.0 - s, best_of),
-    )
+    p1_cover = cover_prob(s, best_of)
+    p2_cover = cover_prob(1.0 - s, best_of)
+    platt = calibration.get(best_of) if calibration is not None else None
+    if platt is not None:
+        # Фора −1.5 стороны не вероятнее ее победы в матче
+        p1_cover = min(platt.apply(p1_cover), p1_win)
+        p2_cover = min(platt.apply(p2_cover), 1.0 - p1_win)
+    return Probs3(p1_win=p1_win, p1_cover=p1_cover, p2_cover=p2_cover)
 
 
 def market_probs(p1_win: float, p1_cover: float, p2_cover: float) -> dict[tuple[str, int], float]:

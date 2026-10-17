@@ -76,6 +76,14 @@ from app.ml.metrics import (
     roi_with_ci,
 )
 from app.ml.report import bookmaker_name, reference_warning, render_markdown, summary_lines
+from app.ml.sets import (
+    BEST_OF,
+    CoverPlatt,
+    SetCount,
+    SetsCalibration,
+    base_probs,
+    complete_for,
+)
 
 # Правила отбора живут в app/ml/strategy.py; StrategyRules, candidates и pick_parlay
 # доступны и отсюда (as — явный реэкспорт для mypy)
@@ -88,6 +96,9 @@ MARKET = "ML"
 ODDS_KIND = "archive"
 # Меньше событий для калибровки — калибровка не применяется (предупреждение в отчете)
 MIN_CALIBRATION_EVENTS = 50
+# Меньше полных матчей формата — поправка модели сетов для него не подбирается: при
+# 300 матчах (600 сторон) ДИ доли «победа с разницей ≥ 2 сета» около ±4 п.п.
+MIN_SETS_MATCHES = 300
 # Вторая проверка приманки (Платт на ее же тестовых событиях) — от стольких событий:
 # подгонка двух параметров улучшает лог-лосс примерно на 1/n, а в 99% случаев не больше
 # 4,6/n, то есть меньше запаса decoy_margin = 0,005
@@ -248,6 +259,56 @@ def fit_platt(p: npt.ArrayLike, y: npt.ArrayLike, *, max_iter: int = 100) -> Pla
         if float(np.abs(scale * step).max()) < 1e-10:
             break
     return PlattScaling(a=float(theta[0]), b=float(theta[1]))
+
+
+@dataclass(frozen=True)
+class SetsSample:
+    """Матч для поправки модели сетов: p1 — вероятность победы игрока 1 после калибровки
+    Платта (как в досье), формат и выигранные сеты игроков 1 и 2."""
+
+    p1: float
+    best_of: int
+    count: SetCount
+
+
+def sets_arrays(
+    samples: Iterable[SetsSample], best_of: int, calibration: SetsCalibration | None = None
+) -> tuple[FloatArray, FloatArray]:
+    """p(−1.5) обеих сторон по модели сетов и исход «выиграл с разницей ≥ 2 сета» для
+    матчей формата с полным счетом. calibration None — независимые сеты без поправки."""
+    p: list[float] = []
+    y: list[float] = []
+    for item in samples:
+        if item.best_of != best_of or not complete_for(item.count, best_of):
+            continue
+        probs = base_probs(item.p1, best_of, calibration)
+        margin_ = item.count.first - item.count.second
+        p.extend((probs.p1_cover, probs.p2_cover))
+        y.extend((float(margin_ >= 2), float(-margin_ >= 2)))
+    return np.array(p, dtype=np.float64), np.array(y, dtype=np.float64)
+
+
+def fit_sets_platt(
+    samples: Sequence[SetsSample], *, min_matches: int = MIN_SETS_MATCHES
+) -> dict[int, CoverPlatt]:
+    """Поправка модели сетов по формату (app/ml/sets.py): Платт (fit_platt) на p(−1.5)
+    независимых сетов обеих сторон против исхода «выиграл с разницей ≥ 2 сета». Обе
+    стороны — с одними a и b, поэтому поправка симметрична и не зависит от того, кто
+    игрок 1. Формата с полными матчами меньше min_matches в ответе нет."""
+    found: dict[int, CoverPlatt] = {}
+    for best_of in BEST_OF:
+        p, y = sets_arrays(samples, best_of)
+        if p.size < 2 * min_matches or y.min() == y.max():
+            continue
+        platt = fit_platt(p, y)
+        found[best_of] = CoverPlatt(a=platt.a, b=platt.b)
+    return found
+
+
+def sets_brier(samples: Sequence[SetsSample], best_of: int, calibration: SetsCalibration) -> float:
+    """Brier p(−1.5) обеих сторон формата с поправкой calibration; матчей нет — nan."""
+    p, y = sets_arrays(samples, best_of, calibration)
+    return float(brier_losses(p, y).mean()) if p.size else float("nan")
 
 
 # --- события ---

@@ -60,7 +60,14 @@ from app.ml.elo import (
     rating_surface,
     win_probability,
 )
-from app.ml.sets import SHOWN_DIGITS, Probs3, base_probs, parse_sets, score_for
+from app.ml.sets import (
+    SHOWN_DIGITS,
+    Probs3,
+    base_probs,
+    parse_sets,
+    score_for,
+    sets_calibration_of,
+)
 
 FEATURE_SET = "d1"
 FORM_SIZE = 10
@@ -782,7 +789,9 @@ async def build_dossier(
             "use_exact": rating,
         }
     p_raw = win_probability(elo[player_ids[0]]["use_exact"], elo[player_ids[1]]["use_exact"])
-    p_base = base_probs(calibrated_p1(p_raw, platt), best_of)
+    # Модель сетов с поправкой p(−1.5) версии модели (без нее — SETS_PLATT, app/ml/sets.py)
+    cover_cal = sets_calibration_of(params.get(model_versions.SETS_KEY))
+    p_base = base_probs(calibrated_p1(p_raw, platt), best_of, cover_cal)
 
     form = {player_id: await form_rows(db, player_id, day) for player_id in player_ids}
     recent = await recent_rows(db, player_ids, day)

@@ -25,19 +25,23 @@ from app.ml.backtest import (
     DecoyResult,
     Outcome,
     ReferenceMix,
+    SetsSample,
     StrategyRules,
     candidates,
     evaluate,
     fit_platt,
+    fit_sets_platt,
     parse_years,
     pick_parlay,
     run_backtest,
+    sets_brier,
     side_flip,
 )
 from app.ml.elo import MODEL_ID, EloEngine, EloMatch, PreMatch, rating_surface
 from app.ml.market import devig_power
 from app.ml.metrics import COIN_LOG_LOSS, Estimate, RoiEstimate, log_loss
 from app.ml.report import num, pct, reference_warning, render_markdown, summary_lines
+from app.ml.sets import SETS_PLATT, CoverPlatt, SetCount, base_probs
 from tests.ml_world import World, make_world, small_world, store_world
 
 FORBIDDEN_LETTERS = ("\u0451", "\u0401")
@@ -70,6 +74,52 @@ def test_platt_recovers_coefficients() -> None:
     assert calibrated[0] == pytest.approx(1.0 / (1.0 + np.exp(-platt.a)))
     with pytest.raises(ValueError):
         fit_platt([0.6, 0.7], [1, 1])
+
+
+def _sets_world(true: CoverPlatt, best_of: int, n: int, seed: int) -> list[SetsSample]:
+    """Матчи, где форы −1.5 сыграны по модели сетов с поправкой true: 2:0 / 0:2 (3:0 или
+    3:1 и наоборот) — с вероятностями поправленных фор, иначе решающий сет."""
+    rng = np.random.default_rng(seed)
+    need = best_of // 2 + 1
+    found: list[SetsSample] = []
+    for p1 in rng.uniform(0.2, 0.9, n):
+        probs = base_probs(float(p1), best_of, {best_of: true})
+        u = rng.random()
+        if u < probs.p1_cover:
+            count = SetCount(need, 0)
+        elif u < probs.p1_cover + probs.p2_cover:
+            count = SetCount(0, need)
+        else:
+            decider = 1.0 - probs.p1_cover - probs.p2_cover
+            first_wins = rng.random() < (probs.p1_win - probs.p1_cover) / decider
+            count = SetCount(need, need - 1) if first_wins else SetCount(need - 1, need)
+        found.append(SetsSample(float(p1), best_of, count))
+    return found
+
+
+def test_sets_platt_recovers_coefficients() -> None:
+    true = CoverPlatt(a=0.25, b=0.9)
+    world = _sets_world(true, 3, 20_000, seed=7)
+    fitted = fit_sets_platt(world)
+    # До 3 побед матчей нет — формата в ответе нет, досье возьмет SETS_PLATT
+    assert set(fitted) == {3}
+    assert fitted[3].a == pytest.approx(true.a, abs=0.05)
+    assert fitted[3].b == pytest.approx(true.b, abs=0.05)
+    # Поправка снижает Brier форы −1.5 по сравнению с независимыми сетами
+    assert sets_brier(world, 3, fitted) < sets_brier(world, 3, {3: CoverPlatt()})
+    # Мало матчей формата — не подбирается; неполный счет не считается
+    assert fit_sets_platt(world[:200]) == {}
+    broken = [SetsSample(0.6, 3, SetCount(1, 1))] * 1000
+    assert fit_sets_platt(broken) == {}
+    assert np.isnan(sets_brier(broken, 3, SETS_PLATT))
+
+
+def test_sets_platt_best_of_five() -> None:
+    world = _sets_world(SETS_PLATT[5], 5, 20_000, seed=8)
+    fitted = fit_sets_platt(world)
+    assert set(fitted) == {5}
+    assert fitted[5].a == pytest.approx(SETS_PLATT[5].a, abs=0.08)
+    assert fitted[5].b == pytest.approx(SETS_PLATT[5].b, abs=0.08)
 
 
 # --- правила стратегии ---

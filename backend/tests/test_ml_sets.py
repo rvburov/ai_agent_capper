@@ -1,5 +1,5 @@
-"""Модель сетов (app/ml/sets.py): формулы, обратная функция, форы и шесть исходов; счет
-по сетам и исход ноги ставки по счету."""
+"""Модель сетов (app/ml/sets.py): формулы, обратная функция, форы и шесть исходов,
+поправка p(−1.5) по формату; счет по сетам и исход ноги ставки по счету."""
 
 import pytest
 
@@ -11,6 +11,8 @@ from app.ml.sets import (
     OUTCOME_NO_RESULT,
     OUTCOME_RETIRED,
     OUTCOME_WALKOVER,
+    SETS_PLATT,
+    CoverPlatt,
     LegOutcome,
     Probs3,
     SetCount,
@@ -27,6 +29,8 @@ from app.ml.sets import (
     score_outcomes,
     set_count_from_score,
     set_prob_from_match,
+    sets_calibration_json,
+    sets_calibration_of,
     wins_needed,
 )
 
@@ -104,6 +108,55 @@ def test_base_probs_are_consistent(best_of: int) -> None:
     first, second = base_probs(0.7, best_of), base_probs(0.3, best_of)
     assert first.p1_cover == pytest.approx(second.p2_cover)
     assert first.p2_cover == pytest.approx(second.p1_cover)
+
+
+@pytest.mark.parametrize("best_of", [3, 5])
+def test_calibrated_base_probs(best_of: int) -> None:
+    # Без изменений (a = 0, b = 1) — те же числа, что у независимых сетов
+    same = {best_of: CoverPlatt()}
+    for p in (0.2, 0.5, 0.8):
+        same_probs = base_probs(p, best_of, same).as_dict()
+        assert same_probs == pytest.approx(base_probs(p, best_of).as_dict())
+    for p in (0.0, 0.05, 0.35, 0.5, 0.65, 0.95, 1.0):
+        raw, fixed = base_probs(p, best_of), base_probs(p, best_of, SETS_PLATT)
+        # Победа в матче не меняется, форы не больше победы, решающий сет не отрицателен
+        assert fixed.p1_win == p
+        assert 0 <= fixed.p1_cover <= fixed.p1_win
+        assert 0 <= fixed.p2_cover <= 1 - fixed.p1_win
+        if 0.05 <= p <= 0.95:
+            # Поправка снижает решающий сет (проверка фор ±1.5: он завышен на 10 п.п.)
+            assert 1 - fixed.p1_cover - fixed.p2_cover < 1 - raw.p1_cover - raw.p2_cover
+    # Перестановка игроков меняет форы местами и с поправкой
+    first, second = base_probs(0.7, best_of, SETS_PLATT), base_probs(0.3, best_of, SETS_PLATT)
+    assert first.p1_cover == pytest.approx(second.p2_cover)
+    assert first.p2_cover == pytest.approx(second.p1_cover)
+
+
+def test_calibrated_example_numbers() -> None:
+    # Равный матч до 2 побед: решающий сет 0,5 → 0,394 (факт 2023–2025 при p фаворита
+    # 0,5–0,6 — 0,398); до 3 побед 0,375 → 0,241 (факт — 0,244)
+    even3 = base_probs(0.5, 3, SETS_PLATT)
+    assert 1 - even3.p1_cover - even3.p2_cover == pytest.approx(0.394, abs=0.001)
+    even5 = base_probs(0.5, 5, SETS_PLATT)
+    assert 1 - even5.p1_cover - even5.p2_cover == pytest.approx(0.241, abs=0.001)
+    # Формат без поправки — как без нее
+    assert base_probs(0.6, 5, {3: SETS_PLATT[3]}) == base_probs(0.6, 5)
+    # Край: σ без переполнения
+    assert CoverPlatt(a=0.0, b=50.0).apply(1e-9) == pytest.approx(0.0, abs=1e-12)
+    assert CoverPlatt(a=0.0, b=50.0).apply(1.0) == pytest.approx(1.0)
+
+
+def test_sets_calibration_of_params() -> None:
+    assert sets_calibration_of(None) == SETS_PLATT
+    assert sets_calibration_of({}) == SETS_PLATT
+    own = sets_calibration_of({"3": {"a": 0.1, "b": 1.1}, "5": {"a": "x", "b": 1}})
+    assert own[3] == CoverPlatt(0.1, 1.1) and own[5] == SETS_PLATT[5]
+    # b ≤ 0 перевернул бы порядок вероятностей — такая запись не берется
+    assert sets_calibration_of({"3": {"a": 0.1, "b": 0}})[3] == SETS_PLATT[3]
+    assert sets_calibration_of({"3": [0.1, 1.1]})[3] == SETS_PLATT[3]
+    stored = sets_calibration_json(SETS_PLATT)
+    assert stored == {"3": {"a": 0.179, "b": 0.921}, "5": {"a": 0.554, "b": 1.325}}
+    assert sets_calibration_of(stored) == SETS_PLATT
 
 
 def test_market_probs() -> None:

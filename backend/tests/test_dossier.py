@@ -23,7 +23,7 @@ from app.db.models import (
 from app.db.session import create_sessionmaker
 from app.ml.backtest import PlattScaling
 from app.ml.elo import rebuild_ratings, upsert_model, win_probability
-from app.ml.sets import base_probs
+from app.ml.sets import SETS_PLATT, CoverPlatt, base_probs, sets_calibration_of
 from app.services.dossier import (
     DETAIL_MAX,
     FEATURE_SET,
@@ -108,9 +108,14 @@ async def test_dossier_content(db: AsyncSession, factory: async_sessionmaker[Asy
     assert p1["load"]["rest"] == (match.match_date - date.fromisoformat(first["d"])).days
     assert content["data_to"] is not None and content["data_to"] < content["as_of"]
 
-    # p_base: три числа по модели сетов, без калибровки — как Эло
+    # p_base: три числа по модели сетов, без калибровки — как Эло; p(−1.5) — с поправкой
+    # модели сетов по умолчанию (у версии модели нет своих чисел)
     assert content["p_base"]["cal"] is False and not result.calibrated
-    assert result.p_base == base_probs(result.p_raw, 3)
+    assert result.p_base == base_probs(result.p_raw, 3, SETS_PLATT)
+    raw = base_probs(result.p_raw, 3)
+    assert result.p_base.p1_win == raw.p1_win
+    decider = 1 - result.p_base.p1_cover - result.p_base.p2_cover
+    assert decider < 1 - raw.p1_cover - raw.p2_cover
     assert content["p_base"]["p1_win"] == round(result.p_raw, 3)
     assert set(content["refs"]) >= {"elo", "form", "h2h", "load"}
     assert result.features["elo1"] > 0 and result.features["surface_weight"] == 0.5
@@ -385,7 +390,11 @@ async def test_calibration_news_serve_and_symmetry(db: AsyncSession) -> None:
     )
     await upsert_model(
         db,
-        params={"surface_weight": 0.5, "platt": {"a": 0.05, "b": 0.8}},
+        params={
+            "surface_weight": 0.5,
+            "platt": {"a": 0.05, "b": 0.8},
+            "sets_platt": {"3": {"a": 0.3, "b": 0.9}},
+        },
         train_from=None,
         train_to=None,
     )
@@ -403,6 +412,11 @@ async def test_calibration_news_serve_and_symmetry(db: AsyncSession) -> None:
     ) / 2.0
     assert result.p_base.p1_win == pytest.approx(expected)
     assert result.p_base.p1_win != pytest.approx(result.p_raw)
+    # Поправка модели сетов — из параметров модели (до 2 побед), а не SETS_PLATT
+    own = sets_calibration_of({"3": {"a": 0.3, "b": 0.9}})
+    assert own[3] == CoverPlatt(0.3, 0.9) and own[5] == SETS_PLATT[5]
+    assert result.p_base == base_probs(result.p_base.p1_win, 3, own)
+    assert result.p_base != base_probs(result.p_base.p1_win, 3, SETS_PLATT)
     assert content["p_base"]["elo_p"] == round(result.p_raw, 3)
     assert p1["country"] == "ITA" and p1["age"] == 26.0
     assert p1["news"] == [

@@ -21,6 +21,13 @@ Brier — не выше +0,005 (правило TOKEN_ECONOMY.md, 2.4). Инач�
 
 Первая перекалибровка переносит калибровку elo-v1 в версию с датой (базовая версия),
 чтобы было с чем сравнивать и куда откатываться.
+
+Вместе с калибровкой подбирается поправка модели сетов (params.sets_platt, app/ml/sets.py):
+Платт на p(−1.5) по формату на тех же обучающих матчах с полным счетом. Новая пара чисел
+формата берется, если на отложенной части Brier форы −1.5 с ней не выше, чем с прежней, и
+матчей формата хватает (MIN_SETS_MATCHES для подбора, MIN_HOLDOUT для проверки); иначе
+остается прежняя (у версии без своих чисел — SETS_PLATT). Включение версии решает правило
+калибровки выше; числа сетов идут вместе с ней.
 """
 
 from collections.abc import Sequence
@@ -34,7 +41,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.db.models import Match, MlModel, Prediction, User
-from app.ml.backtest import BacktestConfig, PlattScaling, fit_platt, side_flip
+from app.ml.backtest import (
+    BacktestConfig,
+    PlattScaling,
+    SetsSample,
+    fit_platt,
+    fit_sets_platt,
+    sets_arrays,
+    sets_brier,
+    side_flip,
+)
 from app.ml.elo import MODEL_ID, win_probability
 from app.ml.lesson_scope import ratings_select
 from app.ml.metrics import (
@@ -47,7 +63,16 @@ from app.ml.metrics import (
     log_loss,
     log_losses,
 )
-from app.ml.model_versions import CALIBRATION_KIND, active_calibration, version_id
+from app.ml.model_versions import CALIBRATION_KIND, SETS_KEY, active_calibration, version_id
+from app.ml.sets import (
+    BEST_OF,
+    SetCount,
+    SetsCalibration,
+    complete_for,
+    set_count_from_score,
+    sets_calibration_json,
+    sets_calibration_of,
+)
 from app.schemas.learning import (
     CalibrationPointOut,
     CiNumOut,
@@ -82,13 +107,16 @@ LEARNING_LINK = "/learning"
 @dataclass(frozen=True)
 class Sample:
     """Матч: день, вероятность модели до калибровки для стороны side_flip, исход этой
-    стороны и рынок архива без маржи для нее (None — кэфов нет)."""
+    стороны и рынок архива без маржи для нее (None — кэфов нет). best_of и count —
+    формат и сеты стороны и соперника (None — счет неполный): для поправки модели сетов."""
 
     match_id: int
     day: date
     p_raw: float
     y: int
     q: float | None
+    best_of: int = 3
+    count: SetCount | None = None
 
 
 async def samples(db: AsyncSession, *, since: date, until: date) -> list[Sample]:
@@ -107,13 +135,18 @@ async def samples(db: AsyncSession, *, since: date, until: date) -> list[Sample]
         side_player = row["p2"] if flip else row["p1"]
         p_raw = win_probability(r2, r1) if flip else win_probability(r1, r2)
         q1 = market.get(match_id)
+        won = row["winner_id"] == side_player
+        best_of = int(row["best_of"]) if row["best_of"] in BEST_OF else 3
+        count = set_count_from_score(row["score"], winner_is_first=won)
         found.append(
             Sample(
                 match_id=match_id,
                 day=row["day"],
                 p_raw=p_raw,
-                y=1 if row["winner_id"] == side_player else 0,
+                y=1 if won else 0,
                 q=None if q1 is None else (1.0 - q1 if flip else q1),
+                best_of=best_of,
+                count=count if complete_for(count, best_of) else None,
             )
         )
     return sorted(found, key=lambda item: (item.day, item.match_id))
@@ -133,6 +166,56 @@ def split_holdout(items: Sequence[Sample], share: float = HOLDOUT_SHARE) -> tupl
 
 def _probs(items: Sequence[Sample], platt: PlattScaling | None) -> list[float]:
     return [calibrated_p1(item.p_raw, platt) for item in items]
+
+
+def _sets_samples(items: Sequence[Sample], platt: PlattScaling | None) -> list[SetsSample]:
+    """Матчи с полным счетом для поправки модели сетов: p стороны — после калибровки."""
+    return [
+        SetsSample(calibrated_p1(item.p_raw, platt), item.best_of, item.count)
+        for item in items
+        if item.count is not None
+    ]
+
+
+def choose_sets(
+    train: Sequence[Sample],
+    holdout: Sequence[Sample],
+    platt: PlattScaling | None,
+    previous: SetsCalibration,
+) -> tuple[SetsCalibration, dict[str, Any]]:
+    """Поправка модели сетов новой версии по формату (правило — в docstring модуля) и
+    числа для metrics.sets: подбор, Brier форы −1.5 на отложенной части с новой и прежней
+    парой, что взято."""
+    fitted = fit_sets_platt(_sets_samples(train, platt))
+    test = _sets_samples(holdout, platt)
+    chosen = dict(previous)
+    report: dict[str, Any] = {}
+    for best_of in BEST_OF:
+        n_holdout = sets_arrays(test, best_of)[0].size // 2
+        new = fitted.get(best_of)
+        prev_brier = sets_brier(test, best_of, previous) if n_holdout else None
+        new_brier = (
+            sets_brier(test, best_of, {**previous, best_of: new})
+            if new is not None and n_holdout
+            else None
+        )
+        taken = (
+            new is not None
+            and new_brier is not None
+            and prev_brier is not None
+            and n_holdout >= MIN_HOLDOUT
+            and new_brier <= prev_brier
+        )
+        if taken and new is not None:
+            chosen[best_of] = new
+        report[str(best_of)] = {
+            "fitted": new.to_json() if new is not None else None,
+            "n_holdout": n_holdout,
+            "brier": new_brier,
+            "prev_brier": prev_brier,
+            "taken": taken,
+        }
+    return chosen, report
 
 
 def _fit(items: Sequence[Sample]) -> PlattScaling | None:
@@ -254,6 +337,9 @@ async def recalibrate(
         await db.commit()
         return RecalibrationOut(decision="skipped", reason="ml.too_few", version=None)
     old_platt = _platt_of(current.params)
+    sets, sets_report = choose_sets(
+        train, holdout, new_platt, sets_calibration_of((current.params or {}).get(SETS_KEY))
+    )
     y = [item.y for item in holdout]
     days = [item.day.isoformat() for item in holdout]
     p_new, p_old = _probs(holdout, new_platt), _probs(holdout, old_platt)
@@ -271,7 +357,11 @@ async def recalibrate(
         train_from=train[0].day,
         train_to=train[-1].day,
         feature_set=current.feature_set,
-        params={"base": MODEL_ID, "platt": {"a": new_platt.a, "b": new_platt.b}},
+        params={
+            "base": MODEL_ID,
+            "platt": {"a": new_platt.a, "b": new_platt.b},
+            SETS_KEY: sets_calibration_json(sets),
+        },
         metrics={
             "n_train": len(train),
             "n_holdout": len(holdout),
@@ -296,6 +386,7 @@ async def recalibrate(
                 for row in table
             ],
             "walk_forward": walk_forward(data, today=day),
+            "sets": sets_report,
             "seed": SEED,
             "rule": {"log_loss_margin": LOG_LOSS_MARGIN, "brier_margin": BRIER_MARGIN},
             "reason": reason,

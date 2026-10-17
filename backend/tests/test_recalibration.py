@@ -1,7 +1,8 @@
 """Еженедельная перекалибровка базовой модели (этап 5, В6 Р25, Т12, Т13): версия с датой,
 включение по правилу «не хуже прежней на отложенной части» (лог-лосс +0,01, Brier
 +0,005), иначе rejected; уведомления администратору, откат; досье и прогнозы берут
-калибровку активной версии; проверка по месяцам и GET /api/ml/model."""
+калибровку активной версии (и поправку модели сетов); проверка по месяцам и
+GET /api/ml/model."""
 
 from datetime import date
 
@@ -13,7 +14,8 @@ from app.db.models import AdminAuditLog, MlModel, Notification
 from app.db.session import create_sessionmaker
 from app.ml.backtest import PlattScaling
 from app.ml.elo import MODEL_ID, rebuild_ratings
-from app.ml.model_versions import CALIBRATION_KIND, active_model_id, model_params
+from app.ml.model_versions import CALIBRATION_KIND, SETS_KEY, active_model_id, model_params
+from app.ml.sets import SETS_PLATT
 from app.services import recalibration
 from tests.helpers_admin import admin_signed_in, error_code, signed_in
 from tests.ml_world import make_world, store_world
@@ -72,6 +74,20 @@ async def test_recalibration_activates_rejects_and_rolls_back(
     params = await model_params(db)
     assert params["platt"] == {"a": version.platt_a, "b": version.platt_b}
     assert "surface_weight" in params
+    # Поправка модели сетов подобрана вместе с калибровкой: до 2 побед — новая (в мире все
+    # матчи 2:0, с ней Brier форы −1.5 ниже), до 3 побед матчей нет — прежние SETS_PLATT
+    report = rows[1].metrics["sets"]
+    assert report["3"]["taken"] is True and report["3"]["n_holdout"] >= recalibration.MIN_HOLDOUT
+    assert report["3"]["brier"] <= report["3"]["prev_brier"]
+    assert report["5"] == {
+        "fitted": None,
+        "n_holdout": 0,
+        "brier": None,
+        "prev_brier": None,
+        "taken": False,
+    }
+    assert rows[1].params[SETS_KEY] == {"3": report["3"]["fitted"], "5": SETS_PLATT[5].to_json()}
+    assert params[SETS_KEY] == rows[1].params[SETS_KEY]
     variants = list(
         await db.scalars(
             select(Notification.params["variant"].astext).where(Notification.user_id == admin.id)
@@ -112,3 +128,4 @@ async def test_recalibration_activates_rejects_and_rolls_back(
     assert back.json()["active"]["auto"] is False
     assert await active_model_id(db) == baseline_id
     assert (await model_params(db)).get("platt") is None
+    assert (await model_params(db)).get(SETS_KEY) is None
