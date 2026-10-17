@@ -1,11 +1,14 @@
 /* Раздел «Администрирование» — кабинет администратора (docs/PLAN.md, раздел 7 «Кабинет администратора»; решения Р4–Р9, Р12–Р17).
-   Вкладки — подмаршруты #admin-<вкладка>: users, invites, access, key, usage, data, settings, audit, message.
+   Вкладки — подмаршруты #admin-<вкладка>: users, summary, invites, access, key, usage, data, settings, audit, message;
+   карточка участника — #admin-user-<id>.
    Этап 5: «Данные» — загрузка файла tennis-data 2026.xlsx раз в неделю (В1) и отчет загрузки; в «Расходе ИИ» —
    разборы ставок общей задачей и проверки (eval) по прогонам с ценой и худшим случаем (В2, В3).
    #admin-limits — вкладка «Ключ и бюджет» с прокруткой к лимитам участников (туда ведет уведомление о 80% лимита).
    Действия имитируются: состояние меняется в памяти (DATA.users, DATA.admin), каждое действие пишется в журнал
-   DATA.admin.audit. Об участнике администратор видит только расход на ИИ и активность — ставок, банка и стратегии
-   здесь нет (Р14). Удаленный участник помечается status: 'deleted', как в остальных экранах. */
+   DATA.admin.audit. Р27 (17 октября 2026, заменяет Р14): администратор видит ставки, банк, стратегию и анализы
+   каждого участника — только просмотр: блок «Ставки и банк» в карточке участника, вкладка «Сводка» по всем и режим
+   просмотра (js/view.js). Каждый просмотр — запись журнала data_view. Пароли, коды 2FA, резервные коды и ключи Claude
+   участников не видны никому. Удаленный участник помечается status: 'deleted', как в остальных экранах. */
 (function () {
   'use strict';
   const { h, fmt, icon, button, card, chip } = UI;
@@ -32,7 +35,8 @@
   // Запись о смене валюты переживает перезагрузку — часы идут после нее.
   let clock = Math.max(toMin(TODAY + 'T09:41'), ...DATA.admin.audit.map(e => toMin(e.at) + 1));
   const now = () => fromMin(clock);
-  const tick = () => fromMin(clock++);
+  // записи о просмотре данных (js/view.js) идут в тот же журнал — часы не отстают от его последней записи
+  const tick = () => { clock = Math.max(clock, ...DATA.admin.audit.map(e => toMin(e.at) + 1)); return fromMin(clock++); };
   function left(expires) {
     const m = toMin(expires) - clock;
     if (m <= 0) return 'срок вышел';
@@ -132,6 +136,7 @@
     lesson_on: ['Урок включен в анализ', 'book'],
     player_merge: ['Игроки объединены', 'users'],
     player_edit: ['Изменен игрок', 'user'],
+    data_view: ['Просмотр данных участника', 'eye'],
   };
   const actionOf = e => ACTIONS[e.action] || [e.action, 'info'];
   const inGroup = list => e => list.includes(e.action);
@@ -143,6 +148,7 @@
     { id: 'money', label: 'Ключ, бюджет и лимиты', test: inGroup(['key_change', 'limit_change', 'budget_change', 'ai_mode']) },
     { id: 'settings', label: 'Валюта, настройки, сообщения', test: inGroup(['set_currency', 'settings', 'message']) },
     { id: 'learning', label: 'Данные и обучение', test: inGroup(['data_upload', 'eval_run', 'eval_set', 'version_on', 'lesson_on']) },
+    { id: 'view', label: 'Просмотр данных участников', test: inGroup(['data_view']) },
     { id: 'terminal', label: 'Команды терминала', test: e => e.actor === 'терминал' },
   ];
   const entry = (action, target, details) => ({ at: tick(), actor: D.user.name, action, target: target || null, details, ip: '95.216.•.•' });
@@ -156,6 +162,7 @@
   const TABS = [
     { id: 'overview', label: 'Обзор', short: 'Обзор', icon: 'layers' },
     { id: 'users', label: 'Участники', short: 'Участники', icon: 'users' },
+    { id: 'summary', label: 'Сводка', short: 'Сводка', icon: 'chart' },
     { id: 'invites', label: 'Приглашения', short: 'Приглашения', icon: 'userPlus' },
     { id: 'access', label: 'Сброс доступа', short: 'Сброс доступа', icon: 'lock' },
     { id: 'key', label: 'Ключ и бюджет', short: 'Ключ и бюджет', icon: 'key' },
@@ -174,6 +181,8 @@
     twofaUser: '',
     tz: 'Europe/Helsinki',
     msg: { to: 'all', user: '', text: '', push: true },
+    card: null, cardLogged: null, // карточка участника (#admin-user-<id>) и чей просмотр уже записан в журнал
+    sumPeriod: '30', sumLogged: null, // «Сводка»: период и какой просмотр уже записан
   };
   const TZ = D.timezones.map(t => ({ value: t.value, label: t.label }));
   const tzLabel = v => (TZ.find(t => t.value === v) || { label: v }).label.replace(/ \(.*\)$/, '');
@@ -189,13 +198,13 @@
     .adm-private svg { width: 15px; height: 15px; flex: none; }
     .adm-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-    /* 9 вкладок: на широком экране — строка (с иконками от 1521px), уже — сетка кнопок, как в личном кабинете на телефоне */
+    /* 11 вкладок: на широком экране — строка (с иконками от 1700px), уже — сетка кнопок, как в личном кабинете на телефоне */
     .tabs.adm-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 10px 11px; }
     .tabs.adm-tabs button svg { width: 16px; height: 16px; flex: none; display: none; }
-    @media (min-width: 1521px) { .tabs.adm-tabs button svg { display: block; } }
+    @media (min-width: 1700px) { .tabs.adm-tabs button svg { display: block; } }
     .adm-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
-    @media (max-width: 1280px) {
-      .tabs.adm-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; border-bottom: 0; overflow: visible; }
+    @media (max-width: 1440px) {
+      .tabs.adm-tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; border-bottom: 0; overflow: visible; }
       .tabs.adm-tabs button { justify-content: center; padding: 8px 4px; min-height: 42px; border: 1px solid var(--line); border-radius: var(--r-md); margin: 0; background: var(--surface); color: var(--fg-2); font-size: var(--fs-sm); line-height: 1.25; white-space: normal; text-align: center; min-width: 0; }
       .tabs.adm-tabs button:hover { color: var(--fg); border-color: var(--line-strong); }
       .tabs.adm-tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); }
@@ -513,6 +522,40 @@
     .adm-notif .notif-body { white-space: pre-wrap; overflow-wrap: anywhere; }
     .adm-count { font-variant-numeric: tabular-nums; color: var(--fg-3); font-weight: 400; }
     .adm-count.warn { color: var(--warn-ink); font-weight: 600; }
+
+    /* Р27: ставки и банк участника (только просмотр), сводка по всем */
+    .adm-facts.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    @media (max-width: 720px) { .adm-facts.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .adm-facts dd small { display: block; font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
+    .adm-name-link { color: var(--fg); text-decoration: none; }
+    .adm-name-link:hover { color: var(--accent-ink); text-decoration: underline; }
+    .adm-bets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+    .adm-bets li { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
+    .adm-bets li:first-child { border-top: 0; }
+    .adm-bets-date { font-size: var(--fs-sm); color: var(--fg-2); white-space: nowrap; }
+    .adm-bets-what { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .adm-bets-what b { font-weight: 600; font-size: var(--fs-sm); }
+    .adm-bets-what span { font-size: var(--fs-xs); color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .adm-bets-sum { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; font-size: var(--fs-sm); }
+    @media (max-width: 480px) { .adm-bets li { grid-template-columns: minmax(0, 1fr) auto; } .adm-bets-date { grid-column: 1 / -1; font-size: var(--fs-xs); } }
+    .adm-ro-note { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--fg-3); }
+    .adm-ro-note svg { width: 14px; height: 14px; flex: none; }
+    @media (max-width: 1180px) { .adm-main.adm-pcard > .adm-col:last-child { order: -1; } }
+    .adm-sum-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    @media (min-width: 1600px) { .adm-sum-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+    .adm-sum-tiles > .card { padding: 14px 16px; }
+    .adm-sum-tiles .stat-value { font-size: var(--fs-xl); }
+    @media (max-width: 720px) { .adm-sum-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .adm-sum-tiles > .card { padding: 12px; } }
+    .adm-sum-table td { vertical-align: middle; white-space: nowrap; }
+    .adm-sum-table tr.is-total td { background: var(--surface-2); font-weight: 600; }
+    .adm-sum-table tr.is-empty td { color: var(--fg-3); }
+    .adm-sum-go { color: var(--fg-3); display: inline-flex; }
+    .adm-sum-go svg { width: 18px; height: 18px; }
+    .adm-scards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    @media (max-width: 720px) { .adm-scards { grid-template-columns: minmax(0, 1fr); } }
+    .card.adm-scard { padding: 14px; gap: 10px; }
+    .adm-scard-head { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+    .adm-scard-bank { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); white-space: nowrap; }
   `);
 
   // ---------- общие кусочки ----------
@@ -722,7 +765,7 @@
   function switchTab(id, after, fromTabs) {
     const hadFocus = fromTabs || (document.activeElement && document.activeElement.getAttribute('role') === 'tab');
     if (st.tab !== id) st.resetShown = null;
-    st.tab = id;
+    st.tab = id; st.card = null; st.cardLogged = null; st.sumLogged = null;
     closeMenu(false);
     try { history.replaceState(history.state, '', location.href.split('#')[0] + '#admin' + (id === 'overview' ? '' : '-' + id)); } catch (e) { /* в песочнице адрес может быть недоступен */ }
     drawTabs(); drawPanel();
@@ -798,6 +841,12 @@
     const me = isMe(u), blocked = u.status === 'blocked';
     const items = [];
     if (me) items.push({ icon: 'user', label: 'Личный кабинет', hint: 'пароль, 2FA и ваши сеансы', onClick: () => UI.go('profile-security') });
+    // Р27: ставки и банк участника — только просмотр, каждый просмотр в журнале
+    if (!me && D.hasBook(u.id)) {
+      items.push({ icon: 'wallet', label: 'Карточка участника', hint: 'ставки и банк за 30 дней', onClick: () => UI.go('admin-user-' + u.id) });
+      items.push({ icon: 'eye', label: 'Открыть как участник видит', hint: 'Главная, Ставки, Аналитика · только просмотр', onClick: () => UI.view.open(u.id, 'dashboard') });
+      items.push('sep');
+    }
     if (u.returnRequested && u.aiMode === 'own') {
       items.push({ icon: 'key', label: 'Разрешить вернуть ключ администратора', onClick: () => approveReturn(u) });
       items.push({ icon: 'x', label: 'Отклонить просьбу', hint: 'останется на своем ключе', onClick: () => rejectReturn(u) });
@@ -980,7 +1029,7 @@
       id: 'adm-role-otp',
       title: toAdmin ? 'Сделать администратором' : 'Сделать участником',
       body: [personRow(u, true), h('p', { class: 'small soft' }, toAdmin
-        ? 'Он увидит раздел «Администрирование»: участников, приглашения, ключ Claude, бюджет и журнал — и сможет делать все то же, что и вы. Ставки, банк и стратегию участников не видит никто из администраторов.'
+        ? 'Он увидит раздел «Администрирование»: участников, приглашения, ключ Claude, бюджет и журнал — и сможет делать все то же, что и вы. Ставки, банк, стратегию и анализы участников он будет видеть, как и вы, — только просмотр, каждый просмотр в журнале.'
         : 'Он перестанет видеть раздел «Администрирование». Его ставки, банк, стратегия и лимит на ИИ не изменятся.')],
       confirmLabel: toAdmin ? 'Сделать администратором' : 'Сделать участником', icon: 'admin',
       onConfirm: () => {
@@ -1035,7 +1084,7 @@
         h('div', { class: 'adm-two' },
           h('div', { class: 'adm-box' }, h('h4', { class: 'bad-text' }, 'Удалится навсегда'), h('ul', { class: 'adm-bul gone' }, gone.map(t => h('li', null, icon('x'), t)))),
           h('div', { class: 'adm-box' }, h('h4', { class: 'good-text' }, 'Останется'), h('ul', { class: 'adm-bul stay' }, stay.map(t => h('li', null, icon('check'), t))))),
-        UI.callout('warn', 'alert', 'Восстановить нельзя. Вы не видите ставки и банк участника и не сможете выгрузить их за него — если данные ему нужны, попросите сделать экспорт в личном кабинете. Если нужно только закрыть доступ, заблокируйте: данные сохранятся.'),
+        UI.callout('warn', 'alert', 'Восстановить нельзя. Ставки и банк участника вы видите только для просмотра и выгрузить их за него не можете — если данные ему нужны, попросите сделать экспорт в личном кабинете. Если нужно только закрыть доступ, заблокируйте: данные сохранятся.'),
         h('div', { class: 'field' },
           h('label', { class: 'field-label', for: 'adm-del-email' }, h('span', null, 'Введите email участника: ', h('b', { class: 'mono' }, u.email))),
           email,
@@ -1405,9 +1454,10 @@
     const t = UI.table({
       columns: [
         { label: 'Участник · роль и статус', render: u => h('div', { class: 'adm-person' }, avatar(u), h('div', null,
-          h('div', { class: 'adm-person-name' }, h('span', { class: 'adm-nowrap' }, u.name), isMe(u) && chip('вы', 'accent')),
+          h('div', { class: 'adm-person-name' }, h('a', { class: 'adm-nowrap adm-name-link', href: '#admin-user-' + u.id, title: 'Карточка участника' }, u.name), isMe(u) && chip('вы', 'accent')),
           h('div', { class: 'adm-person-mail adm-nowrap' }, u.email),
-          h('div', { class: 'row adm-chips', style: 'margin-top:6px' }, roleChip(u), statusChip(u)))) },
+          h('div', { class: 'row adm-chips', style: 'margin-top:6px' }, roleChip(u), statusChip(u)),
+          betsCell(u))) },
         { label: 'Ключ Claude', render: keyCell },
         { label: 'Расход ИИ за октябрь', render: spendBlock },
         { label: 'Анализы', align: 'r', render: analysesCell },
@@ -1420,7 +1470,15 @@
     t.querySelectorAll('tbody tr').forEach((tr, i) => { if (rows[i] && rows[i].status === 'blocked') tr.classList.add('is-blocked'); });
     return t;
   }
-  function userCard(u) {
+  // Р27: банк и ROI участника за 30 дней — в таблице участников; подробнее — в карточке участника
+  function betsCell(u) {
+    const s = D.bookSummary(u.id, 30);
+    if (!s) return h('div', { class: 'adm-sub', style: 'margin-top:6px' }, 'Ставок нет');
+    return h('a', { class: 'adm-sub adm-name-link', href: '#admin-user-' + u.id, style: 'display:inline-block;margin-top:6px', title: 'Ставки и банк — в карточке участника' },
+      'Банк ', h('b', null, fmt.money(s.bank)), ' · ROI 30 дн. ', h('span', { class: s.roi != null && s.roi < 0 ? 'bad-text' : null }, s.roi == null ? '—' : fmt.signedPct(s.roi)));
+  }
+  function userCard(u, inCard) {
+    const s = inCard ? null : D.bookSummary(u.id, 30);
     return h('section', { class: ['card', 'adm-ucard', u.status === 'blocked' && 'is-blocked'], 'aria-label': u.name },
       h('div', { class: 'adm-ucard-head' }, avatar(u),
         h('div', { style: 'min-width:0' }, h('div', { class: 'adm-person-name' }, u.name, isMe(u) && chip('вы', 'accent')), h('div', { class: 'adm-person-mail' }, u.email)),
@@ -1430,27 +1488,193 @@
       h('dl', { class: 'adm-facts two' },
         h('div', null, h('dt', null, 'Анализов сегодня'), h('dd', null, u.todayAnalyses + (AI.limitOf(u) ? ' из ' + AI.limitOf(u).daily : ''))),
         h('div', null, h('dt', null, 'За октябрь'), h('dd', null, pl(u.analyses, 'анализ', 'анализа', 'анализов')))),
-      h('div', { class: 'row', style: 'gap:6px 10px' }, twoFaChip(u), h('span', { class: 'xsmall muted' }, 'Вход: ' + lc(when(u.lastLogin)))));
+      h('div', { class: 'row', style: 'gap:6px 10px' }, twoFaChip(u), h('span', { class: 'xsmall muted' }, 'Вход: ' + lc(when(u.lastLogin)))),
+      // Р27: короткая строка о ставках и банке и переход в карточку участника
+      inCard ? null : h('dl', { class: 'adm-facts' },
+        h('div', null, h('dt', null, 'Банк'), h('dd', null, s ? fmt.money(s.bank) : '—')),
+        h('div', null, h('dt', null, 'ROI 30 дней'), h('dd', { class: s && s.roi != null && s.roi < 0 ? 'bad-text' : null }, s && s.roi != null ? fmt.signedPct(s.roi) : '—')),
+        h('div', null, h('dt', null, 'В игре'), h('dd', null, s ? String(s.open) : '—'))),
+      inCard ? null : button(isMe(u) ? 'Моя карточка' : 'Карточка участника', { kind: 'secondary', size: 'sm', icon: 'user', iconRight: 'chevronRight', href: '#admin-user-' + u.id, block: true }));
   }
+  // ---------- карточка участника (#admin-user-<id>): доступ и расход ИИ + ставки и банк (Р27) ----------
+  const betKind = b => (b.legs.length > 1 ? 'Экспресс × ' + b.legs.length : 'Ординар');
+  function betLine(b) {
+    const open = b.status === 'open';
+    return h('li', null,
+      h('span', { class: 'adm-bets-date' }, fmt.date(b.date)),
+      h('div', { class: 'adm-bets-what' }, h('b', null, betKind(b) + ' · кэф ' + fmt.odds(b.total)), h('span', null, b.legs.map(D.match).join(', '))),
+      h('div', { class: 'adm-bets-sum' },
+        b.awaiting ? chip('Ждет результата', 'warn', 'clock') : UI.statusChip(b.status),
+        h('span', { class: open ? 'muted' : b.profit > 0 ? 'good-text' : b.profit < 0 ? 'bad-text' : 'muted' }, open ? fmt.money(b.stake) + ' в игре' : fmt.signedMoney(b.profit))));
+  }
+  function moneyCard(u) {
+    const me = isMe(u);
+    const s = D.bookSummary(u.id, 30), all = D.bookSummary(u.id, null);
+    if (!s) {
+      return card({ title: 'Ставки и банк', subtitle: 'Только просмотр',
+        body: UI.empty(u.status === 'blocked' ? 'Ставок нет: участника заблокировали до первой ставки.' : 'Ставок пока нет.') });
+    }
+    const profitCls = s.profit > 0 ? 'good-text' : s.profit < 0 ? 'bad-text' : null;
+    return card({
+      title: 'Ставки и банк', id: 'adm-money',
+      subtitle: me ? 'Ваши данные · суммы в валюте программы' : 'За 30 дней · суммы в валюте программы · только просмотр',
+      actions: me ? null : [chip('только просмотр', 'warn', 'eye')],
+      body: [
+        h('dl', { class: 'adm-facts four' },
+          h('div', null, h('dt', null, 'Банк'), h('dd', null, fmt.money(s.bank), h('small', null, 'вложено ' + fmt.money(s.invested)))),
+          h('div', null, h('dt', null, 'Прибыль за 30 дней'), h('dd', { class: profitCls }, fmt.signedMoney(s.profit), h('small', null, pl(s.n, 'ставка', 'ставки', 'ставок')))),
+          h('div', null, h('dt', null, 'ROI за 30 дней'), h('dd', { class: s.roi != null && s.roi < 0 ? 'bad-text' : null }, s.roi == null ? '—' : fmt.signedPct(s.roi), h('small', null, 'за все время ' + (all.roi == null ? '—' : fmt.signedPct(all.roi))))),
+          h('div', null, h('dt', null, 'В игре'), h('dd', null, pl(s.open, 'ставка', 'ставки', 'ставок'), h('small', null, s.open ? 'на ' + fmt.money(s.inPlay) : 'открытых нет')))),
+        h('div', { class: 'eyebrow', style: 'margin-top:2px' }, 'Последние ставки'),
+        s.last.length ? h('ul', { class: 'adm-bets', 'aria-label': 'Последние ставки' }, s.last.map(betLine)) : UI.empty('Ставок пока нет.'),
+        me ? null : h('span', { class: 'adm-ro-note' }, icon('history'), 'Этот просмотр записан в журнал администратора'),
+      ],
+      foot: me
+        ? [button('Моя главная', { kind: 'secondary', size: 'sm', icon: 'home', href: '#dashboard' }), button('Мои ставки', { kind: 'ghost', size: 'sm', icon: 'ticket', href: '#bets' })]
+        : [button('Открыть как участник видит', { kind: 'primary', icon: 'eye', attrs: { id: 'adm-view-open' }, onClick: () => UI.view.open(u.id, 'dashboard') }),
+          button('Ставки', { kind: 'secondary', size: 'sm', icon: 'ticket', onClick: () => UI.view.open(u.id, 'bets') }),
+          button('Банк и стратегия', { kind: 'ghost', size: 'sm', icon: 'wallet', onClick: () => UI.view.open(u.id, 'profile-bank') })],
+    });
+  }
+  function participantPanel(u) {
+    if (!u) { st.card = null; return PANELS.users(); }
+    // Р27: открыть карточку с данными участника — тоже просмотр его данных, запись в журнал один раз за открытие
+    if (!isMe(u) && D.hasBook(u.id) && st.cardLogged !== u.id) { st.cardLogged = u.id; UI.view.logAdmin(u.name, 'Карточка участника: ставки и банк'); }
+    const back = button('Все участники', { kind: 'ghost', size: 'sm', icon: 'chevronLeft', onClick: () => {
+      st.card = null; st.cardLogged = null;
+      try { history.replaceState(history.state, '', location.href.split('#')[0] + '#admin-users'); } catch (e) { /* не страшно */ }
+      redrawPanel();
+    } });
+    return [
+      h('div', { class: 'row' }, back),
+      h('div', { class: 'adm-main adm-pcard' },
+        h('div', { class: 'adm-col' }, moneyCard(u)),
+        h('div', { class: 'adm-col' }, userCard(u, true))),
+    ];
+  }
+
   PANELS.users = () => {
     const all = people();
     const f = USER_FILTERS.find(x => x.id === st.userFilter) || USER_FILTERS[0];
     const rows = all.filter(f.test).sort((a, b) => (isMe(b) - isMe(a)) || (a.status === 'blocked') - (b.status === 'blocked') || b.spent - a.spent);
     const seg = UI.segmented({ label: 'Показать', items: USER_FILTERS.map(x => ({ id: x.id, label: x.label + ' · ' + all.filter(x.test).length })), active: f.id, onChange: id => { st.userFilter = id; redrawPanel(); } });
-    const privacy = UI.callout('info', 'eyeOff', h('b', null, 'Здесь только расход на ИИ и активность: '), 'входы и число анализов. Ставки, банк и стратегию участника не видит никто, кроме него самого — администратор тоже.');
+    if (st.card) return participantPanel(userById(st.card));
+    // Р27: правило просмотра — коротко над списком
+    const privacy = () => UI.callout('info', 'eye', h('span', null, h('b', null, 'Ставки, банк, стратегию и анализы участника вы видите только для просмотра: '), 'в карточке участника (нажмите на имя) и во вкладке «Сводка». Каждый просмотр записывается в журнал. Пароли, коды 2FA и ключи Claude не видит никто.'));
     return [
       (() => {
         const c = card({
           title: 'Участники', subtitle: pl(all.length, 'человек', 'человека', 'человек') + ' · расход ИИ за октябрь в долларах', class: 'adm-wide-only',
-          body: [h('div', { class: 'adm-toolbar' }, seg), privacy],
+          body: [h('div', { class: 'adm-toolbar' }, seg), privacy()],
         });
         c.appendChild(h('div', { class: 'adm-users-wrap' }, usersTable(rows)));
         return c;
       })(),
       h('div', { class: 'adm-narrow-only stack' },
         h('div', { class: 'adm-toolbar' }, UI.segmented({ label: 'Показать', items: USER_FILTERS.map(x => ({ id: x.id, label: x.label + ' · ' + all.filter(x.test).length })), active: f.id, onChange: id => { st.userFilter = id; redrawPanel(); } })),
-        privacy.cloneNode(true),
+        privacy(),
         rows.length ? h('div', { class: 'adm-ucards' }, rows.map(userCard)) : UI.empty('Никого нет')),
+    ];
+  };
+
+  // =====================================================================
+  // 2а. СВОДКА ПО ВСЕМ УЧАСТНИКАМ (Р27) — только просмотр, каждый просмотр в журнале
+  // =====================================================================
+  const SUM_PERIODS = [
+    { id: '7', label: '7 дней', days: 7, ctx: 'за 7 дней' },
+    { id: '30', label: '30 дней', days: 30, ctx: 'за 30 дней' },
+    { id: '90', label: '3 месяца', days: 90, ctx: 'за 3 месяца' },
+    { id: 'all', label: 'Все', days: null, ctx: 'за все время' },
+  ];
+  const tone = v => (v == null ? null : v > 0 ? 'good-text' : v < 0 ? 'bad-text' : null);
+  const pctOrDash = v => (v == null ? '—' : fmt.signedPct(v));
+  function openPerson(u) { if (isMe(u)) UI.go('dashboard'); else UI.view.open(u.id, 'dashboard'); }
+  PANELS.summary = () => {
+    const P = SUM_PERIODS.find(x => x.id === st.sumPeriod) || SUM_PERIODS[1];
+    if (st.sumLogged !== P.id) { st.sumLogged = P.id; UI.view.logAdmin('Все участники', 'Сводка ' + P.ctx); }
+    const rows = people().map(u => ({ u, s: D.bookSummary(u.id, P.days) }))
+      .sort((a, b) => (isMe(b.u) - isMe(a.u)) || ((b.s ? 1 : 0) - (a.s ? 1 : 0)) || ((b.s && b.s.profit) || 0) - ((a.s && a.s.profit) || 0));
+    const live = rows.filter(r => r.s);
+    const T = {
+      n: sum(live, r => r.s.n), turnover: sum(live, r => r.s.turnover), profit: sum(live, r => r.s.profit),
+      clvN: sum(live, r => r.s.clvN), legsN: sum(live, r => r.s.legsN), bank: sum(live, r => r.s.bank),
+    };
+    T.roi = T.turnover ? T.profit / T.turnover * 100 : null;
+    T.clv = T.clvN ? sum(live.filter(r => r.s.clvN), r => r.s.clv * r.s.clvN) / T.clvN : null;
+    T.brier = T.legsN ? sum(live.filter(r => r.s.legsN), r => r.s.brier * r.s.legsN) / T.legsN : null;
+    T.brierMarket = T.legsN ? sum(live.filter(r => r.s.legsN), r => r.s.brierMarket * r.s.legsN) / T.legsN : null;
+    const seg = UI.segmented({ label: 'Период', items: SUM_PERIODS.map(x => ({ id: x.id, label: x.label })), active: P.id, onChange: id => { st.sumPeriod = id; redrawPanel(); } });
+    const bd = T.brier != null ? T.brier - T.brierMarket : null;
+    const tiles = h('div', { class: 'adm-sum-tiles' },
+      UI.stat({ label: 'Ставок', icon: 'ticket', value: String(T.n), hint: live.length + ' ' + fmt.plural(live.length, 'человек', 'человека', 'человек') + ' со ставками' }),
+      UI.stat({ label: 'Оборот', icon: 'coins', value: fmt.money(T.turnover), hint: 'сумма ставок' }),
+      UI.stat({ label: 'Прибыль', icon: 'wallet', value: fmt.signedMoney(T.profit), hint: 'по всем вместе' }),
+      UI.stat({ label: 'ROI', icon: 'chart', value: pctOrDash(T.roi), hint: 'прибыль ÷ оборот' }),
+      UI.stat({ label: 'Средний CLV', icon: 'bolt', value: pctOrDash(T.clv == null ? null : Math.round(T.clv * 10) / 10), hint: T.clvN + ' ' + fmt.plural(T.clvN, 'ставка', 'ставки', 'ставок') + ' с закрытием' }),
+      UI.stat({ label: 'Brier модели', icon: 'target', value: T.brier == null ? '—' : fmt.dec(T.brier, 3), hint: T.brier == null ? 'нет событий' : 'рынок ' + fmt.dec(T.brierMarket, 3) + ' · ' + (Math.round(bd * 1000) === 0 ? 'наравне' : bd < 0 ? 'модель точнее' : 'рынок точнее') }));
+    const go = u => h('span', { class: 'adm-sum-go', 'aria-hidden': 'true' }, icon('chevronRight'));
+    const table = UI.table({
+      columns: [
+        { label: 'Участник', render: r => h('div', { class: 'adm-person' }, avatar(r.u), h('div', null, h('div', { class: 'adm-person-name' }, h('span', { class: 'adm-nowrap' }, r.u.name), isMe(r.u) && chip('вы', 'accent'), r.u.status === 'blocked' && chip('заблокирован', 'bad')))) },
+        { label: 'Банк', align: 'r', render: r => (r.s ? fmt.money(r.s.bank) : '—') },
+        { label: 'Ставок', align: 'r', render: r => (r.s ? String(r.s.n) : '—') },
+        { label: 'ROI', align: 'r', render: r => (r.s ? h('span', { class: tone(r.s.roi) }, pctOrDash(r.s.roi)) : '—') },
+        { label: 'Прибыль', align: 'r', render: r => (r.s ? h('span', { class: tone(r.s.profit) }, fmt.signedMoney(r.s.profit)) : '—') },
+        { label: 'Средний CLV', align: 'r', render: r => (r.s ? h('span', { class: tone(r.s.clv) }, pctOrDash(r.s.clv == null ? null : Math.round(r.s.clv * 10) / 10)) : '—') },
+        { label: 'Анализов', align: 'r', render: r => String(r.u.analyses) },
+        { label: 'Расход ИИ', align: 'r', render: r => usd(r.u.spent) },
+        { label: 'Последний вход', render: r => when(r.u.lastLogin) },
+        { label: h('span', { class: 'sr-only' }, 'Открыть'), align: 'r', render: r => (r.s ? go(r.u) : null) },
+      ],
+      rows, empty: 'Участников нет',
+      onRowClick: r => { if (r.s) openPerson(r.u); },
+    });
+    table.querySelector('table').classList.add('adm-sum-table');
+    table.querySelectorAll('tbody tr').forEach((tr, i) => {
+      const r = rows[i];
+      if (!r) return;
+      if (!r.s) { tr.classList.add('is-empty'); tr.classList.remove('clickable'); tr.removeAttribute('tabindex'); return; }
+      tr.setAttribute('aria-label', r.u.name + ': открыть данные' + (isMe(r.u) ? '' : ' · только просмотр'));
+      tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPerson(r.u); } });
+    });
+    table.querySelector('tbody').appendChild(h('tr', { class: 'is-total' },
+      h('td', null, 'Итого'), h('td', { class: 'r' }, fmt.money(T.bank)), h('td', { class: 'r' }, String(T.n)), h('td', { class: ['r', tone(T.roi)] }, pctOrDash(T.roi)),
+      h('td', { class: ['r', tone(T.profit)] }, fmt.signedMoney(T.profit)), h('td', { class: ['r', tone(T.clv)] }, pctOrDash(T.clv == null ? null : Math.round(T.clv * 10) / 10)),
+      h('td', { class: 'r' }, String(sum(rows, r => r.u.analyses))), h('td', { class: 'r' }, usd(sum(rows, r => r.u.spent))), h('td'), h('td')));
+    const cards = h('div', { class: 'adm-scards' }, rows.map(r => {
+      const s = r.s;
+      const kids = [
+        h('div', { class: 'adm-scard-head' }, avatar(r.u),
+          h('div', { style: 'min-width:0' }, h('div', { class: 'adm-person-name' }, r.u.name, isMe(r.u) && chip('вы', 'accent'), r.u.status === 'blocked' && chip('заблокирован', 'bad')), h('div', { class: 'adm-person-mail' }, 'Вход: ' + lc(when(r.u.lastLogin)))),
+          h('span', { class: 'adm-scard-bank' }, s ? fmt.money(s.bank) : '—')),
+        s ? h('dl', { class: 'adm-facts' },
+          h('div', null, h('dt', null, 'Ставок'), h('dd', null, String(s.n))),
+          h('div', null, h('dt', null, 'ROI'), h('dd', { class: tone(s.roi) }, pctOrDash(s.roi))),
+          h('div', null, h('dt', null, 'Прибыль'), h('dd', { class: tone(s.profit) }, fmt.signedMoney(s.profit))),
+          h('div', null, h('dt', null, 'Средний CLV'), h('dd', { class: tone(s.clv) }, pctOrDash(s.clv == null ? null : Math.round(s.clv * 10) / 10))),
+          h('div', null, h('dt', null, 'Анализов'), h('dd', null, String(r.u.analyses))),
+          h('div', null, h('dt', null, 'Расход ИИ'), h('dd', null, usd(r.u.spent)))) : h('p', { class: 'small soft', style: 'margin:0' }, 'Ставок нет.'),
+        s ? button(isMe(r.u) ? 'Мои данные' : 'Смотреть данные', { kind: 'secondary', size: 'sm', icon: 'eye', iconRight: 'chevronRight', block: true, onClick: () => openPerson(r.u) }) : null,
+      ];
+      return h('section', { class: 'card adm-scard', 'aria-label': r.u.name }, kids);
+    }));
+    return [
+      card({
+        title: 'Сводка по участникам', subtitle: P.ctx.charAt(0).toUpperCase() + P.ctx.slice(1) + ' · все участники вместе с вами · суммы в валюте программы, ' + UI.currency.sym,
+        actions: [chip('только просмотр', 'warn', 'eye')],
+        body: [h('div', { class: 'adm-toolbar' }, seg), tiles,
+          howto('Brier — точность вероятностей модели на событиях ставок, ниже — лучше; рядом — рынок без маржи на тех же событиях. CLV — кэф ставки к закрывающему.')],
+      }),
+      (() => {
+        const c = card({ title: 'По участникам', subtitle: 'Банк — сейчас; ставки, ROI, прибыль и CLV — ' + P.ctx + '; анализы и расход ИИ — за октябрь', class: 'adm-wide-only', flush: true,
+          body: [h('div', { class: 'adm-users-wrap' }, table)],
+          foot: [h('span', { class: 'adm-ro-note' }, icon('eye'), 'Нажмите на строку — данные участника откроются так, как он их видит, только просмотр. Каждый просмотр — в журнале.')] });
+        return c;
+      })(),
+      h('div', { class: 'adm-narrow-only stack' },
+        h('div', { class: 'eyebrow' }, 'По участникам · ' + P.ctx),
+        cards,
+        h('span', { class: 'adm-ro-note' }, icon('eye'), 'Данные участника откроются так, как он их видит, только просмотр. Каждый просмотр — в журнале.')),
     ];
   };
 
@@ -2052,7 +2276,7 @@
         UI.callout('', 'info', h('div', { class: 'stack', style: 'gap:4px' },
           h('span', null, h('b', null, 'Расхождений с ручным расчетом: ' + r.conflicts + '. '), 'Участнику ушло уведомление, банк не меняли — исправляет он сам.'),
           h('span', null, h('b', null, 'Снятие или неявка: ' + r.retired + '. '), 'Такие ставки сами не рассчитываются — правила букмекеров разные; участнику напоминание внести исход.'))),
-        howto('Чужие ставки, суммы и исходы здесь не видны (Р14) — только сколько рассчитано и у скольких участников.'),
+        howto('В отчете загрузки — только сколько ставок рассчитано и у скольких участников. Сами ставки и суммы участников — в «Сводке» и в карточке участника, только просмотр.'),
       ],
     });
   }
@@ -2219,9 +2443,14 @@
     adminOnly: true,
     render(root, param) {
       const p = param || '';
-      const tab = p === 'limits' ? 'key' : TABS.some(t => t.id === p) ? p : 'overview';
+      // #admin-user-<id> — карточка участника на вкладке «Участники»
+      const um = /^user-(\w+)$/.exec(p);
+      const cardUser = um && userById(um[1]) && userById(um[1]).status !== 'deleted' ? um[1] : null;
+      const tab = cardUser ? 'users' : p === 'limits' ? 'key' : TABS.some(t => t.id === p) ? p : 'overview';
       if (tab !== st.tab) st.resetShown = null;
-      st.tab = tab;
+      if (cardUser !== st.card) st.cardLogged = null;
+      if (tab !== st.tab) st.sumLogged = null;
+      st.tab = tab; st.card = cardUser;
       headSlot = h('div', { style: 'min-width:0' });
       tabsSlot = h('div', { class: 'adm-anchor', style: 'min-width:0' });
       panelEl = h('div', { class: 'adm-panel', id: 'adm-panel', role: 'tabpanel', tabindex: '-1' });

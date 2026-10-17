@@ -554,7 +554,7 @@
   const reportWeeks = ['2026-09-28', '2026-09-21', '2026-09-14', '2026-09-07'];
 
   // Загрузки файла tennis-data (В1): администратор скачивает 2026.xlsx в браузере и загружает на сайте.
-  // Отчет загрузки: новые матчи, рассчитанные ставки всех участников (без сумм — Р14), непривязанные матчи
+  // Отчет загрузки: новые матчи, рассчитанные ставки всех участников (только число: суммы отчету не нужны), непривязанные матчи
   const lastUpload = bets.filter(b => b.settledAt && b.settledAt.startsWith(UPLOAD_LAST + 'T08'));
   const archive = {
     source: 'tennis-data.co.uk', file: '2026.xlsx', lastLoad: UPLOAD_LAST + 'T08:12', by: 'Роман Буров', matchesTo: ARCHIVE_TO, next: '2026-10-12',
@@ -614,6 +614,11 @@
     // Журнал действий администратора и команд терминала (admin_audit_log)
     audit: [
       { at: '2026-10-07T09:20', actor: 'Роман Буров', action: 'reset_code', target: 'Алексей Ковалев', details: 'Код сброса пароля, 24 часа', ip: '95.216.•.•' },
+      // Р27: каждый просмотр чужих данных администратором — запись журнала (кто, когда, чьи данные, какой экран)
+      { at: '2026-10-06T20:41', actor: 'Роман Буров', action: 'data_view', target: 'Алексей Ковалев', details: 'Ставки · только просмотр', ip: '95.216.•.•' },
+      { at: '2026-10-06T20:40', actor: 'Роман Буров', action: 'data_view', target: 'Алексей Ковалев', details: 'Главная · только просмотр', ip: '95.216.•.•' },
+      { at: '2026-10-06T19:15', actor: 'Роман Буров', action: 'data_view', target: 'Ольга Лехтинен', details: 'Банк и стратегия · только просмотр', ip: '95.216.•.•' },
+      { at: '2026-10-05T10:02', actor: 'Роман Буров', action: 'data_view', target: 'Все участники', details: 'Сводка за 30 дней · только просмотр', ip: '95.216.•.•' },
       { at: '2026-10-07T08:00', actor: 'Роман Буров', action: 'message', target: 'Все участники', details: 'В субботу с 10:00 до 10:30 (Хельсинки) сервер обновляется, анализы будут недоступны.', ip: '95.216.•.•' },
       { at: '2026-10-06T02:00', actor: 'Роман Буров', action: 'eval_run', target: null, details: 'Прогон v4 на наборе eval-2026-08: 250 событий, 3 пакета по ≤ 100, худший случай $27,50 — факт $2,48', ip: '95.216.•.•' },
       { at: '2026-10-05T08:12', actor: 'Роман Буров', action: 'data_upload', target: null, details: '2026.xlsx, 1,9 МБ: 71 новый матч по 4 окт, рассчитано ставок — 9, не привязано матчей — 2', ip: '95.216.•.•' },
@@ -655,6 +660,8 @@
       { id: 'n5', kind: 'new_device', icon: 'device', tone: 'info', title: 'Вход с нового устройства', body: 'Safari, iPhone · Хельсинки. Если это не вы — завершите сеанс в личном кабинете.', at: '2026-10-05T19:12', link: '#profile-security', read: true },
     ],
     member: [
+      // Р27: тем, кто зарегистрировался до нового правила, — одно уведомление со ссылкой на «Кто видит мои данные»
+      { id: 'n20', kind: 'rules_change', icon: 'eye', tone: 'info', title: 'Изменились правила: администратор видит ваши ставки и банк', body: 'Только просмотр: изменить он ничего не может, каждый просмотр записывается в журнал. Пароль, коды 2FA и ключ Claude не видит никто. Подробнее — «Кто видит мои данные».', at: '2026-10-05T09:00', link: '#profile-data-who', read: false },
       { id: 'n1', kind: 'admin_message', icon: 'megaphone', tone: 'info', title: 'Сообщение администратора', body: 'В субботу с 10:00 до 10:30 (Хельсинки) сервер обновляется, анализы будут недоступны.', at: '2026-10-07T08:00', read: false },
       { id: 'n10', kind: 'weekly_report', icon: 'calendar', tone: 'info', title: 'Отчет за неделю 28 сен – 4 окт', week: '2026-09-28', at: '2026-10-05T07:00', link: '#learning-reports', read: false },
       { id: 'n4', kind: 'bet_settled', icon: 'ticket', tone: autoLast.status === 'win' ? 'good' : 'bad', title: 'Ставка №' + autoLast.id + ' рассчитана автоматически', bet: autoLast.id, at: autoLast.settledAt, link: '#bets-' + autoLast.id, read: true },
@@ -744,6 +751,155 @@
     { value: 'America/Los_Angeles', label: 'Лос-Анджелес (UTC−7)', city: 'Лос-Анджелесу' },
   ];
 
+  // ---------- Р27: данные участников для режима просмотра администратором ----------
+  // Администратор видит ставки, банк, стратегию и анализы каждого участника — только просмотр. В макете у каждого
+  // участника своя история: часть общих демо-ставок приложения (без старого бота) со своим стартовым банком,
+  // своими суммами по той же таблице стратегии и своими букмекерами. Показатели — теми же формулами, что выше.
+  // В приложении это обычные ответы сервера (GET /dashboard, /bets, /analytics, /analyses) по участнику.
+  const sumBy = (a, f) => a.reduce((s, x) => s + f(x), 0);
+  const yOf = l => (l.result === 'win' ? 1 : 0);
+  function bookStats(bk) {
+    const st = bk.bets.filter(b => b.status !== 'open');
+    const w = st.filter(b => b.status === 'win').length, lo = st.filter(b => b.status === 'loss').length, vo = st.filter(b => b.status === 'void').length;
+    const turn = sumBy(st, b => b.stake), prof = sumBy(st, b => b.profit);
+    let sN = 0; const sT = st.length ? st[st.length - 1].status : null;
+    for (let i = st.length - 1; i >= 0 && st[i].status === sT; i--) sN++;
+    const app = bk.allLegs.filter(l => l.q != null);
+    const br = app.length ? sumBy(app, l => (l.p - yOf(l)) ** 2) / app.length : null;
+    const brM = app.length ? sumBy(app, l => (l.q - yOf(l)) ** 2) / app.length : null;
+    const cb = st.filter(b => b.clv != null && b.source !== 'bot');
+    const calib = [];
+    for (let c = 0.5; c < 0.95; c += 0.05) {
+      const inBin = app.filter(l => l.p >= c && l.p < c + 0.05);
+      if (inBin.length) calib.push({ lo: round(c, 2), hi: round(c + 0.05, 2), p: round(sumBy(inBin, l => l.p) / inBin.length, 3), actual: round(inBin.filter(l => l.result === 'win').length / inBin.length, 3), n: inBin.length });
+    }
+    const rolling = [];
+    for (let i = 29; i < app.length; i += 3) {
+      const win = app.slice(i - 29, i + 1);
+      rolling.push({ date: win[win.length - 1].date, model: round(sumBy(win, l => (l.p - yOf(l)) ** 2) / 30, 3), market: round(sumBy(win, l => (l.q - yOf(l)) ** 2) / 30, 3) });
+    }
+    const by = (key, labelOf) => {
+      const g = {};
+      bk.allLegs.forEach(l => { const k = key(l); (g[k] = g[k] || []).push(l); });
+      return Object.entries(g).map(([k, ls]) => ({ key: k, label: labelOf ? labelOf(k) : k, n: ls.length, roi: round(sumBy(ls, l => (l.result === 'win' ? l.odds - 1 : -1)) / ls.length * 100, 1), winrate: round(ls.filter(l => l.result === 'win').length / ls.length * 100, 1) }));
+    };
+    let pk = 0;
+    bk.bankHistory.forEach(x => { if (x.flow) { const before = x.bank - x.flow; pk = before > 0 ? pk * x.bank / before : x.bank; } pk = Math.max(pk, x.bank); });
+    return {
+      calibration: calib, brierRolling: rolling,
+      roiBySurface: by(l => l.surface, k => surfaces[k].label), roiByMarket: by(l => l.marketLabel),
+      roiByOdds: by(l => oddsBucket(l.odds)).sort((a, b) => a.key.localeCompare(b.key)),
+      roiByTotal: Object.entries(st.reduce((g, b) => { const k = totalBucket(b.total); (g[k] = g[k] || []).push(b); return g; }, {})).map(([k, bs]) => ({ key: k, label: k, n: bs.length, roi: round(sumBy(bs, b => b.profit) / sumBy(bs, b => b.stake) * 100, 1) })).sort((a, b) => a.key.localeCompare(b.key)),
+      stats: {
+        bank: bk.bank, start: bk.start, profit: prof, turnover: turn, roi: turn ? round(prof / turn * 100, 1) : 0, settled: st.length, wins: w, losses: lo, voids: vo,
+        winrate: w + lo ? round(w / (w + lo) * 100, 1) : 0, open: bk.bets.filter(b => b.status === 'open').length,
+        streak: { type: sT, n: sN }, brier: br == null ? null : round(br, 3), brierMarket: brM == null ? null : round(brM, 3), clvAvg: cb.length ? round(sumBy(cb, b => b.clv) / cb.length, 1) : null, legs: bk.allLegs.length,
+        peak: Math.round(pk), invested: sumBy(bk.bankFlows.filter(f => f.at.slice(0, 10) <= TODAY), f => (f.kind === 'withdrawal' ? -f.amount : f.amount)),
+      },
+    };
+  }
+  // since — первый день книги (регистрация или начало ставок приложения), keep — какие общие ставки у него были,
+  // open — какие открытые ставки, deposit — пополнение внутри истории, books — его букмекеры
+  const MEMBER_BOOKS = {
+    u2: { since: '2026-08-01', start: 30000, keep: b => b.id % 3 !== 1, open: () => true, deposit: { date: '2026-09-07', amount: 10000, note: 'Пополнение счета Unibet' }, books: ['bet365', 'Unibet', 'Pinnacle'],
+      analyses: [
+        { id: 'A-0130', at: '2026-10-06T19:05', matches: [{ p1: 'fritz', p2: 'deminaur' }, { p1: 'zverev', p2: 'musetti' }], status: 'done', decision: 'bet', cost: 0.18 },
+        { id: 'A-0128', at: '2026-10-05T11:20', matches: [{ p1: 'sinner', p2: 'draper' }], status: 'done', decision: 'skip', cost: 0.11 },
+        { id: 'A-0126', at: '2026-10-04T18:45', matches: [{ p1: 'alcaraz', p2: 'rublev' }, { p1: 'djokovic', p2: 'shelton' }], status: 'failed', note: 'шаг 8 из 9: Claude перегружен', cost: 0.14 },
+        { id: 'A-0124', at: '2026-10-03T10:10', matches: [{ p1: 'medvedev', p2: 'rune' }, { p1: 'sinner', p2: 'musetti' }], status: 'done', decision: 'bet', cost: 0.17 },
+      ] },
+    u3: { since: '2026-08-01', start: 80000, keep: b => b.id % 3 !== 0 && b.id % 5 !== 2, open: b => b.date === TODAY, books: ['Pinnacle', 'bet365'],
+      analyses: [
+        { id: 'A-0129', at: '2026-10-07T08:55', matches: [{ p1: 'sinner', p2: 'rune' }, { p1: 'djokovic', p2: 'rublev' }], status: 'done', decision: 'skip', cost: 0.19 },
+        { id: 'A-0127', at: '2026-10-07T08:20', matches: [{ p1: 'alcaraz', p2: 'shelton' }], status: 'cancelled', cost: 0.04 },
+        { id: 'A-0125', at: '2026-10-06T09:40', matches: [{ p1: 'zverev', p2: 'draper' }, { p1: 'fritz', p2: 'medvedev' }, { p1: 'musetti', p2: 'rune' }], status: 'done', decision: 'bet', cost: 0.21 },
+        { id: 'A-0123', at: '2026-10-05T09:15', matches: [{ p1: 'deminaur', p2: 'rublev' }, { p1: 'shelton', p2: 'draper' }], status: 'done', decision: 'bet', cost: 0.16 },
+      ] },
+    u4: { since: '2026-08-20', start: 20000, keep: b => (b.id * 9) % 10 < 7, open: () => false, books: ['Unibet'],
+      analyses: [
+        { id: 'A-0122', at: '2026-10-05T20:03', matches: [{ p1: 'sinner', p2: 'medvedev' }, { p1: 'alcaraz', p2: 'deminaur' }], status: 'done', decision: 'bet', cost: 0.22 },
+        { id: 'A-0119', at: '2026-10-02T21:30', matches: [{ p1: 'djokovic', p2: 'zverev' }], status: 'done', decision: 'skip', cost: 0.2 },
+      ] },
+  };
+  function deriveBook(o) {
+    let bk = o.start, nid = 1, dep = o.deposit || null;
+    const hist = [{ date: o.since, bank: bk }], out = [], legs = [];
+    const flows = [{ at: o.since + 'T09:00', kind: 'deposit', amount: o.start, start: true, note: 'Стартовый банк' }];
+    bets.filter(b => b.source === 'app' && b.date >= o.since && (b.status === 'open' ? o.open(b) : o.keep(b))).forEach(b0 => {
+      if (dep && b0.date >= dep.date) { bk += dep.amount; hist.push({ date: dep.date, bank: bk, flow: dep.amount }); flows.push({ at: dep.date + 'T10:05', kind: 'deposit', amount: dep.amount, note: dep.note }); dep = null; }
+      const stake = Math.round(bk * stakePct(b0.total) / 100 / 10) * 10;
+      const profit = b0.status === 'win' ? Math.round(stake * b0.total - stake) : b0.status === 'loss' ? -stake : 0;
+      if (b0.status !== 'open') bk += profit;
+      const b = Object.assign({}, b0, { id: nid++, srcId: b0.id, stake, profit, bankAfter: b0.status === 'open' ? null : bk, bookmaker: o.books[b0.id % o.books.length], legs: b0.legs.map(l => Object.assign({}, l)) });
+      out.push(b);
+      if (b0.status !== 'open') {
+        hist.push({ date: b0.date, bank: bk });
+        allLegs.filter(l => l.betId === b0.id).forEach(l => legs.push(Object.assign({}, l, { betId: b.id })));
+      }
+    });
+    const book = { bets: out, allLegs: legs, bankHistory: hist, bankFlows: flows, start: o.start, bank: bk, recentAnalyses: o.analyses.map(a => Object.assign({}, a)) };
+    return Object.assign(book, bookStats(book));
+  }
+  const books = {};
+  Object.keys(MEMBER_BOOKS).forEach(uid => { books[uid] = deriveBook(MEMBER_BOOKS[uid]); });
+  // Чьи данные сейчас на экранах: base — свои (демо-пользователя), иначе id участника. Подмена — на месте:
+  // экраны держат ссылки на массивы и DATA.stats, поэтому меняется содержимое, а не сами объекты.
+  const BOOK_KEYS = ['bets', 'allLegs', 'bankHistory', 'bankFlows', 'recentAnalyses', 'calibration', 'brierRolling', 'roiBySurface', 'roiByMarket', 'roiByOdds', 'roiByTotal'];
+  let curBook = 'base', baseSnap = null;
+  const snapBase = () => { const s = {}; BOOK_KEYS.forEach(k => { s[k] = window.DATA[k].slice(); }); s.stats = Object.assign({}, window.DATA.stats); return s; };
+  function applyBook(src) {
+    BOOK_KEYS.forEach(k => { const a = window.DATA[k]; a.splice(0, a.length, ...src[k]); });
+    const S = window.DATA.stats;
+    Object.keys(S).forEach(k => { delete S[k]; });
+    Object.assign(S, src.stats);
+  }
+  function useBook(uid) {
+    const want = books[uid] ? uid : 'base';
+    if (want === curBook) return;
+    if (curBook === 'base') baseSnap = snapBase();
+    applyBook(want === 'base' ? baseSnap : books[want]);
+    curBook = want;
+  }
+  // Книга человека без подмены экранов: для «Сводки» и карточки участника. Своя (u1 у администратора) — живая
+  const bookOf = uid => {
+    if (books[uid]) return books[uid];
+    if (uid !== personas.admin.id) return null;
+    return curBook === 'base' ? window.DATA : Object.assign({ stats: baseSnap.stats }, baseSnap);
+  };
+  // Итоги человека за период: days — 7, 30, 90 или null (все время)
+  function bookSummary(uid, days) {
+    const bk = bookOf(uid);
+    if (!bk) return null;
+    const from = days ? addDays(TODAY, -days) : '0000';
+    const st = bk.bets.filter(b => b.status !== 'open' && b.date > from && b.date <= TODAY);
+    const legs = bk.allLegs.filter(l => l.date > from && l.q != null);
+    const turnover = sumBy(st, b => b.stake), profit = sumBy(st, b => b.profit);
+    const cb = st.filter(b => b.clv != null && b.source !== 'bot');
+    const open = bk.bets.filter(b => b.status === 'open');
+    return {
+      n: st.length, turnover, profit, roi: turnover ? profit / turnover * 100 : null,
+      clv: cb.length ? sumBy(cb, b => b.clv) / cb.length : null, clvN: cb.length,
+      brier: legs.length ? sumBy(legs, l => (l.p - yOf(l)) ** 2) / legs.length : null,
+      brierMarket: legs.length ? sumBy(legs, l => (l.q - yOf(l)) ** 2) / legs.length : null, legsN: legs.length,
+      bank: bk.stats.bank, invested: bk.stats.invested, open: open.length, inPlay: sumBy(open, b => b.stake),
+      last: bk.bets.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id)).slice(0, 5),
+      analyses: bk.recentAnalyses || [],
+    };
+  }
+  // Участник глазами администратора: его профиль для экранов (имя, пояс, букмекеры), как personas
+  const memberPersonas = {};
+  function personaOf(uid) {
+    if (uid === personas.admin.id) return personas.admin;
+    if (uid === personas.member.id) return personas.member;
+    if (!memberPersonas[uid]) {
+      const u = users.find(x => x.id === uid);
+      if (!u) return null;
+      const TZ = { u3: 'Europe/Berlin', u4: 'America/New_York' };
+      memberPersonas[uid] = { id: u.id, name: u.name, first: u.name.split(' ')[0], email: u.email, initials: u.name.split(' ').map(w => w[0]).join('').slice(0, 2), tz: TZ[uid] || 'Europe/Helsinki', role: u.role, roleLabel: u.role === 'admin' ? 'Администратор' : 'Участник', since: u.since, aiMode: u.aiMode, bookmakers: (MEMBER_BOOKS[uid] || { books: ['bet365'] }).books.slice() };
+    }
+    return memberPersonas[uid];
+  }
+
   window.DATA = {
     today: TODAY,
     demo: true,
@@ -788,13 +944,17 @@
         { key: 'week_win', label: 'Итог 7 дней +10% и лучше', effect: 'ставка +0,5 п.п.', on: false },
       ],
     },
+    // Р27: режим просмотра данных участника администратором (js/view.js): своя книга у каждого участника
+    useBook, bookSummary, personaOf, hasBook: uid => !!bookOf(uid),
     playerName: id => (P[id] ? P[id].short : id),
     match: (l) => (P[l.p1] ? P[l.p1].short : l.p1) + ' — ' + (P[l.p2] ? P[l.p2].short : l.p2),
   };
   // Текущий пользователь зависит от демо-роли (UI.auth.role задает app.js)
   const role = () => (window.UI && UI.auth && UI.auth.role) || 'admin';
-  Object.defineProperty(window.DATA, 'user', { enumerable: true, get: () => personas[role()] });
+  // В режиме просмотра (Р27) экраны видят участника, чьи данные открыты: его имя, пояс, букмекеров, лимит
+  const viewing = () => (window.UI && UI.view && UI.view.uid) || null;
+  Object.defineProperty(window.DATA, 'user', { enumerable: true, get: () => (viewing() && personaOf(viewing())) || personas[role()] });
   try { JSON.parse(localStorage.getItem('capper.currencyLog') || '[]').forEach(e => admin.audit.unshift(e)); } catch (e) { /* хранилище недоступно */ }
   admin.audit.sort((a, b) => (a.at < b.at ? 1 : -1));
-  Object.defineProperty(window.DATA, 'me', { enumerable: true, get: () => users.find(u => u.id === personas[role()].id) });
+  Object.defineProperty(window.DATA, 'me', { enumerable: true, get: () => users.find(u => u.id === (viewing() || personas[role()].id)) });
 })();

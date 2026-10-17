@@ -46,13 +46,15 @@
       if (role === 'admin' || role === 'member') { state.role = role; store.set('role', role); }
       state.authed = true; store.set('authed', '1'); UI.go('dashboard');
     },
-    logout() { state.authed = false; store.set('authed', null); UI.go('login'); UI.toast('Вы вышли из аккаунта', 'logout'); },
+    logout() { if (UI.view) UI.view.exit(); state.authed = false; store.set('authed', null); UI.go('login'); UI.toast('Вы вышли из аккаунта', 'logout'); },
     get authed() { return state.authed; },
     get role() { return state.role; },
-    get isAdmin() { return state.role === 'admin'; },
+    // В режиме просмотра данных участника (Р27) экраны рисуются так, как их видит участник: без дел администратора
+    get isAdmin() { return state.role === 'admin' && !(UI.view && UI.view.active); },
     // Только для макета: посмотреть интерфейс глазами другой роли
     setRole(role) {
       if (role === state.role) return;
+      if (UI.view) UI.view.exit();
       state.role = role; store.set('role', role);
       render();
       UI.toast(role === 'admin' ? 'Вы смотрите макет как администратор' : 'Вы смотрите макет как участник', 'user');
@@ -73,7 +75,13 @@
   // Обязательные виды (вход с нового устройства, сообщение администратора) приходят всегда — это решает UI.notifPrefs.
   const allowed = n => !UI.notifPrefs || UI.notifPrefs.allowed(n.kind);
   UI.notifications = {
+    // Уведомления — свои, даже когда открыты данные участника (Р27): тексты считаются по своим ставкам
     list() {
+      const viewing = UI.view && UI.view.active;
+      if (viewing) DATA.useBook('base');
+      try { return this.build(); } finally { if (viewing) DATA.useBook(UI.view.uid); }
+    },
+    build() {
       return (DATA.notifications[state.role] || []).filter(allowed).map(n => {
         let body = n.body, link = n.link;
         // ставка рассчитана — ссылка на саму ставку (#bets-<id>), а не на список
@@ -172,7 +180,7 @@
     UI.modal({
       title: 'Смотреть макет как',
       body: close => { closeM = close; return h('div', { class: 'stack', style: 'gap:10px' },
-        opt('admin', 'Администратор', DATA.personas.admin.name, 'Видит раздел «Администрирование»: участники, приглашения, ключ Claude, бюджет и лимиты, журнал.'),
+        opt('admin', 'Администратор', DATA.personas.admin.name, 'Видит раздел «Администрирование»: участники, их ставки и банк (только просмотр), приглашения, ключ Claude, бюджет и лимиты, журнал.'),
         opt('member', 'Участник', DATA.personas.member.name, 'Свой банк и ставки, свой лимит на ИИ или свой ключ Claude. Кабинета администратора нет.'),
         h('p', { class: 'xsmall muted', style: 'margin:0' }, 'В настоящем приложении роль задает администратор. Переключатель есть только в макете.')); },
     });
@@ -258,10 +266,13 @@
       h('div', { class: 'topbar-actions' },
         h('button', { class: 'demo-pill demo-role hide-mobile', type: 'button', title: 'Все цифры в макете вымышлены. Нажмите, чтобы посмотреть интерфейс другой роли', on: { click: roleSwitchModal } }, 'Макет · ' + roleLabel(), icon('chevronDown')),
         h('div', { class: 'topbar-extra row' }),
-        h('span', { class: 'bank-pill', title: 'Текущий банк' }, h('span', { class: 'muted hide-mobile' }, 'Банк'), h('b', null, fmt.money(S.bank))),
-        button('Новый анализ', { kind: 'primary', icon: 'plus', href: '#new', attrs: { class: 'btn primary hide-mobile' } }),
+        // в режиме просмотра (Р27) в шапке — банк участника, чьи данные открыты, и кнопки «Новый анализ» нет
+        UI.view.active
+          ? h('span', { class: 'bank-pill vw-pill', title: 'Банк участника: ' + UI.view.user.name + ' · только просмотр' }, icon('eye'), h('span', { class: 'hide-mobile' }, UI.view.user.name.split(' ')[0]), h('b', null, fmt.money(S.bank)))
+          : h('span', { class: 'bank-pill', title: 'Текущий банк' }, h('span', { class: 'muted hide-mobile' }, 'Банк'), h('b', null, fmt.money(S.bank))),
+        UI.view.active ? null : button('Новый анализ', { kind: 'primary', icon: 'plus', href: '#new', attrs: { class: 'btn primary hide-mobile' } }),
         bellBtn = h('button', { class: 'btn ghost icon-only bell-btn', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', title: 'Уведомления', on: { click: openNotif } }, icon('bell'), h('span', { class: 'bell-badge', 'aria-hidden': 'true' })),
-        h('a', { class: 'avatar', href: '#profile', title: 'Личный кабинет · ' + DATA.user.name, 'aria-label': 'Личный кабинет' }, DATA.user.initials)));
+        h('a', { class: 'avatar', href: '#profile', title: 'Личный кабинет · ' + DATA.personas[state.role].name, 'aria-label': 'Личный кабинет' }, DATA.personas[state.role].initials)));
     headerSlot = topbar;
     updateBell();
 
@@ -276,7 +287,9 @@
     const view = h('main', { class: 'view', id: 'view', tabindex: '-1' });
     // на телефоне плашка «демо» скрыта в шапке — показываем ее над содержимым
     const demoNote = UI.isMobile() ? h('button', { class: 'demo-pill demo-role', type: 'button', style: 'align-self:flex-start;margin:10px var(--gutter) 0', on: { click: roleSwitchModal } }, 'Макет · цифры вымышлены · ' + roleLabel(), icon('chevronDown')) : null;
-    const root = h('div', { class: 'shell' }, h('div', { class: 'sidebar-col' }, sidebar), h('div', { class: 'main' }, topbar, demoNote, view), tabbar);
+    // Р27: плашка «Вы смотрите данные: … · только просмотр» — между шапкой и экраном, прилипает под шапкой
+    const viewBar = UI.view.active ? UI.view.banner() : null;
+    const root = h('div', { class: 'shell' }, h('div', { class: 'sidebar-col' }, sidebar), h('div', { class: 'main' }, topbar, viewBar, demoNote, view), tabbar);
     return { root, view };
   }
 
@@ -297,6 +310,8 @@
     const app = document.getElementById('app');
     let { id, param } = parse();
     if (!state.authed && id !== 'login') id = 'login';
+    // Р27: экран вне режима просмотра (игроки, обучение, расходы, администрирование, свой кабинет) — к своим данным
+    if (UI.view.active && (state.role !== 'admin' || !UI.view.allows(id, param))) UI.view.exit({ toast: state.role === 'admin' && id !== 'login' });
     const def = UI.screens[id];
     clear(app);
     if (!def) { app.appendChild(h('div', { class: 'empty' }, 'Экран не найден')); return; }
@@ -311,6 +326,11 @@
     const { root, view } = shell(def.nav || id);
     app.appendChild(root);
     UI.setHeader({ title: def.title, crumbs: def.crumbs });
+    // Р27: «Чьи данные смотреть» — у администратора на «Главной», «Ставках», «Аналитике» и «Анализах»
+    if (state.role === 'admin' && !UI.view.active && UI.view.viewable(id) && UI.view.people().length) {
+      if (UI.isMobile()) view.appendChild(UI.view.picker(true));
+      else headerSlot.querySelector('.topbar-extra').appendChild(UI.view.picker(false));
+    }
     if (def.adminOnly && state.role !== 'admin') {
       // Сервер на такой запрос отвечает 403; в макете показываем, что видит участник
       view.appendChild(UI.card({ title: 'Раздел только для администратора', body: [
@@ -321,10 +341,12 @@
     }
     try { def.render(view, param); }
     catch (err) { console.error(err); view.appendChild(UI.callout('bad', 'alert', 'Ошибка отрисовки экрана: ' + err.message)); }
+    if (UI.view.active) UI.view.logView(id, param);
     window.scrollTo(0, 0);
   }
   UI.rerender = render;
 
+  UI.view.init();
   window.addEventListener('hashchange', render);
   let lastMobile = UI.isMobile();
   window.addEventListener('resize', () => { const m = UI.isMobile(); if (m !== lastMobile) { lastMobile = m; render(); } });

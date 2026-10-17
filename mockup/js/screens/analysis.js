@@ -686,7 +686,7 @@
         h('div', { class: 'analysis-eyebrow' }, h('span', { class: 'eyebrow' }, fmt.dateFull(TODAY) + ' · ' + tm.tournament + ' · ' + tm.category), UI.surfaceChip('hard'), modeChip()),
         h('h2', { id: 'analysis-title', tabindex: '-1' }, title),
         h('p', { class: 'lead' }, lead)),
-      button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new' }));
+      button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new', ro: true }));
   }
 
   // ---------- ход анализа ----------
@@ -805,7 +805,7 @@
     const nums = h('div');
     const offline = h('div', { 'aria-live': 'polite' });
     const live = h('p', { class: 'sr-only', 'aria-live': 'polite' });
-    const cancel = button('Отменить анализ', { kind: 'ghost', size: 'sm', icon: 'x', onClick: () => cancelAnalysis(root, phaseAt(performance.now() - RUN.startedAt)) });
+    const cancel = button('Отменить анализ', { kind: 'ghost', size: 'sm', icon: 'x', onClick: () => cancelAnalysis(root, phaseAt(performance.now() - RUN.startedAt)), ro: true });
     const el = card({
       eyebrow: 'Анализ #' + ID + (RUN.attempt > 1 ? ' · попытка ' + RUN.attempt : ''),
       title: 'Claude разбирает ' + MX.length + ' ' + fmt.plural(MX.length, 'матч', 'матча', 'матчей') + (FOREIGN ? ' из примера' : ''),
@@ -914,21 +914,21 @@
           h('b', null, 'Анализ отменен на шаге ' + (r.at + 1) + ' из ' + STEPS.length + '. '),
           'Потрачено ' + usdS(r.cost) + ' — за шаги, которые успели выполниться; остальные не запускались. События сохранены в «Новом анализе».',
           h('div', { class: 'analysis-stop-acts' },
-            button('Продолжить с шага ' + (r.at + 1), { kind: 'primary', size: 'sm', icon: 'refresh', onClick: () => restartFromStep(root) }),
-            button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new' })),
+            button('Продолжить с шага ' + (r.at + 1), { kind: 'primary', size: 'sm', icon: 'refresh', onClick: () => restartFromStep(root), ro: true }),
+            button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new', ro: true })),
           h('div', { class: 'analysis-stop-note' }, icon('check'), h('span', null, 'Выполненные шаги повторно не оплачиваются.'))));
     }
     const done = STEPS.slice(0, r.at).filter(x => x.cost > 0).map(x => x.title.replace('Claude: ', 'оценка ').replace('Новости: ', 'новости ').replace('Разбор событий', 'разбор текста'));
     const reason = !r.restart && r.code === 'ai.monthly_limit' ? D.ai.access(D.me, 0) : null;
-    const restart = button('Перезапустить с этого шага', { kind: 'primary', size: 'sm', icon: 'refresh', disabled: !r.restart, onClick: () => restartFromStep(root) });
+    const restart = button('Перезапустить с этого шага', { kind: 'primary', size: 'sm', icon: 'refresh', disabled: !r.restart, onClick: () => restartFromStep(root), ro: true });
     return h('div', { class: 'callout bad analysis-stop', role: 'alert' }, icon('alert'),
       h('div', { style: 'min-width:0' },
         h('b', null, 'Анализ остановлен на шаге ' + (r.at + 1) + ' из ' + STEPS.length + ' «' + s.title + '». '),
         r.reason + '.',
         h('div', { class: 'analysis-stop-acts' },
           restart,
-          r.link && button(r.link[0], { kind: 'secondary', size: 'sm', icon: 'key', href: r.link[1] }),
-          button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new' })),
+          r.link && button(r.link[0], { kind: 'secondary', size: 'sm', icon: 'key', href: r.link[1], ro: true }),
+          button('Изменить события', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new', ro: true })),
         !r.restart && h('div', { class: 'analysis-stop-note' }, icon('info'), h('span', null, (r.wait || 'Перезапуск станет доступен, когда лимит позволит') + (reason ? ' (сейчас: ' + reason.charAt(0).toLowerCase() + reason.slice(1) + ')' : '') + '.')),
         h('div', { class: 'analysis-stop-note' }, icon('check'), h('span', null, 'Уже выполненные шаги повторно не оплачиваются' + (done.length ? ' (' + done.join(', ') + ') — их результат сохранен' : '') + '. Потрачено ' + usdS(r.cost) + '.'))));
   }
@@ -971,6 +971,7 @@
 
   // Демо-панель: состояния хода анализа для согласования (в приложении ее нет)
   function demoPanel(root) {
+    if (UI.view.active) return null; // в режиме просмотра данных участника (Р27) анализ не перезапускается
     const f = UI.field({ id: 'analysis-demo-state', label: 'Состояние анализа', value: SCEN.id, options: SCENARIOS.map(x => ({ value: x.id, label: x.label })) });
     f.querySelector('select').addEventListener('change', e => setScenario(root, e.target.value));
     return h('div', { class: 'analysis-demo', role: 'region', 'aria-label': 'Только в макете' },
@@ -1176,10 +1177,16 @@
         h('div', { class: 'eyebrow' }, custom ? 'Сумма · изменена вручную' : 'Рекомендуемая сумма'),
         h('div', { class: 'analysis-stake-value' }, s ? fmt.money(s) : '—'),
         h('div', { class: 'small muted' }, s ? (custom ? sharePct(s) : pctTxt(BASE_PCT)) + ' банка · при выигрыше ' + fmt.money(payout) + ' (' + fmt.signedMoney(payout - s) + ')' : 'Стратегия не дает суммы: экспресс вне ее правил')),
-      custom && rec > 0 && button('Вернуть ' + fmt.money(rec), { kind: 'ghost', size: 'sm', icon: 'refresh', onClick: () => { ST.stake = null; draw(root); UI.toast('Сумма возвращена к рекомендованной: ' + fmt.money(REC()), 'refresh'); } }));
+      custom && rec > 0 && button('Вернуть ' + fmt.money(rec), { kind: 'ghost', size: 'sm', icon: 'refresh', ro: true, onClick: () => { ST.stake = null; draw(root); UI.toast('Сумма возвращена к рекомендованной: ' + fmt.money(REC()), 'refresh'); } }));
 
     let foot;
-    if (ST.decision === 'saved') {
+    if (UI.view.active) {
+      // Р27: администратор видит анализ участника и его решение, но сохранить ставку или изменить сумму не может
+      const rec = (D.recentAnalyses || []).find(a => a.id === ID);
+      foot = h('div', { class: 'stack', style: 'width:100%;gap:10px' },
+        UI.callout('', 'eye', h('b', null, 'Решение участника: '), rec && rec.decision === 'bet' ? 'ставка сохранена — она есть на «Ставках».' : rec && rec.decision === 'skip' ? 'без ставки.' : 'ставку не сохранял.'),
+        UI.view.note('Только просмотр: сохранить ставку, изменить сумму или перезапустить анализ может только участник.'));
+    } else if (ST.decision === 'saved') {
       foot = h('div', { class: 'stack', style: 'width:100%;gap:10px' },
         UI.callout('good', 'check', 'Ставка №' + ST.betId + ' в игре: ' + fmt.money(s) + ' на экспресс @' + fmt.odds(curTotal()) + '. Результат внесете после матчей — модель сверит прогноз.'),
         h('div', { class: 'analysis-actions' }, button('Открыть в ставках', { kind: 'primary', icon: 'ticket', href: '#bets' })));
@@ -1227,7 +1234,7 @@
       : 'Режим «Сбалансированный» (Sonnet 5.5) еще не проверен на eval-наборе и не ищет свежие новости. Для решения о ставке надежнее «Точный».';
     return UI.callout(MODE.id === 'eco' ? 'warn' : 'info', MODE.id === 'eco' ? 'alert' : 'info',
       txt, ' В макете вероятности примера одинаковы во всех режимах.',
-      h('div', { class: 'row analysis-mode-acts' }, button('Перезапустить в режиме «Точный»', { kind: 'secondary', size: 'sm', icon: 'refresh', disabled: !!reason, onClick: () => rerunPrecise(root) }),
+      h('div', { class: 'row analysis-mode-acts' }, button('Перезапустить в режиме «Точный»', { kind: 'secondary', size: 'sm', icon: 'refresh', disabled: !!reason, onClick: () => rerunPrecise(root), ro: true }),
         reason && h('span', { class: 'xsmall', role: 'status' }, 'Сейчас нельзя: ' + reason.charAt(0).toLowerCase() + reason.slice(1))));
   }
   function rerunPrecise(root) {
@@ -1469,7 +1476,7 @@
     if (!FOREIGN) return null;
     const list = REQ.events.map(e => nm(e.p1) + ' — ' + nm(e.p2));
     const used = MX.filter(m => m.entered).map(m => D.match({ p1: m.a, p2: m.b }));
-    const back = button('Вернуться к вводу', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new' });
+    const back = button('Вернуться к вводу', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#new', ro: true });
     if (ST.exampleAck) {
       return h('div', { class: 'analysis-foreign-mini', role: 'note' }, icon('alert'),
         h('span', null, 'Показан пример анализа, а не ваши события: ' + list.join(', ') + '.'),

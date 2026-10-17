@@ -493,7 +493,7 @@
     return card({
       class: 'costs-card costs-side',
       title: 'Кто тратит бюджет',
-      subtitle: D.ai.month.charAt(0).toUpperCase() + D.ai.month.slice(1) + ', в долларах. Видны только расходы на ИИ — ставки и банк участников закрыты.',
+      subtitle: D.ai.month.charAt(0).toUpperCase() + D.ai.month.slice(1) + ', в долларах. Ставки и банк участников — в «Администрирование → Сводка», только просмотр.',
       body: [
         h('ul', { class: 'costs-mlist costs-who' }, rows),
         notes.length ? howto(notes.join(' ')) : null,

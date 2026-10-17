@@ -18,7 +18,8 @@
   const onEv = n => n + ' ' + fmt.plural(n, 'событии', 'событиях', 'событиях');
   const onBets = n => n + ' ' + fmt.plural(n, 'ставке', 'ставках', 'ставках');
   const pctRange = (lo, hi) => Math.round(lo * 100) + '–' + Math.round(hi * 100) + '%';
-  const firstDate = D.bankHistory[0].date;
+  // Первый день истории — по данным на экране: у участника в режиме просмотра (Р27) он свой
+  const firstDate = () => D.bankHistory[0].date;
   // Считаются при каждой отрисовке: ставка, рассчитанная на экране «Ставки», сразу попадает в выборку
   const settled = () => D.bets.filter(b => b.status !== 'open');
   const openN = () => D.bets.filter(b => b.status === 'open').length;
@@ -192,7 +193,7 @@
 
   function compute() {
     const p = PERIODS.find(x => x.id === state.period) || PERIODS[2];
-    const anchor = p.days ? addDays(TODAY, -p.days) : firstDate; // начало периода (не включительно)
+    const anchor = p.days ? addDays(TODAY, -p.days) : firstDate(); // начало периода (не включительно)
     const srcOk = x => state.source === 'all' || x.source === state.source;
     // события экспрессов старого бота в разрезы не входят — ни без исхода, ни выигранные (Т10, см. botParlayLeg)
     const legOk = (l, from, to, ignore) => l.date > from && l.date <= to && srcOk(l) && !botParlayLeg(l)
@@ -207,7 +208,7 @@
     let prev = null;
     if (p.days) {
       const pa = addDays(anchor, -p.days);
-      if (pa >= firstDate) prev = summarize(SETTLED.filter(b => betOk(b, pa, anchor)));
+      if (pa >= firstDate()) prev = summarize(SETTLED.filter(b => betOk(b, pa, anchor)));
     }
     // Калибровка (В3): ноги рассчитанных ставок; p_final — только у ставок приложения, у бота — p_claude его ординаров
     // Прогнозы без ставки (матчи из анализов с исходом из архива) — только у приложения
@@ -1116,7 +1117,7 @@
           h('h2', null, 'Прибыльность и точность'),
           h('p', { class: 'lead' }, 'Где стратегия приносит деньги и насколько точны вероятности модели. Фильтры ниже пересчитывают все блоки.')),
         h('div', { class: 'analytics-head-actions' },
-          button('Выгрузить CSV', { kind: 'secondary', size: UI.isMobile() ? 'sm' : null, icon: 'download', onClick: () => exportModal(compute()) })));
+          button('Выгрузить CSV', { kind: 'secondary', size: UI.isMobile() ? 'sm' : null, icon: 'download', onClick: () => exportModal(compute()), ro: 'Только просмотр: выгрузить аналитику может только сам участник' })));
       filters = filterBar(reset => update(reset));
       contentEl = h('div', { class: 'stack', style: 'gap:inherit' });
       UI.append(root, [head, filters.el, contentEl]);

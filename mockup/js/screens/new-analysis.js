@@ -1063,7 +1063,7 @@
             chip(t, k, i)));
         }))
         : h('p', { class: 'small muted' }, 'Анализов пока нет.'),
-      foot: list.some(x => !x.demo) ? [h('span', { class: 'xsmall muted' }, 'В макете анализы, кроме #' + (list.find(x => x.demo) || { id: '—' }).id + ', открываются на демо-примере.')] : null,
+      foot: list.some(x => !x.demo) ? [h('span', { class: 'xsmall muted' }, list.some(x => x.demo) ? 'В макете анализы, кроме #' + list.find(x => x.demo).id + ', открываются на демо-примере.' : 'В макете анализы открываются на демо-примере.')] : null,
     });
   }
 
@@ -1186,6 +1186,18 @@
 
   // ---------- экран ----------
   function render(root, param) {
+    // Р27: в режиме просмотра данных участника — только его анализы; запустить анализ за участника нельзя
+    if (UI.view.active) {
+      const u = UI.view.user;
+      root.appendChild(h('div', { class: 'new-root stack', style: 'gap:16px' },
+        h('div', { class: 'page-head new-head' },
+          h('div', { style: 'min-width:0' },
+            h('h2', null, 'Анализы участника'),
+            h('p', { class: 'lead' }, u.name + ': последние анализы с ходом, вероятностями и решением. Откройте анализ, чтобы посмотреть его так, как видел участник.'))),
+        h('div', { style: 'max-width:760px;width:100%' }, recentCard()),
+        h('div', { style: 'max-width:760px;width:100%' }, UI.view.note('Только просмотр: новый анализ запускает сам участник — со своего лимита или своего ключа Claude.'))));
+      return;
+    }
     applyParam(param);
     syncAutoText();
     if (io) { io.disconnect(); io = null; }

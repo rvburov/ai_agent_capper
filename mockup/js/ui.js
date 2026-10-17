@@ -189,10 +189,16 @@
   }
 
   // ---------- компоненты ----------
+  // ro: кнопка меняет данные — в режиме просмотра данных участника (Р27, js/view.js) она неактивна и объясняет почему;
+  // строка в ro — своя подсказка
   function button(label, opts = {}) {
-    const { kind = 'secondary', size, icon: ic, iconRight, onClick, block, type = 'button', disabled, title, href, ariaLabel, attrs } = opts;
+    const { kind = 'secondary', size, icon: ic, iconRight, onClick, block, type = 'button', disabled, title, href, ariaLabel, attrs, ro } = opts;
     const cls = ['btn', kind, size, block && 'block', !label && 'icon-only'];
     const kids = [ic && icon(ic), label && h('span', null, label), iconRight && icon(iconRight)];
+    if (ro && window.UI && UI.view && UI.view.active) {
+      const hint = typeof ro === 'string' ? ro : UI.view.RO_HINT;
+      return h('button', Object.assign({}, attrs || {}, { class: attrs && attrs.class ? [attrs.class, 'is-ro'] : cls.concat('is-ro'), type: 'button', href: null, onClick: null, title: hint, 'aria-disabled': 'true', 'aria-label': (ariaLabel || label || title || '') + '. ' + hint, 'data-ro': hint }), kids);
+    }
     if (href) return h('a', Object.assign({ class: cls, href, title, 'aria-label': ariaLabel || (label ? null : title) }, attrs || {}), kids);
     return h('button', Object.assign({ class: cls, type, title, disabled, 'aria-label': ariaLabel || (label ? null : title), on: onClick ? { click: onClick } : null }, attrs || {}), kids);
   }

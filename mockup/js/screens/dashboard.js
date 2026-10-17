@@ -11,14 +11,15 @@
   const addDays = (s, n) => { const d = new Date(s + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
   const signedDec = (n, d) => (n > 0 ? '+' : '') + fmt.dec(n, d);
   const sum = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
-  const firstDate = D.bankHistory[0].date;
+  // Первый день истории — по данным на экране: у участника в режиме просмотра (Р27) он свой
+  const firstDate = () => D.bankHistory[0].date;
   const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 
   const PERIODS = [
     { id: '7', label: '7 дней', days: 7, ctx: 'за 7 дней', prev: 'к пред. 7 дням' },
     { id: '30', label: '30 дней', days: 30, ctx: 'за 30 дней', prev: 'к пред. 30 дням' },
     { id: '90', label: '3 месяца', days: 90, ctx: 'за 3 месяца', prev: 'к пред. 3 месяцам' },
-    { id: 'all', label: 'Все', days: null, ctx: 'с ' + fmt.date(firstDate), prev: null },
+    { id: 'all', label: 'Все', days: null, get ctx() { return 'с ' + fmt.date(firstDate()); }, prev: null },
   ];
   let periodId = '30';
   try { const s = sessionStorage.getItem('capper.dash.period'); if (s && PERIODS.some(p => p.id === s)) periodId = s; } catch (e) { /* ок */ }
@@ -51,7 +52,7 @@
   }
 
   function periodStats(p) {
-    const anchor = p.days ? addDays(TODAY, -p.days) : firstDate; // банк на конец этого дня = старт периода
+    const anchor = p.days ? addDays(TODAY, -p.days) : firstDate(); // банк на конец этого дня = старт периода
     const settled = D.bets.filter(b => b.status !== 'open' && b.date > anchor && b.date <= TODAY);
     const cur = summarize(settled);
     const legs = D.allLegs.filter(l => l.date > anchor);
@@ -71,7 +72,7 @@
     let prev = null;
     if (p.days) {
       const prevAnchor = addDays(anchor, -p.days);
-      if (prevAnchor >= firstDate) prev = summarize(D.bets.filter(b => b.status !== 'open' && b.date > prevAnchor && b.date <= anchor));
+      if (prevAnchor >= firstDate()) prev = summarize(D.bets.filter(b => b.status !== 'open' && b.date > prevAnchor && b.date <= anchor));
     }
     const flowSum = flows.reduce((a, f) => a + (f.kind === 'withdrawal' ? -f.amount : f.amount), 0);
     return { p, anchor, settled, cur, prev, brier: brier(legs), startBank, dates, values, invested, flows, flowSum, maxDD };
@@ -409,7 +410,7 @@
           h('div', null, h('dt', null, 'Ставка'), h('dd', null, fmt.money(b.stake))),
           h('div', null, h('dt', null, 'Выплата'), h('dd', null, fmt.money(payout)))),
         b.awaiting && h('div', { class: 'dashboard-howto' }, icon('database'), 'Матчи сыграны ' + fmt.date(b.date) + ', а в архиве tennis-data они появятся после загрузки файла ≈ ' + fmt.date(D.archive.next) + '. Можно не ждать и внести результат самим.'),
-        button('Внести результат', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#bets-' + b.id, block: true, ariaLabel: 'Внести результат ставки №' + b.id }));
+        button('Внести результат', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#bets-' + b.id, block: true, ariaLabel: 'Внести результат ставки №' + b.id, ro: true }));
     }) : UI.empty('Открытых ставок нет. Запустите анализ матчей дня — ИИ предложит экспресс.');
     return card({
       class: 'dashboard-card',
@@ -446,7 +447,7 @@
       flush: true,
       body: list.length ? h('div', null, rows) : h('div', { style: 'padding:14px 18px' }, UI.empty('Сегодня в ваших ставках и анализах матчей нет.')),
       foot: [
-        button('Новый анализ', { kind: 'primary', size: 'sm', icon: 'spark', href: '#new' }),
+        button('Новый анализ', { kind: 'primary', size: 'sm', icon: 'spark', href: '#new', ro: 'Только просмотр: анализ запускает сам участник' }),
         h('span', { class: 'xsmall muted', style: 'min-width:0;flex:1 1 220px' }, 'Здесь только матчи из ваших ставок и анализов: расписания и линии кэфов в программе нет. Матчи и кэфы своей линии вписываете в «Новом анализе».'),
       ],
     });
@@ -472,7 +473,7 @@
       tone: 'warn', ic: 'clock', sr: 'Ждет результата',
       title: waiting.length + ' ' + fmt.plural(waiting.length, 'ставка ждет', 'ставки ждут', 'ставок ждут') + ' результата',
       text: 'В архиве tennis-data матчи по ' + fmt.date(D.archive.matchesTo) + ', следующий файл ≈ ' + fmt.date(D.archive.next) + ' — тогда ставки рассчитаются сами. Можно внести результат и раньше: по новостям уже есть подсказка.',
-      action: button('Внести результат', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#bets-' + waiting[0].id }),
+      action: button('Внести результат', { kind: 'secondary', size: 'sm', icon: 'edit', href: '#bets-' + waiting[0].id, ro: true }),
     });
     if (isAdmin && D.archive) {
       const days = daysSince(D.archive.lastLoad);
@@ -610,7 +611,7 @@
             ['Прогноз на месяц', '≈ ' + fmt.usd(B.forecast)],
             ['Проверки (eval), отдельно', fmt.usd(A.eval.spent) + ' из ' + usdL(A.eval.monthly) + (A.eval.firstMonth ? ' · с ноября ' + usdL(A.eval.next) : '')],
           ]),
-          howto('Общие фоновые задачи — вызовы без участника: разборы рассчитанных ставок (Sonnet 5.5 через Batch, ≈ $0,01 за матч) и приемка этапа. Проверки идут из своего бюджета и в общий не входят. Прогноз учитывает личные лимиты участников. Ставки и банк участников вам не видны — только расход на ИИ.'),
+          howto('Общие фоновые задачи — вызовы без участника: разборы рассчитанных ставок (Sonnet 5.5 через Batch, ≈ $0,01 за матч) и приемка этапа. Проверки идут из своего бюджета и в общий не входят. Прогноз учитывает личные лимиты участников. Ставки и банк участников — в «Администрирование → Сводка», только просмотр.'),
         ],
         foot: [button('Администрирование', { kind: 'ghost', size: 'sm', icon: 'admin', iconRight: 'chevronRight', href: '#admin-usage', title: 'Расход ИИ по людям — в Администрировании' })],
       });

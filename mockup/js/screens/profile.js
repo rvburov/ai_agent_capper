@@ -14,6 +14,8 @@
   const D = DATA, S = DATA.stats, TODAY = DATA.today;
   const user = () => D.user, me = () => D.me;
   const isAdmin = () => user().role === 'admin';
+  // Р27: администратор смотрит «Банк и стратегию» участника — только просмотр, без форм
+  const RO = () => !!(UI.view && UI.view.active);
 
   // ---------- утилиты ----------
   const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
@@ -164,8 +166,9 @@
   ];
   // Итог недели: результат ставок за 7 дней к банку неделю назад с учетом пополнений и выводов за неделю
   // (как week_change в services/bank.py; движения в макете записываются «сейчас», то есть в эту неделю)
-  const weekBase = D.bankHistory.filter(x => x.date <= addDays(TODAY, -7)).pop() || D.bankHistory[0];
-  const weekPctNow = () => (S.bank - weekBase.bank) / (weekBase.bank + st.bankAdj) * 100;
+  // считается при показе: в режиме просмотра (Р27) на экране банк участника, а не свой
+  const weekBase = () => D.bankHistory.filter(x => x.date <= addDays(TODAY, -7)).pop() || D.bankHistory[0];
+  const weekPctNow = () => (S.bank - weekBase().bank) / (weekBase().bank + st.bankAdj) * 100;
 
   // ---------- состояние (отдельное для каждого пользователя) ----------
   const states = {};
@@ -803,8 +806,8 @@
             : ['Другие участники', 'закрытый круг · приглашает администратор'],
         ]),
         h('p', { class: 'xsmall muted' }, adm
-          ? 'Участников, приглашения, ключ и бюджет вы ведете в «Администрировании». Администраторов может быть несколько: следующих назначаете вы.'
-          : 'Администратор видит только ваш расход на ИИ и активность — входы и число анализов. Ставки, банк и стратегия видны только вам.'),
+          ? 'Участников, приглашения, ключ и бюджет вы ведете в «Администрировании»; там же — ставки и банк участников, только просмотр. Администраторов может быть несколько: следующих назначаете вы.'
+          : 'Администратор видит ваши ставки, банк, стратегию и анализы — только просмотр, каждый просмотр записывается в журнал. Пароль, коды 2FA и ключ Claude не видит никто.'),
       ],
       foot: adm ? [button('Администрирование', { kind: 'secondary', icon: 'admin', href: '#admin-users' }), button('Пригласить участника', { kind: 'ghost', icon: 'userPlus', href: '#admin-invites' })] : null,
     });
@@ -1142,9 +1145,9 @@
       h('div', { class: 'profile-section-title' }, h('h4', null, 'Версия правил'), h('span', { class: 'xsmall muted' }, 'у каждого участника своя')),
       UI.kv([['Действует', act ? act.name : '—'], ['Кандидат', cand ? cand.name : 'нет']]),
       cand && h('div', { class: 'row' },
-        button('Включить ' + cand.id, { kind: 'primary', size: 'sm', icon: 'check', onClick: () => { if (act) { act.status = 'archived'; cand.rollback = act.id; } cand.status = 'active'; applyRuleChange(cand); drawPanel(); UI.toast(cand.id + ' действует со следующего анализа · ' + (act ? act.id : '') + ' в архиве, откат в один клик', 'check'); } }),
-        button('Отклонить', { kind: 'ghost', size: 'sm', onClick: () => { cand.status = 'archived'; drawPanel(); UI.toast('Кандидат ' + cand.id + ' отклонен', 'x'); } })),
-      !cand && act && act.rollback && button('Вернуть ' + act.rollback, { kind: 'ghost', size: 'sm', icon: 'history', onClick: () => { const prev = R.find(v => v.id === act.rollback); act.status = 'archived'; applyRuleChange(act, true); if (prev) prev.status = 'active'; drawPanel(); UI.toast('Снова действует ' + act.rollback, 'history'); } }));
+        button('Включить ' + cand.id, { kind: 'primary', size: 'sm', icon: 'check', ro: true, onClick: () => { if (act) { act.status = 'archived'; cand.rollback = act.id; } cand.status = 'active'; applyRuleChange(cand); drawPanel(); UI.toast(cand.id + ' действует со следующего анализа · ' + (act ? act.id : '') + ' в архиве, откат в один клик', 'check'); } }),
+        button('Отклонить', { kind: 'ghost', size: 'sm', ro: true, onClick: () => { cand.status = 'archived'; drawPanel(); UI.toast('Кандидат ' + cand.id + ' отклонен', 'x'); } })),
+      !cand && act && act.rollback && button('Вернуть ' + act.rollback, { kind: 'ghost', size: 'sm', icon: 'history', ro: true, onClick: () => { const prev = R.find(v => v.id === act.rollback); act.status = 'archived'; applyRuleChange(act, true); if (prev) prev.status = 'active'; drawPanel(); UI.toast('Снова действует ' + act.rollback, 'history'); } }));
   }
   function strategyCard() {
     const b = bankNow();
@@ -1156,7 +1159,7 @@
     return card({
       id: 'profile-strategy', class: 'profile-anchor', title: 'Правила стратегии',
       subtitle: h('span', null, 'Инструкции анализа ', activeVersion ? activeVersion.id : 'v3', ' — общие, правила суммы — ваши · ИИ не предложит событие вне этих рамок'),
-      actions: [button('Предложить изменение', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: proposeRules })],
+      actions: [button('Предложить изменение', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: proposeRules, ro: true })],
       body: [
         ruleVersionsBlock(),
         h('hr', { class: 'divider' }),
@@ -1217,7 +1220,7 @@
     const offActive = off.filter(r => r.active);
     return card({
       id: 'profile-adapt', class: 'profile-anchor', title: 'Адаптации ставки', subtitle: 'Меняют размер ставки по просадке от пика и итогу недели · правил серий нет',
-      actions: [button('Предложить изменение', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: proposeRules })],
+      actions: [button('Предложить изменение', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: proposeRules, ro: true })],
       body: [
         h('div', { class: 'profile-dd' },
           h('div', { class: 'row-between small' }, h('span', { class: 'soft' }, 'Просадка от пика ' + fmt.money(peakNow())), h('b', { class: 'num' }, fmt.signedPct(dd))),
@@ -1269,6 +1272,20 @@
           UI.segmented({ label: 'Длительность паузы', items: [{ id: '1', label: '1 день' }, { id: '7', label: '7 дней' }, { id: '30', label: '30 дней' }, { id: '90', label: '90 дней' }], active: st.pauseDays, onChange: id => { st.pauseDays = id; st.pauseConfirm = false; drawPanel(); } }),
           confirmBox || h('div', { class: 'row' }, button('Взять паузу на ' + st.pauseDays + ' ' + pl(+st.pauseDays, 'день', 'дня', 'дней'), { kind: 'secondary', icon: 'pause', onClick: () => { st.pauseConfirm = true; drawPanel(); setTimeout(() => { const btn = document.querySelector('#profile-rg .profile-confirm .btn.primary'); if (btn) btn.focus(); }, 30); } })));
     const P = st.limitsPending;
+    if (RO()) {
+      return card({
+        id: 'profile-rg', class: 'profile-anchor profile-rg', eyebrow: 'Важно', title: 'Ответственная игра',
+        subtitle: 'Лимиты на день и пауза от ставок',
+        actions: [st.pause ? chip('Пауза', 'warn', 'pause') : chip('Лимиты включены', 'good', 'shield')],
+        body: [
+          h('div', { class: 'profile-usage' },
+            usage('Ставок сегодня', todayN, L.count, todayN + ' из ' + L.count),
+            usage('Сумма сегодня', todaySum, L.amount, moneyBare(todaySum) + ' из ' + fmt.money(L.amount))),
+          UI.kv([['Ставок в день, не больше', String(L.count)], ['Сумма ставок в день', fmt.money(L.amount)], ['Пауза от ставок', st.pause ? 'до ' + dateLong(st.pause.until) : 'нет']]),
+          UI.view.note('Только просмотр: лимиты и паузу меняет сам участник.'),
+        ],
+      });
+    }
     return formCard({
       id: 'profile-rg', class: 'profile-rg', eyebrow: 'Важно', title: 'Ответственная игра',
       subtitle: 'Ограничения, которые не обходятся ни в азарте, ни по совету ИИ',
@@ -1328,6 +1345,12 @@
       after -= signed;
       return row;
     });
+    if (RO()) {
+      return card({
+        id: 'profile-moves', class: 'profile-anchor', title: 'Движение банка', subtitle: 'Пополнение, вывод и корректировка · в прибыль и ROI не входят',
+        body: [h('div', { class: 'stack', style: 'gap:6px' }, h('h4', null, 'Журнал'), h('div', { class: 'profile-list' }, list)), UI.view.note('Только просмотр: пополнение, вывод и корректировку записывает сам участник.')],
+      });
+    }
     return formCard({
       id: 'profile-moves', title: 'Движение банка', subtitle: 'Пополнение, вывод и корректировка · в прибыль и ROI не входят',
       body: [
@@ -1363,15 +1386,15 @@
         list.length ? h('div', { class: 'profile-list' }, list.map(x => item({
           mark: x.mark, title: x.name, wrap: true,
           meta: x.bets + ' ' + pl(x.bets, 'ставка', 'ставки', 'ставок') + (x.inPlay ? ' · в игре ' + fmt.money(x.inPlay) : ''),
-          side: [button('', { kind: 'ghost', size: 'sm', icon: 'edit', title: 'Переименовать ' + x.name, onClick: () => bookModal(x) }),
+          side: RO() ? null : [button('', { kind: 'ghost', size: 'sm', icon: 'edit', title: 'Переименовать ' + x.name, onClick: () => bookModal(x) }),
             button('', { kind: 'ghost', size: 'sm', icon: 'eyeOff', title: 'Скрыть ' + x.name, onClick: () => bookHideModal(x) })],
         }))) : UI.empty('Список пуст. Добавьте букмекеров, у которых ставите.'),
         hidden.length ? h('div', { class: 'stack', style: 'gap:6px' }, h('div', { class: 'eyebrow' }, 'Скрытые'),
           h('div', { class: 'profile-list' }, hidden.map(name => item({ mark: bookMark(name), title: name, wrap: true, meta: BOOK_COUNT(name) + ' ' + pl(BOOK_COUNT(name), 'ставка', 'ставки', 'ставок') + ' · в выборе не показывается',
-            side: button('Вернуть', { kind: 'secondary', size: 'sm', icon: 'refresh', onClick: () => { st.hiddenBooks = hidden.filter(n => n !== name); myBooks().push(name); drawPanel(); UI.toast(name + ' снова в списке', 'check'); } }) })))) : null,
+            side: button('Вернуть', { kind: 'secondary', size: 'sm', icon: 'refresh', ro: true, onClick: () => { st.hiddenBooks = hidden.filter(n => n !== name); myBooks().push(name); drawPanel(); UI.toast(name + ' снова в списке', 'check'); } }) })))) : null,
         h('p', { class: 'profile-note' }, icon('target'), h('span', null, 'Закрывающий кэф для CLV вы вносите на «Ставках»: эталона (' + MARKET_RULE + ') или своего букмекера из этого списка. Сравнение модели с рынком в «Аналитике» — по кэфам вашего букмекера в момент прогноза, без маржи.')),
       ],
-      foot: [button('Добавить букмекера', { kind: 'secondary', icon: 'plus', onClick: () => bookModal(null) }), h('span', { class: 'xsmall muted' }, 'Балансы и сверку с банком добавим позже')],
+      foot: RO() ? null : [button('Добавить букмекера', { kind: 'secondary', icon: 'plus', onClick: () => bookModal(null) }), h('span', { class: 'xsmall muted' }, 'Балансы и сверку с банком добавим позже')],
     });
   }
 
@@ -1757,9 +1780,9 @@
   UI.notifPrefs = {
     // false — пользователь выключил этот вид на сайте; обязательные виды и виды без настройки приходят всегда
     allowed(kind) {
-      const s = states[user().id], id = KIND_PREF[kind];
+      const s = states[D.personas[UI.auth.role].id], id = KIND_PREF[kind];
       if (!s || !id) return true;
-      const pref = id === 'limit' && isAdmin() ? s.notif.users : s.notif[id];
+      const pref = id === 'limit' && UI.auth.role === 'admin' ? s.notif.users : s.notif[id];
       return !pref || pref.site !== false;
     },
   };
@@ -1980,9 +2003,52 @@
   // =====================================================================
   function panelData() {
     return h('div', { class: 'grid' },
-      h('div', { class: 'col-7 profile-col' }, exportCard(), sourcesCard()),
+      h('div', { class: 'col-7 profile-col' }, whoCard(), exportCard(), sourcesCard()),
       h('div', { class: 'col-5 profile-col' }, consentCard(), isAdmin() && importCard()),
       h('div', { class: 'col-12 profile-col' }, dangerCard()));
+  }
+
+  // Р27: кто видит данные участника. Администратор — ставки, банк, стратегию и анализы, только просмотр, каждый
+  // просмотр в журнале; другие участники — ничего; пароль, коды 2FA, резервные коды и ключ Claude — никто
+  function whoCard() {
+    UI.css('profile-who', `
+      .profile-who { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+      .profile-who li { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--line); }
+      .profile-who li:first-child { border-top: 0; padding-top: 2px; }
+      .profile-who-ic { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-2); }
+      .profile-who-ic svg { width: 18px; height: 18px; }
+      .profile-who-ic.good { background: var(--good-soft); color: var(--good-ink); }
+      .profile-who-ic.info { background: var(--info-soft); color: var(--info-ink); }
+      .profile-who-ic.bad { background: var(--bad-soft); color: var(--bad-ink); }
+      .profile-who-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); color: var(--fg-2); }
+      .profile-who-text b { color: var(--fg); font-size: var(--fs-md); font-weight: 600; }
+      .profile-who-text small { font-size: var(--fs-xs); color: var(--fg-3); }
+      .profile-who li > .chip { align-self: center; }
+      @media (max-width: 480px) { .profile-who li { grid-template-columns: 36px minmax(0, 1fr); } .profile-who li > .chip { grid-column: 2; justify-self: start; } }
+    `);
+    const adm = isAdmin();
+    const others = D.users.filter(u => u.role === 'admin' && u.status !== 'deleted' && u.id !== user().id);
+    const lastView = D.admin.audit.find(e => e.action === 'data_view' && e.target === user().name);
+    const row = (ic, kind, who, what, note, tag) => h('li', null,
+      h('span', { class: ['profile-who-ic', kind], 'aria-hidden': 'true' }, icon(ic)),
+      h('div', { class: 'profile-who-text' }, h('b', null, who), h('span', null, what), note && h('small', null, note)),
+      tag || null);
+    return card({
+      id: 'profile-who', class: 'profile-anchor', title: 'Кто видит мои данные', subtitle: 'Ставки, банк, стратегия и анализы',
+      body: [
+        h('ul', { class: 'profile-who' },
+          row('user', 'good', 'Вы', 'Все свои данные. Менять их можете только вы.', null, chip('все', 'good')),
+          adm
+            ? row('admin', 'info', 'Другие администраторы', 'Ваши ставки, банк, стратегию и анализы — только просмотр.', others.length ? others.map(u => u.name).join(', ') : 'Сейчас других администраторов нет. Каждый просмотр — в журнале администратора', chip('просмотр', 'info', 'eye'))
+            : row('admin', 'info', 'Администратор' + (others.length ? ' · ' + others.map(u => u.name).join(', ') : ''), 'Ваши ставки, банк, стратегию и анализы — только просмотр: изменить ничего не может.', 'Каждый просмотр записывается в журнал администратора: кто, когда и какой экран', chip('просмотр', 'info', 'eye')),
+          row('users', null, 'Другие участники', 'Не видят ваших ставок, банка, стратегии и анализов.', 'В общих уроках — только число случаев, без ваших ставок', chip('нет', 'outline')),
+          row('lock', 'bad', 'Никто, даже администратор', 'Пароль, коды 2FA, резервные коды и ключ Claude.', 'Пароль хранится только хэшем, ключ Claude — зашифрованным; вы видите лишь его последние 4 символа', chip('никто', 'bad', 'lock'))),
+        !adm && h('p', { class: 'profile-note' }, icon('eye'), h('span', null, lastView
+          ? 'Последний просмотр администратором: ' + when(lastView.at).toLowerCase() + ' · ' + lastView.details.replace(' · только просмотр', '') + '.'
+          : 'Администратор ваши данные еще не открывал.')),
+        h('p', { class: 'profile-note' }, icon('info'), h('span', null, 'Это правило есть в условиях при регистрации. Не согласны — выгрузите данные ниже и удалите аккаунт.')),
+      ],
+    });
   }
 
   // Экспорт сразу скачиванием (В10): архив собирается по запросу, ссылок «на 24 часа» нет
@@ -2132,6 +2198,22 @@
     title: 'Личный кабинет',
     render(root, param) {
       useState();
+      // Р27: администратор смотрит «Банк и стратегию» участника — без сводки аккаунта и других вкладок, только просмотр
+      if (RO()) {
+        st.tab = 'bank';
+        heroSlot = null;
+        tabsSlot = h('div');
+        panelEl = h('div', { class: 'profile-panel', id: 'profile-panel', role: 'region', tabindex: '-1' });
+        UI.setHeader({ title: 'Банк и стратегия', crumbs: 'Данные участника' });
+        UI.append(root, [h('div', { class: 'page-head' }, h('div', { style: 'min-width:0' },
+          h('h2', null, 'Банк и стратегия'),
+          h('p', { class: 'lead' }, user().name + ': банк, правила суммы, адаптации, ответственная игра и букмекеры — так, как их видит участник. Только просмотр.'))), panelEl]);
+        drawPanel();
+        return;
+      }
+      // #profile-data-who — «Кто видит мои данные» (из уведомления об изменении правил, Р27)
+      const who = param === 'data-who';
+      if (who) { param = 'data'; setHash('data'); setTimeout(() => scrollToId('profile-who'), 80); }
       // #profile-install — окно установки; #profile-notifications-<состояние> — состояние push на этом устройстве (для согласования)
       let p = param || '';
       const install = p === 'install';

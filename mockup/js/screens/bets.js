@@ -439,7 +439,7 @@
       h('div', { style: 'min-width:0' },
         h('h2', null, 'История ставок'),
         h('p', { class: 'lead' }, 'Каждая ставка, сделанная по анализу ИИ, и история старого бота. Внесите результат после матча: от него зависят банк, CLV и точность модели в «Аналитике».')),
-      button('Экспорт CSV', { kind: 'secondary', size: mobile ? 'sm' : null, icon: 'download', onClick: exportCsv }));
+      button('Экспорт CSV', { kind: 'secondary', size: mobile ? 'sm' : null, icon: 'download', onClick: exportCsv, ro: 'Только просмотр: выгрузить ставки может только сам участник' }));
   }
   function exportCsv() {
     const n = filtered().length;
@@ -639,7 +639,7 @@
         h('div', null, h('dt', null, 'Выплата'), h('dd', null, fmt.money(pay)))),
       b.awaiting && h('p', { class: 'xsmall muted', style: 'margin:0' }, 'Матчи сыграны ' + fmt.date(b.date) + '. В архиве tennis-data матчи по ' + fmt.date(D.archive.matchesTo) + ': ставка рассчитается сама после загрузки файла ≈ ' + fmt.date(D.archive.next) + '. Не хотите ждать — внесите результат, в окне есть подсказка из новостей.'),
       h('div', { class: 'bets-open-actions' },
-        button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => settleModal(b), attrs: { 'data-settle': String(b.id) } }),
+        button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => settleModal(b), attrs: { 'data-settle': String(b.id) }, ro: true }),
         // экран «Анализ» показывает только последний анализ — ссылку даем, если ставка сделана по нему
         b.analysis && b.analysis === D.currentAnalysis
           ? button('Анализ', { kind: 'secondary', icon: 'spark', href: '#analysis', title: 'Открыть анализ #' + b.analysis + ', по которому сделана ставка' })
@@ -674,7 +674,7 @@
       ],
       actions: close => [
         button('Закрыть', { kind: 'secondary', onClick: close }),
-        b.status === 'open' && button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => { close(); settleModal(b); } }),
+        b.status === 'open' && button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => { close(); settleModal(b); }, ro: true }),
       ],
     });
   }
@@ -828,8 +828,8 @@
         h('div', { class: 'bets-detail-box' },
           reviewBlock(b),
           !isBot(b) && h('div', { class: 'row' },
-            button(b.legs.some(l => !l.closing && legRes(b, l) !== 'void') ? 'Внести закрытие' : 'Закрывающие кэфы', { kind: 'secondary', size: 'sm', icon: 'bolt', onClick: () => closingModal(b) }),
-            button('Исправить результат', { kind: 'ghost', size: 'sm', icon: 'edit', onClick: () => correctModal(b) })))));
+            button(b.legs.some(l => !l.closing && legRes(b, l) !== 'void') ? 'Внести закрытие' : 'Закрывающие кэфы', { kind: 'secondary', size: 'sm', icon: 'bolt', onClick: () => closingModal(b), ro: true }),
+            button('Исправить результат', { kind: 'ghost', size: 'sm', icon: 'edit', onClick: () => correctModal(b), ro: true })))));
   }
   const closingWho = l => (l.closingSource === 'archive' ? 'архив tennis-data · ' + l.closingBy : l.closingBy === D.marketRef || l.closingBy === 'Betfair' || l.closingBy === 'средний' ? 'эталон · ' + l.closingBy : 'свой · ' + l.closingBy);
   // Т1: в архиве tennis-data кэфы только на победу (П1/П2), момент снятия не проверен; у фор закрытие вносит участник
@@ -856,7 +856,7 @@
     const l = b.legs[b.conflict.leg];
     return UI.callout('warn', 'alert', h('div', { class: 'stack', style: 'gap:6px' },
       h('span', null, h('b', null, 'Архив показывает другое. '), 'В файле tennis-data счет ' + b.conflict.score + ' — по нему ' + l.marketLabel + ' ' + (b.conflict.archiveResult === 'loss' ? 'не сыграла' : 'сыграла') + ', а вы внесли ' + (l.result === 'win' ? 'выигрыш' : 'проигрыш') + '. Банк не меняли.'),
-      button('Исправить результат', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: () => correctModal(b) })));
+      button('Исправить результат', { kind: 'secondary', size: 'sm', icon: 'edit', onClick: () => correctModal(b), ro: true })));
   }
   // Разбор ставки ИИ (этап 5, В3): Sonnet 5.5 через Batch, один на матч; ответ по схеме проверяет код.
   // Рядом — вердикт кодом по CLV (без ИИ), как на этапе 4
@@ -953,8 +953,8 @@
         ];
       },
       actions: close => b.status === 'open'
-        ? [button('Закрыть', { kind: 'secondary', onClick: close }), button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => { close(); settleModal(b); } })]
-        : [!isBot(b) && button('Исправить', { kind: 'secondary', icon: 'edit', onClick: () => { close(); correctModal(b); } }), !isBot(b) && button('Закрытие', { kind: 'secondary', icon: 'bolt', onClick: () => { close(); closingModal(b); } }), button('Закрыть', { kind: 'primary', onClick: close })].filter(Boolean),
+        ? [button('Закрыть', { kind: 'secondary', onClick: close }), button('Внести результат', { kind: 'primary', icon: 'edit', onClick: () => { close(); settleModal(b); }, ro: true })]
+        : [!isBot(b) && button('Исправить', { kind: 'secondary', icon: 'edit', onClick: () => { close(); correctModal(b); }, ro: true }), !isBot(b) && button('Закрытие', { kind: 'secondary', icon: 'bolt', onClick: () => { close(); closingModal(b); }, ro: true }), button('Закрыть', { kind: 'primary', onClick: close })].filter(Boolean),
     });
   }
 
@@ -1283,7 +1283,8 @@
     try { history.replaceState(history.state, '', location.href.split('#')[0] + '#bets'); } catch (e) { /* окружение без history — не страшно */ }
     const b = D.bets.find(x => String(x.id) === String(param));
     if (!b) { UI.toast('Ставка №' + param + ' не найдена', 'alert'); return; }
-    if (b.status === 'open') { setTimeout(() => settleModal(b), 60); return; }
+    // в режиме просмотра данных участника (Р27) результат не вносится — открываем карточку ставки
+    if (b.status === 'open') { setTimeout(() => (UI.view.active ? detailModal(b) : settleModal(b)), 60); return; }
     if (UI.isMobile()) { setTimeout(() => detailModal(b), 60); return; }
     if (!filtered().includes(b)) { F = blank(); build(); }
     const idx = filtered().filter(x => x.status !== 'open').indexOf(b);
