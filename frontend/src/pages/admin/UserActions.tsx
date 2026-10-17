@@ -19,6 +19,7 @@ import {
   useRevokeSessions,
   useUnblockUser,
 } from '../../features/admin/useAdminUsers';
+import { viewTo } from '../../features/view/viewMode';
 import { formatUsd } from '../../lib/format';
 import { ApproveModal, LimitModal, RejectDialog } from './LimitDialogs';
 import { ConfirmDialog, PersonRow } from './parts';
@@ -65,10 +66,21 @@ export function useUserActions(me: Me) {
     if (withCard) {
       items.push({
         id: 'card',
-        icon: 'history',
+        icon: 'wallet',
         label: t('admin.menu.activity'),
         hint: t('admin.menu.activityHint'),
         onSelect: open('card'),
+      });
+    }
+    // Р27: данные участника так, как он их видит, — только просмотр, каждый просмотр в журнале
+    // (в самой карточке эта кнопка — в блоке «Ставки и банк»)
+    if (withCard && !mine && user.status !== 'deleted') {
+      items.push({
+        id: 'view',
+        icon: 'eye',
+        label: t('admin.menu.viewAs'),
+        hint: t('admin.menu.viewAsHint'),
+        onSelect: () => void navigate(viewTo(paths.home, user.id)),
       });
     }
     if (mine) {

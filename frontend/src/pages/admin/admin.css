@@ -12,12 +12,12 @@
 .adm-private svg { width: 15px; height: 15px; flex: none; }
 .adm-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-/* 9 вкладок: на широком экране — строка (с иконками от 1521px), уже — сетка кнопок, как в личном кабинете на телефоне */
+/* 11 вкладок: на широком экране — строка (с иконками от 1521px), уже — сетка кнопок, как в личном кабинете на телефоне */
 .tabs.adm-tabs > a { display: inline-flex; align-items: center; gap: 7px; padding: 10px 11px; }
 .tabs.adm-tabs > a svg { width: 16px; height: 16px; flex: none; display: none; }
 @media (min-width: 1521px) { .tabs.adm-tabs > a svg { display: block; } }
 @media (max-width: 1280px) {
-  .tabs.adm-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; border-bottom: 0; overflow: visible; }
+  .tabs.adm-tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; border-bottom: 0; overflow: visible; }
   .tabs.adm-tabs > a {
     justify-content: center; padding: 8px 4px; min-height: 42px; border: 1px solid var(--line); border-radius: var(--r-md);
     margin: 0; background: var(--surface); color: var(--fg-2); font-size: var(--fs-sm); line-height: 1.25;
@@ -294,3 +294,45 @@
   .adm-limits-table tr.adm-flash > td, .adm-lcard.adm-flash { background: var(--warn-soft); }
 }
 .adm-pause-row { cursor: pointer; flex-wrap: nowrap; min-height: var(--tap); }
+
+/* Р27: ставки и банк участника (только просмотр), сводка по всем (admin.js макета) */
+.adm-pending { opacity: .6; transition: opacity .15s; }
+.adm-facts dd small { display: block; font-weight: 400; font-size: var(--fs-xs); color: var(--fg-3); }
+.adm-name-link { color: var(--fg); text-decoration: none; }
+.adm-name-link:hover { color: var(--accent-ink); text-decoration: underline; }
+.adm-bets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.adm-bets li { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
+.adm-bets li:first-child { border-top: 0; }
+.adm-bets-date { font-size: var(--fs-sm); color: var(--fg-2); white-space: nowrap; }
+.adm-bets-what { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.adm-bets-what b { font-weight: 600; font-size: var(--fs-sm); }
+.adm-bets-what span { font-size: var(--fs-xs); color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-bets-sum { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; font-size: var(--fs-sm); }
+@media (max-width: 480px) {
+  .adm-bets li { grid-template-columns: minmax(0, 1fr) auto; }
+  .adm-bets-date { grid-column: 1 / -1; font-size: var(--fs-xs); }
+}
+.adm-ro-note { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--fg-3); }
+.adm-ro-note svg { width: 14px; height: 14px; flex: none; }
+.adm-money-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.adm-sum-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (min-width: 1600px) { .adm-sum-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.adm-sum-tiles > .card { padding: 14px 16px; }
+.adm-sum-tiles .stat-value { font-size: var(--fs-xl); }
+@media (max-width: 720px) {
+  .adm-sum-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .adm-sum-tiles > .card { padding: 12px; }
+}
+.adm-sum-table td { vertical-align: middle; white-space: nowrap; }
+.adm-sum-table tr.is-total td { background: var(--surface-2); font-weight: 600; }
+.adm-sum-table tr.is-empty td { color: var(--fg-3); }
+.adm-sum-go { color: var(--fg-3); display: inline-flex; }
+.adm-sum-go svg { width: 18px; height: 18px; }
+.adm-scards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 720px) { .adm-scards { grid-template-columns: minmax(0, 1fr); } }
+.card.adm-scard { padding: 14px; gap: 10px; }
+.adm-scard-head { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.adm-scard-head .adm-ava { width: 36px; height: 36px; }
+.adm-scard-bank { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); white-space: nowrap; }
+/* имя в таблице участников — кнопка карточки участника (ссылка в макете) */
+button.adm-name-link { border: 0; background: none; padding: 0; font: inherit; font-weight: inherit; cursor: pointer; text-align: left; max-width: 100%; }

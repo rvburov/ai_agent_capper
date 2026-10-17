@@ -88,7 +88,7 @@ export function BooksCard() {
       subtitle={t('profile.bank.books.subtitle')}
       foot={
         <>
-          <Button icon="plus" disabled={!list.data} onClick={() => setDialog({ kind: 'add' })}>
+          <Button icon="plus" disabled={!list.data} onClick={() => setDialog({ kind: 'add' })} ro>
             {t('profile.bank.books.add')}
           </Button>
           <span className="xsmall muted">{t('profile.bank.books.later')}</span>
@@ -132,11 +132,12 @@ function ActiveRow({ item, currency, onDialog }: { item: Bookmaker; currency: Cu
         </div>
       </div>
       <div className="profile-item-side">
-        <IconButton icon="edit" size="sm" label={t('profile.bank.books.rename', { name: item.name })} onClick={() => onDialog({ kind: 'rename', item })} />
+        <IconButton icon="edit" size="sm" label={t('profile.bank.books.rename', { name: item.name })} onClick={() => onDialog({ kind: 'rename', item })} ro />
         <IconButton
           icon="eyeOff"
           size="sm"
           label={t('profile.bank.books.hide', { name: item.name })}
+          ro
           // Ставки в игре — сразу «Пока нельзя», как в макете; сервер проверит еще раз
           onClick={() => onDialog(item.open_bets > 0 ? { kind: 'blocked', item, text: null, action: 'hide' } : { kind: 'hide', item })}
         />
@@ -164,6 +165,7 @@ function HiddenRow({ item, onDialog }: { item: Bookmaker; onDialog: (dialog: Dia
           icon="refresh"
           loading={update.isPending}
           aria-label={t('profile.bank.books.restoreLabel', { name: item.name })}
+          ro
           onClick={() =>
             update.mutate(
               { id: item.id, archived: false },
@@ -176,7 +178,7 @@ function HiddenRow({ item, onDialog }: { item: Bookmaker; onDialog: (dialog: Dia
         >
           {t('profile.bank.books.restore')}
         </Button>
-        <IconButton icon="trash" size="sm" label={t('profile.bank.books.delete', { name: item.name })} onClick={() => onDialog({ kind: 'delete', item })} />
+        <IconButton icon="trash" size="sm" label={t('profile.bank.books.delete', { name: item.name })} onClick={() => onDialog({ kind: 'delete', item })} ro />
       </div>
     </div>
   );

@@ -10,6 +10,8 @@ export interface IconButtonProps
   label: string;
   kind?: ButtonKind;
   size?: 'sm' | 'md';
+  /** Кнопка меняет данные: в режиме просмотра данных участника неактивна (Button, Р27). */
+  ro?: boolean | string;
 }
 
 /** Квадратная кнопка с иконкой (.btn.icon-only); на телефоне зона нажатия 40 px. */

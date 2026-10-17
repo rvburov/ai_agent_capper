@@ -6,6 +6,8 @@ export type ProfileTab = (typeof PROFILE_TABS)[number];
 export const ADMIN_TABS = [
   'overview',
   'users',
+  // Р27: сводка по ставкам и банку всех участников (только просмотр)
+  'summary',
   'invites',
   'access',
   'key',

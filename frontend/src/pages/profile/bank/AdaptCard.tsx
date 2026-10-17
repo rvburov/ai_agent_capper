@@ -132,7 +132,7 @@ export function AdaptCard({ bank, params, onPropose }: { bank: Bank; params: Str
       title={t('profile.bank.adapt.title')}
       subtitle={t('profile.bank.adapt.subtitle')}
       actions={
-        <Button kind="secondary" size="sm" icon="edit" onClick={onPropose}>
+        <Button kind="secondary" size="sm" icon="edit" onClick={onPropose} ro>
           {t('profile.bank.rules.propose')}
         </Button>
       }

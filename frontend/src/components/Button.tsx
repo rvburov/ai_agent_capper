@@ -3,6 +3,7 @@ import { Link, type LinkProps } from 'react-router';
 
 import { cx } from '../lib/cx';
 import { Icon, type IconName } from './Icon';
+import { useReadOnly } from './ReadOnly';
 import { Spinner } from './Spinner';
 
 export type ButtonKind = 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -18,6 +19,11 @@ interface CommonProps {
   loading?: boolean;
   className?: string;
   children?: ReactNode;
+  /**
+   * Кнопка меняет данные (Р27): в режиме просмотра данных участника она неактивна, нажатие
+   * показывает подсказку. Строка — своя подсказка вместо общей.
+   */
+  ro?: boolean | string;
 }
 
 type AsButton = CommonProps &
@@ -30,6 +36,7 @@ type AsAnchor = CommonProps &
 export type ButtonProps = AsButton | AsRouterLink | AsAnchor;
 
 export function Button(props: ButtonProps) {
+  const readOnly = useReadOnly();
   const {
     kind = 'secondary',
     size = 'md',
@@ -39,6 +46,7 @@ export function Button(props: ButtonProps) {
     loading = false,
     className,
     children,
+    ro,
   } = props;
   const iconOnly = children === undefined || children === null || children === false;
   const cls = cx(
@@ -57,8 +65,31 @@ export function Button(props: ButtonProps) {
     </>
   );
 
+  if (ro && readOnly) {
+    // Только просмотр: вместо ссылки или действия — неактивная кнопка с подсказкой
+    const hint = typeof ro === 'string' ? ro : readOnly.hint;
+    const named = props['aria-label'] ?? (typeof children === 'string' ? children : props.title);
+    return (
+      <button
+        type="button"
+        id={props.id}
+        className={cx(cls, 'is-ro')}
+        title={hint}
+        aria-disabled="true"
+        aria-label={named ? `${named}. ${hint}` : hint}
+        data-ro=""
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          readOnly.onBlocked(hint);
+        }}
+      >
+        {content}
+      </button>
+    );
+  }
   if (props.to !== undefined) {
-    const { kind: _k, size: _s, icon: _i, iconRight: _r, block: _b, loading: _l, ...link } = props;
+    const { kind: _k, size: _s, icon: _i, iconRight: _r, block: _b, loading: _l, ro: _ro, ...link } = props;
     return (
       <Link {...link} className={cls}>
         {content}
@@ -66,7 +97,7 @@ export function Button(props: ButtonProps) {
     );
   }
   if (props.href !== undefined) {
-    const { kind: _k, size: _s, icon: _i, iconRight: _r, block: _b, loading: _l, ...anchor } = props;
+    const { kind: _k, size: _s, icon: _i, iconRight: _r, block: _b, loading: _l, ro: _ro, ...anchor } = props;
     return (
       <a {...anchor} className={cls}>
         {content}
@@ -80,6 +111,7 @@ export function Button(props: ButtonProps) {
     iconRight: _r,
     block: _b,
     loading: _l,
+    ro: _ro,
     type = 'button',
     disabled,
     ...button

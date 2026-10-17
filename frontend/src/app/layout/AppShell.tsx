@@ -4,6 +4,9 @@ import { Outlet, ScrollRestoration } from 'react-router';
 
 import { useMe } from '../../api/hooks/useMe';
 import { useLogout } from '../../features/auth/useLogout';
+import { useViewMode } from '../../features/view/context';
+import { ViewModeProvider } from '../../features/view/ViewModeProvider';
+import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 import { useRouteMeta } from '../routeMeta';
 import { useDocumentTitle } from '../useDocumentTitle';
 import { PageLoading } from './FullPageState';
@@ -14,15 +17,27 @@ import { Sidebar } from './Sidebar';
 import { TabBar } from './TabBar';
 import { TopBar } from './TopBar';
 import { usePendingNavigation } from './usePendingNavigation';
+import { ViewBanner, ViewDenied, ViewPicker } from './ViewBar';
 
 /**
  * Оболочка приложения (mockup/js/app.js, shell): боковая панель на компьютере,
  * нижние вкладки и шторка «Еще» на телефоне, шапка с заголовком раздела.
- * Рендерится внутри RequireAuth, поэтому пользователь уже загружен.
+ * Рендерится внутри RequireAuth, поэтому пользователь уже загружен. Режим просмотра данных
+ * участника (Р27) — для всей оболочки: шапка показывает банк участника, под ней — плашка.
  */
 export function AppShell() {
+  return (
+    <ViewModeProvider>
+      <Shell />
+    </ViewModeProvider>
+  );
+}
+
+function Shell() {
   const { t } = useTranslation();
   const { data: me } = useMe();
+  const view = useViewMode();
+  const mobile = useMediaQuery(MOBILE_QUERY);
   // Переход на экран, который грузится дольше 300 мс: шапка и меню — уже нового экрана, на
   // месте прежнего — индикатор (как при первой загрузке), а не застывший прежний экран
   const pending = usePendingNavigation();
@@ -60,14 +75,17 @@ export function AppShell() {
       </div>
       <div className="main">
         <TopBar title={title} crumbs={crumbs} me={me} onLogout={onLogout} loggingOut={loggingOut} />
+        {view.asUser !== null && <ViewBanner me={me} />}
         <main className="view" id="view" tabIndex={-1} aria-busy={pending ? true : undefined}>
+          {/* «Чьи данные смотреть» на телефоне — строкой над экраном (на компьютере — в шапке) */}
+          {mobile && view.canPick && view.asUser === null && !pending && <ViewPicker me={me} row />}
           {/* экран грузится отдельным файлом (src/app/lazyPage.ts): шапка и меню уже на месте */}
           {pending && <PageLoading immediate />}
           {/* прежний экран при долгом переходе скрыт, но не размонтирован: переход могут отменить */}
           <div className="view-screen" hidden={pending !== null}>
             <Suspense fallback={<PageLoading />}>
               <ScreenTitleContext.Provider value={setScreenTitle}>
-                <Outlet />
+                {view.denied ? <ViewDenied /> : <Outlet />}
               </ScreenTitleContext.Provider>
             </Suspense>
           </div>

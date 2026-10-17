@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { meQueryKey } from '../../../api/keys';
 import type { ExportSummary } from '../../../features/account/api';
+import { adminUser } from '../../../features/admin/testData';
 import { aiBudget } from '../../../features/ai/testData';
 import { playLimitsOut } from '../../../features/bank/testData';
 import { betsSummary } from '../../../features/bets/testData';
@@ -34,8 +35,8 @@ function api(over: Record<string, Handler> = {}): Record<string, Handler> {
     'GET /api/me/play-limits': () => json(playLimitsOut()),
     'GET /api/admin/users': () =>
       json([
-        { id: 1, role: 'admin', status: 'active' },
-        { id: 7, role: 'admin', status: 'active' },
+        adminUser({ id: 1, display_name: 'Роман Буров', role: 'admin' }),
+        adminUser({ id: 7, display_name: 'Мария Виртанен', role: 'admin' }),
       ]),
     ...over,
   };
@@ -58,6 +59,27 @@ afterEach(() => {
 });
 
 describe('Кабинет: данные', () => {
+  it('Р27: «Кто видит мои данные» — администратор только просмотр, без даты последнего просмотра (В1)', async () => {
+    renderTab(api());
+    const who = await card('Кто видит мои данные');
+    expect(within(who).getByText('Администратор')).toBeInTheDocument();
+    expect(within(who).getByText(/Ваши ставки, банк, стратегию и анализы — только просмотр: изменить ничего не может/)).toBeInTheDocument();
+    expect(within(who).getByText(/Каждый просмотр записывается в журнал администратора/)).toBeInTheDocument();
+    expect(within(who).getByText('Другие участники')).toBeInTheDocument();
+    expect(within(who).getByText('Пароль, коды 2FA, резервные коды и ключ Claude.')).toBeInTheDocument();
+    expect(within(who).getByText(/Это правило есть в условиях при регистрации/)).toBeInTheDocument();
+    // дату и экран просмотра участнику не показываем
+    expect(within(who).queryByText(/Последний просмотр/)).toBeNull();
+    expect(within(who).queryByText(/еще не открывал/)).toBeNull();
+  });
+
+  it('Р27: администратору — «Другие администраторы» с именами', async () => {
+    renderTab(api(), ME_ADMIN);
+    const who = await card('Кто видит мои данные');
+    expect(within(who).getByText('Другие администраторы')).toBeInTheDocument();
+    expect(await within(who).findByText('Мария Виртанен')).toBeInTheDocument();
+  });
+
   it('экспорт: что в архиве, JSON и ZIP скачиваются сразу с именем файла с сервера', async () => {
     const created: Blob[] = [];
     vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
@@ -219,7 +241,7 @@ describe('Кабинет: данные', () => {
   });
 
   it('единственный администратор удалить себя не может — сначала назначить другого', async () => {
-    renderTab(api({ 'GET /api/admin/users': () => json([{ id: 1, role: 'admin', status: 'active' }, { id: 2, role: 'member', status: 'active' }]) }), ME_ADMIN);
+    renderTab(api({ 'GET /api/admin/users': () => json([adminUser({ id: 1, role: 'admin' }), adminUser({ id: 2 })]) }), ME_ADMIN);
     const danger = await card('Удалить аккаунт');
     expect(await within(danger).findByText(/^Вы единственный администратор\./)).toBeInTheDocument();
     expect(within(danger).getByRole('button', { name: 'Удалить аккаунт' })).toBeDisabled();

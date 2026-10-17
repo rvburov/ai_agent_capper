@@ -57,7 +57,7 @@ function ConflictNotes({ bet, onCorrect }: { bet: BetItem; onCorrect: (bet: BetI
         ))}
         {!isImported(bet) && (
           <div className="row">
-            <Button size="sm" icon="edit" onClick={() => onCorrect(bet)}>
+            <Button size="sm" icon="edit" onClick={() => onCorrect(bet)} ro>
               {t('bets.actions.correct')}
             </Button>
           </div>
@@ -230,11 +230,11 @@ export function DetailBlock({ bet, onClosing, onCorrect }: { bet: BetItem } & Ac
             <div className="row">
               {/* Старый бот закрывающих кэфов не записывал, CLV по его ставкам не считается (В5) */}
               {!legacy && (
-                <Button size="sm" icon="bolt" onClick={() => onClosing(bet)}>
+                <Button size="sm" icon="bolt" onClick={() => onClosing(bet)} ro>
                   {needsClosing(bet) ? t('bets.actions.addClosing') : t('bets.actions.closing')}
                 </Button>
               )}
-              <Button kind="ghost" size="sm" icon="edit" onClick={() => onCorrect(bet)}>
+              <Button kind="ghost" size="sm" icon="edit" onClick={() => onCorrect(bet)} ro>
                 {t('bets.actions.correct')}
               </Button>
             </div>
@@ -260,19 +260,19 @@ export function BetSheet({
   const footer = open ? (
     <>
       <Button onClick={onClose}>{t('common.close')}</Button>
-      <Button kind="primary" icon="edit" onClick={() => onSettle(bet)}>
+      <Button kind="primary" icon="edit" onClick={() => onSettle(bet)} ro>
         {t('bets.actions.settle')}
       </Button>
     </>
   ) : (
     <>
       {!isImported(bet) && (
-        <Button icon="edit" onClick={() => onCorrect(bet)}>
+        <Button icon="edit" onClick={() => onCorrect(bet)} ro>
           {t('bets.actions.correctShort')}
         </Button>
       )}
       {!legacy && (
-        <Button icon="bolt" onClick={() => onClosing(bet)}>
+        <Button icon="bolt" onClick={() => onClosing(bet)} ro>
           {t('bets.actions.closingShort')}
         </Button>
       )}

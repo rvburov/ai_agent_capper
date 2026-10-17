@@ -19,6 +19,7 @@ import type { Analysis, Express, Step } from '../../features/analysis/types';
 import { isActive, isParseFailed } from '../../features/analysis/types';
 import { useAnalysisEvents } from '../../features/analysis/useAnalysisEvents';
 import type { Bet } from '../../features/bets/api';
+import { useViewAs } from '../../features/view/context';
 import { usePublicSettings } from '../../features/profile/usePublicSettings';
 import { formatDateLong, formatMoney, formatOdds, type Currency } from '../../lib/format';
 import { cx } from '../../lib/cx';
@@ -78,11 +79,13 @@ export function AnalysisPage() {
   const params = useParams();
   const id = Number(params.id);
   const valid = Number.isInteger(id) && id > 0;
+  // Р27: анализ участника в режиме просмотра — без потока событий (ход идущего — опросом)
+  const asUser = useViewAs();
   const [poll, setPoll] = useState(false);
-  const query = useAnalysis(valid ? id : null, { poll });
+  const query = useAnalysis(valid ? id : null, { poll: poll || asUser !== null });
   const analysis = query.data;
   const active = isActive(analysis?.status);
-  const stream = useAnalysisEvents(valid ? id : 0, active);
+  const stream = useAnalysisEvents(valid ? id : 0, active && asUser === null);
   useEffect(() => setPoll(stream.poll), [stream.poll]);
 
   const { data: me } = useMe();
@@ -174,7 +177,8 @@ export function AnalysisPage() {
   for (const step of steps) {
     if (step.state === 'running' && !runningSince.current.has(step.index)) runningSince.current.set(step.index, Date.now());
   }
-  const isAdmin = me?.role === 'admin';
+  // В режиме просмотра — как видит участник: его лимит, без подсказок администратора
+  const isAdmin = me?.role === 'admin' && asUser === null;
   const info = analysis.status === 'failed' ? stopInfo(analysis, { isAdmin, access: access.data, t }) : null;
   const ctx: StepContext = {
     names,
@@ -351,7 +355,7 @@ export function AnalysisPage() {
           </h2>
           <p className="lead">{lead}</p>
         </div>
-        <Button size="sm" icon="edit" to={`${paths.newAnalysis}?draft=${analysis.id}`}>
+        <Button size="sm" icon="edit" to={`${paths.newAnalysis}?draft=${analysis.id}`} ro>
           {t('analysis.edit')}
         </Button>
       </div>

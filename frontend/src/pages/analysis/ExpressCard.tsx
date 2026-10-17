@@ -2,7 +2,7 @@ import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 import { paths } from '../../app/paths';
-import { Button, Callout, Chip, Disclosure, Icon, OddsBox } from '../../components';
+import { Button, Callout, Chip, Disclosure, Icon, OddsBox, ReadOnlyNote, useReadOnly } from '../../components';
 import { keyText } from '../../features/analysis/codes';
 import { formatProb, formatShare } from '../../features/analysis/markets';
 import { payout, totalOdds, type MoneyRules } from '../../features/analysis/stake';
@@ -134,6 +134,7 @@ interface ExpressCardProps {
 
 export function ExpressCard(props: ExpressCardProps) {
   const { t } = useTranslation();
+  const readOnly = useReadOnly();
   const { analysis, express, legs, currency, rules, state } = props;
   // Ставка сохранена — показываем ее сумму и кэфы (с сервера), а не рекомендацию анализа
   const saved = analysis.bet;
@@ -180,25 +181,34 @@ export function ExpressCard(props: ExpressCardProps) {
       <div className="stack analysis-foot">
         <Callout>{t('analysis.express.skipped')}</Callout>
         <div className="analysis-actions">
-          <Button kind="primary" icon="ticket" loading={props.deciding} onClick={props.onUnskip}>
+          <Button kind="primary" icon="ticket" loading={props.deciding} onClick={props.onUnskip} ro>
             {t('analysis.express.unskip')}
           </Button>
         </div>
       </div>
     );
   } else {
-    foot = (
+    const actions = (
       <div className="analysis-actions">
-        <Button kind="primary" icon="check" onClick={props.onSave}>
+        <Button kind="primary" icon="check" onClick={props.onSave} ro>
           {t('analysis.express.save')}
         </Button>
-        <Button icon="edit" onClick={props.onEditStake}>
+        <Button icon="edit" onClick={props.onEditStake} ro>
           {t('analysis.express.editStake')}
         </Button>
-        <Button kind="ghost" icon="x" loading={props.deciding} onClick={props.onSkip}>
+        <Button kind="ghost" icon="x" loading={props.deciding} onClick={props.onSkip} ro>
           {t('analysis.express.skip')}
         </Button>
       </div>
+    );
+    // Р27: администратор смотрит анализ участника — решение принимает сам участник
+    foot = readOnly ? (
+      <div className="stack analysis-foot">
+        {actions}
+        <ReadOnlyNote>{t('view.roAnalysisNote')}</ReadOnlyNote>
+      </div>
+    ) : (
+      actions
     );
   }
 
@@ -291,7 +301,7 @@ export function ExpressCard(props: ExpressCardProps) {
             </div>
           </div>
           {custom && recommended !== null && decision !== 'bet' && (
-            <Button kind="ghost" size="sm" icon="refresh" onClick={props.onResetStake}>
+            <Button kind="ghost" size="sm" icon="refresh" onClick={props.onResetStake} ro>
               {t('analysis.express.reset', { amount: formatMoney(recommended, currency) })}
             </Button>
           )}

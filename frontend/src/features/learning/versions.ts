@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { api, unwrap } from '../../api/client';
 import { analysisKeys } from '../analysis/keys';
 import { DASHBOARD_PREFIX } from '../bets/keys';
+import { useViewAs } from '../view/context';
+import { asUserQuery, viewKey } from '../view/viewMode';
 import { learningKeys } from './keys';
 import type { EvalRun, EvalRuns, RulesCandidateIn, StrategyVersion, StrategyVersions } from './types';
 
@@ -24,9 +26,10 @@ export function runActive(run: Pick<EvalRun, 'status'> | null | undefined): bool
 }
 
 export function useStrategyVersions({ enabled = true }: { enabled?: boolean } = {}) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: learningKeys.versions,
-    queryFn: () => unwrap(api.GET('/api/strategy/versions')),
+    queryKey: viewKey(asUser, learningKeys.versions),
+    queryFn: () => unwrap(api.GET('/api/strategy/versions', { params: { query: asUserQuery(asUser) } })),
     staleTime: 30_000,
     enabled,
   });

@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, unwrap } from '../../api/client';
 import type { components } from '../../api/schema';
 import { analysisKeys } from '../analysis/keys';
+import { useViewAs } from '../view/context';
+import { asUserQuery, viewKey } from '../view/viewMode';
 
 /*
  * «Мои букмекеры» кабинета (В9): GET /api/me/bookmakers/list — действующие и скрытые, с числом
@@ -20,9 +22,10 @@ export const bookmakerKeys = {
 };
 
 export function useBookmakerList() {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: bookmakerKeys.list,
-    queryFn: () => unwrap(api.GET('/api/me/bookmakers/list')),
+    queryKey: viewKey(asUser, bookmakerKeys.list),
+    queryFn: () => unwrap(api.GET('/api/me/bookmakers/list', { params: { query: asUserQuery(asUser) } })),
     staleTime: 60_000,
   });
 }

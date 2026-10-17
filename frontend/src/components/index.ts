@@ -38,6 +38,7 @@ export { Meter, type MeterProps } from './Meter';
 export { Modal, type ModalProps } from './Modal';
 export { OddsBox, OddsGrid, type OddsCell, type OddsGridProps } from './OddsBox';
 export { PushNotice, type PushNoticeProps } from './PushNotice';
+export { ReadOnlyContext, ReadOnlyNote, useReadOnly, type ReadOnlyState } from './ReadOnly';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Segmented, type SegmentedItem, type SegmentedProps } from './Segmented';
 export { Skeleton, type SkeletonProps } from './Skeleton';

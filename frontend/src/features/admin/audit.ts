@@ -20,6 +20,7 @@ export const AUDIT_GROUPS = [
   'settings',
   'import',
   'learning',
+  'view',
 ] as const;
 export type AuditGroup = (typeof AUDIT_GROUPS)[number];
 
@@ -37,7 +38,31 @@ const GROUP_ACTIONS: Record<Exclude<AuditGroup, 'all'>, readonly AuditAction[]> 
   import: ['import', 'player_merge', 'player_edit'],
   // Этап 5: загрузка файла tennis-data, наборы и прогоны проверок, включение версий
   learning: ['data_upload', 'eval_set', 'eval_run', 'version_on', 'lesson_on', 'lesson_off', 'model_on'],
+  // Р27: администратор открыл данные участника или выгрузил их в CSV
+  view: ['member_view', 'member_export'],
 };
+
+// Экраны просмотра данных участника (details.screen записи member_view, группы маршрутов сервера)
+const VIEW_SCREENS = ['dashboard', 'bets', 'analytics', 'bank', 'analyses', 'learning', 'ai', 'summary'] as const;
+type ViewScreen = (typeof VIEW_SCREENS)[number];
+
+function isViewScreen(value: unknown): value is ViewScreen {
+  return typeof value === 'string' && (VIEW_SCREENS as readonly string[]).includes(value);
+}
+
+const SUMMARY_PERIODS = ['7d', '30d', '90d', 'all'] as const;
+type SummaryPeriod = (typeof SUMMARY_PERIODS)[number];
+
+const EXPORT_PARTS = ['bets', 'events', 'calibration', 'brier'] as const;
+type ExportPart = (typeof EXPORT_PARTS)[number];
+
+function isExportPart(value: string): value is ExportPart {
+  return (EXPORT_PARTS as readonly string[]).includes(value);
+}
+
+function isSummaryPeriod(value: unknown): value is SummaryPeriod {
+  return typeof value === 'string' && (SUMMARY_PERIODS as readonly string[]).includes(value);
+}
 
 /** Действия группы для запроса ?action=...; для «Все действия» — без фильтра. */
 export function groupActions(group: AuditGroup): readonly AuditAction[] | undefined {
@@ -60,6 +85,8 @@ function isRole(value: unknown): value is Role {
 /** Кого касается запись: участник, email приглашения или null — «вся программа». */
 export function auditTarget(entry: AuditEntry): string | null {
   const d = entry.details;
+  // Сводка по всем участникам (Р27) — не «вся программа», а все участники
+  if (entry.action === 'member_view' && d.screen === 'summary') return i18n.t('admin.audit.allMembers');
   if (entry.action === 'delete') {
     const name = text(d.display_name);
     const email = text(d.email);
@@ -231,6 +258,30 @@ export function auditDetails(entry: AuditEntry): string {
       const to = text(d.to);
       if (d.field !== 'default_tz' || !from || !to) return '';
       return t('admin.audit.details.defaultTz', { from: timeZoneName(t, from), to: timeZoneName(t, to) });
+    }
+    case 'member_view': {
+      // «Ставки · только просмотр»; сводка по всем — «Сводка за 30 дней · только просмотр»
+      if (!isViewScreen(d.screen)) return t('admin.audit.details.viewReadOnly');
+      if (d.screen === 'summary') {
+        const period = isSummaryPeriod(d.period) ? t(`admin.audit.details.viewPeriods.${d.period}`) : null;
+        return period
+          ? t('admin.audit.details.viewSummaryPeriod', { period })
+          : t('admin.audit.details.viewSummary');
+      }
+      return t('admin.audit.details.view', { screen: t(`admin.audit.details.viewScreens.${d.screen}`) });
+    }
+    case 'member_export': {
+      // «Ставки, CSV» или «Аналитика: ставки, события, CSV»
+      if (d.what === 'bets') return t('admin.audit.details.exportBets');
+      if (d.what !== 'analytics') return '';
+      const parts = Array.isArray(d.parts) ? d.parts.filter((p): p is string => typeof p === 'string') : [];
+      const known = parts.filter(isExportPart);
+      return known.length
+        ? t('admin.audit.details.exportAnalyticsParts', {
+            parts: known.map((p) => t(`admin.audit.details.exportParts.${p}`)).join(', '),
+            format: known.length > 1 ? 'ZIP' : 'CSV',
+          })
+        : t('admin.audit.details.exportAnalytics');
     }
     case 'data_upload': {
       // «2026.xlsx, 1,9 МБ» — итог загрузки знает только воркер: он на вкладке «Данные»

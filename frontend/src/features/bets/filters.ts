@@ -125,8 +125,10 @@ export function anyActive(filters: BetFilters): boolean {
 }
 
 /** Строка CSV по тем же фильтрам (GET /api/bets/export.csv). */
-export function exportHref(filters: BetFilters): string {
+export function exportHref(filters: BetFilters, asUser: number | null = null): string {
   const params = new URLSearchParams();
+  // Р27: администратор выгружает ставки участника, чьи данные смотрит (выгрузка — в журнал)
+  if (asUser !== null) params.set('as_user', String(asUser));
   for (const [name, value] of Object.entries(filtersQuery(filters))) {
     if (Array.isArray(value)) for (const item of value) params.append(name, String(item));
     else if (value !== undefined && value !== null) params.set(name, String(value));

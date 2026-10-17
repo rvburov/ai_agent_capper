@@ -16,6 +16,15 @@ async function fillForm(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('регистрация по приглашению', () => {
+  it('Р27: в условиях — администратор видит ставки, банк и анализы (только просмотр)', () => {
+    mockFetch({});
+    renderAuth('/register');
+    const data = screen.getByRole('region', { name: 'Ваши данные' });
+    expect(within(data).getByText('Администратор видит ваши ставки, банк и анализы (только просмотр).')).toBeInTheDocument();
+    expect(within(data).getByText(/каждый просмотр записывается в журнал/)).toBeInTheDocument();
+    expect(data.textContent).not.toMatch(/видите только вы/);
+  });
+
   it('пустая форма: ошибки полей и согласий, запроса нет, фокус на первом поле', async () => {
     const { calls } = mockFetch({});
     renderAuth('/register');

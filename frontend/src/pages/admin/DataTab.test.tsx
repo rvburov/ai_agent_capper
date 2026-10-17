@@ -96,7 +96,7 @@ describe('Администрирование → Данные', () => {
     expect(within(report).getByText(/^Нет в архиве: 1 —/)).toBeInTheDocument();
     expect(within(report).getByText('Расхождений с ручным расчетом: 1.')).toBeInTheDocument();
     expect(within(report).getByText('Исход вносит участник: 2.')).toBeInTheDocument();
-    expect(within(report).getByText(/Чужие ставки, суммы и исходы здесь не видны/)).toBeInTheDocument();
+    expect(within(report).getByText(/Сами ставки и суммы участников — в «Сводке» и в карточке участника, только просмотр/)).toBeInTheDocument();
     // Р14: ни сумм, ни валюты
     expect(report.textContent).not.toMatch(/₽|\$/);
   });

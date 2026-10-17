@@ -13,10 +13,11 @@ import { useBetSummary } from '../../../features/bets/api';
 import { useBookmakerList } from '../../../features/bookmakers/api';
 import { formatDateRange, formatDayMonth, formatNumber } from '../../../lib/format';
 import { useHashTarget } from '../useHashTarget';
+import { WhoCard } from './WhoCard';
 import './data.css';
 
 /*
- * Кабинет → «Данные» (panelData макета, GDPR, Р15, В10): экспорт всех своих данных сразу
+ * Кабинет → «Данные» (panelData макета, GDPR, Р15, В10): кто видит мои данные (Р27), экспорт всех своих данных сразу
  * скачиванием, откуда берутся данные о матчах, согласие на обезличенные прогнозы, статус
  * импорта старого бота и удаление аккаунта с паролем и кодом 2FA (7 дней на отмену).
  */
@@ -35,6 +36,7 @@ export function DataTab({ me }: { me: Me }) {
   return (
     <div className="grid">
       <div className="col-7 profile-col">
+        <WhoCard me={me} />
         <ExportCard summary={data} />
         <SourcesCard />
       </div>

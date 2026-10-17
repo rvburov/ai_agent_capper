@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { api, unwrap } from '../../api/client';
 import type { components } from '../../api/schema';
 import { isLegacy } from './display';
+import { useViewAs } from '../view/context';
+import { asUserQuery, viewKey } from '../view/viewMode';
 import { betKeys } from './keys';
 import type { BetItem, BetLeg, LegResult } from './types';
 
@@ -97,15 +99,16 @@ export function reviewShown(bet: Pick<BetItem, 'status' | 'source'>, review: Bet
 // Ключ — под betKeys.all: расчет, сторно и уведомление «ставка рассчитана» перечитывают его сами
 export const reviewKey = (id: number) => [...betKeys.all, 'review', id] as const;
 
-async function fetchReview(id: number): Promise<BetReview> {
-  return unwrap(api.GET('/api/bets/{bet_id}/review', { params: { path: { bet_id: id } } }));
+async function fetchReview(id: number, asUser: number | null): Promise<BetReview> {
+  return unwrap(api.GET('/api/bets/{bet_id}/review', { params: { path: { bet_id: id }, query: asUserQuery(asUser) } }));
 }
 
 /** Разбор ставки; у открытой, возврата и ставки бота запроса нет. */
 export function useBetReview(bet: Pick<BetItem, 'id' | 'status' | 'source'>) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: reviewKey(bet.id),
-    queryFn: () => fetchReview(bet.id),
+    queryKey: viewKey(asUser, reviewKey(bet.id)),
+    queryFn: () => fetchReview(bet.id, asUser),
     enabled: reviewable(bet),
   });
 }

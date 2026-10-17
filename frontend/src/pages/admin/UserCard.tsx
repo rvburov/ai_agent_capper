@@ -8,6 +8,7 @@ import { useAdminUser } from '../../features/admin/useAdminUsers';
 import { deviceName } from '../../features/profile/devices';
 import { RESULT_CHIPS } from '../../features/profile/loginLog';
 import { formatDateTime, formatUsd } from '../../lib/format';
+import { MemberMoney } from './MemberMoney';
 import { HowTo, LoadError, PersonRow, RoleChip, StatusChip, TwoFactorChip } from './parts';
 
 interface UserCardProps {
@@ -18,9 +19,9 @@ interface UserCardProps {
 }
 
 /**
- * Карточка участника: активность (последний вход, сеансы, входы) и те же действия, что в меню.
- * В макете ее нет — она нужна, чтобы администратор видел входы участника перед блокировкой
- * или сбросом. Только активность и расход на ИИ: ставок, банка и стратегии здесь нет (Р14).
+ * Карточка участника (#admin-user-<id> макета): ставки и банк (только просмотр, Р27), роль,
+ * ключ Claude, расход ИИ, активность (последний вход, сеансы, входы) и те же действия, что в
+ * меню. Пароля, кодов 2FA и ключа Claude участника здесь нет.
  */
 export function UserCard({ user, me, actions, onClose }: UserCardProps) {
   const { t } = useTranslation();
@@ -58,6 +59,7 @@ export function UserCard({ user, me, actions, onClose }: UserCardProps) {
           <dd>{formatUsd(current.ai_spent_month_usd)}</dd>
         </div>
       </dl>
+      <MemberMoney userId={current.id} own={current.id === me.id} blocked={current.status === 'blocked'} />
       <div className="stack" style={{ gap: 6 }}>
         <div className="eyebrow">{t('admin.card.recent')}</div>
         <div className="xsmall muted">{t('admin.card.recentHint')}</div>

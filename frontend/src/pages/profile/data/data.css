@@ -17,3 +17,21 @@
 @media (max-width: 720px) {
   .profile-del-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 }
+
+/* «Кто видит мои данные» (whoCard макета, Р27) */
+.profile-who { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.profile-who li { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--line); }
+.profile-who li:first-child { border-top: 0; padding-top: 2px; }
+.profile-who-ic { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--fg-2); }
+.profile-who-ic svg { width: 18px; height: 18px; }
+.profile-who-ic.good { background: var(--good-soft); color: var(--good-ink); }
+.profile-who-ic.info { background: var(--info-soft); color: var(--info-ink); }
+.profile-who-ic.bad { background: var(--bad-soft); color: var(--bad-ink); }
+.profile-who-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); color: var(--fg-2); }
+.profile-who-text b { color: var(--fg); font-size: var(--fs-md); font-weight: 600; }
+.profile-who-text small { font-size: var(--fs-xs); color: var(--fg-3); }
+.profile-who li > .chip { align-self: center; }
+@media (max-width: 480px) {
+  .profile-who li { grid-template-columns: 36px minmax(0, 1fr); }
+  .profile-who li > .chip { grid-column: 2; justify-self: start; }
+}

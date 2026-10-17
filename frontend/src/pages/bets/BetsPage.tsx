@@ -19,6 +19,7 @@ import {
   type BetFilters,
 } from '../../features/bets/filters';
 import type { BetItem } from '../../features/bets/types';
+import { useViewAs } from '../../features/view/context';
 import { formatDateRange } from '../../lib/format';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 import { BetSheet } from './BetDetail';
@@ -90,6 +91,8 @@ export function BetsPage() {
   const mobile = useMediaQuery(MOBILE_QUERY);
   const filtered = anyActive(filters);
   const today = localDay(new Date());
+  // Р27: администратор смотрит ставки участника — только просмотр, выгрузка CSV работает (В2)
+  const asUser = useViewAs();
 
   // Когда на этом экране последний раз менялся банк (расчет, сторно): капитал из кэша до
   // ответа /api/me/bank — еще прежний, его не показываем
@@ -217,10 +220,11 @@ export function BetsPage() {
     if (!bet) return;
     linkDone.current = linkedId;
     dropParam('bet');
-    if (bet.status === 'open') setSettleFor({ bet });
-    else if (mobile) setSheetFor(bet);
+    // в режиме просмотра результат не вносится: открытая ставка — карточкой, без окна результата
+    if (bet.status === 'open' && asUser === null) setSettleFor({ bet });
+    else if (mobile || bet.status === 'open') setSheetFor(bet);
     else setSeek(bet);
-  }, [linkedId, linkedBet.data, linkedBet.error, mobile, dropParam, t, toast]);
+  }, [linkedId, linkedBet.data, linkedBet.error, mobile, asUser, dropParam, t, toast]);
 
   useEffect(() => {
     if (!seek) return;
@@ -302,7 +306,7 @@ export function BetsPage() {
           <h2>{t('bets.head.title')}</h2>
           <p className="lead">{t('bets.head.lead')}</p>
         </div>
-        <Button href={exportHref(filters)} download="bets.csv" icon="download" size={mobile ? 'sm' : 'md'} title={t('bets.head.exportTitle')}>
+        <Button href={exportHref(filters, asUser)} download="bets.csv" icon="download" size={mobile ? 'sm' : 'md'} title={t('bets.head.exportTitle')}>
           {t('bets.head.export')}
         </Button>
       </div>

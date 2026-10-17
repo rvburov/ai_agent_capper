@@ -1,6 +1,8 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import { api, unwrap } from '../../api/client';
+import { useViewAs } from '../view/context';
+import { asUserQuery, viewKey } from '../view/viewMode';
 import { analyticsKeys } from './keys';
 import type { AnalyticsQuery } from './types';
 
@@ -10,9 +12,10 @@ import type { AnalyticsQuery } from './types';
  * (приглушенными), пока не придет новый ответ.
  */
 export function useAnalytics(query: AnalyticsQuery) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: analyticsKeys.one(query),
-    queryFn: () => unwrap(api.GET('/api/analytics', { params: { query } })),
+    queryKey: viewKey(asUser, analyticsKeys.one(query)),
+    queryFn: () => unwrap(api.GET('/api/analytics', { params: { query: { ...query, ...asUserQuery(asUser) } } })),
     placeholderData: keepPreviousData,
   });
 }
@@ -24,9 +27,10 @@ export function useAnalytics(query: AnalyticsQuery) {
  * после нажатия ответ уже в кэше.
  */
 export function useAnalyticsEver(query: AnalyticsQuery, enabled: boolean) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: analyticsKeys.one(query),
-    queryFn: () => unwrap(api.GET('/api/analytics', { params: { query } })),
+    queryKey: viewKey(asUser, analyticsKeys.one(query)),
+    queryFn: () => unwrap(api.GET('/api/analytics', { params: { query: { ...query, ...asUserQuery(asUser) } } })),
     enabled,
   });
 }

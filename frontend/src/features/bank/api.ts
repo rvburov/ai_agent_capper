@@ -5,6 +5,8 @@ import { isApiError } from '../../api/errors';
 import { analysisKeys } from '../analysis/keys';
 import { ANALYTICS_PREFIX, DASHBOARD_PREFIX } from '../bets/keys';
 import { refreshAfterCurrencyChange } from './currency';
+import { useViewAs } from '../view/context';
+import { asUserQuery, viewKey } from '../view/viewMode';
 import type { BankEntryIn } from './types';
 
 // Журнал банка и движение денег (пополнение, вывод, корректировка). Банк (GET /api/me/bank) —
@@ -20,13 +22,19 @@ export const ENTRIES_PAGE = 20;
 
 /** Журнал банка, новые сверху; flowsOnly — только пополнения, выводы и корректировки. */
 export function useBankEntries({ flowsOnly = true }: { flowsOnly?: boolean } = {}) {
+  const asUser = useViewAs();
   return useInfiniteQuery({
-    queryKey: bankKeys.entries(flowsOnly),
+    queryKey: viewKey(asUser, bankKeys.entries(flowsOnly)),
     queryFn: ({ pageParam }) =>
       unwrap(
         api.GET('/api/me/bank/entries', {
           params: {
-            query: { flows_only: flowsOnly, limit: ENTRIES_PAGE, ...(pageParam === null ? {} : { before: pageParam }) },
+            query: {
+              flows_only: flowsOnly,
+              limit: ENTRIES_PAGE,
+              ...(pageParam === null ? {} : { before: pageParam }),
+              ...asUserQuery(asUser),
+            },
           },
         }),
       ),

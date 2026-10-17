@@ -18,6 +18,7 @@ import { KeyTab } from './KeyTab';
 import { MessagesTab } from './MessagesTab';
 import { OverviewTab } from './OverviewTab';
 import { SettingsTab } from './SettingsTab';
+import { SummaryTab } from './SummaryTab';
 import { UsageTab } from './UsageTab';
 import { UsersTab } from './UsersTab';
 import './admin.css';
@@ -25,6 +26,7 @@ import './admin.css';
 const ICONS: Record<AdminTab, IconName> = {
   overview: 'layers',
   users: 'users',
+  summary: 'chart',
   invites: 'userPlus',
   access: 'lock',
   key: 'key',
@@ -91,6 +93,7 @@ export function AdminPage() {
       >
         {active === 'overview' && <OverviewTab me={me} />}
         {active === 'users' && <UsersTab me={me} />}
+        {active === 'summary' && <SummaryTab me={me} />}
         {active === 'invites' && <InvitesTab onInvite={openInvite} />}
         {active === 'access' && <AccessTab me={me} />}
         {active === 'key' && <KeyTab me={me} />}

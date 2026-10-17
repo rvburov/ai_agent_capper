@@ -52,7 +52,7 @@ export function StrategyCard({ strategy, error, onRetry, bank, onPropose }: Stra
     className: 'profile-anchor',
     title: t('profile.bank.strategy.title'),
     actions: (
-      <Button kind="secondary" size="sm" icon="edit" onClick={onPropose}>
+      <Button kind="secondary" size="sm" icon="edit" onClick={onPropose} ro>
         {t('profile.bank.rules.propose')}
       </Button>
     ),

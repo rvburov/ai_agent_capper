@@ -165,3 +165,6 @@
   .tabs.new-tabs > button svg { display: none; }
   .tabs.new-tabs > button { font-size: var(--fs-sm); padding: 13px 6px; }
 }
+
+/* Р27: анализы участника в режиме просмотра — список и пояснение, без формы запуска */
+.new-viewed { display: flex; flex-direction: column; gap: 16px; max-width: 760px; width: 100%; }

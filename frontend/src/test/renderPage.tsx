@@ -2,12 +2,13 @@ import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router';
+import { createMemoryRouter, Outlet, RouterProvider, type RouteObject } from 'react-router';
 
 import { meQueryKey } from '../api/keys';
 import { createQueryClient } from '../api/queryClient';
 import { ThemeProvider } from '../app/theme/ThemeProvider';
 import { ToastProvider } from '../components';
+import { ViewModeProvider } from '../features/view/ViewModeProvider';
 import { baseApi, type Currency, type Me } from './factories';
 import { mockFetch, ME_MEMBER, type Handler } from './fetchMock';
 import { setViewportWidth } from './setup';
@@ -33,6 +34,11 @@ export interface RenderPageOptions {
   stubs?: Record<string, string>;
   /** Ширина окна для matchMedia: 375 — телефон (по умолчанию компьютер, 1366). */
   width?: number;
+  /**
+   * Режим просмотра данных участника (Р27), как в оболочке: адрес с ?as= открывает чужие данные.
+   * По умолчанию — если в адресе есть ?as=.
+   */
+  viewMode?: boolean;
 }
 
 /**
@@ -54,14 +60,27 @@ export function createTestQueryClient(): QueryClient {
  */
 export function renderPage(element: ReactNode, options: RenderPageOptions) {
   const { path, url, me = ME_MEMBER, api, currency, stubs = {}, width } = options;
+  const viewMode = options.viewMode ?? /[?&]as=/.test(url ?? path);
   if (width !== undefined) setViewportWidth(width);
   const user = userEvent.setup();
   const calls = api ? mockFetch({ ...baseApi(me, currency), ...api }).calls : [];
 
-  const routes: RouteObject[] = [
+  const pages: RouteObject[] = [
     { path, element },
     ...Object.entries(stubs).map(([stubPath, text]) => ({ path: stubPath, element: <p>{text}</p> })),
   ];
+  const routes: RouteObject[] = viewMode
+    ? [
+        {
+          element: (
+            <ViewModeProvider>
+              <Outlet />
+            </ViewModeProvider>
+          ),
+          children: pages,
+        },
+      ]
+    : pages;
   const router = createMemoryRouter(routes, { initialEntries: [url ?? path] });
   const client = createTestQueryClient();
   if (me) client.setQueryData(meQueryKey, me);

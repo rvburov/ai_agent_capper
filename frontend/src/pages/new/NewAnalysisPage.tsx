@@ -6,7 +6,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { isApiError } from '../../api/errors';
 import { useMe } from '../../api/hooks/useMe';
 import { paths } from '../../app/paths';
-import { Button, Callout, Skeleton, StickyActionBar, Stepper, Tabs, useToast } from '../../components';
+import { Button, Callout, ReadOnlyNote, Skeleton, StickyActionBar, Stepper, Tabs, useToast } from '../../components';
 import {
   useAiAccess,
   useAnalysis,
@@ -32,6 +32,8 @@ import { isParseFailed, type Analysis } from '../../features/analysis/types';
 import { playBlockedText, playKeys, usePlayLimits } from '../../features/bank/playLimits';
 import { useDebounced } from '../../features/players/api';
 import { usePublicSettings } from '../../features/profile/usePublicSettings';
+import { useViewAs } from '../../features/view/context';
+import { useViewedName } from '../../features/view/people';
 import { currencySign, formatAmountInput, formatEstimate, formatUsd, type Currency } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { eventTitle } from './EventCard';
@@ -102,7 +104,35 @@ function initialDraft(draftParam: number | null, userId: number | null): { state
   return { state: { ...emptyDraft(), analysisId: draftParam }, loadId: draftParam };
 }
 
+/**
+ * «Новый анализ». Р27: администратор, который смотрит данные участника, видит здесь только
+ * последние анализы участника — запустить анализ за него нельзя.
+ */
 export function NewAnalysisPage() {
+  return useViewAs() === null ? <NewAnalysisScreen /> : <ViewedAnalyses />;
+}
+
+/** Анализы участника в режиме просмотра (render макета при UI.view.active). */
+function ViewedAnalyses() {
+  const { t } = useTranslation();
+  const name = useViewedName();
+  return (
+    <div className="new-root stack">
+      <div className="page-head new-head">
+        <div style={{ minWidth: 0 }}>
+          <h2>{t('new.viewed.title')}</h2>
+          <p className="lead">{t('new.viewed.lead', { name: name ?? t('new.viewed.member') })}</p>
+        </div>
+      </div>
+      <div className="new-viewed">
+        <RecentCard limit={20} />
+        <ReadOnlyNote>{t('new.viewed.note')}</ReadOnlyNote>
+      </div>
+    </div>
+  );
+}
+
+function NewAnalysisScreen() {
   const { t } = useTranslation();
   const toast = useToast();
   const navigate = useNavigate();

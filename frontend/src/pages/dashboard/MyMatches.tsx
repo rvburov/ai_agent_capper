@@ -105,7 +105,7 @@ export function MyMatches({ data }: { data: Dashboard }) {
       flush
       foot={
         <>
-          <Button kind="primary" size="sm" icon="spark" to={paths.newAnalysis}>
+          <Button kind="primary" size="sm" icon="spark" to={paths.newAnalysis} ro={t('view.roAnalysis')}>
             {t('dashboard.matches.newAnalysis')}
           </Button>
           <span className="xsmall muted dashboard-foot-note">{t('dashboard.matches.note')}</span>

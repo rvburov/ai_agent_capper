@@ -145,7 +145,7 @@ export function RunningCard({ analysis, steps, ctx, offline, cancelling, onCance
       title={t('analysis.run.title', { count: matchesCount })}
       subtitle={analysis.attempt > 1 ? t('analysis.run.subtitleRestart') : queued ? t('analysis.run.subtitleQueued') : t('analysis.run.subtitle')}
       actions={
-        <Button kind="ghost" size="sm" icon="x" onClick={() => setConfirm(true)}>
+        <Button kind="ghost" size="sm" icon="x" onClick={() => setConfirm(true)} ro>
           {t('analysis.cancel.button')}
         </Button>
       }
@@ -254,10 +254,10 @@ export function StopBanner({ analysis, steps, ctx, info, restarting, onRestart }
         <div className="callout-body">
           <b>{t('analysis.stop.cancelledTitle', { n: at, total })}</b> {t('analysis.stop.cancelledText', { spent })}
           <div className="analysis-stop-acts">
-            <Button kind="primary" size="sm" icon="refresh" disabled={finishing} loading={restarting} onClick={onRestart}>
+            <Button kind="primary" size="sm" icon="refresh" disabled={finishing} loading={restarting} onClick={onRestart} ro>
               {t('analysis.stop.continue', { n: at })}
             </Button>
-            <Button size="sm" icon="edit" to={editTo}>
+            <Button size="sm" icon="edit" to={editTo} ro>
               {t('analysis.edit')}
             </Button>
           </div>
@@ -282,15 +282,15 @@ export function StopBanner({ analysis, steps, ctx, info, restarting, onRestart }
       <div className="callout-body">
         <b>{t('analysis.stop.title', { n: at, total, title })}</b> {info?.reason}.
         <div className="analysis-stop-acts">
-          <Button kind="primary" size="sm" icon="refresh" disabled={!info?.restart} loading={restarting} onClick={onRestart}>
+          <Button kind="primary" size="sm" icon="refresh" disabled={!info?.restart} loading={restarting} onClick={onRestart} ro>
             {t('analysis.stop.restart')}
           </Button>
           {info?.link && (
-            <Button size="sm" icon="key" to={appPath(info.link.to)}>
+            <Button size="sm" icon="key" to={appPath(info.link.to)} ro>
               {info.link.label}
             </Button>
           )}
-          <Button size="sm" icon="edit" to={editTo}>
+          <Button size="sm" icon="edit" to={editTo} ro>
             {t('analysis.edit')}
           </Button>
         </div>

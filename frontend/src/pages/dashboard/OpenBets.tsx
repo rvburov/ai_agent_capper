@@ -82,6 +82,7 @@ function OpenBetCard({ bet, today, starts }: { bet: OpenBet; today: string; star
         block
         to={`${paths.bets}?bet=${bet.id}`}
         aria-label={t('dashboard.open.settleLabel', { id: bet.id })}
+        ro
       >
         {t('dashboard.open.settle')}
       </Button>

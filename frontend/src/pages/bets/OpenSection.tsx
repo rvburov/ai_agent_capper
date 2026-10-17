@@ -154,7 +154,7 @@ function OpenCard({ bet, fresh, onSettle }: { bet: BetItem; fresh: boolean; onSe
       </dl>
       {bet.awaiting_result && <p className="xsmall muted">{awaitingText(bet, t)}</p>}
       <div className="bets-open-actions">
-        <Button kind="primary" icon="edit" onClick={() => onSettle(bet)}>
+        <Button kind="primary" icon="edit" onClick={() => onSettle(bet)} ro>
           {t('bets.actions.settle')}
         </Button>
         {bet.analysis_id !== null && (

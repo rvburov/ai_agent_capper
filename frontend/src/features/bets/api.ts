@@ -12,6 +12,8 @@ import { isApiError } from '../../api/errors';
 import type { components } from '../../api/schema';
 import { analysisKeys } from '../analysis/keys';
 import { refreshAfterCurrencyChange } from '../bank/currency';
+import { useViewAs } from '../view/context';
+import { asUserQuery, viewKey } from '../view/viewMode';
 import { ANALYTICS_PREFIX, betKeys, DASHBOARD_PREFIX } from './keys';
 import type { BetFiltersQuery, BetItem, ClosingIn, LegSettleIn } from './types';
 
@@ -73,13 +75,19 @@ export const OPEN_PAGE = 50;
  * При смене фильтров прежний список остается на экране, пока не придет новый.
  */
 export function useBetList(query: BetFiltersQuery, { limit = HISTORY_PAGE, enabled = true } = {}) {
+  const asUser = useViewAs();
   const listQuery = { ...query, limit };
   return useInfiniteQuery({
-    queryKey: betKeys.list(listQuery),
+    queryKey: viewKey(asUser, betKeys.list(listQuery)),
     queryFn: ({ pageParam }) =>
       unwrap(
         api.GET('/api/bets', {
-          params: { query: pageParam === null ? listQuery : { ...listQuery, before: pageParam } },
+          params: {
+            query: {
+              ...(pageParam === null ? listQuery : { ...listQuery, before: pageParam }),
+              ...asUserQuery(asUser),
+            },
+          },
         }),
       ),
     initialPageParam: null as number | null,
@@ -91,9 +99,10 @@ export function useBetList(query: BetFiltersQuery, { limit = HISTORY_PAGE, enabl
 
 /** Итоги по тем же фильтрам (GET /api/bets/summary). */
 export function useBetSummary(query: BetFiltersQuery, { enabled = true } = {}) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: betKeys.summary(query),
-    queryFn: () => unwrap(api.GET('/api/bets/summary', { params: { query } })),
+    queryKey: viewKey(asUser, betKeys.summary(query)),
+    queryFn: () => unwrap(api.GET('/api/bets/summary', { params: { query: { ...query, ...asUserQuery(asUser) } } })),
     placeholderData: keepPreviousData,
     enabled,
   });
@@ -113,9 +122,11 @@ export function useBetCounts() {
  * поэтому она считается устаревшей сразу: карточка запрашивается при открытии окна.
  */
 export function useBet(id: number | null, initial?: BetItem) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: betKeys.one(id ?? 0),
-    queryFn: () => unwrap(api.GET('/api/bets/{bet_id}', { params: { path: { bet_id: id ?? 0 } } })),
+    queryKey: viewKey(asUser, betKeys.one(id ?? 0)),
+    queryFn: () =>
+      unwrap(api.GET('/api/bets/{bet_id}', { params: { path: { bet_id: id ?? 0 }, query: asUserQuery(asUser) } })),
     enabled: id !== null,
     initialData: initial,
     initialDataUpdatedAt: initial ? 0 : undefined,

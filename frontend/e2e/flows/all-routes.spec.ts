@@ -16,7 +16,7 @@ import { placeBet, settleWon } from './dashboard-steps';
 // а у участника и администратора еще и с открытым колокольчиком (окно уведомлений) и окнами этапа 5
 // (ставка с разбором ИИ, предложение правил, предложение урока) и окном установки этапа 6. Данные на экранах настоящие: у
 // участника — анализ и рассчитанная ставка, у администратора — его разделы, «Обучение модели»,
-// «ИИ и расходы» и кабинет.
+// «ИИ и расходы» и кабинет, а также экраны участника в режиме просмотра (Р27).
 
 const THEMES = ['light', 'dark'] as const;
 
@@ -128,6 +128,16 @@ test('все экраны на телефоне: без прокрутки вб�
   expect(playerId).toBeGreaterThan(0);
 
   const urls = appUrls({ analysisId, playerId });
+  // Р27: администратор смотрит данные участника (?as=<id>) — те же экраны глазами участника,
+  // с плашкой «Вы смотрите данные» и неактивными кнопками изменения
+  const people = (await (await admin.api.get('/api/admin/users')).json()) as { id: number; email: string }[];
+  const memberId = people.find((p) => p.email === member.email)?.id ?? 0;
+  expect(memberId).toBeGreaterThan(0);
+  const viewUrls = ['/', '/bets', '/analytics', '/new', paths.analysis(analysisId), paths.profile('bank')].map((url) => ({
+    url: `${url}?as=${memberId}`,
+    who: 'admin' as const,
+    pattern: 'данные участника',
+  }));
   const guest = await device();
   const seen = [
     ...(await checkUrls(guest, urls.filter((u) => u.who === 'guest'))),
@@ -136,8 +146,9 @@ test('все экраны на телефоне: без прокрутки вб�
     // у администратора свои виды общих экранов: дела на главной, бюджет ключа, разделы кабинета,
     // «Обучение модели» с решениями (предложить урок, заморозить набор, перекалибровать, JSONL)
     ...(await checkUrls(admin, ADMIN_VIEWS.map((url) => ({ url, who: 'admin' as const, pattern: 'вид администратора' })))),
+    ...(await checkUrls(admin, viewUrls)),
   ];
-  expect(seen.length).toBe(urls.length + ADMIN_VIEWS.length);
+  expect(seen.length).toBe(urls.length + ADMIN_VIEWS.length + viewUrls.length);
   await checkBell(m);
   await checkBell(admin);
   // окна этапа 5: ставка с блоком «Разбор ИИ» (нижний лист), предложение правил суммы, урок

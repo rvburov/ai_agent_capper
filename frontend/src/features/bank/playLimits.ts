@@ -4,6 +4,8 @@ import { api, unwrap } from '../../api/client';
 import { isApiError } from '../../api/errors';
 import { parseAmount } from '../analysis/amount';
 import { codeText } from '../analysis/codes';
+import { useViewAs } from '../view/context';
+import { asUserQuery, viewKey } from '../view/viewMode';
 import { playKeys, refreshAfterCurrencyChange } from './currency';
 import type { PlayLimits, PlayLimitsIn } from './types';
 
@@ -18,9 +20,10 @@ export { playKeys, refreshAfterCurrencyChange };
 
 /** Лимиты, пауза и «сегодня» участника. */
 export function usePlayLimits() {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: playKeys.limits,
-    queryFn: () => unwrap(api.GET('/api/me/play-limits')),
+    queryKey: viewKey(asUser, playKeys.limits),
+    queryFn: () => unwrap(api.GET('/api/me/play-limits', { params: { query: asUserQuery(asUser) } })),
     staleTime: 30_000,
   });
 }

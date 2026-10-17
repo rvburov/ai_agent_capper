@@ -2,7 +2,18 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { isApiError } from '../../../api/errors';
-import { Button, Callout, Chip, Field, Meter, Segmented, Skeleton, useToast } from '../../../components';
+import {
+  Button,
+  Callout,
+  Chip,
+  Field,
+  Meter,
+  ReadOnlyNote,
+  Segmented,
+  Skeleton,
+  useReadOnly,
+  useToast,
+} from '../../../components';
 import { apiErrorText } from '../../../features/analysis/codes';
 import {
   cancelPendingBody,
@@ -131,6 +142,8 @@ function ResponsibleForm({ limits, tz }: { limits: PlayLimits; tz: string }) {
   const [confirm, setConfirm] = useState(false);
   const busy = useRef(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  // Р27: администратор смотрит лимиты участника — значения без формы, менять может только он сам
+  const readOnly = useReadOnly() !== null;
 
   // Лимиты на сервере изменились (другая вкладка, вступило повышение, сменилась валюта) — поля
   // показывают новые; пока человек правит поле, его ввод не трогаем
@@ -268,6 +281,7 @@ function ResponsibleForm({ limits, tz }: { limits: PlayLimits; tz: string }) {
             inputMode="numeric"
             autoComplete="off"
             placeholder={t('profile.bank.rg.noLimit')}
+            readOnly={readOnly}
             value={draft.count}
             error={errors.includes('count') ? t('profile.bank.rg.countError', { max: limits.bets_per_day_max }) : undefined}
             onChange={(event) => {
@@ -282,6 +296,7 @@ function ResponsibleForm({ limits, tz }: { limits: PlayLimits; tz: string }) {
             autoComplete="off"
             suffix={currencySign(currency)}
             placeholder={t('profile.bank.rg.noLimit')}
+            readOnly={readOnly}
             value={draft.amount}
             error={errors.includes('amount') ? t('profile.bank.rg.amountError') : undefined}
             onChange={(event) => {
@@ -298,7 +313,7 @@ function ResponsibleForm({ limits, tz }: { limits: PlayLimits; tz: string }) {
                 {t('profile.bank.rg.pending', { what: pendingText.join(t('profile.bank.rg.and')), when: inlineMoment(limits.pending.starts_at) })}
               </div>
               <div className="row">
-                <Button kind="ghost" size="sm" loading={save.isPending} onClick={() => void cancelPending()}>
+                <Button kind="ghost" size="sm" loading={save.isPending} onClick={() => void cancelPending()} ro>
                   {t('profile.bank.rg.cancelPending')}
                 </Button>
               </div>
@@ -317,6 +332,8 @@ function ResponsibleForm({ limits, tz }: { limits: PlayLimits; tz: string }) {
             <b>{t('profile.bank.rg.pausedUntil', { date: formatDateLong(pauseLastDay(limits.paused_until)) })}</b>{' '}
             {t('profile.bank.rg.pausedText')}
           </Callout>
+        ) : readOnly ? (
+          <p className="small soft">{t('view.bank.noPause')}</p>
         ) : (
           <div className="stack profile-tight">
             <p className="small soft">{t('profile.bank.rg.pauseText')}</p>
@@ -355,11 +372,17 @@ function ResponsibleForm({ limits, tz }: { limits: PlayLimits; tz: string }) {
           </div>
         )}
       </div>
-      <div className="card-foot">
-        <Button type="submit" icon="check" loading={save.isPending}>
-          {t('profile.bank.rg.save')}
-        </Button>
-      </div>
+      {readOnly ? (
+        <div className="card-foot">
+          <ReadOnlyNote>{t('view.bank.limitsNote')}</ReadOnlyNote>
+        </div>
+      ) : (
+        <div className="card-foot">
+          <Button type="submit" icon="check" loading={save.isPending}>
+            {t('profile.bank.rg.save')}
+          </Button>
+        </div>
+      )}
     </form>
   );
 }

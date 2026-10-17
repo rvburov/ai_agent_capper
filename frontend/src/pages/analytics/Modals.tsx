@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Button, Callout, Checkbox, Modal } from '../../components';
 import { exportHref, type AnalyticsFilters } from '../../features/analytics/filters';
 import type { ExportPart } from '../../features/analytics/types';
+import { useViewAs } from '../../features/view/context';
 
 // Окна «Аналитики»: «Brier и CLV простыми словами» (explainModal) и выгрузка CSV (exportModal, В13).
 
@@ -52,7 +53,8 @@ export function ExportModal({ filters, scope, onClose }: ExportModalProps) {
   const { t } = useTranslation();
   const [picked, setPicked] = useState<ReadonlySet<ChoiceKey>>(() => new Set(CHOICES.filter((c) => c.on).map((c) => c.key)));
   const parts = CHOICES.filter((c) => picked.has(c.key)).flatMap((c) => c.parts);
-  const href = exportHref(filters, parts);
+  // Р27: администратор выгружает аналитику участника, чьи данные смотрит (выгрузка — в журнал)
+  const href = exportHref(filters, parts, useViewAs());
   return (
     <Modal
       open

@@ -9,6 +9,8 @@ import { useBank, useStrategy } from '../../features/analysis/api';
 import { useAiBudget } from '../../features/ai/useAiBudget';
 import { capitalize } from '../../features/analytics/display';
 import { useAiUsage, useDashboard } from '../../features/dashboard/api';
+import { useViewAs } from '../../features/view/context';
+import { useViewedName } from '../../features/view/people';
 import { learningSnapshot } from '../../features/dashboard/learning';
 import { PERIODS, readPeriod, savePeriod } from '../../features/dashboard/display';
 import type { Dashboard, DashboardPeriod } from '../../features/dashboard/types';
@@ -50,12 +52,16 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const mobile = useMediaQuery(MOBILE_QUERY);
   const { data: me } = useMe();
+  // Р27: администратор смотрит главную участника — как ее видит сам участник, только просмотр
+  const asUser = useViewAs();
+  const viewedName = useViewedName();
   const [period, setPeriod] = useState<DashboardPeriod>(readPeriod);
   const dashboard = useDashboard(period);
   const bankQuery = useBank();
   const strategy = useStrategy();
   const budget = useAiBudget();
-  const usage = useAiUsage(me !== undefined && me.role !== 'admin');
+  // Свой расход у администратора не нужен; у участника, чьи данные он смотрит, — нужен
+  const usage = useAiUsage(me !== undefined && (me.role !== 'admin' || asUser !== null));
 
   function choose(next: DashboardPeriod) {
     savePeriod(next);
@@ -107,7 +113,7 @@ export function DashboardPage() {
   const bank = bankQuery.data ?? data.bank;
   const ctx = periodCtx(data, t);
   const prevCtx = data.period === 'all' ? null : t(`dashboard.period.prev.${data.period}`);
-  const name = firstName(me.display_name);
+  const name = firstName(asUser === null ? me.display_name : viewedName);
   const greeting = name ? t(`dashboard.head.greeting.${data.greeting}`, { name }) : t(`dashboard.head.greetingAlone.${data.greeting}`);
   const counts = [
     t('dashboard.head.inPlay', { count: data.open_count }),
@@ -143,7 +149,7 @@ export function DashboardPage() {
   const chart = <BankDynamics data={data} bank={bank} ctx={ctx} mobile={mobile} pending={pending} />;
   const open = <OpenBets data={data} />;
   const matches = <MyMatches data={data} />;
-  const admin = me.role === 'admin';
+  const admin = me.role === 'admin' && asUser === null;
   const learningNow = learningSnapshot(data.learning);
   const awaitingBet = data.open_bets.find((bet) => bet.awaiting_result) ?? null;
   const attention = (
@@ -156,7 +162,9 @@ export function DashboardPage() {
     />
   );
   const learning = <LearningCard snapshot={learningNow} admin={admin} />;
-  const costs = <Costs budget={budget.data} usage={usage.data} me={me} failed={budget.isError} />;
+  // В режиме просмотра — лимит участника; бюджет ключа администратора — только если смотрят администратора
+  const adminCosts = asUser === null ? me.role === 'admin' : Boolean(budget.data?.budget);
+  const costs = <Costs budget={budget.data} usage={usage.data} admin={adminCosts} failed={budget.isError} />;
 
   if (mobile) {
     // Телефон: одна колонка, самое важное сверху — банк, открытые ставки, мои матчи сегодня

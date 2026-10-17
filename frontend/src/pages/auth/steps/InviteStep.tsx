@@ -220,7 +220,10 @@ export function InviteStep({ focus, onRegistered }: InviteStepProps) {
         </div>
         <ul>
           <li>{t('auth.register.data1')}</li>
-          <li>{t('auth.register.data2')}</li>
+          {/* Р27: участник знает до регистрации, что администратор видит его данные */}
+          <li>
+            <b>{t('auth.register.data2Strong')}</b> {t('auth.register.data2')}
+          </li>
           <li>{t('auth.register.data3')}</li>
         </ul>
       </section>

@@ -3,7 +3,7 @@ import { useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { isApiError } from '../../../api/errors';
-import { Button, Callout, Field, Segmented, Skeleton, useToast, type IconName } from '../../../components';
+import { Button, Callout, Field, ReadOnlyNote, Segmented, Skeleton, useReadOnly, useToast, type IconName } from '../../../components';
 import { apiErrorText } from '../../../features/analysis/codes';
 import { bankKeys, useAddBankEntry, useBankEntries } from '../../../features/bank/api';
 import { parseMove } from '../../../features/bank/display';
@@ -52,6 +52,8 @@ export function MovesCard({ bank }: { bank: Bank }) {
   const currency = currencyOf(bank.currency);
   const money = (value: string | null, signed = false) => formatMoney(value, currency, { signed });
   const correction = kind === 'correction';
+  // Р27: администратор смотрит банк участника — журнал без формы записи
+  const readOnly = useReadOnly() !== null;
   const rows = entries.data?.pages.flatMap((page) => page.items) ?? [];
   const lastId = entries.data?.pages[0]?.last_id ?? null;
 
@@ -114,48 +116,52 @@ export function MovesCard({ bank }: { bank: Bank }) {
         }}
       >
         <div className="card-body">
-          <Segmented<MoveKind>
-            label={t('profile.bank.moves.kindLabel')}
-            items={KINDS.map((value) => ({ value, label: t(`profile.bank.moves.kinds.${value}`) }))}
-            value={kind}
-            onChange={(value) => {
-              // как в макете: другая запись — пустое поле суммы
-              setKind(value);
-              setAmount('');
-              setFieldError(null);
-              add.reset();
-            }}
-          />
-          <div className="profile-fields collapse">
-            <Field
-              id={amountId}
-              label={correction ? t('profile.bank.moves.amountSigned') : t('profile.bank.moves.amount')}
-              suffix={currencySign(currency)}
-              inputMode={correction ? 'text' : 'decimal'}
-              autoComplete="off"
-              placeholder={correction ? t('profile.bank.moves.correctionPlaceholder') : ''}
-              value={amount}
-              hint={hint}
-              error={fieldError ?? undefined}
-              onChange={(event) => {
-                setAmount(event.target.value);
-                setFieldError(null);
-              }}
-            />
-            <Field
-              id={noteId}
-              label={t('profile.bank.moves.note')}
-              autoComplete="off"
-              maxLength={200}
-              placeholder={correction ? t('profile.bank.moves.notePlaceholderCorrection') : t('profile.bank.moves.notePlaceholder')}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </div>
-          {serverError !== null && (
-            <Callout kind="bad" role="alert">
-              {apiErrorText(serverError)}
-            </Callout>
+          {!readOnly && (
+            <>
+              <Segmented<MoveKind>
+                label={t('profile.bank.moves.kindLabel')}
+                items={KINDS.map((value) => ({ value, label: t(`profile.bank.moves.kinds.${value}`) }))}
+                value={kind}
+                onChange={(value) => {
+                  // как в макете: другая запись — пустое поле суммы
+                  setKind(value);
+                  setAmount('');
+                  setFieldError(null);
+                  add.reset();
+                }}
+              />
+              <div className="profile-fields collapse">
+                <Field
+                  id={amountId}
+                  label={correction ? t('profile.bank.moves.amountSigned') : t('profile.bank.moves.amount')}
+                  suffix={currencySign(currency)}
+                  inputMode={correction ? 'text' : 'decimal'}
+                  autoComplete="off"
+                  placeholder={correction ? t('profile.bank.moves.correctionPlaceholder') : ''}
+                  value={amount}
+                  hint={hint}
+                  error={fieldError ?? undefined}
+                  onChange={(event) => {
+                    setAmount(event.target.value);
+                    setFieldError(null);
+                  }}
+                />
+                <Field
+                  id={noteId}
+                  label={t('profile.bank.moves.note')}
+                  autoComplete="off"
+                  maxLength={200}
+                  placeholder={correction ? t('profile.bank.moves.notePlaceholderCorrection') : t('profile.bank.moves.notePlaceholder')}
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                />
+              </div>
+              {serverError !== null && (
+                <Callout kind="bad" role="alert">
+                  {apiErrorText(serverError)}
+                </Callout>
+              )}
+            </>
           )}
           <div className="stack profile-tight">
             <h4>{t('profile.bank.moves.journal')}</h4>
@@ -199,12 +205,15 @@ export function MovesCard({ bank }: { bank: Bank }) {
             )}
           </div>
           <p className="xsmall muted">{t('profile.bank.moves.betsNote')}</p>
+          {readOnly && <ReadOnlyNote>{t('view.bank.movesNote')}</ReadOnlyNote>}
         </div>
-        <div className="card-foot">
-          <Button kind="primary" type="submit" icon="check" loading={add.isPending} disabled={!entries.data}>
-            {t('profile.bank.moves.submit')}
-          </Button>
-        </div>
+        {!readOnly && (
+          <div className="card-foot">
+            <Button kind="primary" type="submit" icon="check" loading={add.isPending} disabled={!entries.data}>
+              {t('profile.bank.moves.submit')}
+            </Button>
+          </div>
+        )}
       </form>
     </section>
   );

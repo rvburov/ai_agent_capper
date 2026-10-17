@@ -1,6 +1,8 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import { api, unwrap } from '../../api/client';
+import { useViewAs } from '../view/context';
+import { asUserQuery, viewKey } from '../view/viewMode';
 import { aiUsageKey, dashboardKeys } from './keys';
 import type { DashboardPeriod } from './types';
 
@@ -13,11 +15,24 @@ import type { DashboardPeriod } from './types';
  * такие события кэш главной не сбрасывают.
  */
 export function useDashboard(period: DashboardPeriod) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: dashboardKeys.period(period),
-    queryFn: () => unwrap(api.GET('/api/dashboard', { params: { query: { period } } })),
+    queryKey: viewKey(asUser, dashboardKeys.period(period)),
+    queryFn: () => unwrap(api.GET('/api/dashboard', { params: { query: { period, ...asUserQuery(asUser) } } })),
     placeholderData: keepPreviousData,
     refetchOnMount: 'always',
+  });
+}
+
+/**
+ * Главная участника для карточки участника в «Администрировании» (Р27): тот же GET /api/dashboard
+ * с as_user и тот же ключ кэша, что у режима просмотра. Свой id — без as_user (свои данные).
+ */
+export function useMemberDashboard(userId: number, period: DashboardPeriod, own: boolean) {
+  const asUser = own ? null : userId;
+  return useQuery({
+    queryKey: viewKey(asUser, dashboardKeys.period(period)),
+    queryFn: () => unwrap(api.GET('/api/dashboard', { params: { query: { period, ...asUserQuery(asUser) } } })),
   });
 }
 
@@ -26,9 +41,10 @@ export function useDashboard(period: DashboardPeriod) {
  * дорогая задача в «Расходах ИИ» участника. Администратору на главной не нужен (enabled).
  */
 export function useAiUsage(enabled: boolean) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: aiUsageKey(null),
-    queryFn: () => unwrap(api.GET('/api/ai/usage')),
+    queryKey: viewKey(asUser, aiUsageKey(null)),
+    queryFn: () => unwrap(api.GET('/api/ai/usage', { params: { query: asUserQuery(asUser) } })),
     staleTime: 30_000,
     enabled,
   });

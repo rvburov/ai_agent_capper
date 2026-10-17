@@ -2,7 +2,6 @@ import type { TFunction } from 'i18next';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { Me } from '../../api/hooks/useMe';
 import { paths } from '../../app/paths';
 import { Button, Callout, Card, Chip, Icon, KeyValue, Meter, Skeleton, spendTone } from '../../components';
 import { spendMonth } from '../../features/admin/display';
@@ -100,11 +99,12 @@ interface CostsProps {
   budget: AiBudget | undefined;
   /** Свой расход за месяц (у администратора не запрашивается). */
   usage: AiUsage | undefined;
-  me: Me;
+  /** Вид администратора: бюджет ключа администратора вместо своего лимита. */
+  admin: boolean;
   failed: boolean;
 }
 
-export function Costs({ budget, usage, me, failed }: CostsProps) {
+export function Costs({ budget, usage, admin, failed }: CostsProps) {
   const { t } = useTranslation();
   const more = (
     <Button kind="ghost" size="sm" iconRight="chevronRight" to={paths.costs}>
@@ -120,7 +120,7 @@ export function Costs({ budget, usage, me, failed }: CostsProps) {
   }
   const title = t('dashboard.costs.title', { month: monthIn(budget, t) });
 
-  if (me.role === 'admin' && budget.budget) {
+  if (admin && budget.budget) {
     // Бюджет ключа администратора: «Вы» + «Участники на вашем ключе» + «Общие фоновые задачи» =
     // все вызовы на ключе за месяц (без проверок); участники — members_usd с сервера
     const total = budget.budget;

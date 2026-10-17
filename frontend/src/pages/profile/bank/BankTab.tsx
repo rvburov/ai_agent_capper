@@ -10,6 +10,7 @@ import { useBankEntries } from '../../../features/bank/api';
 import { usePlayLimits } from '../../../features/bank/playLimits';
 import type { Bank } from '../../../features/bank/types';
 import { useBetSummary } from '../../../features/bets/api';
+import { useViewAs } from '../../../features/view/context';
 import { currencyOf } from '../../../features/bets/display';
 import { formatDateLong, formatMoney, formatPercent, type Currency } from '../../../lib/format';
 import { MOBILE_QUERY, useMediaQuery } from '../../../lib/useMediaQuery';
@@ -99,6 +100,8 @@ function Tiles({ bank, openBets }: { bank: Bank; openBets: number | null }) {
 }
 
 export function BankTab({ me }: { me: Me }) {
+  // Р27: администратор смотрит банк участника — кнопки изменения неактивны (ro), формы скрыты
+  const asUser = useViewAs();
   const bank = useBank();
   const strategy = useStrategy();
   const summary = useBetSummary({});
@@ -119,12 +122,13 @@ export function BankTab({ me }: { me: Me }) {
   }
   const data = bank.data;
   const currency = currencyOf(data.currency);
-  const admin = me.role === 'admin';
+  const admin = me.role === 'admin' && asUser === null;
   const openBets = summary.data?.open ?? null;
   const strategyCard = <StrategyCard strategy={strategy.data} error={strategy.error} onRetry={() => void strategy.refetch()} bank={data} onPropose={() => setProposing(true)} />;
   const adaptCard = <AdaptCard bank={data} params={strategy.data?.params ?? null} onPropose={() => setProposing(true)} />;
   const movesCard = <MovesCard bank={data} />;
-  const responsible = <ResponsibleCard tz={me.tz} />;
+  // Пояс участника — из его лимитов (в них пояс дня лимита), свой — из профиля
+  const responsible = <ResponsibleCard tz={asUser === null ? me.tz : (limits.data?.tz ?? me.tz)} />;
   const books = <BooksCard />;
   return (
     <>

@@ -117,10 +117,10 @@ export function RuleVersionsBlock({ bank, strategy }: BlockProps) {
       {candidate?.check && <Callout kind="info" icon="history">{checkText(candidate.check, bank, labels, t)}</Callout>}
       {candidate && (
         <div className="row">
-          <Button kind="primary" size="sm" icon="check" loading={activate.isPending} disabled={!candidate.can_activate} onClick={() => decide(candidate, 'activate')}>
+          <Button kind="primary" size="sm" icon="check" loading={activate.isPending} disabled={!candidate.can_activate} onClick={() => decide(candidate, 'activate')} ro>
             {t('profile.bank.rules.enable', { code: code(candidate) })}
           </Button>
-          <Button kind="ghost" size="sm" loading={reject.isPending} onClick={() => decide(candidate, 'reject')}>
+          <Button kind="ghost" size="sm" loading={reject.isPending} onClick={() => decide(candidate, 'reject')} ro>
             {t('profile.bank.rules.reject')}
           </Button>
         </div>
@@ -136,6 +136,7 @@ export function RuleVersionsBlock({ bank, strategy }: BlockProps) {
               loading={rollback.isPending && rollback.variables === version.id}
               disabled={rollback.isPending}
               onClick={() => decide(version, 'rollback')}
+              ro
             >
               {t('profile.bank.rules.rollback', { code: code(version) })}
             </Button>

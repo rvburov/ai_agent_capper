@@ -166,8 +166,13 @@ function queryString(query: AnalyticsQuery, parts: readonly ExportPart[]): strin
  * Выгрузка под теми же фильтрами (В13): одна часть — CSV, несколько — ZIP, в котором каждая часть
  * отдельным CSV. Пусто — null (выгружать нечего).
  */
-export function exportHref(filters: AnalyticsFilters, parts: readonly ExportPart[]): string | null {
+export function exportHref(
+  filters: AnalyticsFilters,
+  parts: readonly ExportPart[],
+  asUser: number | null = null,
+): string | null {
   if (!parts.length) return null;
-  const query = queryString(filtersQuery(filters), parts);
+  // Р27: администратор выгружает данные участника, чьи данные смотрит (as_user; выгрузка — в журнал)
+  const query = queryString({ ...filtersQuery(filters), ...(asUser === null ? {} : { as_user: asUser }) }, parts);
   return parts.length === 1 ? `/api/analytics/export.csv?${query}` : `/api/analytics/export.zip?${query}`;
 }

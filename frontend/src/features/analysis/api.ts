@@ -3,6 +3,8 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { api, unwrap } from '../../api/client';
 import { aiKeys } from '../ai/keys';
 import { refreshAfterCurrencyChange } from '../bank/currency';
+import { useViewAs } from '../view/context';
+import { asUserQuery, viewKey } from '../view/viewMode';
 import { analysisKeys } from './keys';
 import type { Analysis, ConfirmIn } from './types';
 import { isActive, isSettling } from './types';
@@ -22,9 +24,15 @@ const LIMIT_POLL_MS = 30_000;
  * 30 с: администратор поднимет лимит, и кнопка перезапуска оживет без перезагрузки.
  */
 export function useAnalysis(id: number | null, { poll = false }: { poll?: boolean } = {}) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: analysisKeys.one(id ?? 0),
-    queryFn: () => unwrap(api.GET('/api/analyses/{analysis_id}', path(id ?? 0))),
+    queryKey: viewKey(asUser, analysisKeys.one(id ?? 0)),
+    queryFn: () =>
+      unwrap(
+        api.GET('/api/analyses/{analysis_id}', {
+          params: { path: { analysis_id: id ?? 0 }, query: asUserQuery(asUser) },
+        }),
+      ),
     enabled: id !== null && id > 0,
     staleTime: 5_000,
     refetchInterval: (query) => {
@@ -41,9 +49,11 @@ export function useAnalysis(id: number | null, { poll = false }: { poll?: boolea
  * (launched): каждый разбор и каждая форма — новый черновик, они вытеснили бы анализы.
  */
 export function useRecentAnalyses(limit = 5) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: [...analysisKeys.list, 'launched', limit],
-    queryFn: () => unwrap(api.GET('/api/analyses', { params: { query: { limit, launched: true } } })),
+    queryKey: viewKey(asUser, [...analysisKeys.list, 'launched', limit]),
+    queryFn: () =>
+      unwrap(api.GET('/api/analyses', { params: { query: { limit, launched: true, ...asUserQuery(asUser) } } })),
     staleTime: 15_000,
   });
 }
@@ -116,27 +126,30 @@ export function useDecision() {
 
 /** Активная версия стратегии участника (правила для «Перед запуском» и экспресса). */
 export function useStrategy() {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: analysisKeys.strategy,
-    queryFn: () => unwrap(api.GET('/api/strategy/active')),
+    queryKey: viewKey(asUser, analysisKeys.strategy),
+    queryFn: () => unwrap(api.GET('/api/strategy/active', { params: { query: asUserQuery(asUser) } })),
     staleTime: 5 * 60_000,
   });
 }
 
 /** Банк по учету и адаптации суммы (Р22). */
 export function useBank() {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: analysisKeys.bank,
-    queryFn: () => unwrap(api.GET('/api/me/bank')),
+    queryKey: viewKey(asUser, analysisKeys.bank),
+    queryFn: () => unwrap(api.GET('/api/me/bank', { params: { query: asUserQuery(asUser) } })),
     staleTime: 30_000,
   });
 }
 
 /** Букмекеры участника, частые первыми. */
 export function useBookmakers() {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: analysisKeys.bookmakers,
-    queryFn: () => unwrap(api.GET('/api/me/bookmakers')),
+    queryKey: viewKey(asUser, analysisKeys.bookmakers),
+    queryFn: () => unwrap(api.GET('/api/me/bookmakers', { params: { query: asUserQuery(asUser) } })),
     staleTime: 5 * 60_000,
   });
 }
@@ -148,9 +161,10 @@ export function useBookmakers() {
  * вкладкой «Ключ Claude»: расход, перечитанный в одном месте, виден в другом.
  */
 export function useAiAccess({ poll = false }: { poll?: boolean } = {}) {
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: aiKeys.budget,
-    queryFn: () => unwrap(api.GET('/api/ai/budget')),
+    queryKey: viewKey(asUser, aiKeys.budget),
+    queryFn: () => unwrap(api.GET('/api/ai/budget', { params: { query: asUserQuery(asUser) } })),
     staleTime: 15_000,
     refetchInterval: poll ? LIMIT_POLL_MS : false,
   });

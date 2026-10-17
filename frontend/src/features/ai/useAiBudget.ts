@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { api, unwrap } from '../../api/client';
+import { useViewAs } from '../view/context';
+import { asUserQuery, viewKey } from '../view/viewMode';
 import { aiKeys } from './keys';
 
 // Расход меняется анализами, которые идут без этой страницы (участник ушел с экрана анализа),
@@ -14,9 +16,11 @@ const RUNNING_POLL_MS = 15_000;
  * по которой анализ сейчас не запустится (GET /api/ai/budget). Администратору — еще общий бюджет.
  */
 export function useAiBudget() {
+  // Р27: на экранах режима просмотра — лимит участника (без его ключа)
+  const asUser = useViewAs();
   return useQuery({
-    queryKey: aiKeys.budget,
-    queryFn: () => unwrap(api.GET('/api/ai/budget')),
+    queryKey: viewKey(asUser, aiKeys.budget),
+    queryFn: () => unwrap(api.GET('/api/ai/budget', { params: { query: asUserQuery(asUser) } })),
     staleTime: 30_000,
     refetchOnMount: 'always',
     refetchInterval: (query) => ((query.state.data?.reserved_usd ?? 0) > 0 ? RUNNING_POLL_MS : POLL_MS),

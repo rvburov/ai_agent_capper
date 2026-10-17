@@ -4,6 +4,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import type { Me } from '../../api/hooks/useMe';
 import {
   ActionMenu,
+  Button,
   Callout,
   Card,
   Chip,
@@ -78,7 +79,7 @@ export function UsersTab({ me }: { me: Me }) {
     </div>
   );
   const privacy = (
-    <Callout kind="info" icon="eyeOff">
+    <Callout kind="info" icon="eye">
       <b>{t('admin.users.privacyStrong')}</b> {t('admin.users.privacy')}
     </Callout>
   );
@@ -101,6 +102,7 @@ export function UsersTab({ me }: { me: Me }) {
                     key={user.id}
                     user={user}
                     me={me}
+                    onCard={() => actions.open('card', user)}
                     menu={menu(user)}
                     month={month}
                     alertPct={alertPct}
@@ -128,9 +130,15 @@ export function UsersTab({ me }: { me: Me }) {
           <Avatar user={user} meId={me.id} className={cx(user.status === 'blocked' && 'adm-dim')} />
           <div>
             <div className={cx('adm-person-name', user.status === 'blocked' && 'adm-dim')}>
-              <span className="adm-nowrap" title={personName(user)}>
+              {/* Р27: имя открывает карточку участника (ставки и банк, только просмотр) */}
+              <button
+                type="button"
+                className="adm-nowrap adm-name-link"
+                title={t('admin.users.openCard')}
+                onClick={() => actions.open('card', user)}
+              >
                 {personName(user)}
-              </span>
+              </button>
               {user.id === me.id && <MeChip />}
             </div>
             <div
@@ -347,10 +355,12 @@ interface UserCardItemProps {
   alertPct: number | null;
   asks: boolean;
   ai: MemberLimit | undefined;
+  /** Открыть карточку участника: ставки и банк (Р27), входы и действия. */
+  onCard: () => void;
 }
 
 /** Карточка участника на узком экране (userCard макета). */
-function UserCardItem({ user, me, menu, month, alertPct, asks, ai }: UserCardItemProps) {
+function UserCardItem({ user, me, menu, month, alertPct, asks, ai, onCard }: UserCardItemProps) {
   const { t } = useTranslation();
   const blocked = user.status === 'blocked';
   const daily = dailyLimit(user);
@@ -401,6 +411,9 @@ function UserCardItem({ user, me, menu, month, alertPct, asks, ai }: UserCardIte
           })}
         </span>
       </div>
+      <Button size="sm" icon="user" iconRight="chevronRight" block onClick={onCard}>
+        {user.id === me.id ? t('admin.users.myCard') : t('admin.users.card')}
+      </Button>
     </section>
   );
 }

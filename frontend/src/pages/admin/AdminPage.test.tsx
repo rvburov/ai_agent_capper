@@ -11,6 +11,7 @@ import {
   memberLimit,
 } from '../../features/admin/testData';
 import type { AuditEntry, Invite } from '../../features/admin/types';
+import { dashboardOut, recentBet } from '../../features/dashboard/testData';
 import { apiError, json, ME_ADMIN, mockFetch, type Handler } from '../../test/fetchMock';
 import { renderPage } from '../../test/renderPage';
 import { setViewportWidth } from '../../test/setup';
@@ -104,7 +105,7 @@ function renderAdmin(path: string) {
     path: '/admin/:tab?',
     url: path,
     me: ME_ADMIN,
-    stubs: { '/profile/:tab?': 'Личный кабинет' },
+    stubs: { '/profile/:tab?': 'Личный кабинет', '/': 'Главная', '/bets': 'Ставки' },
   });
   return { router };
 }
@@ -115,7 +116,7 @@ async function openMenu(user: ReturnType<typeof userEvent.setup>, name: string) 
 }
 
 describe('Администрирование: участники', () => {
-  it('шапка и таблица: роль, статус, ключ, расход и лимит; ставок и банка нет (Р14)', async () => {
+  it('шапка и таблица: роль, статус, ключ, расход и лимит; ставки и банк — в карточке участника (Р27)', async () => {
     mockFetch(routes());
     renderAdmin('/admin/users');
     expect(
@@ -180,7 +181,9 @@ describe('Администрирование: участники', () => {
     expect(within(menu).getByRole('menuitem', { name: /Выдать код сброса пароля/ })).toBeDisabled();
     expect(within(menu).getByRole('menuitem', { name: /Сделать участником/ })).toBeEnabled();
     // первый доступный пункт в фокусе, стрелки двигают фокус
-    expect(within(menu).getByRole('menuitem', { name: /Активность и входы/ })).toHaveFocus();
+    expect(within(menu).getByRole('menuitem', { name: /Карточка участника/ })).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(within(menu).getByRole('menuitem', { name: /Открыть как участник видит/ })).toHaveFocus();
     await user.keyboard('{ArrowDown}');
     expect(within(menu).getByRole('menuitem', { name: /Завершить все сеансы/ })).toHaveFocus();
   });
@@ -292,6 +295,7 @@ describe('Администрирование: участники', () => {
     const user = userEvent.setup();
     mockFetch(
       routes({
+        'GET /api/dashboard': () => json(dashboardOut()),
         'GET /api/admin/users/2': () =>
           json({
             ...OLGA,
@@ -305,7 +309,7 @@ describe('Администрирование: участники', () => {
     );
     renderAdmin('/admin/users');
     const menu = await openMenu(user, 'Ольга Лехтинен');
-    await user.click(within(menu).getByRole('menuitem', { name: /Активность и входы/ }));
+    await user.click(within(menu).getByRole('menuitem', { name: /Карточка участника/ }));
     const dialog = screen.getByRole('dialog', { name: 'Карточка участника' });
     const logins = await within(dialog).findByRole('list', { name: 'Последние входы' });
     expect(within(logins).getAllByRole('listitem')).toHaveLength(2);
@@ -314,6 +318,46 @@ describe('Администрирование: участники', () => {
     expect(within(logins).getByText(/Неизвестное устройство/)).toBeInTheDocument();
     expect(within(dialog).getByText('Сеансов сейчас').nextSibling).toHaveTextContent('2');
     expect(within(dialog).getByRole('menuitem', { name: /Заблокировать/ })).toBeEnabled();
+  });
+
+  it('Р27: карточка участника — ставки и банк с его главной (as_user), кнопки открывают режим просмотра', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch(
+      routes({
+        'GET /api/admin/users/2': () => json({ ...OLGA, active_sessions: 1, recent_logins: [] }),
+        'GET /api/dashboard': (request) =>
+          json(
+            new URL(request.url).searchParams.get('period') === 'all'
+              ? dashboardOut({ period: 'all', kpi: { ...dashboardOut().kpi, roi: 0.12 }, recent: [recentBet({ id: 41 })] })
+              : dashboardOut(),
+          ),
+      }),
+    );
+    const { router } = renderAdmin('/admin/users');
+    await user.click(await screen.findByRole('button', { name: 'Ольга Лехтинен' }));
+    const dialog = screen.getByRole('dialog', { name: 'Карточка участника' });
+    const money = await within(dialog).findByRole('region', { name: 'Ставки и банк' });
+    expect(await within(money).findByText('ROI за 30 дней')).toBeInTheDocument();
+    expect(within(money).getByText('за все время +12,0%')).toBeInTheDocument();
+    expect(within(money).getByText('Ставка №41')).toBeInTheDocument();
+    expect(within(money).getByText('Этот просмотр записан в журнал администратора')).toBeInTheDocument();
+    const dash = calls.filter((r) => new URL(r.url).pathname === '/api/dashboard');
+    expect(dash.length).toBe(2);
+    for (const r of dash) expect(new URL(r.url).searchParams.get('as_user')).toBe('2');
+    await user.click(within(money).getByRole('button', { name: 'Ставки' }));
+    await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe('/bets?as=2'));
+  });
+
+  it('Р27: в меню участника — «Открыть как участник видит», у себя — нет', async () => {
+    const user = userEvent.setup();
+    mockFetch(routes());
+    const { router } = renderAdmin('/admin/users');
+    const mine = await openMenu(user, 'Роман Буров');
+    expect(within(mine).queryByRole('menuitem', { name: /Открыть как участник видит/ })).toBeNull();
+    await user.keyboard('{Escape}');
+    const menu = await openMenu(user, 'Ольга Лехтинен');
+    await user.click(within(menu).getByRole('menuitem', { name: /Открыть как участник видит/ }));
+    await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe('/?as=2'));
   });
 
   it('на телефоне — карточки участников вместо таблицы', async () => {
@@ -602,5 +646,78 @@ describe('Администрирование: журнал и заглушки',
     expect(await screen.findByRole('heading', { name: 'Сообщение участникам' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Сообщение' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.queryByText(/Раздел появится/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Администрирование: сводка (Р27)', () => {
+  function summaryOut(period: string) {
+    return {
+      period,
+      currency: 'RUB',
+      month_start: '2026-10-01T00:00:00Z',
+      totals: {
+        bets: 25,
+        turnover: '50000.00',
+        profit: '3000.00',
+        roi: 0.06,
+        clv_avg: 0.021,
+        clv_n: 12,
+        brier_model: 0.214,
+        brier_market: 0.219,
+        brier_n: 40,
+        members_with_bets: 2,
+        bank: '130000.00',
+      },
+      members: [
+        { user_id: 1, name: 'Роман Буров', role: 'admin', status: 'active', me: true, empty: false, bank: '50000.00', bets: 10, turnover: '20000.00', roi: 0.05, profit: '1000.00', clv_avg: 0.01, clv_n: 5, analyses: 4, ai_spend_usd: 2.5, last_login_at: ago(1) },
+        { user_id: 2, name: 'Ольга Лехтинен', role: 'member', status: 'active', me: false, empty: false, bank: '80000.00', bets: 15, turnover: '30000.00', roi: 0.0667, profit: '2000.00', clv_avg: 0.028, clv_n: 7, analyses: 11, ai_spend_usd: 1.93, last_login_at: ago(5) },
+        { user_id: 4, name: 'Игорь Нестеров', role: 'member', status: 'blocked', me: false, empty: true, bank: '0.00', bets: 0, turnover: '0.00', roi: null, profit: '0.00', clv_avg: null, clv_n: 0, analyses: 0, ai_spend_usd: 0, last_login_at: null },
+      ],
+    };
+  }
+
+  it('итоги за период, строки по участникам; строка открывает данные участника, своя — свою главную', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch(
+      routes({ 'GET /api/admin/summary': (request) => json(summaryOut(new URL(request.url).searchParams.get('period') ?? '30d')) }),
+    );
+    const { router } = renderAdmin('/admin/summary');
+    expect(await screen.findByRole('heading', { name: 'Сводка по участникам' })).toBeInTheDocument();
+    expect(await screen.findByText('2 человека со ставками')).toBeInTheDocument();
+    expect(screen.getAllByText(/только просмотр/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('+6,0%').length).toBe(2);
+    expect(screen.getByText('рынок 0,219 · модель точнее')).toBeInTheDocument();
+    const table = screen.getByRole('table', { name: 'По участникам' });
+    const total = within(table).getByText('Итого').closest('tr')!;
+    expect(total).toHaveTextContent('130 000');
+    // у заблокированного без банка и ставок открыть нечего
+    const igor = within(table).getByText('Игорь Нестеров').closest('tr')!;
+    expect(igor).not.toHaveAttribute('tabindex');
+    expect(calls.some((r) => new URL(r.url).searchParams.get('period') === '30d')).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: '7 дней' }));
+    await waitFor(() => expect(calls.some((r) => new URL(r.url).searchParams.get('period') === '7d')).toBe(true));
+
+    await user.click(within(table).getByRole('row', { name: /Ольга Лехтинен: открыть данные/ }));
+    await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe('/?as=2'));
+  });
+
+  it('своя строка ведет на свою главную без ?as=', async () => {
+    const user = userEvent.setup();
+    mockFetch(routes({ 'GET /api/admin/summary': () => json(summaryOut('30d')) }));
+    const { router } = renderAdmin('/admin/summary');
+    const table = await screen.findByRole('table', { name: 'По участникам' });
+    await user.click(within(table).getByRole('row', { name: /Роман Буров: открыть свою главную/ }));
+    await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe('/'));
+  });
+
+  it('на телефоне — карточки с «Смотреть данные»', async () => {
+    setViewportWidth(375);
+    const user = userEvent.setup();
+    mockFetch(routes({ 'GET /api/admin/summary': () => json(summaryOut('30d')) }));
+    const { router } = renderAdmin('/admin/summary');
+    const olga = await screen.findByRole('region', { name: 'Ольга Лехтинен' });
+    await user.click(within(olga).getByRole('button', { name: 'Смотреть данные' }));
+    await waitFor(() => expect(router.state.location.search).toBe('?as=2'));
   });
 });

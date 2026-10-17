@@ -1,12 +1,15 @@
 import { useTranslation } from 'react-i18next';
 import { Navigate, useParams } from 'react-router';
 
-import { useMe } from '../../api/hooks/useMe';
+import { useMe, type Me } from '../../api/hooks/useMe';
 import { paths, PROFILE_TABS, type ProfileTab } from '../../app/paths';
 import { Tabs, type IconName } from '../../components';
 import { useSuspiciousCandidates } from '../../features/profile/useLoginEvents';
 import { useSuspiciousLogin } from '../../features/profile/useSuspiciousLogin';
 import { useAiBudget } from '../../features/ai/useAiBudget';
+import { useViewAs } from '../../features/view/context';
+import { useViewedName } from '../../features/view/people';
+import { useScreenTitle } from '../../app/layout/screenTitle';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 import { BankTab } from './bank/BankTab';
 import { DataTab } from './data/DataTab';
@@ -31,8 +34,39 @@ function isProfileTab(value: string): value is ProfileTab {
   return (PROFILE_TABS as readonly string[]).includes(value);
 }
 
+/**
+ * Р27: администратор смотрит «Банк и стратегию» участника — без сводки аккаунта и других
+ * вкладок, только просмотр (render макета при RO()).
+ */
+function ViewedBank({ me }: { me: Me }) {
+  const { t } = useTranslation();
+  const name = useViewedName();
+  useScreenTitle(t('profile.viewed.title'));
+  return (
+    <>
+      <div className="page-head">
+        <div style={{ minWidth: 0 }}>
+          <h2>{t('profile.viewed.title')}</h2>
+          <p className="lead">{t('profile.viewed.lead', { name: name ?? t('profile.viewed.member') })}</p>
+        </div>
+      </div>
+      <div id="profile-panel" className="profile-panel" role="region" aria-label={t('profile.viewed.title')}>
+        <BankTab me={me} />
+      </div>
+    </>
+  );
+}
+
 /** Личный кабинет (mockup/js/screens/profile.js): сводка, вкладки-адреса /profile/<вкладка>. */
 export function ProfilePage() {
+  const asUser = useViewAs();
+  const { data: me } = useMe();
+  // Режим просмотра бывает только на /profile/bank (features/view/viewMode.ts)
+  if (asUser !== null && me) return <ViewedBank me={me} />;
+  return <OwnProfile />;
+}
+
+function OwnProfile() {
   const { t } = useTranslation();
   const { tab } = useParams();
   const { data: me } = useMe();

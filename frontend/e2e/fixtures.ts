@@ -214,6 +214,27 @@ function learningOut(): Schemas['LearningOut'] {
   };
 }
 
+/** Люди программы (GET /api/admin/users): администратор и одна участница. */
+export function adminUsers(me: Schemas['MeOut']): Schemas['AdminUserOut'][] {
+  const row = (over: Partial<Schemas['AdminUserOut']>): Schemas['AdminUserOut'] => ({
+    id: me.id,
+    display_name: me.display_name,
+    email: me.email,
+    role: me.role,
+    status: 'active',
+    ai_mode: 'shared',
+    totp_enabled: true,
+    created_at: '2026-09-01T09:00:00Z',
+    last_login_at: '2026-10-07T08:00:00Z',
+    ai_spent_month_usd: 0,
+    analyses_month: 0,
+    limit: null,
+    limit_share: null,
+    ...over,
+  });
+  return [row({}), row({ id: 7, display_name: 'Ольга Лехтинен', email: 'olga@example.com', role: 'member' })];
+}
+
 /** Дела администратора (GET /api/admin/attention): архив свежий, просьб и участников у лимита нет. */
 export function adminAttention(over: Partial<Schemas['AdminAttentionOut']> = {}): Schemas['AdminAttentionOut'] {
   return {
@@ -417,6 +438,11 @@ export async function mockApi(page: Page, me: Me | null, api: Record<string, Moc
     // счетчик дел у пункта «Администрирование» (GET /api/admin/attention) — дел нет
     if (url.pathname === '/api/admin/attention' && me?.role === 'admin') {
       await route.fulfill({ json: adminAttention() });
+      return;
+    }
+    // выбор «Чьи данные смотреть» у администратора на главной и «Ставках» (Р27) — участник один
+    if (url.pathname === '/api/admin/users' && me?.role === 'admin') {
+      await route.fulfill({ json: adminUsers(me) });
       return;
     }
     // плашка «Банк» в шапке — тоже

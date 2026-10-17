@@ -190,7 +190,7 @@ export function Attention({ bank, params, admin, awaiting, learning }: Attention
       title: t('dashboard.attention.awaiting.title', { count: awaiting.count }),
       text: awaitingText(awaiting.bet, t),
       action: (
-        <Button size="sm" icon="edit" to={awaiting.bet ? `${paths.bets}?bet=${awaiting.bet.id}` : `${paths.bets}?status=open`}>
+        <Button size="sm" icon="edit" to={awaiting.bet ? `${paths.bets}?bet=${awaiting.bet.id}` : `${paths.bets}?status=open`} ro>
           {t('dashboard.attention.awaiting.settle')}
         </Button>
       ),

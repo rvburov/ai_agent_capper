@@ -68,6 +68,17 @@
 .btn.sm.icon-only { width: 32px; }
 .btn[disabled], .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 .btn[aria-busy="true"] { cursor: progress; }
+/* только просмотр данных участника (Р27): кнопка изменения неактивна и на наведение не отвечает */
+.btn.primary.is-ro:hover { background: var(--accent); }
+.btn.secondary.is-ro:hover { background: var(--surface); }
+.btn.ghost.is-ro:hover { background: transparent; color: var(--fg-2); }
+.btn.danger.is-ro:hover { background: var(--bad-soft); }
+/* только просмотр: пояснение вместо формы, которой в режиме просмотра нет (ReadOnlyNote) */
+.vw-note {
+  display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-sm); color: var(--fg-2);
+  padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2);
+}
+.vw-note svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--fg-3); }
 /* на телефоне — цели касания не меньше 40px (после базовых размеров, чтобы перекрывать их) */
 @media (max-width: 960px) {
   .btn.sm { height: var(--tap); }

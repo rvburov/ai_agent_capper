@@ -21,10 +21,25 @@ describe('журнал действий', () => {
       message: true, confirm_failed: true, player_merge: true, player_edit: true,
       ai_mode_change: true, budget_change: true, agent_config_change: true, settings_change: true,
       data_upload: true, eval_set: true, eval_run: true, version_on: true, lesson_on: true, lesson_off: true, model_on: true,
+      member_view: true, member_export: true,
     };
     for (const action of Object.keys(all)) {
       expect(grouped.filter((a) => a === action)).toHaveLength(1);
     }
+  });
+
+  it('Р27: просмотр и выгрузка данных участника — своя группа фильтра и строка подробностей', () => {
+    expect(groupActions('view')).toEqual(['member_view', 'member_export']);
+    const view = (details: Record<string, unknown>) => auditEntry({ action: 'member_view', details });
+    expect(auditDetails(view({ user_id: 3, screen: 'bets' }))).toBe('Ставки · только просмотр');
+    expect(auditDetails(view({ user_id: 3, screen: 'bank' }))).toBe('Банк и стратегия · только просмотр');
+    expect(auditDetails(view({ user_id: null, screen: 'summary', period: '30d' }))).toBe('Сводка за 30 дней · только просмотр');
+    expect(auditTarget(view({ user_id: null, screen: 'summary', period: '30d' }))).toBe('Все участники');
+    expect(auditTarget(view({ user_id: 3, screen: 'dashboard' }))).toBe('Ольга Лехтинен');
+    const exported = (details: Record<string, unknown>) => auditEntry({ action: 'member_export', details });
+    expect(auditDetails(exported({ user_id: 3, what: 'bets' }))).toBe('Ставки, CSV');
+    expect(auditDetails(exported({ user_id: 3, what: 'analytics', parts: ['bets'] }))).toBe('Аналитика: ставки, CSV');
+    expect(auditDetails(exported({ user_id: 3, what: 'analytics', parts: ['bets', 'events'] }))).toBe('Аналитика: ставки, события, ZIP');
   });
 
   it('команда терминала: автора нет, source = terminal', () => {

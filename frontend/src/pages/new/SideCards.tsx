@@ -139,10 +139,10 @@ export function recentMatches(item: AnalysisListItem, t: TFunction): string {
 }
 
 /** Последние анализы: открыть с того места, где ушли (GET /api/analyses). */
-export function RecentCard() {
+export function RecentCard({ limit = 5 }: { limit?: number }) {
   const { t } = useTranslation();
   // Только запущенные (черновики сервер не отдает): открытый черновик и так на этом экране
-  const recent = useRecentAnalyses(5);
+  const recent = useRecentAnalyses(limit);
   const items = recent.data?.items ?? [];
   return (
     <Card className="new-recent-card" title={t('new.recent.title')} subtitle={t('new.recent.subtitle')}>

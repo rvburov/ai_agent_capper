@@ -23,6 +23,8 @@ export const adminKeys = {
   // «Данные» (этап 5): свежесть архива и загрузки файла tennis-data
   dataUploads: ['admin', 'data', 'uploads'] as const,
   dataUpload: (id: number) => ['admin', 'data', 'uploads', id] as const,
+  // «Сводка» (Р27): итоги и строки по участникам за период
+  summary: (period: string) => ['admin', 'summary', period] as const,
 };
 
 /**

@@ -5,10 +5,11 @@ import { adminKeys, invalidateAdmin } from './keys';
 import type { Role } from './types';
 
 /** Участники (GET /api/admin/users): без удаленных, расход на ИИ за месяц и лимит. */
-export function useAdminUsers() {
+export function useAdminUsers({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: adminKeys.users,
     queryFn: () => unwrap(api.GET('/api/admin/users')),
+    enabled,
   });
 }
 
