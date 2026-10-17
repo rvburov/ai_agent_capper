@@ -76,7 +76,9 @@ class Settings(BaseSettings):
     session_idle_days: int = 14
     session_absolute_days: int = 30
     trusted_device_days: int = 30
-    login_pending_minutes: int = 5
+    # С запасом на настройку 2FA с одного телефона: скопировать ключ, добавить его в
+    # приложение-аутентификатор и вернуться за кодом
+    login_pending_minutes: int = 15
     invite_days: int = 7
     reset_code_hours: int = 24
     # Сколько хешей пароля Argon2 (64 МиБ каждый) считается одновременно. Обычно число

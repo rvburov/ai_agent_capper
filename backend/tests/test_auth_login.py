@@ -10,8 +10,9 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cookies import CSRF_HEADER, cookie_name
-from app.core.security.passwords import needs_rehash
+from app.core.security.passwords import hash_password, needs_rehash
 from app.core.security.tokens import hash_token
+from app.core.security.totp import code_at_step, current_step
 from app.db.models import LoginEvent, Notification, User, UserSession
 from app.services.sessions import utcnow
 from app.workers.jobs import purge_old_login_events
@@ -55,7 +56,7 @@ async def test_login_with_2fa_end_to_end(
     assert first.json() == {"status": "totp_required", "user": None}
     login_cookie = set_cookie_header(first, "login")
     assert login_cookie is not None
-    assert "HttpOnly" in login_cookie and "Max-Age=300" in login_cookie
+    assert "HttpOnly" in login_cookie and "Max-Age=900" in login_cookie
     assert cookie_value(client, "session") is None
     # До кода 2FA кабинет закрыт
     assert (await client.get("/api/me")).status_code == 401
@@ -528,3 +529,33 @@ async def test_user_without_2fa_must_set_it_up(
     assert response.json() == {"status": "totp_setup_required", "user": None}
     assert (await code_step(client, code="123456")).status_code == 401
     assert cookie_name("login") in {c.name for c in client.cookies.jar}
+
+
+async def test_setup_secret_is_kept_between_logins(
+    make_client: ClientFactory, make_user: UserFactory, db: AsyncSession
+) -> None:
+    # Человек добавил ключ в приложение, вход тем временем истек, он вошел заново: QR-код
+    # тот же, иначе коды из приложения не подходят
+    member = await make_user(totp=False)
+    first = await make_client()
+    assert (await password_step(first, member)).json()["status"] == "totp_setup_required"
+    secret = (await first.post("/api/auth/2fa/setup")).json()["secret"]
+    second = await make_client()
+    assert (await password_step(second, member)).json()["status"] == "totp_setup_required"
+    assert (await second.post("/api/auth/2fa/setup")).json()["secret"] == secret
+
+    # Пароль сменили: секрет, выданный при старом пароле, больше не показываем
+    new_password = "another-long-unique-password"
+    await db.execute(
+        update(User).where(User.id == member.id).values(password_hash=hash_password(new_password))
+    )
+    await db.commit()
+    third = await make_client()
+    assert (await password_step(third, member, password=new_password)).status_code == 200
+    fresh = (await third.post("/api/auth/2fa/setup")).json()["secret"]
+    assert fresh != secret
+
+    done = await third.post(
+        "/api/auth/2fa/setup/confirm", json={"code": code_at_step(fresh, current_step())}
+    )
+    assert done.status_code == 200, done.text

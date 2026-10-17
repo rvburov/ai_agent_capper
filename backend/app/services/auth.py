@@ -1,10 +1,16 @@
 """Вход: пароль → код 2FA или резервный код → сеанс; настройка 2FA; выход.
 
 Незавершенный вход между шагами живет в Redis под ключом login:pending:<sha256 токена>
-login_pending_minutes (5 минут); сам токен — в cookie login. В состоянии: user_id, IP,
+login_pending_minutes (15 минут); сам токен — в cookie login. В состоянии: user_id, IP,
 этап (totp — ждем код, setup — нужно настроить 2FA), отпечаток хеша пароля и на этапе
-setup — новый секрет 2FA, зашифрованный AES-GCM. Отпечаток нужен, чтобы смена или сброс
+setup — секрет 2FA, зашифрованный AES-GCM. Отпечаток нужен, чтобы смена или сброс
 пароля обрывали незавершенный вход, начатый со старым паролем.
+
+Секрет настройки один на пользователя, пока 2FA не включена: он лежит в
+login:setup:<user_id> (SETUP_SECRET_HOURS) вместе с отпечатком пароля, и повторный вход
+показывает тот же QR-код. Иначе человек, который добавил ключ в приложение и вошел заново
+(вход истек, пока он переключался на телефоне в приложение), получал новый секрет, и коды
+из приложения не подходили. После смены пароля секрет новый.
 
 Защита от подбора — app.core.ratelimit (порядок вызовов описан там). Каждая попытка
 пишется в login_events, отказы 429 — одной строкой на паузу или окно лимита. Сервис
@@ -149,6 +155,13 @@ async def _is_new_device(db: AsyncSession, user: User, user_agent: str | None) -
 
 def _pending_key(token: str) -> str:
     return redis_key("login", "pending", hash_token(token))
+
+
+SETUP_SECRET_HOURS = 24
+
+
+def _setup_key(user_id: int) -> str:
+    return redis_key("login", "setup", str(user_id))
 
 
 def password_fingerprint(user: User) -> str:
@@ -637,8 +650,8 @@ async def _ensure_setup_secret(redis: Redis, token: str, user: User) -> PendingL
                     raise AppError(401, "auth.login_expired")
                 if current.setup_secret_enc is not None:
                     return current
-                enc, version = crypto.encrypt_str(new_totp_secret(), aad)
-                current.setup_secret_enc = base64.b64encode(enc).decode()
+                enc_b64, version = await _user_setup_secret(redis, user, current.pw, aad)
+                current.setup_secret_enc = enc_b64
                 current.setup_key_version = version
                 # у multi() в redis-py нет аннотаций типов
                 cast(Any, pipe).multi()
@@ -647,6 +660,31 @@ async def _ensure_setup_secret(redis: Redis, token: str, user: User) -> PendingL
                 return current
             except WatchError:
                 continue
+    raise AppError(401, "auth.login_expired")
+
+
+async def _user_setup_secret(redis: Redis, user: User, pw: str, aad: bytes) -> tuple[str, int]:
+    """Секрет настройки 2FA пользователя: прежний, если он выдан при том же пароле,
+    иначе новый. SET NX: два параллельных входа получают один секрет."""
+    key = _setup_key(user.id)
+    ttl = SETUP_SECRET_HOURS * 3600
+    for _ in range(2):
+        stored = await redis.get(key)
+        if stored is not None:
+            try:
+                data = json.loads(stored)
+                if data.get("pw") == pw:
+                    return str(data["enc"]), int(data["v"])
+            except (TypeError, ValueError, KeyError):
+                pass
+            # Пароль сменили (или запись испорчена): секрет, который мог видеть
+            # знавший старый пароль, больше не выдаем
+            await redis.delete(key)
+        enc, version = crypto.encrypt_str(new_totp_secret(), aad)
+        enc_b64 = base64.b64encode(enc).decode()
+        record = {"pw": pw, "enc": enc_b64, "v": version}
+        if await redis.set(key, json.dumps(record), ex=ttl, nx=True):
+            return enc_b64, version
     raise AppError(401, "auth.login_expired")
 
 
@@ -726,6 +764,7 @@ async def confirm_totp_setup(
     await db.refresh(user)
     await _code_succeeded(redis, user=user, client=client)
     await drop_pending_login(redis, login_token)
+    await redis.delete(_setup_key(user_id))
     outcome = await _complete_login(
         db, user, client=client, method="totp", old_session_token=old_session_token
     )
