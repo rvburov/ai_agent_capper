@@ -8,6 +8,7 @@ import pytest
 from app.ml.backtest import StrategyRules as BacktestRules
 from app.ml.sets import MARKET_MINUS, MARKET_ML, MARKET_PLUS, Probs3
 from app.ml.strategy import (
+    SUSPENDED_MARKETS,
     BankSignals,
     DrawdownLevel,
     Leg,
@@ -184,7 +185,7 @@ def test_candidates_with_markets() -> None:
     pool = [
         leg(1, 0.70, "1.50"),  # перевес 1,05
         leg(1, 0.68, "1.62", market=MARKET_MINUS),  # 1,1016 — лучший в матче 1
-        leg(2, 0.66, "1.70", market=MARKET_PLUS, selection=2),  # 1,122
+        leg(2, 0.66, "1.70", market=MARKET_MINUS, selection=2),  # 1,122
         leg(3, 0.60, "1.80", market=MARKET_MINUS),  # p меньше 0,65
         leg(4, 0.90, "1.12"),  # кэф меньше 1,13
         leg(5, 0.70, "1.60", blocks=("injury",)),  # травма
@@ -192,7 +193,7 @@ def test_candidates_with_markets() -> None:
     ]
     found = candidates(pool, PARAMS)
     assert [(item.match_id, item.market) for item in found] == [
-        (2, MARKET_PLUS),
+        (2, MARKET_MINUS),
         (1, MARKET_MINUS),
     ]
     # require_value из параметров (Р21) можно переопределить для сравнения
@@ -209,7 +210,7 @@ def test_candidates_with_markets() -> None:
 
 def test_tie_break_is_stable() -> None:
     # Одинаковый перевес на разных рынках одного матча: ML раньше форы
-    same = [leg(1, 0.7, "1.6", market=MARKET_PLUS), leg(1, 0.7, "1.6")]
+    same = [leg(1, 0.7, "1.6", market=MARKET_MINUS), leg(1, 0.7, "1.6")]
     assert candidates(same, PARAMS)[0].market == MARKET_ML
 
 
@@ -251,29 +252,29 @@ def test_parlay_takes_fitting_outcome_of_each_match() -> None:
     # исход до 1.50 — он и идет в экспресс, матч не выпадает
     match1 = [
         leg(1, 0.66, "1.60"),  # перевес 1,056
-        leg(1, 0.90, "1.15", market=MARKET_PLUS),  # 1,035
+        leg(1, 0.90, "1.15", market=MARKET_MINUS),  # 1,035
     ]
     match2 = [leg(2, 0.75, "1.40")]  # 1,05
     guarded = pick_parlay([*match1, *match2], PARAMS, drawdown=twenty)
     assert guarded is not None
-    assert [(item.match_id, item.market) for item in guarded] == [(2, MARKET_ML), (1, MARKET_PLUS)]
+    assert [(item.match_id, item.market) for item in guarded] == [(2, MARKET_ML), (1, MARKET_MINUS)]
     assert parlay_issues(list(guarded), PARAMS, twenty) == ()
     # candidates с тем же лимитом просадки — те же исходы
     picked = candidates([*match1, *match2], PARAMS, drawdown=twenty)
-    assert [(item.match_id, item.market) for item in picked] == [(2, MARKET_ML), (1, MARKET_PLUS)]
+    assert [(item.match_id, item.market) for item in picked] == [(2, MARKET_ML), (1, MARKET_MINUS)]
     assert [item.market for item in candidates(match1, PARAMS)] == [MARKET_ML]
 
     # Тройка: исход матча 1 с наибольшим перевесом (1.70) для тройки не годится, его фора
-    # +1.5 (p 0,85, кэф 1.30) годится — получается тройка, а не двойник
+    # −1.5 (p 0,85, кэф 1.30) годится — получается тройка, а не двойник
     match1 = [
         leg(1, 0.72, "1.70"),  # 1,224
-        leg(1, 0.85, "1.30", market=MARKET_PLUS),  # 1,105
+        leg(1, 0.85, "1.30", market=MARKET_MINUS),  # 1,105
     ]
     others = [leg(2, 0.75, "1.45"), leg(3, 0.74, "1.45")]
     triple = pick_parlay([*match1, *others], PARAMS)
     assert triple is not None
     assert [(item.match_id, item.market) for item in triple] == [
-        (1, MARKET_PLUS),
+        (1, MARKET_MINUS),
         (2, MARKET_ML),
         (3, MARKET_ML),
     ]
@@ -281,6 +282,37 @@ def test_parlay_takes_fitting_outcome_of_each_match() -> None:
     # Просадка 10% числа ног не ограничивает — та же тройка
     ten = PARAMS.drawdown_level(D("0.1"))
     assert pick_parlay([*match1, *others], PARAMS, drawdown=ten) == triple
+
+
+def test_suspended_market_is_never_picked() -> None:
+    # Ф(+1.5) на проверке (SUSPENDED_MARKETS): даже с большим валуем и в списке рынков
+    # версии исход не идет ни в кандидаты, ни в экспресс, а экран получает свою причину
+    assert MARKET_PLUS in SUSPENDED_MARKETS
+    plus = leg(1, 0.85, "1.50", market=MARKET_PLUS, selection=2)  # перевес 1,275
+    others = [leg(2, 0.75, "1.45"), leg(3, 0.74, "1.45")]
+    stored = StrategyParams.from_params({"markets": ["ML", "HCP_-1.5", "HCP_+1.5"]})
+    for params in (PARAMS, stored):
+        assert MARKET_PLUS in params.markets
+        assert candidates([plus, *others], params) == [others[0], others[1]]
+        assert candidates([plus], params, require_value=False) == []
+        express = pick_parlay([plus, *others], params)
+        assert express is not None and plus not in express
+        assert leg_issues(plus, params) == ("market_suspended",)
+    # Причина рынка на проверке — первой: ее и показывает экран
+    weak = leg(1, 0.6, "1.9", market=MARKET_PLUS, blocks=("form",))
+    assert leg_issues(weak, PARAMS) == ("market_suspended", "form", "p_low", "odds_high")
+    # Без +1.5 в версии — обе причины
+    no_plus = StrategyParams.from_params({"markets": ["ML"]})
+    assert leg_issues(plus, no_plus) == ("market_suspended", "market")
+    # Вероятность и кэф исхода по-прежнему есть (строка таблицы анализа)
+    probs = Probs3(p1_win=0.8, p1_cover=0.55, p2_cover=0.05)
+    odds: dict[str, list[Decimal | None]] = {"HCP_+1.5": [D("1.10"), D("2.30")]}
+    shown = legs_for_match(9, probs, odds, PARAMS)
+    assert [(item.market, item.selection) for item in shown] == [
+        (MARKET_PLUS, 1),
+        (MARKET_PLUS, 2),
+    ]
+    assert pick_parlay([*shown, *others], PARAMS) == tuple(others)
 
 
 def test_backtest_rules_still_work() -> None:

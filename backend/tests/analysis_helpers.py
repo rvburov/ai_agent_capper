@@ -212,11 +212,15 @@ async def make_analysis(
     *pairs: Sequence[str],
     bank: str | None = "10000",
     tournament: str | None = "Test Open 9",
+    plus: tuple[str | None, str | None] = (None, None),
 ) -> int:
-    """Анализ из формы, запущенный (queued) без воркера. Возвращает id."""
+    """Анализ из формы, запущенный (queued) без воркера. Возвращает id. plus — кэфы на
+    Ф(+1.5) игроков 1 и 2 в каждом событии."""
     analysis = await analyses_service.create_form(db, user)
     body = ConfirmIn(
-        events=[event_in(world, pair[0], pair[1], tournament=tournament) for pair in pairs],
+        events=[
+            event_in(world, pair[0], pair[1], tournament=tournament, plus=plus) for pair in pairs
+        ],
         bank=Decimal(bank) if bank is not None else None,
         bookmaker="Fonbet",
     )

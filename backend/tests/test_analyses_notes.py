@@ -1,5 +1,6 @@
 """Пометки исходов в итоге анализа: «в матче есть исход выгоднее» — только когда другой
-исход этого матча вошел в экспресс.
+исход этого матча вошел в экспресс; рынок на проверке (Ф(+1.5)) виден в таблице со своей
+причиной, но в экспресс не идет.
 
 Сквозной прогон на настоящих данных: экспресса нет (подходит одно событие), а у
 подходящего исхода стояло «В матче есть исход выгоднее», хотя выгоднее в матче не было.
@@ -84,3 +85,38 @@ async def test_leg_beside_chosen_one_is_not_best(
         for row in match["markets"]:
             # Исход матча, у которого в экспрессе другой исход, не бывает «не вошел»
             assert row["note_key"] != "analysis.leg.not_picked"
+
+
+async def test_suspended_market_is_shown_but_not_picked(
+    db: AsyncSession,
+    engine: AsyncEngine,
+    redis: Redis,
+    make_user: UserFactory,
+    world: dict[str, int],
+    fake: FakeClaude,
+) -> None:
+    # Кэфы на Ф(+1.5) обеих сторон с большим валуем: исходы есть в таблице с вероятностью
+    # и кэфом, но в экспресс не идут, а причина — «рынок на проверке»
+    member = await make_user()
+    analysis_id = await make_analysis(
+        db,
+        redis,
+        member.user,
+        world,
+        ("sinner", "rune"),
+        ("djokovic", "rublev"),
+        plus=("1.40", "1.75"),
+    )
+    assert await run(engine, redis, analysis_id) == "done"
+
+    result = await _result(db, analysis_id)
+    express = result["express"]
+    assert express is not None
+    assert all(leg["market"] != "HCP_+1.5" for leg in express["legs"])
+    for match in result["matches"]:
+        rows = [row for row in match["markets"] if row["market"] == "HCP_+1.5"]
+        assert len(rows) == 2
+        for row in rows:
+            assert row["odds"] is not None and row["p_final"] > 0
+            assert not row["in_express"]
+            assert row["note_key"] == "analysis.leg.market_suspended"

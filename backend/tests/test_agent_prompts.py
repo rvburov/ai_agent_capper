@@ -159,8 +159,11 @@ def test_every_text_key_of_analysis_has_text() -> None:
     for module in TEXT_MODULES:
         keys |= _keys_in(module)
     keys |= {f"analysis.rules.{key}" for key in RULE_KEYS}
-    issues = ("form", "injury", "fatigue", "market", "p_low", "cover_p_low", "odds_low")
-    keys |= {f"analysis.leg.{key}" for key in (*issues, "odds_high", "no_value", "drawdown_odds")}
+    issues = ("form", "injury", "fatigue", "market", "market_suspended", "p_low", "cover_p_low")
+    keys |= {
+        f"analysis.leg.{key}"
+        for key in (*issues, "odds_low", "odds_high", "no_value", "drawdown_odds")
+    }
     reasons = ("no_legs", "no_bank", "currency", "total_range", "below_min")
     keys |= {f"analysis.stake.{key}" for key in reasons}
     compare = ("elo_rank", "elo_surface", "form10", "load14", "serve_first", "serve_second")
