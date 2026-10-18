@@ -193,7 +193,7 @@
       keyView: mode, seenMode: mode, keyDraft: '', keyShow: false, keyErr: null, keyReplace: false, keyDelConfirm: false,
       // что присылать — по видам уведомлений (notifications.kind): на сайте (site) и push (push, по умолчанию — PUSH_OFF)
       notif: { bet: { site: true }, limit: { site: true }, key: { site: true }, decision: { site: true }, requests: { site: true }, users: { site: true }, budget: { site: true }, archive: { site: true }, alert: { site: true } },
-      quiet: { on: true, from: '23:00', to: '08:00' }, // тихие часы — только для push, по поясу пользователя
+      quiet: { on: false, from: '23:00', to: '08:00' }, // тихие часы — только для push, по поясу пользователя; по умолчанию выключены (18.10.2026)
       deletion: null,
     };
   }

@@ -1218,7 +1218,8 @@ async def test_stage6_migration_push_and_quiet_hours(settings: Settings) -> None
                     )
                 )
             async with engine.begin() as conn:
-                await conn.run_sync(run_alembic_upgrade, "head")
+                # 0013 выключает тихие часы всем — здесь проверяется сама 0010
+                await conn.run_sync(run_alembic_upgrade, "0012")
             async with engine.begin() as conn:
                 user = (
                     await conn.execute(
@@ -1349,6 +1350,37 @@ async def test_bet_kind_migration(settings: Settings) -> None:
                 )
                 assert "kind" not in columns
                 assert await conn.scalar(text("SELECT count(*) FROM bets")) == 4
+                await conn.run_sync(run_alembic_upgrade, "head")
+        finally:
+            await engine.dispose()
+
+
+async def test_quiet_hours_off_migration(settings: Settings) -> None:
+    """0012 → 0013: тихие часы выключены у всех и по умолчанию у новых; окно 23:00–08:00
+    остается. Откат возвращает только значение по умолчанию."""
+    async with _temp_database(settings, "quiet_off") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0012")
+                await conn.execute(text("INSERT INTO users (email) VALUES ('a@example.com')"))
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                await conn.execute(text("INSERT INTO users (email) VALUES ('b@example.com')"))
+                rows = await conn.execute(
+                    text("SELECT quiet_enabled, quiet_start FROM users ORDER BY id")
+                )
+                assert [(row[0], str(row[1])) for row in rows] == [
+                    (False, "23:00:00"),
+                    (False, "23:00:00"),
+                ]
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0012")
+            async with engine.begin() as conn:
+                await conn.execute(text("INSERT INTO users (email) VALUES ('c@example.com')"))
+                states = await conn.execute(text("SELECT quiet_enabled FROM users ORDER BY id"))
+                assert list(states.scalars()) == [False, False, True]
                 await conn.run_sync(run_alembic_upgrade, "head")
         finally:
             await engine.dispose()

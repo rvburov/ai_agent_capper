@@ -45,7 +45,8 @@ async def test_member_prefs_by_key_mode(
     assert required == {"new_device", "login_failures", "admin_message"}
     # Push по умолчанию включен у всех видов участника (В2, этап 6)
     assert all(item["on_site"] and item["push"] and not item["admin"] for item in body["items"])
-    assert body["quiet_hours"] == {"enabled": True, "start": "23:00", "end": "08:00"}
+    # Тихие часы по умолчанию выключены (0013), окно 23:00–08:00 — на случай включения
+    assert body["quiet_hours"] == {"enabled": False, "start": "23:00", "end": "08:00"}
     groups = {item["kind"]: item["group"] for item in body["items"]}
     assert groups["limit_80"] == groups["limit_100"] == "limit"
     own = await signed_in(make_client, make_user, login, ip="10.0.0.2", ai_mode="own")

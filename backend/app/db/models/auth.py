@@ -113,8 +113,9 @@ class User(CreatedAtMixin, UpdatedAtMixin, Base):
     # отменить (В10, Р24)
     deletion_requested_at: Mapped[datetime | None]
     # Тихие часы push (этап 6, В3): в эти часы по поясу tz push не уходят, уведомления
-    # остаются в колокольчике. Начало и конец не совпадают, шаг — 30 минут (проверяет API)
-    quiet_enabled: Mapped[bool] = mapped_column(server_default=text("true"))
+    # остаются в колокольчике. Начало и конец не совпадают, шаг — 30 минут (проверяет API).
+    # По умолчанию выключены (решение владельца 18.10.2026, миграция 0013)
+    quiet_enabled: Mapped[bool] = mapped_column(server_default=text("false"))
     quiet_start: Mapped[time] = mapped_column(Time, server_default=text("'23:00'"))
     quiet_end: Mapped[time] = mapped_column(Time, server_default=text("'08:00'"))
 

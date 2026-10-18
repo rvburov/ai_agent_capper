@@ -590,6 +590,9 @@ async def test_quiet_hours_skip_push_but_not_login_alerts(
     vapid: Settings, push_server: FakePushService, make_user: UserFactory, db: AsyncSession
 ) -> None:
     alice = (await make_user(tz="Asia/Tokyo")).user
+    # По умолчанию тихие часы выключены (0013) — участник включил их сам
+    alice.quiet_enabled = True
+    await db.commit()
     phone = device("phone")
     await _subscribe(db, alice, phone)
     night = datetime(2026, 10, 16, 15, 30, tzinfo=UTC)  # 00:30 в Токио
@@ -948,7 +951,7 @@ async def test_export_has_devices_without_endpoint(
     assert phone.endpoint not in exported.text and phone.keys["p256dh"] not in exported.text
     profile = data["profile"]
     assert (profile["quiet_enabled"], profile["quiet_start"], profile["quiet_end"]) == (
-        True,
+        False,
         "23:00:00",
         "08:00:00",
     )
