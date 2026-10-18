@@ -4,7 +4,9 @@
 калибровку активной версии (и поправку модели сетов); проверка по месяцам и
 GET /api/ml/model."""
 
+import threading
 from datetime import date
+from typing import Any
 
 import pytest
 from sqlalchemy import select
@@ -50,9 +52,19 @@ async def test_recalibration_activates_rejects_and_rolls_back(
     admin = await admin_signed_in(make_client, make_user, login)
     member = await signed_in(make_client, make_user, login)
     assert await active_model_id(db) == MODEL_ID
+    # Подбор моделей сетов и геймов — в потоке, не в цикле событий воркера (M3 волны 3)
+    in_main: list[bool] = []
+    layers = recalibration._choose_layers
+
+    def spy(*args: Any) -> Any:
+        in_main.append(threading.current_thread() is threading.main_thread())
+        return layers(*args)
+
+    monkeypatch.setattr(recalibration, "_choose_layers", spy)
 
     result = await recalibration.recalibrate(db, today=TODAY)
     assert result.decision == "activated" and result.reason is None
+    assert in_main == [False]
     version = result.version
     assert version is not None and version.id == f"{MODEL_ID}@{TODAY.isoformat()}"
     assert version.status == "active" and version.auto is True

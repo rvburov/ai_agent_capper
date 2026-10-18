@@ -93,7 +93,7 @@ from app.ingest.runs import (
     last_ok_file_hashes,
     update_lock,
 )
-from app.ml.markets import is_market, swapped_side
+from app.ml.markets import SCORE_SIDES, SCORE_SWAPPED, is_market, swapped_side
 from app.services.bet_versions import touch_bets_on_matches
 
 SOURCE = "sackmann"
@@ -947,7 +947,8 @@ async def _flip_sides(db: AsyncSession, match_ids: Sequence[int]) -> None:
     этих матчах — новая версия: счет из окна расчета («первым — игрок 1»), открытого до
     обмена, относился бы уже к другому игроку (app/services/bet_versions.py).
 
-    У тоталов (STOT_, GTOT_, Р28) сторона — больше или меньше, а не игрок: она не меняется.
+    У тоталов (STOT_, GTOT_, Р28) сторона — больше или меньше, а не игрок: она не меняется,
+    а счет ноги (он у тотала со стороны игрока 1) и счет архива разворачиваются.
     """
     if not match_ids:
         return
@@ -972,6 +973,17 @@ async def _flip_sides(db: AsyncSession, match_ids: Sequence[int]) -> None:
         update(BetLeg)
         .where(BetLeg.match_id.in_(ids), ~_is_total(BetLeg.market))
         .values(selection=3 - BetLeg.selection)
+        .execution_options(**no_sync)
+    )
+    await db.execute(
+        update(BetLeg)
+        .where(BetLeg.match_id.in_(ids), _is_total(BetLeg.market))
+        .values(
+            score=func.regexp_replace(BetLeg.score, SCORE_SIDES, SCORE_SWAPPED, "g"),
+            archive_score=func.regexp_replace(
+                BetLeg.archive_score, SCORE_SIDES, SCORE_SWAPPED, "g"
+            ),
+        )
         .execution_options(**no_sync)
     )
     await db.execute(

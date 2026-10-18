@@ -60,6 +60,7 @@ from app.ml.elo import (
     rating_surface,
     win_probability,
 )
+from app.ml.games import ServeRecord, decider_rule, games_calibration_of, serve_mean
 from app.ml.sets import (
     SHOWN_DIGITS,
     Probs3,
@@ -433,12 +434,22 @@ async def serve_sums(
     return {int(row[0]): ServeSums(*(int(value or 0) for value in row[1:])) for row in rows}
 
 
-async def _serve_stats(
-    db: AsyncSession, player_ids: Sequence[int], day: date
-) -> dict[int, dict[str, Any]]:
+def serve_record(sums: ServeSums | None) -> ServeRecord | None:
+    """Подача и прием за окно для темпа модели геймов (app/ml/games.py)."""
+    if sums is None or sums.svpt <= 0 or sums.opp_svpt <= 0:
+        return None
+    return ServeRecord(
+        serve_points=sums.svpt,
+        serve_won=sums.first_won + sums.second_won,
+        return_points=sums.opp_svpt,
+        return_won=sums.opp_svpt - sums.opp_first_won - sums.opp_second_won,
+    )
+
+
+def _serve_stats(by_player: dict[int, ServeSums]) -> dict[int, dict[str, Any]]:
     """Подача и прием за 52 недели для досье (доли с округлением до сотых)."""
     stats: dict[int, dict[str, Any]] = {}
-    for player_id, sums in (await serve_sums(db, player_ids, day)).items():
+    for player_id, sums in by_player.items():
         stats[player_id] = {
             "m": sums.matches,
             "first_in": _ratio(sums.first_in, sums.svpt),
@@ -795,7 +806,8 @@ async def build_dossier(
 
     form = {player_id: await form_rows(db, player_id, day) for player_id in player_ids}
     recent = await recent_rows(db, player_ids, day)
-    serve = await _serve_stats(db, player_ids, day)
+    sums = await serve_sums(db, player_ids, day)
+    serve = _serve_stats(sums)
     news = await _news(db, player_ids, as_of) if with_news else {}
     data_to = await data_to_on(db, day)
     head_to_head = await h2h(db, *player_ids, day, surface)
@@ -813,6 +825,17 @@ async def build_dossier(
     names = {player_id: row.name for player_id, row in people.items()}
 
     tour, level = await archive_tournament(db, match.tournament_id)
+    # Вход цепи модели геймов: темп по подаче и приему, правило решающего сета турнира и
+    # поправка версии модели (в досье не идет — Claude его не видит, префикс кэша тот же)
+    games = games_calibration_of(params.get(model_versions.GAMES_KEY)).input_for(
+        serve_mean(
+            serve_record(sums.get(player_ids[0])),
+            serve_record(sums.get(player_ids[1])),
+            surface,
+        ),
+        decider_rule(level, tour, day.year, best_of),
+        best_of,
+    )
 
     refs: dict[str, str] = {"elo": "p1.elo p2.elo p_base", "h2h": "h2h"}
     blocks: dict[str, dict[str, Any]] = {}
@@ -906,6 +929,7 @@ async def build_dossier(
         "best_of": best_of,
         "surface": surface,
         "ml_model_id": model.model_id,
+        "games": games.to_json(),
     }
     return DossierResult(
         dossier_id=dossier_id,

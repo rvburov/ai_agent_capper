@@ -44,6 +44,8 @@ ExtraFamily = Literal["shcp", "stot", "ghcp", "gtot"]
 # Статус рынка: express — идет в экспресс, suspended — на проверке (SUSPENDED_MARKETS),
 # compare — «для сравнения» (новые рынки до решения администратора)
 MarketStatus = Literal["express", "suspended", "compare"]
+# Состояние модели семейства рынков (app/ml/markets.py, model_state)
+ModelState = Literal["ok", "failed", "none"]
 Surface = Literal["hard", "clay", "grass", "carpet"]
 AnalysisStatus = Literal[
     "created",
@@ -475,9 +477,11 @@ class MarketRow(BaseModel):
     Р28: family и line — семейство и линия из кода рынка (у фор — линия выбранной
     стороны, у ML — null); status — express, suspended или compare («для сравнения»;
     suspended — по списку сейчас, у новых семейств — на момент анализа: так собирался его
-    экспресс); p_push — вероятность
-    возврата на целой линии (у половинной 0). У рынков по геймам вероятностей модели пока
-    нет (волна 3): p_base, p_claude, p_final, value — null, has_model — false."""
+    экспресс); p_push — вероятность возврата на целой линии (у половинной 0). has_model —
+    есть вероятность модели, model_state — ok (есть), failed (модель семейства не прошла
+    проверку на истории, note_key analysis.leg.model_failed) или none (модели нет, у строк
+    рынков по геймам до этапа 7, волны 3; note_key analysis.leg.no_model): тогда p_base,
+    p_claude, p_final, value — null."""
 
     market: Market
     selection: int
@@ -497,6 +501,7 @@ class MarketRow(BaseModel):
     status: MarketStatus
     p_push: float
     has_model: bool
+    model_state: ModelState
 
 
 class MatchResult(BaseModel):
@@ -558,6 +563,9 @@ class RuleCheck(BaseModel):
 
 
 class ExpressOut(BaseModel):
+    """Экспресс стратегии. p_express — Π(pᵢ + P(возврат)ᵢ / кэфᵢ): p_express · итоговый
+    кэф − 1 = ev и с целыми линиями (без них — произведение вероятностей ног)."""
+
     legs: list[ExpressLeg]
     total_odds: DecimalOut
     p_express: float
@@ -577,8 +585,9 @@ class VariantOut(BaseModel):
     """Вариант ставки (Р29, app/ml/variants.py): strategy — экспресс стратегии, safer —
     ординар «надежнее», value — ординар «лучший валуй», best_express — «Экспресс из
     лучших» (вне правил стратегии). kind — вид ставки при сохранении. also: ["value"] —
-    safer совпал с лучшим валуем (одна карточка). p — произведение итоговых вероятностей
-    ног, value — p·кэф − 1, value_tier — его уровень. stake — рекомендованная сумма (null —
+    safer совпал с лучшим валуем (одна карточка). p — вероятность варианта Π(pᵢ +
+    P(возврат)ᵢ / кэфᵢ) (без целых линий — произведение итоговых вероятностей ног), value —
+    p·кэф − 1, value_tier — его уровень. stake — рекомендованная сумма (null —
     суммы нет, почему — stake_calc.reason: no_value, total_range, below_min…), stake_calc —
     расчет для «Как посчитана сумма». why_key — ключ локали причины выбора
     (analysis.variants.why.*) и why_params. issues — правила экспресса, которые не прошел

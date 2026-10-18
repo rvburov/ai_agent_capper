@@ -294,7 +294,7 @@ async def test_eval_runs_compare_candidate_and_activation(
     assert made.status_code == 201, made.text
     v4 = made.json()
     assert (v4["code"], v4["status"], v4["lessons"]) == ("v4", "candidate", ["L-001"])
-    assert v4["prompt_version"].startswith("analysis.v1+lessons_block.v2:")
+    assert v4["prompt_version"].startswith("analysis.v1+lessons_block.v3:")
     assert v4["can_activate"] is False and v4["activate_reason"] == "strategy.eval_needed"
     early = await admin.client.post(f"/api/strategy/versions/{v4['id']}/activate")
     assert early.status_code == 409 and error_code(early) == "strategy.eval_needed"

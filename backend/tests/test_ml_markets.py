@@ -252,15 +252,18 @@ def test_status_and_express_codes() -> None:
     assert market_status("ML") == "express" and market_status("HCP_+1.5") == "express"
     assert market_status("STOT_2.5") == "compare"
     assert market_status("STOT_2.5", ("stot",)) == "express"
-    # У рынков по геймам нет вероятности модели: в экспресс их не перевести
-    assert market_status("GTOT_22.5", ("gtot",)) == "compare"
+    # Модель геймов прошла проверку (этап 7, волна 3): переведенный рынок идет в экспресс
+    assert market_status("GTOT_22.5", ("gtot",)) == "express"
+    assert market_status("GTOT_22.5") == "compare"
     assert market_meta("GHCP_-3", ()) == {
         "family": "ghcp", "line": -3.0, "status": "compare", "suspended": False,
-        "has_model": False,
+        "has_model": True, "model_state": "ok",
     }  # fmt: skip
     codes = ["ML", "STOT_2.5", "GTOT_22.5", "HCP_-2.5"]
     assert express_codes(codes, params) == params.markets
-    assert express_codes(codes, params, ("stot", "gtot")) == (*params.markets, "STOT_2.5")
+    assert express_codes(codes, params, ("stot", "gtot")) == (
+        *params.markets, "STOT_2.5", "GTOT_22.5",
+    )  # fmt: skip
 
 
 def test_new_markets_only_in_express_when_promoted() -> None:

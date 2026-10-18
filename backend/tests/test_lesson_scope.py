@@ -6,6 +6,7 @@
 
 from datetime import date, timedelta
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pytest
@@ -307,3 +308,121 @@ def test_selection_prob_uses_sets_calibration() -> None:
     raw = lesson_check.selection_prob(0.7, 5, MARKET_PLUS, {})
     assert raw == 1.0 - base_probs(0.7, 5).p2_cover
     assert lesson_check.selection_prob(0.7, 5, MARKET_PLUS) < raw
+
+
+# --- тоталы и фора по геймам (M1 и L1 волны 3) ---
+
+GTOT = {"feature": "market", "op": "eq", "values": ["gtot"]}
+
+
+@pytest.mark.parametrize(
+    "side",
+    [
+        FAVORITE,
+        {"feature": "odds", "op": "ge", "value": 2.0},
+        {"feature": "sets_48h", "op": "ge", "value": 3},
+        {"feature": "opp_sets_48h", "op": "ge", "value": 3},
+        {"feature": "rest_days", "op": "le", "value": 1},
+        {"feature": "h2h_wins", "op": "ge", "value": 1},
+    ],
+)
+@pytest.mark.parametrize("values", [["gtot"], ["stot"], ["ML", "stot"]])
+def test_total_lesson_refuses_side_features(side: dict[str, Any], values: list[str]) -> None:
+    market = {"feature": "market", "op": "in", "values": values}
+    with pytest.raises(ScopeError) as caught:
+        validate_scope({"direction": "lower", "conditions": [market, side]})
+    assert caught.value.code == "lesson.scope_total_side"
+
+
+def test_total_and_game_handicap_scopes() -> None:
+    # Тотал — без признака стороны, симметричные признаки допустимы
+    total = _scope(GTOT, {"feature": "elo_gap", "op": "lt", "value": 100})
+    assert total.markets() == ("gtot",)
+    assert _scope({"feature": "market", "op": "eq", "values": ["stot"]}).markets() == ("stot",)
+    # Фора по геймам без стороны вырождается, как ML: линии сторон L и −L дополняют друг друга
+    ghcp = {"feature": "market", "op": "eq", "values": ["ghcp"]}
+    hard = {"feature": "surface", "op": "eq", "values": ["hard"]}
+    for conditions in ([ghcp, hard], [{**ghcp, "op": "in", "values": ["ML", "ghcp"]}, hard]):
+        with pytest.raises(ScopeError) as caught:
+            validate_scope({"direction": "lower", "conditions": conditions})
+        assert caught.value.code == "lesson.scope_side"
+    assert _scope(ghcp, FAVORITE).markets() == ("ghcp",)
+    # Фора по сетам ±2.5 не симметрична (−2.5 у каждой стороны — своя победа 3:0)
+    assert _scope({"feature": "market", "op": "eq", "values": ["shcp"]}, hard)
+
+
+async def test_own_total_leg_is_not_a_player_side(
+    db: AsyncSession, engine: AsyncEngine, make_user: UserFactory
+) -> None:
+    """Своя нога на тотал «меньше» (selection 2) — случай со стороны игрока 1, а не игрока
+    2; в фактах — семейство рынка и без признаков стороны."""
+    world = await mini_archive(db, engine)
+    user = await make_user()
+    _, under, _ = await own_leg(db, user.id, world.m3, selection=2, market="GTOT_22.5")
+    _, over, _ = await own_leg(db, user.id, world.m3, selection=1, market="GTOT_22.5")
+    _, ml, _ = await own_leg(db, user.id, world.m3, selection=2)
+    rows = await read_only(
+        db, cases_select(None, model=EloModel(), own=True, leg_ids=[under.id, over.id, ml.id])
+    )
+    by_leg = {row["leg_id"]: row for row in rows}
+    for leg in (under, over):
+        assert (by_leg[leg.id]["side"], by_leg[leg.id]["pid"]) == (1, world.a)
+    assert (by_leg[ml.id]["side"], by_leg[ml.id]["pid"]) == (2, world.b)
+    features = await lesson_check.leg_features(db, [under.id, ml.id])
+    assert features[under.id]["market"] == "gtot"
+    assert features[under.id]["role"] is None and features[under.id]["odds"] is None
+    assert features[under.id]["sets_48h"] is None and features[under.id]["h2h_wins"] is None
+    assert features[under.id]["h2h_matches"] == 1 and features[under.id]["surface"]
+    assert features[ml.id]["market"] == "ML" and features[ml.id]["role"] == "underdog"
+    own = await lesson_check.own_cases(db, _scope(GTOT))
+    assert own.legs == 2 and set(own.leg_ids) == {under.id, over.id}
+
+
+async def test_whole_line_residual_and_analytics_are_conditional(
+    db: AsyncSession, engine: AsyncEngine, make_user: UserFactory
+) -> None:
+    """M2 волны 3: у своих ног целой линии (тотал 22, p = 0.45, возврат 0.1) остаток урока
+    и калибровка «Аналитики» берут p / (1 − p_push): среди решенных ног выигрыш и
+    проигрыш поровну — остаток 0, а не ложные +5 п.п. «модель занижает»."""
+    from app.db.models import Bet
+    from app.ml.games import PUSH_KEY
+    from app.services import analytics
+
+    world = await mini_archive(db, engine)
+    user = await make_user()
+    push = {"base": 0.12, "claude": 0.1, "final": 0.1}
+    legs = []
+    for selection, result in ((1, "win"), (2, "loss"), (1, "void")):
+        _, leg, prediction = await own_leg(
+            db, user.id, world.m3, selection=selection, market="GTOT_22", result=result,
+            p_final=0.45,
+        )  # fmt: skip
+        prediction.features = {PUSH_KEY: push}
+        legs.append(leg)
+    _, half, _ = await own_leg(
+        db, user.id, world.m2, market="GTOT_22.5", result="win", p_final=0.45
+    )
+    await db.commit()
+
+    own = await lesson_check.own_cases(db, _scope(GTOT))
+    assert own.legs == 3 and set(own.leg_ids) == {legs[0].id, legs[1].id, half.id}
+    # (1 − 0.5) + (0 − 0.5) + (1 − 0.45) — у половинной линии p без изменений
+    assert own.residual == pytest.approx((0.5 - 0.5 + 0.55) / 3)
+
+    rows = await analytics.settled_rows(db, user.user, [Bet.user_id == user.id])
+    found = {leg.id: leg for bet in rows for leg in bet.legs}
+    assert found[legs[0].id].push == (0.12, 0.1, 0.1) and found[half.id].push == (0.0, 0.0, 0.0)
+    decided = [(bet, leg) for bet in rows for leg in bet.legs if leg.result in ("win", "loss")]
+    events = {event.leg.id: event for event in analytics.calibration_events(decided, "final")}
+    assert events[half.id].p == pytest.approx(0.45)
+    pushed = [event for event in events.values() if event.leg.market == "GTOT_22"]
+    assert [event.p for event in pushed] == [pytest.approx(0.5)]
+    # «Все мои прогнозы»: сторона пары и p — тоже при условии «не возврат». Больше 0.45 и
+    # меньше 0.45 при возврате 0.1 — по 0.5 (без условия ни одна сторона не была ≥ 50%)
+    window = analytics.Window("all", None, date(2030, 1, 1), None)
+    predictions = await analytics.prediction_events(db, user.user, window, ZoneInfo("UTC"))
+    totals = [event for event in predictions if event.market == "GTOT_22"]
+    # 6-1 6-1: 14 геймов, «больше 22» не прошло
+    assert [(event.selection, event.y) for event in totals] == [(1, 0)]
+    assert totals[0].p == pytest.approx(0.5)
+    assert totals[0].p_base == pytest.approx(0.43 / 0.88)  # p_base own_leg — p − 0.02

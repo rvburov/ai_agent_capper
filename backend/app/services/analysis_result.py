@@ -5,8 +5,11 @@
 пишется (калибровка, CLV, общий счетчик), строка видна в таблице, своей ставкой их
 поставить можно, но в экспресс и варианты они идут, только если администратор перевел
 семейство в экспресс (app_settings.express_markets). Рынки по сетам считаются из трех
-чисел матча (app/ml/sets.py, market_prob): поправка Claude переносится кодом. У рынков по
-геймам вероятности модели пока нет (волна 3): p_base, p_claude, p_final — пусто.
+чисел матча (app/ml/sets.py, market_prob), рынки по геймам — цепью очко → гейм → сет → матч
+из тех же трех чисел, темпа и правила решающего сета (app/ml/games.py; вход цепи —
+features.games досье): поправка Claude переносится кодом. У целой линии по геймам «ровно» —
+возврат: вероятность возврата пишется в features.p_push прогноза, валуй = p·кэф +
+P(возврат) − 1. У семейства без принятой модели p_base, p_claude, p_final — пусто.
 
 Числа считает код (app/ml/strategy.py): Р22 — поправка Claude ограничена ±10 п.п. от
 p_base и согласована; исходы с кэфами участника; экспресс по правилам v3 с лимитом
@@ -20,7 +23,6 @@ p_base и согласована; исходы с кэфами участник�
 Claude и без записи; сумма — от банка сейчас.
 """
 
-import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
@@ -39,10 +41,11 @@ from app.db.models import (
     PlayerNews,
     Prediction,
 )
+from app.ml.games import PUSH_KEY, GamesInput, market_outcome
 from app.ml.market import devig_pair
-from app.ml.markets import is_market, opposite
+from app.ml.markets import MODEL_FAILED, MODEL_NONE, is_market, opposite
 from app.ml.model_versions import active_model_id
-from app.ml.sets import MARKET_MINUS, MARKETS, Probs3, market_prob
+from app.ml.sets import MARKET_MINUS, MARKETS, Probs3
 from app.ml.strategy import (
     STATUS_COMPARE,
     BankSignals,
@@ -54,12 +57,15 @@ from app.ml.strategy import (
     apply_claude,
     candidates,
     express_codes,
+    leg_blocks,
     leg_issues,
     legs_for_match,
     make_leg,
     market_meta,
     parlay_issues,
+    parlay_p,
     parlay_total,
+    parlay_value,
     pick_parlay,
     selection_blocks,
     stake,
@@ -124,6 +130,7 @@ class _Match:
     legs: list[Leg]
     form: tuple[list[str], list[str]]
     entry: dict[str, Any]
+    games: GamesInput
 
 
 def clip01(value_: float) -> float:
@@ -172,12 +179,33 @@ def with_express_markets(
     return params if found == params.markets else replace(params, markets=found)
 
 
-def outcome_prob(probs: Probs3, best_of: int, market: str, selection: int) -> float | None:
-    """Вероятность исхода по трем числам матча: прежние рынки — из Probs3, новые — из
-    модели сетов; рынок по геймам — None."""
-    if market in MARKETS:
-        return probs.markets()[(market, selection)]
-    return market_prob(probs, best_of, market, selection)
+def outcome_prob(
+    probs: Probs3,
+    best_of: int,
+    market: str,
+    selection: int,
+    games: GamesInput | None = None,
+) -> tuple[float, float] | None:
+    """(P(выигрыш), P(возврат)) исхода по трем числам матча: прежние рынки — из Probs3,
+    новые по сетам — из модели сетов, по геймам — из цепи (games). Нет вероятности — None."""
+    return market_outcome(probs, best_of, market, selection, games)
+
+
+def games_input(entry: Mapping[str, Any], event: ConfirmedEvent) -> GamesInput:
+    """Вход цепи модели геймов из features досье матча (нет — среднее тура на покрытии)."""
+    features = entry.get("features") or {}
+    return GamesInput.from_json(features.get("games"), surface=event.surface, best_of=event.best_of)
+
+
+def push_of(prediction: Prediction) -> float:
+    """Вероятность возврата итогового прогноза (0 — половинная линия или прогноз до Р28)."""
+    found = (prediction.features or {}).get(PUSH_KEY)
+    if not isinstance(found, Mapping):
+        return 0.0
+    try:
+        return float(found.get("final") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def form_of(content: dict[str, Any], key: str) -> list[str]:
@@ -355,10 +383,17 @@ async def _load_match(
         1: selection_blocks([r == "W" for r in form[0][:5]], out.flags.p1, data.params),
         2: selection_blocks([r == "W" for r in form[1][:5]], out.flags.p2, data.params),
     }
+    games = games_input(entry, event)
     legs = legs_for_match(
-        event.match_id, final.p_final, event.odds, data.params, blocks=blocks, best_of=event.best_of
+        event.match_id,
+        final.p_final,
+        event.odds,
+        data.params,
+        blocks=blocks,
+        best_of=event.best_of,
+        games=games,
     )
-    item = _Match(event, out, content, final, fair_probs(event.odds), legs, form, entry)
+    item = _Match(event, out, content, final, fair_probs(event.odds), legs, form, entry, games)
     return item, assessment, dossier
 
 
@@ -370,18 +405,35 @@ def _predictions(
     ml_model: str | None,
     lessons: list[str],
 ) -> dict[tuple[str, int], Prediction]:
-    """Прогнозы матча по 6 исходам и по введенным новым рынкам (только INSERT). У рынка по
-    геймам вероятностей нет (пусто). lessons — коды уроков в system оценки (по ее версии
-    промпта)."""
+    """Прогнозы матча по 6 исходам и по введенным новым рынкам (только INSERT). У семейства
+    без принятой модели вероятностей нет (пусто); у целой линии — вероятность возврата в
+    features.p_push. lessons — коды уроков в system оценки (по ее версии промпта)."""
     event = item.event
     assert event.match_id is not None
     bookmaker = event.bookmaker or data.bookmaker
     rows: dict[tuple[str, int], Prediction] = {}
     for market, selection in entered_outcomes(event.odds):
         price = event.odds.get(market, [None, None])[selection - 1]
-        p_base = outcome_prob(item.final.p_base, event.best_of, market, selection)
-        p_claude = outcome_prob(item.final.p_claude, event.best_of, market, selection)
-        p_final = outcome_prob(item.final.p_final, event.best_of, market, selection)
+        found = {
+            name: outcome_prob(probs, event.best_of, market, selection, item.games)
+            for name, probs in (
+                ("base", item.final.p_base),
+                ("claude", item.final.p_claude),
+                ("final", item.final.p_final),
+            )
+        }
+        p_base, p_claude, p_final = (
+            pair[0] if pair is not None else None
+            for pair in (found["base"], found["claude"], found["final"])
+        )
+        final_found = found["final"]
+        push = final_found[1] if final_found is not None else 0.0
+        features = dict(item.entry.get("features") or {})
+        if any(pair is not None and pair[1] > 0 for pair in found.values()):
+            features[PUSH_KEY] = {
+                name: round(pair[1], P_DIGITS) if pair is not None else None
+                for name, pair in found.items()
+            }
         rows[(market, selection)] = Prediction(
             user_id=data.analysis.user_id,
             analysis_id=data.analysis.id,
@@ -390,7 +442,7 @@ def _predictions(
             selection=selection,
             as_of=dossier.as_of,
             dossier_id=dossier.id,
-            features=item.entry.get("features") or {},
+            features=features,
             feature_set=FEATURE_SET,
             strategy_version_id=data.analysis.strategy_version_id,
             ml_model_id=ml_model,
@@ -404,7 +456,7 @@ def _predictions(
             q_market_at_pred=item.fair.get((market, selection)),
             odds_at_pred=price,
             bookmaker_at_pred=(bookmaker or None) if price is not None else None,
-            value_at_pred=value(p_final, price)
+            value_at_pred=value(p_final, price, push)
             if price is not None and p_final is not None
             else None,
             rationale=item.out.explanation,
@@ -435,14 +487,17 @@ def _market_rows(
         prediction = predictions[(market, selection)]
         price = event.odds.get(market, [None, None])[selection - 1]
         p_final = prediction.p_final
-        gain = value(p_final, price) if price is not None and p_final is not None else None
+        push = push_of(prediction)
+        gain = value(p_final, price, push) if price is not None and p_final is not None else None
         key = (match_key, market, selection)
         leg = legs.get((market, selection))
         meta = market_meta(market, families)
         note: str | None = None
         if price is None:
             note = "analysis.leg.no_odds"
-        elif not meta["has_model"]:
+        elif meta["model_state"] == MODEL_FAILED:
+            note = "analysis.leg.model_failed"
+        elif meta["model_state"] == MODEL_NONE:
             note = "analysis.leg.no_model"
         elif meta["status"] == STATUS_COMPARE:
             note = "analysis.leg.market_compare"
@@ -469,7 +524,7 @@ def _market_rows(
                 "tier": value_tier(gain) if gain is not None else "none",
                 "in_express": key in in_express,
                 "note_key": note,
-                "p_push": 0.0,
+                "p_push": round(push, P_DIGITS),
                 **meta,
             }
         )
@@ -587,13 +642,14 @@ def _express_view(
 ) -> dict[str, Any]:
     total = parlay_total(express)
     calc = stake(bank, total, list(express), params, state.signals(), currency)
-    p_express = math.prod(leg.p for leg in express)
+    # Согласована с ev: p_express · итоговый кэф − 1 = ev и у целых линий (L4 волны 3)
+    p_express = parlay_p(express)
     total_text = _total_text(total)
     return {
         "legs": _legs_view(express, prediction_ids),
         "total_odds": total_text,
         "p_express": round(p_express, P_DIGITS),
-        "ev": round(p_express * float(total) - 1.0, P_DIGITS),
+        "ev": round(parlay_value(express), P_DIGITS),
         "stake": _stake_view(calc, bank_source, total_text),
         "rules": rule_checks(express, params, level),
     }
@@ -690,6 +746,9 @@ def stored_variants(
     legs: list[Leg] = []
     matches: list[int] = []
     prediction_ids: dict[tuple[int, str, int], int] = {}
+    # Вероятность возврата исхода по таблице рынков — и у строк, которые не стали ногой
+    # (нужна запасной ноге экспресса ниже)
+    pushes: dict[tuple[int, str, int], float] = {}
     confidence: dict[int, str] = {}
     for match in result.get("matches") or []:
         match_id = int(match["match_id"])
@@ -709,6 +768,7 @@ def stored_variants(
             market, selection = str(row["market"]), int(row["selection"])
             if row.get("prediction_id") is not None:
                 prediction_ids[(match_id, market, selection)] = int(row["prediction_id"])
+            pushes[(match_id, market, selection)] = float(row.get("p_push") or 0.0)
             odds = row.get("odds")
             if (
                 odds is None
@@ -727,7 +787,8 @@ def stored_variants(
                     selection,
                     float(row["p_final"]),
                     price,
-                    blocks=blocks[selection],
+                    blocks=leg_blocks(market, selection, blocks),
+                    push=float(row.get("p_push") or 0.0),
                 )
             )
     by_key = {(leg.match_id, leg.market, leg.selection): leg for leg in legs}
@@ -742,7 +803,8 @@ def stored_variants(
         if leg is None and item.get("odds") is not None and item.get("p") is not None:
             price = Decimal(str(item["odds"]))
             if price > 1:
-                leg = make_leg(*key, float(item["p"]), price)
+                # Валуй — с возвратом, как у всех ног (L3 волны 3)
+                leg = make_leg(*key, float(item["p"]), price, push=pushes.get(key, 0.0))
         if leg is None:
             express = []
             break

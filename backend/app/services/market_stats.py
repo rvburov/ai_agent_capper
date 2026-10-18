@@ -7,15 +7,17 @@
 модель общая, и 150 событий набираются быстрее. Повтор анализа того же матча тем же
 участником — одно событие (последний прогноз). Проверочные прогоны (is_eval) не считаются.
 
-- ROI — как ординары на равную сумму по кэфам из ввода: выигрыш — кэф − 1, проигрыш — −1,
-  возврат — 0; 95% ДИ — бутстрэп.
+- ROI — как ординары на равную сумму по кэфам из ввода: выигрыш — кэф − 1, проигрыш — −1;
+  возврат (ровно на целой линии) событием не считается, как в «Аналитике»; 95% ДИ —
+  бутстрэп.
 - CLV — по закрытию, которое участники внесли в ставки по этим прогнозам (кэф / закрытие −
   1; в архиве кэфов новых рынков нет); 95% ДИ — бутстрэп; clv_n — событий с закрытием.
 - Порог: событий ≥ NEED, из них с закрытием ≥ CLV_NEED и нижняя граница ДИ среднего CLV
-  выше нуля; только у семейств с вероятностью модели (MODEL_FAMILIES: рынки по геймам
-  перевести нельзя до волны 3). Тогда администраторам уходит уведомление market_ready
-  (одно на семейство, app_settings.markets_notified), а перевести семейство в экспресс
-  можно кнопкой администратора (set_express): это общая настройка
+  выше нуля; только у семейств с вероятностью модели (has_model; семейство, модель
+  которого не прошла проверку на истории, — FAILED_FAMILIES — перевести нельзя). Тогда
+  администраторам уходит уведомление market_ready (одно на семейство,
+  app_settings.markets_notified), а перевести семейство в экспресс можно кнопкой
+  администратора (set_express): это общая настройка
   app_settings.express_markets, в журнале администратора — settings_change. Пороги отбора
   для новых рынков (p от 65%, кэф 1.13–1.80) пока общие (решение владельца — вернуться,
   когда первый рынок пройдет порог).
@@ -45,7 +47,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.redis import redis_key
 from app.db.models import BetLeg, Match, Prediction, Tournament, User
-from app.ml.markets import FAMILIES, MODEL_FAMILIES, NEW_FAMILIES, family_of, is_market, market_spec
+from app.ml.markets import (
+    FAMILIES,
+    MODEL_FAILED,
+    NEW_FAMILIES,
+    family_of,
+    has_model,
+    is_market,
+    market_spec,
+    model_state,
+)
 from app.ml.metrics import bootstrap_mean_ci
 from app.ml.sets import RESULT_LOSS, RESULT_WIN, match_leg_outcome
 from app.ml.strategy import STATUS_COMPARE, STATUS_EXPRESS, STATUS_SUSPENDED, SUSPENDED_MARKETS
@@ -146,15 +157,12 @@ async def _events(db: AsyncSession) -> dict[str, _Family]:
             score=score,
             best_of=best_of,
         )
-        if outcome.result is None:
+        # Возврат (ровно на целой линии) событием не считается — как в «Аналитике»
+        # (analytics._decided): ни в ROI, ни в счетчике
+        if outcome.result not in (RESULT_WIN, RESULT_LOSS):
             continue
         price = Decimal(odds)
-        if outcome.result == RESULT_WIN:
-            gain = float(price - 1)
-        elif outcome.result == RESULT_LOSS:
-            gain = -1.0
-        else:
-            gain = 0.0
+        gain = float(price - 1) if outcome.result == RESULT_WIN else -1.0
         item = found[family_of(market)]
         item.returns.append(gain)
         if leg_clv is not None:
@@ -167,7 +175,7 @@ def _status(family: str, promoted: tuple[str, ...]) -> tuple[str, list[str]]:
     suspended = sorted(code for code in SUSPENDED_MARKETS if family_of(code) == family)
     if suspended:
         return STATUS_SUSPENDED, suspended
-    if family in NEW_FAMILIES and (family not in promoted or family not in MODEL_FAMILIES):
+    if family in NEW_FAMILIES and (family not in promoted or not has_model(family)):
         return STATUS_COMPARE, []
     return STATUS_EXPRESS, []
 
@@ -256,7 +264,7 @@ async def market_stats(
     for family in FAMILIES:
         data = numbers.get(family) or _Numbers()
         status, suspended = _status(family, promoted)
-        ready = _passed(data) and status == STATUS_COMPARE and family in MODEL_FAMILIES
+        ready = _passed(data) and status == STATUS_COMPARE and has_model(family)
         roi_shown = data.events >= PRIVATE_MIN
         clv_shown = data.clv_n >= PRIVATE_MIN
         items.append(
@@ -264,7 +272,8 @@ async def market_stats(
                 family=family,  # type: ignore[arg-type]
                 status=status,  # type: ignore[arg-type]
                 suspended_markets=suspended,
-                has_model=family in MODEL_FAMILIES,
+                has_model=has_model(family),
+                model_state=model_state(family),  # type: ignore[arg-type]
                 promoted=family in promoted,
                 events=data.events,
                 roi=data.roi if roi_shown else None,
@@ -303,7 +312,9 @@ async def set_express(
 
     if family not in NEW_FAMILIES:
         raise AppError(422, "admin.markets.not_new", family=family)
-    if express and family not in MODEL_FAMILIES:
+    if express and model_state(family) == MODEL_FAILED:
+        raise AppError(422, "admin.markets.model_failed", family=family)
+    if express and not has_model(family):
         raise AppError(422, "admin.markets.no_model", family=family)
     if express:
         current = next(item for item in (await market_stats(db)).families if item.family == family)

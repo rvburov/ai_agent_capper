@@ -32,7 +32,14 @@ from app.db.models import (
 from app.db.session import create_sessionmaker
 from app.ml.elo import rebuild_ratings
 from app.ml.lesson_scope import cases_select, validate_scope
-from app.services import check_runs, lesson_check, lesson_quick, lessons, smoke_eval
+from app.services import (
+    check_runs,
+    lesson_check,
+    lesson_quick,
+    lessons,
+    smoke_eval,
+    strategy_versions,
+)
 from app.workers.jobs import collect_all
 from tests.analysis_helpers import install, set_admin_key
 from tests.claude_mock import seed_prices
@@ -231,8 +238,24 @@ async def test_real_bias_lesson_is_ready_then_retired(
     for match in list(await db.scalars(select(Match).where(Match.id.in_(list(favorites))))):
         match.winner_id = favorites[match.id]
     await db.commit()
+    # Проверка на архиве идет до блокировки общей линии (M3 волны 3): решения
+    # администратора не ждут минуты счета модели
+    order: list[str] = []
+    real_check, real_lock = lesson_check.check_history, strategy_versions.lock_shared
+
+    async def check(*args: Any, **kwargs: Any) -> Any:
+        order.append("check")
+        return await real_check(*args, **kwargs)
+
+    async def lock(*args: Any, **kwargs: Any) -> None:
+        order.append("lock")
+        await real_lock(*args, **kwargs)
+
+    monkeypatch.setattr(lesson_check, "check_history", check)
+    monkeypatch.setattr(strategy_versions, "lock_shared", lock)
     summary = await lessons.recheck_lessons(db, now=NOW + timedelta(days=17))
     await db.refresh(lesson)
+    assert order[:2] == ["check", "lock"]
     assert summary["retired"] == 1
     assert lesson.status == "retired" and not lesson.in_prompt and lesson.retired_at is not None
     assert lesson.rechecked_at is not None
@@ -525,7 +548,7 @@ async def test_quick_check_enable_disable(
     with_lesson = {r.prompt_version for r in runs}
     assert len(with_lesson) == 1
     [prompt_id] = with_lesson
-    assert prompt_id is not None and prompt_id.startswith("analysis.v1+lessons_block.v2:")
+    assert prompt_id is not None and prompt_id.startswith("analysis.v1+lessons_block.v3:")
     await db.refresh(lesson)
     quick = lesson.metrics["quick"]
     assert quick["status"] == "done" and quick["passed"] is True

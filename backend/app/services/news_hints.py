@@ -24,8 +24,8 @@ from app.ingest.names import fold
 from app.ml.markets import parse_games
 from app.schemas.bets import NewsResultOut
 
-# Сет в счете из новости: «6-3», «6:3», «7–6(5)»
-_SET = re.compile(r"(\d{1,2})\s*[-:–]\s*(\d{1,2})(?:\s*\(\d+\))?")
+# Сет в счете из новости: «6-3», «6:3», «7–6(5)», «7-6(10-8)»
+_SET = re.compile(r"(\d{1,2})\s*[-:–]\s*(\d{1,2})(?:\s*\(\d+(?:[-:–]\d+)?\))?")
 _RETIRED = re.compile(r"\b(ret|retired|retd|w/o|walkover|отказ|снял)", re.IGNORECASE)
 # Сет по геймам: «6-4», «7-6(5)», «7-6(7-5)», супер-тай-брейк «[10-8]»
 _GAME_SET = re.compile(

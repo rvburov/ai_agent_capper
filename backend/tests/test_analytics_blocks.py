@@ -454,3 +454,37 @@ def test_period_start_from_server() -> None:
     result = analytics.series_block(_inputs(rows, AnalyticsFiltersIn(source="app")), rows)
     assert result.kind == "result" and result.start_amount == 0 and result.change_share is None
     assert all(point.invested is None for point in result.points) and result.flows == []
+
+
+def test_whole_line_calibration_is_conditional_on_not_void() -> None:
+    """M2 волны 3: у целой линии возвраты из событий выброшены, поэтому p события —
+    p / (1 − p_push). Тотал 22: p = 0.45, возврат 0.1; среди решенных ног выигрышей
+    ровно половина — калибровка без сдвига (без условия было бы −5 п.п.)."""
+    whole = [
+        replace(
+            _leg(
+                index,
+                market="GTOT_22",
+                selection=1,
+                p=0.45,
+                result="win" if index % 2 else "loss",
+            ),
+            push=(0.12, 0.1, 0.1),
+        )
+        for index in range(1, 201)
+    ]
+    half = _leg(500, market="GTOT_22.5", selection=1, p=0.45)
+    rows = [_bet(leg.id, [leg]) for leg in [*whole, half]]
+    events = calibration_events([(bet, leg) for bet in rows for leg in bet.legs], "final")
+    by_leg = {event.leg.id: event for event in events}
+    assert by_leg[1].p == pytest.approx(0.5)
+    assert by_leg[500].p == pytest.approx(0.45)
+    pushed = [event for event in events if event.leg.market == "GTOT_22"]
+    mean_p = sum(event.p for event in pushed) / len(pushed)
+    actual = sum(event.y for event in pushed) / len(pushed)
+    assert mean_p == pytest.approx(actual)
+    block = calibration_block(pushed, "final")
+    [cell] = [item for item in block.bins if item.n]
+    assert cell.p == pytest.approx(0.5) and cell.actual == pytest.approx(0.5)
+    assert cell.p_base == pytest.approx(0.45 / 0.88)
+    assert cell.p_claude == pytest.approx(0.5)

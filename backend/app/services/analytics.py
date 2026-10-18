@@ -57,6 +57,7 @@ from app.core.csv_safe import csv_cell
 from app.core.errors import AppError
 from app.core.i18n import t
 from app.db.models import BankrollLedger, Bet, BetLeg, Match, Prediction, Tournament, User
+from app.ml.games import PUSH_KEY, PUSH_NAMES, decided_prob, push_values
 from app.ml.markets import (
     FAMILIES,
     GAME_FAMILIES,
@@ -328,6 +329,16 @@ class LegRow:
     p_claude: float | None
     q_market: float | None
     forecast: bool
+    # Вероятности возврата прогноза (целая линия по геймам) по PUSH_NAMES: base, claude,
+    # final; пусто — возврата нет
+    push: tuple[float, ...] = ()
+
+    def decided(self, name: str, p: float | None) -> float | None:
+        """p прогноза при условии, что нога решена (не возврат): сравнивается с исходом
+        выигрыш или проигрыш (M2 волны 3)."""
+        if p is None or not self.push:
+            return p
+        return decided_prob(p, self.push[PUSH_NAMES.index(name)])
 
 
 @dataclass(slots=True)
@@ -360,6 +371,7 @@ class _Forecast:
     p_base: float | None
     p_claude: float | None
     q_market: float | None
+    push: Any = None
 
 
 async def _replacement_rows(db: AsyncSession, user: User) -> dict[int, Any]:
@@ -375,6 +387,7 @@ async def _replacement_rows(db: AsyncSession, user: User) -> dict[int, Any]:
             Prediction.p_base,
             Prediction.p_claude,
             Prediction.q_market_at_pred,
+            Prediction.features[PUSH_KEY].label("p_push"),
         ).where(
             Prediction.user_id == user.id,
             Prediction.supersedes.is_not(None),
@@ -398,7 +411,9 @@ def _latest_replacement(
         latest, current = row, row.id
     if latest is None:
         return None
-    return _Forecast(latest.p_final, latest.p_base, latest.p_claude, latest.q_market_at_pred)
+    return _Forecast(
+        latest.p_final, latest.p_base, latest.p_claude, latest.q_market_at_pred, latest.p_push
+    )
 
 
 async def settled_rows(
@@ -433,6 +448,7 @@ async def settled_rows(
             Prediction.p_base,
             Prediction.p_claude,
             Prediction.q_market_at_pred,
+            Prediction.features[PUSH_KEY].label("p_push"),
             Prediction.is_eval,
         )
         .select_from(Bet)
@@ -473,7 +489,7 @@ def _add_row(bets: dict[int, BetRow], row: Any, by_parent: dict[int, Any]) -> No
             kind=row.kind,
         )
     forecast = row.prediction_id is not None and not row.is_eval
-    values = _Forecast(row.p_final, row.p_base, row.p_claude, row.q_market_at_pred)
+    values = _Forecast(row.p_final, row.p_base, row.p_claude, row.q_market_at_pred, row.p_push)
     if forecast and by_parent:
         values = _latest_replacement(by_parent, row.prediction_id, row.scheduled_at) or values
     bet.legs.append(
@@ -492,6 +508,7 @@ def _add_row(bets: dict[int, BetRow], row: Any, by_parent: dict[int, Any]) -> No
             p_claude=values.p_claude if forecast else None,
             q_market=values.q_market if forecast else None,
             forecast=forecast,
+            push=tuple(push_values(values.push).values()) if forecast else (),
         )
     )
 
@@ -716,6 +733,7 @@ async def prediction_events(
             Prediction.p_final,
             Prediction.p_base,
             Prediction.p_claude,
+            Prediction.features[PUSH_KEY].label("p_push"),
             Prediction.as_of,
             Match.winner_id,
             Match.player1_id,
@@ -744,13 +762,18 @@ async def prediction_events(
     latest: dict[tuple[int, str, int], Any] = {}
     for row in rows:
         latest[(row.match_id, row.market, row.selection)] = row
-    pairs: dict[tuple[int, str, int], Any] = {}
+    # Целая линия: возврат исхода не дает, поэтому p — при условии «не возврат» (M2 волны
+    # 3); по ней же выбирается сторона пары (у больше 0.47 и меньше 0.445 при возврате
+    # 0.085 сторона «больше» — 0.514)
+    pairs: dict[tuple[int, str, int], tuple[Any, dict[str, float]]] = {}
     for (match_id, market, selection), row in latest.items():
-        if float(row.p_final) < 0.5 or (float(row.p_final) == 0.5 and selection != 1):
+        push = push_values(row.p_push)
+        p = decided_prob(float(row.p_final), push["final"])
+        if p < 0.5 or (p == 0.5 and selection != 1):
             continue
-        pairs.setdefault((match_id, *_pred_pair(market, selection)), row)
+        pairs.setdefault((match_id, *_pred_pair(market, selection)), (row, push))
     found: list[PredEvent] = []
-    for row in pairs.values():
+    for row, push in pairs.values():
         day = row.as_of.astimezone(zone).date()
         if (window.first is not None and day < window.first) or day > window.last:
             continue
@@ -759,10 +782,18 @@ async def prediction_events(
             continue
         found.append(
             PredEvent(
-                p=float(row.p_final),
+                p=decided_prob(float(row.p_final), push["final"]),
                 y=outcome,
-                p_base=float(row.p_base) if row.p_base is not None else None,
-                p_claude=float(row.p_claude) if row.p_claude is not None else None,
+                p_base=(
+                    decided_prob(float(row.p_base), push["base"])
+                    if row.p_base is not None
+                    else None
+                ),
+                p_claude=(
+                    decided_prob(float(row.p_claude), push["claude"])
+                    if row.p_claude is not None
+                    else None
+                ),
                 market=row.market,
                 selection=row.selection,
                 day=day,
@@ -848,7 +879,8 @@ def calibration_events(
         if kind == "final":
             if bet.source != "app" or leg.p_final is None:
                 continue
-            p = leg.p_final
+            # Целая линия: исход без возвратов — против p при условии «не возврат» (M2)
+            p = leg.decided("final", leg.p_final) or 0.0
         else:
             if bet.source != "legacy" or leg.p_claude is None:
                 continue
@@ -1309,11 +1341,15 @@ def parlays_block(inputs: Inputs, chosen: Sequence[BetRow]) -> ParlaysOut | None
 
 
 def _p_base(event: "Event | PredEvent") -> float | None:
-    return event.leg.p_base if isinstance(event, Event) else event.p_base
+    if isinstance(event, Event):
+        return event.leg.decided("base", event.leg.p_base)
+    return event.p_base
 
 
 def _p_claude(event: "Event | PredEvent") -> float | None:
-    return event.leg.p_claude if isinstance(event, Event) else event.p_claude
+    if isinstance(event, Event):
+        return event.leg.decided("claude", event.leg.p_claude)
+    return event.p_claude
 
 
 def _calibration_bin(

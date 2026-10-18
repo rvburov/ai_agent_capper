@@ -6,18 +6,20 @@ ROI и CLV — доли (0.042 = 4,2%), с 95% ДИ (low, high). Тексты �
 
 from pydantic import BaseModel
 
-from app.schemas.analyses import MarketFamily, MarketStatus
+from app.schemas.analyses import MarketFamily, MarketStatus, ModelState
 
 
 class MarketFamilyOut(BaseModel):
     """Семейство рынков: status — express (идет в экспресс), suspended (на проверке, рынки
     — suspended_markets), compare («для сравнения»). promoted — администратор перевел
-    новое семейство в экспресс. has_model — есть вероятность модели (у рынков по геймам —
-    с волны 3). events — события (исход с кэфом из ввода и известным итогом матча, общий
-    счетчик всех участников); roi — как ординары на равную сумму по кэфам из ввода; clv —
-    средний CLV по закрытию, которое внесли участники, clv_n — событий с закрытием. ROI
-    показывается от private_min событий, CLV — от private_min значений с закрытием (счетчик
-    общий: иначе по одной ставке видно чужой кэф), до того — null. ready — порог пройден у
+    новое семейство в экспресс. has_model — есть вероятность модели; model_state — ok,
+    failed (модель семейства не прошла проверку на истории: вероятности нет, в экспресс
+    нельзя) или none (модели нет). events — события (исход с кэфом из ввода и известным
+    итогом матча, общий счетчик всех участников); roi — как ординары на равную сумму по
+    кэфам из ввода; clv — средний CLV по закрытию, которое внесли участники, clv_n —
+    событий с закрытием. ROI показывается от private_min событий, CLV — от private_min
+    значений с закрытием (счетчик общий: иначе по одной ставке видно чужой кэф), до того —
+    null. ready — порог пройден у
     семейства «для сравнения» с вероятностью модели (событий ≥ need, с закрытием ≥
     clv_need и нижняя граница ДИ CLV выше нуля), can_promote — кнопка «Перевести в
     экспресс» доступна. Числа семейств могут отставать от ставок до 10 минут (кэш)."""
@@ -26,6 +28,7 @@ class MarketFamilyOut(BaseModel):
     status: MarketStatus
     suspended_markets: list[str]
     has_model: bool
+    model_state: ModelState
     promoted: bool
     events: int
     roi: float | None

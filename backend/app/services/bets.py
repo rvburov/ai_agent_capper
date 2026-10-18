@@ -77,6 +77,7 @@ from app.db.models import (
     User,
 )
 from app.ingest.match_link import archive_days, played_before
+from app.ml.games import PUSH_KEY
 from app.ml.market import REFERENCE_ORDER
 from app.ml.markets import (
     UNIT_GAMES,
@@ -757,6 +758,8 @@ class LegContext:
     p_claude: float | None
     p_final: float | None
     zone: ZoneInfo | None = None
+    # Вероятность возврата итогового прогноза (целая линия по геймам, features.p_push)
+    p_push: float = 0.0
 
     def _local(self, moment: datetime) -> date:
         return moment.astimezone(self.zone).date() if self.zone else moment.date()
@@ -805,7 +808,13 @@ async def leg_contexts(
         return {}
     rows = await db.execute(
         select(
-            BetLeg, Match, Tournament, Prediction.p_base, Prediction.p_claude, Prediction.p_final
+            BetLeg,
+            Match,
+            Tournament,
+            Prediction.p_base,
+            Prediction.p_claude,
+            Prediction.p_final,
+            Prediction.features[PUSH_KEY]["final"].astext,
         )
         .join(Match, Match.id == BetLeg.match_id)
         .outerjoin(Tournament, Tournament.id == Match.tournament_id)
@@ -826,15 +835,30 @@ async def leg_contexts(
     by_bet = {bet.id: bet for bet in bets}
     zone = user_zone(user.tz)
     out: dict[int, list[LegContext]] = {bet_id: [] for bet_id in ids}
-    for leg, match, tournament, p_base, p_claude, p_final in rows:
+    for leg, match, tournament, p_base, p_claude, p_final, push in rows:
         analysis_id = by_bet[leg.bet_id].analysis_id
         events = confirmed.get(analysis_id, {}) if analysis_id is not None else {}
         out[leg.bet_id].append(
             LegContext(
-                leg, match, tournament, events.get(match.id), p_base, p_claude, p_final, zone
+                leg,
+                match,
+                tournament,
+                events.get(match.id),
+                p_base,
+                p_claude,
+                p_final,
+                zone,
+                _push(push),
             )
         )
     return out
+
+
+def _push(raw: str | None) -> float:
+    try:
+        return min(1.0, max(0.0, float(raw))) if raw is not None else 0.0
+    except ValueError:
+        return 0.0
 
 
 # Р28: коды рынков семейства (app/ml/markets.py) — для фильтров по семейству
@@ -989,7 +1013,10 @@ def _leg_out(context: LegContext, players: dict[int, Player], *, open_bet: bool)
         p_final=context.p_final,
         p_base=context.p_base,
         p_claude=context.p_claude,
-        edge=p - 1 / float(leg.odds_taken) if p is not None and leg.odds_taken > 0 else None,
+        # С возвратом: p − (1 − P(возврат))/кэф, знак тот же, что у валуя p·кэф + P(возврат) − 1
+        edge=p - (1.0 - context.p_push) / float(leg.odds_taken)
+        if p is not None and leg.odds_taken > 0
+        else None,
         result=leg.result,  # type: ignore[arg-type]
         score=score_from_own(leg.score, leg.selection, leg.market),
         settled_at=leg.settled_at,

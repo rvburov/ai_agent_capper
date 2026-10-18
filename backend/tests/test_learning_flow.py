@@ -101,7 +101,7 @@ async def test_enabled_lesson_goes_to_analysis_system_block(
     v4 = versions[1]
     assert v4.changes == ["+ урок L-001"] and v4.parent_id == versions[0].id
     assert v4.prompt_version is not None
-    assert v4.prompt_version.startswith("analysis.v1+lessons_block.v2:")
+    assert v4.prompt_version.startswith("analysis.v1+lessons_block.v3:")
     block = v4.params["lessons_block"]
     # В инструкции — условие из словаря и поправка, собранные кодом; текст урока — нет (m7)
     assert "- L-001: surface = hard; role = favorite; sets_48h ≥ 5; направление lower." in block
@@ -248,3 +248,60 @@ async def test_learning_summary_dashboard_and_analytics(
     # Чужие прогнозы в «Все мои прогнозы» не попадают
     foreign = (await other.client.get("/api/analytics")).json()
     assert foreign["calibration_all"]["events"] == 0
+
+
+async def test_active_version_keeps_its_lessons_block_version(
+    db: AsyncSession,
+    engine: AsyncEngine,
+    redis: Redis,
+    fake: FakeClaude,
+    make_client: ClientFactory,
+    make_user: UserFactory,
+    login: LoginFn,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H1 волны 3: активная версия собрана с блоком уроков v2, после выкладки код
+    перешел на v3. Ключ версии берется из сохраненной prompt_version: анализ находит
+    свою версию, получает блок уроков и lessons_applied, готовая оценка переиспользуется."""
+    from app.agent import prompts
+
+    world = await seed_world(db, engine)
+    await set_admin_key(db)
+    await seed_prices(db)
+    admin = await admin_signed_in(make_client, make_user, login)
+    member = await signed_in(make_client, make_user, login)
+    other = await signed_in(make_client, make_user, login, ip="10.0.0.2")
+    lesson = await _ready_lesson(db)
+
+    # Версия создана до выкладки: в коде еще lessons_block.v2
+    monkeypatch.setattr(prompts, "LESSONS_BLOCK", ("lessons_block", 2))
+    monkeypatch.setattr(strategy_versions, "LESSONS_BLOCK", ("lessons_block", 2))
+    enabled = await admin.client.post(f"/api/lessons/{lesson.id}/enable")
+    assert enabled.status_code == 200, enabled.text
+    monkeypatch.undo()
+    assert prompts.LESSONS_BLOCK == ("lessons_block", 3)
+
+    active = await strategy_versions.shared_active(db)
+    assert active is not None and active.prompt_version is not None
+    stored = active.prompt_version
+    assert stored.startswith("analysis.v1+lessons_block.v2:")
+    prompt = await strategy_versions.instructions_prompt(db)
+    assert prompt.version_id == stored and prompt.lessons and prompt.codes == ("L-001",)
+    resolved = await strategy_versions.resolve_prompt(db, stored)
+    assert resolved.version_id == stored and resolved.lessons == prompt.lessons
+    assert await strategy_versions.lessons_of_prompt(db, stored) == ["L-001"]
+
+    first = await make_analysis(db, redis, member.user.user, world, ("sinner", "rune"))
+    analysis = await db.get_one(Analysis, first, populate_existing=True)
+    assert analysis.prompt_version == stored
+    assert await run(engine, redis, first) == "done"
+    calls = fake.calls("analysis")
+    assert len(calls) == 1 and "- L-001:" in calls[0]["system"][1]["text"]
+    predictions = list(await db.scalars(select(Prediction).where(Prediction.analysis_id == first)))
+    assert predictions and all(row.lessons_applied == ["L-001"] for row in predictions)
+    assert all(row.prompt_version == stored for row in predictions)
+
+    # Повтор оценки по MatchAssessment.prompt_version: второй анализ берет готовую
+    second = await make_analysis(db, redis, other.user.user, world, ("sinner", "rune"))
+    assert await run(engine, redis, second) == "done"
+    assert len(fake.calls("analysis")) == 1

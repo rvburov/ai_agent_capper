@@ -3,7 +3,7 @@
 Две линии версий:
 
 - **инструкции анализа** — общая линия (user_id пустой), ее ведет администратор: промпт
-  анализа (prompt_version — составная версия, например analysis.v1+lessons_block.v2:<sha>)
+  анализа (prompt_version — составная версия, например analysis.v1+lessons_block.v3:<sha>)
   и уроки в system (lessons — коды, params.lessons_block — снимок текста блока уроков на
   момент создания версии: перепроверка урока не меняет действующие инструкции тихо).
   Анализ берет system активной версии общей линии (instructions_prompt). Кандидат —
@@ -45,6 +45,7 @@ from app.agent.prompts import (
     SystemPrompt,
     base_version_id,
     compose_version_id,
+    lessons_block_id,
     load_prompt,
     load_prompt_id,
     parse_version_id,
@@ -248,7 +249,7 @@ def _scope_of(lesson: Lesson) -> Scope | None:
 
 
 def lessons_block(lessons: Sequence[Lesson]) -> str:
-    """Блок уроков для system анализа (prompts/lessons_block.v2.md)."""
+    """Блок уроков для system анализа (prompts/lessons_block.v3.md)."""
     lines = "\n".join(lesson_line(lesson) for lesson in lessons)
     return load_prompt(*LESSONS_BLOCK).format(lessons=lines).strip()
 
@@ -260,8 +261,13 @@ def system_prompt_of(version: StrategyVersion | None) -> SystemPrompt:
         return SystemPrompt(load_prompt(*ANALYSIS_PROMPT))
     base = load_prompt_id(prompt_version_of(version))
     block = (version.params or {}).get("lessons_block") if version.user_id is None else None
+    # Версия блока — из сохраненной prompt_version, а не из LESSONS_BLOCK: после выкладки
+    # новой версии блока ключ активной версии тот же, анализы находят ее уроки (H1 волны 3)
     return SystemPrompt(
-        base, block if isinstance(block, str) and block else None, tuple(version.lessons or ())
+        base,
+        block if isinstance(block, str) and block else None,
+        tuple(version.lessons or ()),
+        block_id=lessons_block_id(version.prompt_version),
     )
 
 

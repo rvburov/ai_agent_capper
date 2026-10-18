@@ -372,17 +372,31 @@ async def recheck_lessons(db: AsyncSession, *, now: datetime | None = None) -> d
     )
     counts = {"checked": 0, "kept": 0, "retired": 0, "rejected": 0}
     for lesson_id in ids:
-        # Порядок блокировок — как у решений администратора: общая линия, затем урок
-        await strategy_versions.lock_shared(db)
-        await strategy_versions.ensure_shared_active(db)
-        lesson = await db.get(Lesson, lesson_id, with_for_update=True, populate_existing=True)
-        scope = stored_scope(lesson) if lesson is not None else None
-        if lesson is None or scope is None:
+        # Проверка на архиве — до блокировок: она идет минуты (модель геймов), и все это
+        # время решения администратора по общей линии не ждут (M3 волны 3)
+        found = await db.get(Lesson, lesson_id, populate_existing=True)
+        scope = stored_scope(found) if found is not None else None
+        if scope is None:
+            await db.rollback()
             continue
-        await refresh_cases(db, lesson)
         check = await lesson_check.check_history(
             db, scope, today=moment.date(), shrink_k=config.lesson_shrink_k
         )
+        # Порядок блокировок — как у решений администратора: общая линия, затем урок.
+        # Пока шла проверка, урок могли списать, выключить или поменять условие — тогда
+        # результат не применяется
+        await strategy_versions.lock_shared(db)
+        await strategy_versions.ensure_shared_active(db)
+        lesson = await db.get(Lesson, lesson_id, with_for_update=True, populate_existing=True)
+        if (
+            lesson is None
+            or lesson.status not in CHECKED_STATUSES
+            or lesson.kind != "numeric"
+            or stored_scope(lesson) != scope
+        ):
+            await db.commit()
+            continue
+        await refresh_cases(db, lesson)
         apply_history(lesson, check, moment)
         lesson.rechecked_at = moment
         counts["checked"] += 1

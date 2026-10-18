@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Bet, BetLeg, Prediction, User
+from app.ml.games import PUSH_KEY
 from app.ml.strategy import StrategyParams, make_leg, stake
 from app.services.app_settings import get_app_settings
 from app.services.bank import LedgerEntry, bank_from_entries, ledger_entries, user_zone
@@ -81,16 +82,17 @@ async def check_rules(
     zone = user_zone(await db.scalar(select(User.tz).where(User.id == user_id)))
     if since is not None:
         bets = [bet for bet in bets if bet.placed_at.astimezone(zone).date() >= since]
-    legs_by_bet: dict[int, list[tuple[BetLeg, float | None]]] = {}
+    legs_by_bet: dict[int, list[tuple[BetLeg, float | None, float]]] = {}
     if bets:
         rows = await db.execute(
-            select(BetLeg, Prediction.p_final)
+            select(BetLeg, Prediction.p_final, Prediction.features[PUSH_KEY]["final"].astext)
             .outerjoin(Prediction, Prediction.id == BetLeg.prediction_id)
             .where(BetLeg.bet_id.in_([bet.id for bet in bets]))
             .order_by(BetLeg.id)
         )
-        for leg, p_final in rows:
-            legs_by_bet.setdefault(leg.bet_id, []).append((leg, p_final))
+        for leg, p_final, push in rows:
+            # Вероятность возврата целой линии по геймам (Р28): валуй ноги с возвратом
+            legs_by_bet.setdefault(leg.bet_id, []).append((leg, p_final, float(push or 0.0)))
     entries = await ledger_entries(db, user_id)
     # Винрейт правила «Рост банка» — как в рабочем расчете суммы (bank_state): по всем
     # рассчитанным ставкам участника любого вида и источника, а не только по проверяемым
@@ -113,8 +115,9 @@ async def check_rules(
                 leg.selection,
                 float(p_final) if p_final is not None else float(1 / leg.odds_taken),
                 leg.odds_taken,
+                push=push if p_final is not None else 0.0,
             )
-            for leg, p_final in legs_by_bet.get(bet.id, [])
+            for leg, p_final, push in legs_by_bet.get(bet.id, [])
         ]
         if not legs:
             continue

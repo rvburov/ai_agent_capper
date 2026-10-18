@@ -27,13 +27,15 @@ NEWS_RETRY = ("news_retry", 1)
 ANALYSIS_PROMPT = ("analysis", 1)
 ANALYSIS_REQUEST = ("analysis_request", 1)
 ANALYSIS_RETRY = ("analysis_retry", 1)
-# Этап 5: разбор ставки (Batch) и блок уроков в system анализа (быстрая проверка урока)
-POSTMORTEM_PROMPT = ("postmortem", 1)
+# Этап 5: разбор ставки (Batch) и блок уроков в system анализа (быстрая проверка урока).
+# Р28, этап 7, волна 3: postmortem.v2 и lessons_block.v3 знают семейства новых рынков в
+# признаке market (shcp, stot, ghcp, gtot); прежние версии остаются опубликованными
+POSTMORTEM_PROMPT = ("postmortem", 2)
 POSTMORTEM_REQUEST = ("postmortem_request", 1)
 # Блок уроков v2 (m7 волны 3): строка числового урока — условие из словаря и направление,
 # собранные кодом, без свободного текста; v1 (код и текст урока) — строка процессного
 # урока (его пишет только администратор)
-LESSONS_BLOCK = ("lessons_block", 2)
+LESSONS_BLOCK = ("lessons_block", 3)
 LESSON_LINE = ("lesson_line", 2)
 LESSON_LINE_TEXT = ("lesson_line", 1)
 LESSON_SHIFT = ("lesson_shift", 1)
@@ -91,7 +93,7 @@ def published_prompts() -> dict[str, str]:
 
 # --- system анализа: промпт версии и блок уроков (этап 5, волна 3) ---
 
-# Разделитель составной версии: analysis.v1+lessons_block.v2:<sha12 блока уроков>
+# Разделитель составной версии: analysis.v1+lessons_block.v3:<sha12 блока уроков>
 LESSONS_JOINER = "+"
 LESSONS_HASH_CHARS = 12
 
@@ -107,10 +109,14 @@ class SystemPrompt:
     base: Prompt
     lessons: str | None = None
     codes: tuple[str, ...] = ()
+    # Версия файла блока уроков, по которому собран снимок (lessons_block.v2). None —
+    # текущий LESSONS_BLOCK: так собирается новый блок. Снимок сохраненной версии
+    # инструкций хранит свою версию блока: смена константы в коде не меняет ее ключ
+    block_id: str | None = None
 
     @property
     def version_id(self) -> str:
-        return compose_version_id(self.base.version_id, self.lessons)
+        return compose_version_id(self.base.version_id, self.lessons, block_id=self.block_id)
 
     @property
     def text(self) -> str:
@@ -119,19 +125,35 @@ class SystemPrompt:
         return f"{self.base.text}\n{self.lessons.strip()}\n"
 
 
-def compose_version_id(base_version_id: str, lessons: str | None) -> str:
-    """analysis.v1 без уроков; с уроками — analysis.v1+lessons_block.v2:<sha12 блока>
-    (до 64 символов, как колонки prompt_version)."""
+def compose_version_id(
+    base_version_id: str, lessons: str | None, *, block_id: str | None = None
+) -> str:
+    """analysis.v1 без уроков; с уроками — analysis.v1+lessons_block.v3:<sha12 блока>
+    (до 64 символов, как колонки prompt_version). block_id — версия блока снимка (для
+    сохраненной версии инструкций); None — текущий LESSONS_BLOCK (новый блок)."""
     if not lessons:
         return base_version_id
-    block = load_prompt(*LESSONS_BLOCK).version_id
+    block = block_id or load_prompt(*LESSONS_BLOCK).version_id
     digest = hashlib.sha256(lessons.strip().encode("utf-8")).hexdigest()[:LESSONS_HASH_CHARS]
     return f"{base_version_id}{LESSONS_JOINER}{block}:{digest}"[:64]
 
 
 def base_version_id(version_id: str) -> str:
-    """Версия промпта без блока уроков: analysis.v1+lessons_block.v2:… → analysis.v1."""
+    """Версия промпта без блока уроков: analysis.v1+lessons_block.v3:… → analysis.v1."""
     return version_id.split(LESSONS_JOINER, 1)[0]
+
+
+def lessons_block_id(version_id: str | None) -> str | None:
+    """Версия блока уроков из составной версии: analysis.v1+lessons_block.v2:… →
+    lessons_block.v2. Без блока или испорчена — None."""
+    if not version_id or LESSONS_JOINER not in version_id:
+        return None
+    block = version_id.split(LESSONS_JOINER, 1)[1].split(":", 1)[0]
+    try:
+        name, _ = parse_version_id(block)
+    except ValueError:
+        return None
+    return block if name == LESSONS_BLOCK[0] else None
 
 
 def system_blocks(prompt: Prompt | SystemPrompt, *, ttl: str | None = None) -> list[Any]:

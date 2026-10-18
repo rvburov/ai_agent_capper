@@ -17178,7 +17178,8 @@
           "stake",
           "rules"
         ],
-        "title": "ExpressOut"
+        "title": "ExpressOut",
+        "description": "Экспресс стратегии. p_express — Π(pᵢ + P(возврат)ᵢ / кэфᵢ): p_express · итоговый\nкэф − 1 = ev и с целыми линиями (без них — произведение вероятностей ног)."
       },
       "ExtraOddsIn": {
         "properties": {
@@ -20505,6 +20506,15 @@
             "type": "boolean",
             "title": "Has Model"
           },
+          "model_state": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed",
+              "none"
+            ],
+            "title": "Model State"
+          },
           "promoted": {
             "type": "boolean",
             "title": "Promoted"
@@ -20598,6 +20608,7 @@
           "status",
           "suspended_markets",
           "has_model",
+          "model_state",
           "promoted",
           "events",
           "roi",
@@ -20611,7 +20622,7 @@
           "can_promote"
         ],
         "title": "MarketFamilyOut",
-        "description": "Семейство рынков: status — express (идет в экспресс), suspended (на проверке, рынки\n— suspended_markets), compare («для сравнения»). promoted — администратор перевел\nновое семейство в экспресс. has_model — есть вероятность модели (у рынков по геймам —\nс волны 3). events — события (исход с кэфом из ввода и известным итогом матча, общий\nсчетчик всех участников); roi — как ординары на равную сумму по кэфам из ввода; clv —\nсредний CLV по закрытию, которое внесли участники, clv_n — событий с закрытием. ROI\nпоказывается от private_min событий, CLV — от private_min значений с закрытием (счетчик\nобщий: иначе по одной ставке видно чужой кэф), до того — null. ready — порог пройден у\nсемейства «для сравнения» с вероятностью модели (событий ≥ need, с закрытием ≥\nclv_need и нижняя граница ДИ CLV выше нуля), can_promote — кнопка «Перевести в\nэкспресс» доступна. Числа семейств могут отставать от ставок до 10 минут (кэш)."
+        "description": "Семейство рынков: status — express (идет в экспресс), suspended (на проверке, рынки\n— suspended_markets), compare («для сравнения»). promoted — администратор перевел\nновое семейство в экспресс. has_model — есть вероятность модели; model_state — ok,\nfailed (модель семейства не прошла проверку на истории: вероятности нет, в экспресс\nнельзя) или none (модели нет). events — события (исход с кэфом из ввода и известным\nитогом матча, общий счетчик всех участников); roi — как ординары на равную сумму по\nкэфам из ввода; clv — средний CLV по закрытию, которое внесли участники, clv_n —\nсобытий с закрытием. ROI показывается от private_min событий, CLV — от private_min\nзначений с закрытием (счетчик общий: иначе по одной ставке видно чужой кэф), до того —\nnull. ready — порог пройден у\nсемейства «для сравнения» с вероятностью модели (событий ≥ need, с закрытием ≥\nclv_need и нижняя граница ДИ CLV выше нуля), can_promote — кнопка «Перевести в\nэкспресс» доступна. Числа семейств могут отставать от ставок до 10 минут (кэш)."
       },
       "MarketRow": {
         "properties": {
@@ -20764,6 +20775,15 @@
           "has_model": {
             "type": "boolean",
             "title": "Has Model"
+          },
+          "model_state": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed",
+              "none"
+            ],
+            "title": "Model State"
           }
         },
         "type": "object",
@@ -20785,10 +20805,11 @@
           "line",
           "status",
           "p_push",
-          "has_model"
+          "has_model",
+          "model_state"
         ],
         "title": "MarketRow",
-        "description": "Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф\nучастника, валуй p_final·кэф + p_push − 1 и уровень, попал ли в экспресс, почему нет\n(note_key — ключ analysis.leg.*). suspended — рынок на проверке (SUSPENDED_MARKETS,\nР28): в экспресс и варианты не идет, своей ставкой поставить можно; признак — по\nсписку сейчас, и у старых анализов тоже.\n\nР28: family и line — семейство и линия из кода рынка (у фор — линия выбранной\nстороны, у ML — null); status — express, suspended или compare («для сравнения»;\nsuspended — по списку сейчас, у новых семейств — на момент анализа: так собирался его\nэкспресс); p_push — вероятность\nвозврата на целой линии (у половинной 0). У рынков по геймам вероятностей модели пока\nнет (волна 3): p_base, p_claude, p_final, value — null, has_model — false."
+        "description": "Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф\nучастника, валуй p_final·кэф + p_push − 1 и уровень, попал ли в экспресс, почему нет\n(note_key — ключ analysis.leg.*). suspended — рынок на проверке (SUSPENDED_MARKETS,\nР28): в экспресс и варианты не идет, своей ставкой поставить можно; признак — по\nсписку сейчас, и у старых анализов тоже.\n\nР28: family и line — семейство и линия из кода рынка (у фор — линия выбранной\nстороны, у ML — null); status — express, suspended или compare («для сравнения»;\nsuspended — по списку сейчас, у новых семейств — на момент анализа: так собирался его\nэкспресс); p_push — вероятность возврата на целой линии (у половинной 0). has_model —\nесть вероятность модели, model_state — ok (есть), failed (модель семейства не прошла\nпроверку на истории, note_key analysis.leg.model_failed) или none (модели нет, у строк\nрынков по геймам до этапа 7, волны 3; note_key analysis.leg.no_model): тогда p_base,\np_claude, p_final, value — null."
       },
       "MarketSliceOut": {
         "properties": {
@@ -30792,7 +30813,7 @@
           "warnings"
         ],
         "title": "VariantOut",
-        "description": "Вариант ставки (Р29, app/ml/variants.py): strategy — экспресс стратегии, safer —\nординар «надежнее», value — ординар «лучший валуй», best_express — «Экспресс из\nлучших» (вне правил стратегии). kind — вид ставки при сохранении. also: [\"value\"] —\nsafer совпал с лучшим валуем (одна карточка). p — произведение итоговых вероятностей\nног, value — p·кэф − 1, value_tier — его уровень. stake — рекомендованная сумма (null —\nсуммы нет, почему — stake_calc.reason: no_value, total_range, below_min…), stake_calc —\nрасчет для «Как посчитана сумма». why_key — ключ локали причины выбора\n(analysis.variants.why.*) и why_params. issues — правила экспресса, которые не прошел\nbest_express (ключи analysis.rules.*). warnings: no_value — валуй ниже нуля, модель не\nсоветует ставить; low_confidence — уверенность анализа по матчу ноги средняя или\nнизкая."
+        "description": "Вариант ставки (Р29, app/ml/variants.py): strategy — экспресс стратегии, safer —\nординар «надежнее», value — ординар «лучший валуй», best_express — «Экспресс из\nлучших» (вне правил стратегии). kind — вид ставки при сохранении. also: [\"value\"] —\nsafer совпал с лучшим валуем (одна карточка). p — вероятность варианта Π(pᵢ +\nP(возврат)ᵢ / кэфᵢ) (без целых линий — произведение итоговых вероятностей ног), value —\np·кэф − 1, value_tier — его уровень. stake — рекомендованная сумма (null —\nсуммы нет, почему — stake_calc.reason: no_value, total_range, below_min…), stake_calc —\nрасчет для «Как посчитана сумма». why_key — ключ локали причины выбора\n(analysis.variants.why.*) и why_params. issues — правила экспресса, которые не прошел\nbest_express (ключи analysis.rules.*). warnings: no_value — валуй ниже нуля, модель не\nсоветует ставить; low_confidence — уверенность анализа по матчу ноги средняя или\nнизкая."
       },
       "VersionBriefOut": {
         "properties": {

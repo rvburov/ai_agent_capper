@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AgentRun, Analysis, Bet, BetLeg, Player, StrategyVersion
-from app.ml.markets import NEW_FAMILIES, extra_into, extra_lines
+from app.ml.markets import MODEL_FAILED, MODEL_NONE, MODEL_OK, NEW_FAMILIES, extra_into, extra_lines
 from app.ml.strategy import STATUS_COMPARE, STATUS_EXPRESS, STATUS_SUSPENDED, market_meta
 from app.schemas.analyses import (
     AccessOut,
@@ -435,6 +435,15 @@ def _row_meta(row: dict[str, Any], promoted: Sequence[str]) -> dict[str, Any]:
         and stored in (STATUS_COMPARE, STATUS_EXPRESS)
     ):
         meta["status"] = stored
+    # Вероятность модели — как при анализе: у строк рынков по геймам до волны 3 ее нет,
+    # хотя модель принята позже (пересчета старых анализов нет)
+    if "has_model" in row:
+        meta["has_model"] = bool(row["has_model"])
+        state = row.get("model_state")
+        if state in (MODEL_OK, MODEL_FAILED, MODEL_NONE):
+            meta["model_state"] = state
+        elif not meta["has_model"]:
+            meta["model_state"] = MODEL_NONE
     return meta
 
 

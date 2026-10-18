@@ -32,7 +32,9 @@ from app.ml.strategy import (
     StakeMode,
     StrategyParams,
     parlay_issues,
+    parlay_p,
     parlay_total,
+    parlay_value,
 )
 
 VariantCode = Literal["strategy", "safer", "value", "best_express"]
@@ -82,17 +84,16 @@ class Variant:
 
     @property
     def p(self) -> float:
-        result = 1.0
-        for leg in self.legs:
-            result *= leg.p
-        return result
+        """Вероятность варианта, согласованная с валуем (parlay_p): p · кэф − 1 = value и
+        у целых линий по геймам."""
+        return parlay_p(self.legs)
 
     @property
     def value(self) -> float:
-        """Валуй варианта: p·кэф − 1 (у ординара — валуй ноги)."""
+        """Валуй варианта: Π(pᵢ·кэфᵢ + P(возврат)ᵢ) − 1 (у ординара — валуй ноги)."""
         if len(self.legs) == 1:
             return self.legs[0].value
-        return self.p * float(self.total_odds) - 1.0
+        return parlay_value(self.legs)
 
     @property
     def no_value(self) -> bool:

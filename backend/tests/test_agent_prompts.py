@@ -45,6 +45,7 @@ PUBLISHED = {
     "lesson_shift.v1": "51397f058c92e91f6c0833d775a4c45ac3b78549cc5ac28a2398a1295b2a5811",
     "lessons_block.v1": "ed8d75ae5ac8d547a1fcab7d4496b4fb72e2de7e822872b4d36c6df34ec7d66b",
     "lessons_block.v2": "a42f9c38ef0a24c55d782d825aaa87c264287399c4ea2fd8fe306d2d4aab2f03",
+    "lessons_block.v3": "7547c5064852dd393165126d3f81bc74a463b0d68aa0eb3244a60b865cc1c24c",
     "news.v1": "2993309576d631053ddce2a95cda6e162923f268ad1eb97177e8238a03268915",
     "news.v2": "0d7766c72ee82a1c2fa71e396ffcf005c5fb3c23b36a5077da847a426eb10b21",
     "news_request.v1": "c086524b071306191ca0e7503e6ce73553169d7d82b6b8fcba9469a71e9e97af",
@@ -53,6 +54,7 @@ PUBLISHED = {
     "parse_input.v1": "7bbb18f5a817f99878923cde98a05014850f9f6597f919ce2aa71a66f710c5bb",
     "parse_input.v2": "062d36ea1f6cc3a93d343a1a8c552f45a7017f9280b1aae9d67b1bc042bf07d7",
     "postmortem.v1": "5c693bfaac5850f257dbf97c3d11030553396c2a3dc3abfb4ce28ddb084d1fcf",
+    "postmortem.v2": "9ce2ba01b02873df815f8cd64a39ad580b0121105c781bef8c65cfa489c00583",
     "postmortem_request.v1": "f1b04fcf1b18bbfd8f643a00b6a48f960a072b6c4038b73c878f476df844c184",
 }
 # Слова, на которые модель отвечает отказом reasoning_extraction (он оплачивается)
@@ -186,3 +188,21 @@ def test_every_error_code_of_analysis_has_text() -> None:
     assert {"analysis.no_events", "analysis.odds_range", "analysis.same_players"} <= codes
     missing = sorted(code for code in codes if not has_key(f"errors.{code}"))
     assert missing == []
+
+
+def test_stored_block_version_keeps_composite_id() -> None:
+    """Снимок блока уроков сохраненной версии собирает ключ со своей версией блока,
+    а не с текущим LESSONS_BLOCK (H1 волны 3)."""
+    from app.agent.prompts import SystemPrompt, compose_version_id, lessons_block_id
+
+    base = load_prompt(*ANALYSIS_PROMPT)
+    stored = compose_version_id(base.version_id, "Уроки", block_id="lessons_block.v2")
+    assert stored.startswith(f"{base.version_id}+lessons_block.v2:")
+    assert lessons_block_id(stored) == "lessons_block.v2"
+    assert lessons_block_id(base.version_id) is None
+    assert lessons_block_id("analysis.v1+news.v1:abc") is None
+    snapshot = SystemPrompt(base, "Уроки", ("L-001",), block_id=lessons_block_id(stored))
+    assert snapshot.version_id == stored
+    fresh = SystemPrompt(base, "Уроки", ("L-001",))
+    current = load_prompt(*LESSONS_BLOCK).version_id
+    assert fresh.version_id.startswith(f"{base.version_id}+{current}:")

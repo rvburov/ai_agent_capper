@@ -41,14 +41,14 @@ from types import MappingProxyType
 from typing import Any, Literal, Protocol, Self
 
 from app.core.i18n import t
-from app.ml.markets import MODEL_FAMILIES, NEW_FAMILIES, is_market, market_spec
+from app.ml.games import GamesInput, market_outcome
+from app.ml.markets import NEW_FAMILIES, has_model, is_market, market_spec, model_state
 from app.ml.sets import (
     MARKET_MINUS,
     MARKETS,
     PROBS3_FIELDS,
     SHOWN_DIGITS,
     Probs3,
-    market_prob,
 )
 
 CURRENCIES: tuple[str, ...] = ("RUB", "USD", "EUR")
@@ -614,6 +614,16 @@ def selection_blocks(
     return tuple(blocks)
 
 
+def leg_blocks(market: str, selection: int, blocks: Mapping[int, Sequence[str]]) -> tuple[str, ...]:
+    """Причины не брать исход (selection_blocks по игрокам): у ставки на игрока — его
+    причины; у тотала сторона — больше или меньше, а не игрок: форма игрока к ней не
+    относится, травма и перегруз любого из двух — относятся."""
+    if not (is_market(market) and market_spec(market).is_total):
+        return tuple(blocks.get(selection, ()))
+    found = {item for side in (1, 2) for item in blocks.get(side, ()) if item != "form"}
+    return tuple(flag for flag in BLOCKING_FLAGS if flag in found)
+
+
 def market_status(code: str, promoted: Iterable[str] = ()) -> str:
     """Статус рынка: suspended — на проверке (SUSPENDED_MARKETS); compare — новое семейство
     Р28, которое администратор не перевел в экспресс (или у него нет вероятности модели);
@@ -629,7 +639,8 @@ def market_status(code: str, promoted: Iterable[str] = ()) -> str:
 
 def market_meta(code: str, promoted: Iterable[str] = ()) -> dict[str, Any]:
     """Поля строки рынка, которые выводятся из кода и текущих списков (MarketRow): семейство,
-    линия, статус, на проверке, есть ли вероятность модели."""
+    линия, статус, на проверке, есть ли вероятность модели и ее состояние (ok, failed —
+    модель не прошла проверку на истории, none — модели нет)."""
     spec = market_spec(code)
     status = market_status(code, promoted)
     return {
@@ -638,6 +649,7 @@ def market_meta(code: str, promoted: Iterable[str] = ()) -> dict[str, Any]:
         "status": status,
         "suspended": status == STATUS_SUSPENDED,
         "has_model": spec.has_model,
+        "model_state": model_state(spec.family),
     }
 
 
@@ -647,7 +659,7 @@ def express_codes(
     """Рынки, которые отбор может взять в экспресс: из params.markets и рынки новых
     семейств, которые администратор перевел в экспресс (promoted, Р28), если у них есть
     вероятность модели. codes — рынки с кэфами; порядок — params.markets, потом codes."""
-    allowed = set(promoted) & set(NEW_FAMILIES) & set(MODEL_FAMILIES)
+    allowed = {family for family in set(promoted) & set(NEW_FAMILIES) if has_model(family)}
     found = list(params.markets)
     for code in codes:
         if code in found or not is_market(code):
@@ -666,13 +678,15 @@ def legs_for_match(
     blocks: Mapping[int, Sequence[str]] | None = None,
     best_of: int | None = None,
     markets: Sequence[str] | None = None,
+    games: GamesInput | None = None,
 ) -> list[Leg]:
     """Исходы матча с кэфами участника: odds — рынок → [кэф на игрока 1, на игрока 2]
     (None — кэфа нет), как в analyses.confirmed; рынки — из markets (по умолчанию
     params.markets; с новыми семействами — express_codes). Рынок на проверке
     (SUSPENDED_MARKETS) тоже дает исход: его не берет отбор, а экран объясняет причину
     (leg_issues). blocks — selection → причины (selection_blocks). best_of нужен рынкам
-    кроме ML и фор ±1.5; рынок без вероятности модели исхода не дает."""
+    кроме ML и фор ±1.5, games — рынкам по геймам (вход цепи, app/ml/games.py); рынок без
+    вероятности модели исхода не дает. У целой линии нога несет вероятность возврата."""
     legs: list[Leg] = []
     for market in markets if markets is not None else params.markets:
         pair = odds.get(market)
@@ -681,16 +695,12 @@ def legs_for_match(
         for selection, price in enumerate(pair, start=1):
             if price is None or price <= 1:
                 continue
-            if market in MARKETS:
-                p: float | None = probs.markets()[(market, selection)]
-            elif best_of is None:
+            found = market_outcome(probs, best_of, market, selection, games)
+            if found is None:
                 continue
-            else:
-                p = market_prob(probs, best_of, market, selection)
-            if p is None:
-                continue
-            reasons = tuple((blocks or {}).get(selection, ()))
-            legs.append(make_leg(match_id, market, selection, p, price, blocks=reasons))
+            p, push = found
+            reasons = leg_blocks(market, selection, blocks or {})
+            legs.append(make_leg(match_id, market, selection, p, price, blocks=reasons, push=push))
     return legs
 
 
@@ -785,6 +795,25 @@ def parlay_total(legs: Iterable[Pick]) -> Decimal:
     for leg in legs:
         total *= leg.odds
     return total
+
+
+def parlay_value(legs: Iterable[Pick]) -> float:
+    """Валуй экспресса с возвратами: Π(pᵢ·кэфᵢ + P(возврат)ᵢ) − 1 — нога с возвратом идет с
+    кэфом 1 (ожидаемый множитель ноги — ее перевес edge). Без целых линий — p·кэф − 1."""
+    result = 1.0
+    for leg in legs:
+        result *= leg.edge
+    return result - 1.0
+
+
+def parlay_p(legs: Iterable[Pick]) -> float:
+    """Вероятность экспресса, согласованная с валуем: Π(pᵢ + P(возврат)ᵢ / кэфᵢ), так что
+    p · итоговый кэф − 1 = parlay_value. Возврат ноги — выигрыш с кэфом 1, то есть доля
+    1/кэф выигрыша. Без целых линий — Πpᵢ."""
+    result = 1.0
+    for leg in legs:
+        result *= leg.edge / float(leg.odds)
+    return result
 
 
 def pick_parlay[T: Pick](

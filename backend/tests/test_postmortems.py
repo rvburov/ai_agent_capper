@@ -140,7 +140,7 @@ async def test_one_review_per_match_shared_and_costed(
         and run.user_id is None
         and run.key_source == "admin"
         and run.model == "claude-sonnet-5-5"
-        and run.prompt_version == "postmortem.v1"
+        and run.prompt_version == "postmortem.v2"
         and run.schema_version == "pm1"
         for run in runs
     )

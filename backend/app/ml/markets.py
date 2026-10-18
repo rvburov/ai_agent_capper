@@ -45,8 +45,25 @@ FAMILIES: tuple[str, ...] = (
 )
 # Новые рынки Р28: «для сравнения», пока администратор не переведет семейство в экспресс
 NEW_FAMILIES: tuple[str, ...] = (FAMILY_SHCP, FAMILY_STOT, FAMILY_GHCP, FAMILY_GTOT)
-# Семейства, у которых есть вероятность модели (рынки по геймам — волна 3)
-MODEL_FAMILIES: tuple[str, ...] = (FAMILY_ML, FAMILY_H15, FAMILY_SHCP, FAMILY_STOT)
+# Семейства, у которых есть вероятность модели. Рынки по геймам (цепь app/ml/games.py)
+# прошли проверку на 2023–2025 (этап 7, волна 3; PLAN.md, Р28): верхняя граница 95% ДИ
+# разницы Brier с константой ниже нуля по всем стандартным линиям семейства
+MODEL_FAMILIES: tuple[str, ...] = (
+    FAMILY_ML,
+    FAMILY_H15,
+    FAMILY_SHCP,
+    FAMILY_STOT,
+    FAMILY_GHCP,
+    FAMILY_GTOT,
+)
+# Семейства, модель которых не прошла проверку на истории: вероятность не показывается, в
+# экспресс перевести нельзя (сейчас таких нет; семейство отсюда не входит в MODEL_FAMILIES)
+FAILED_FAMILIES: tuple[str, ...] = ()
+# Состояние модели семейства для экрана: ok — вероятность есть, failed — модель не прошла
+# проверку, none — модели пока нет
+MODEL_OK = "ok"
+MODEL_FAILED = "failed"
+MODEL_NONE = "none"
 # Семейства, исход которых считается по счету по геймам
 GAME_FAMILIES: tuple[str, ...] = (FAMILY_GHCP, FAMILY_GTOT)
 # Семейства «другие рынки» формы ввода (extra): фора ±1.5 вводится прежними полями
@@ -102,11 +119,23 @@ class MarketSpec:
 
     @property
     def has_model(self) -> bool:
-        return self.family in MODEL_FAMILIES
+        return has_model(self.family)
 
     @property
     def is_new(self) -> bool:
         return self.family in NEW_FAMILIES
+
+
+def has_model(family: str) -> bool:
+    """У семейства есть вероятность модели (списки читаются при вызове: тесты их меняют)."""
+    return family in MODEL_FAMILIES and family not in FAILED_FAMILIES
+
+
+def model_state(family: str) -> str:
+    """ok, failed или none (см. MODEL_OK)."""
+    if family in FAILED_FAMILIES:
+        return MODEL_FAILED
+    return MODEL_OK if family in MODEL_FAMILIES else MODEL_NONE
 
 
 def line_text(line: Decimal, *, signed: bool = False) -> str:
@@ -306,8 +335,11 @@ RESULT_VOID = "void"
 
 GameSets = Sequence[tuple[int, int]]
 
-# Сет счета по геймам из ввода: «6:4», «6-4», «7:6(5)», «[10-8]»
-_GAME_SET = re.compile(r"^(\[)?(\d{1,2})\s*[:\-–]\s*(\d{1,2})(?:\((\d{1,2})\))?(\])?$")
+# Сет счета по геймам из ввода: «6:4», «6-4», «7:6(5)», «7:6(10-8)», «7:6(10:8)», «13:12»,
+# «[10-8]»; разделители — как у окна расчета на frontend (settle.ts): «:», «-», «–»
+_GAME_SET = re.compile(
+    r"^(\[)?(\d{1,2})\s*[:\-–]\s*(\d{1,2})(?:\((\d{1,2})(?:[:\-–]\d{1,2})?\))?(\])?$"
+)
 GAMES_MAX_SETS = 5
 
 
@@ -332,12 +364,15 @@ def parse_games(text: str | None) -> list[tuple[int, int]] | None:
     return found
 
 
-def set_finished(first: int, second: int) -> bool:
-    """Сет доигран: 6 геймов с разницей 2 и больше, 7:5, 7:6 или длинный сет с разницей 2
-    (13:11); супер-тай-брейк — 1:0."""
+def set_finished(first: int, second: int, *, last: bool = True) -> bool:
+    """Сет доигран: 6 геймов с разницей 2 и больше, 7:5, 7:6, длинный сет с разницей 2
+    (13:11) или 13:12 — только решающий (last: тай-брейк при 12:12, Уимблдон 2019–2021);
+    супер-тай-брейк — 1:0."""
     high, low = max(first, second), min(first, second)
     if (high, low) == (1, 0):
         return True
+    if (high, low) == (13, 12):
+        return last
     if high == 7 and low in (5, 6):
         return True
     return high >= 6 and high - low == 2 if high > 6 else high == 6 and low <= 4
@@ -346,13 +381,23 @@ def set_finished(first: int, second: int) -> bool:
 def games_complete(sets: GameSets, best_of: int | None) -> bool:
     """Матч доигран по счету: все сеты доиграны и у одного нужное число сетов (формат
     неизвестен — 2 или 3 победы при меньшем числе у соперника)."""
-    if not sets or not all(set_finished(first, second) for first, second in sets):
+    final = len(sets) - 1
+    if not sets or not all(
+        set_finished(first, second, last=index == final)
+        for index, (first, second) in enumerate(sets)
+    ):
         return False
     won = sum(1 for first, second in sets if first > second)
     lost = len(sets) - won
     top, low = max(won, lost), min(won, lost)
     needs = (best_of // 2 + 1,) if best_of in (3, 5) else (2, 3)
     return any(top == need and low < need for need in needs)
+
+
+# Регулярное выражение SQL: счет «a:b» каждого сета → «b:a» (обмен игроков у ноги на тотал:
+# ее счет хранится со стороны игрока 1)
+SCORE_SIDES = r"(\d+):(\d+)"
+SCORE_SWAPPED = r"\2:\1"
 
 
 def games_text(sets: GameSets) -> str:

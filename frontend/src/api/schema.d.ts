@@ -5868,7 +5868,11 @@ export interface components {
             /** Odds */
             odds: string;
         };
-        /** ExpressOut */
+        /**
+         * ExpressOut
+         * @description Экспресс стратегии. p_express — Π(pᵢ + P(возврат)ᵢ / кэфᵢ): p_express · итоговый
+         *     кэф − 1 = ev и с целыми линиями (без них — произведение вероятностей ног).
+         */
         ExpressOut: {
             /** Legs */
             legs: components["schemas"]["ExpressLeg"][];
@@ -7044,12 +7048,14 @@ export interface components {
          * MarketFamilyOut
          * @description Семейство рынков: status — express (идет в экспресс), suspended (на проверке, рынки
          *     — suspended_markets), compare («для сравнения»). promoted — администратор перевел
-         *     новое семейство в экспресс. has_model — есть вероятность модели (у рынков по геймам —
-         *     с волны 3). events — события (исход с кэфом из ввода и известным итогом матча, общий
-         *     счетчик всех участников); roi — как ординары на равную сумму по кэфам из ввода; clv —
-         *     средний CLV по закрытию, которое внесли участники, clv_n — событий с закрытием. ROI
-         *     показывается от private_min событий, CLV — от private_min значений с закрытием (счетчик
-         *     общий: иначе по одной ставке видно чужой кэф), до того — null. ready — порог пройден у
+         *     новое семейство в экспресс. has_model — есть вероятность модели; model_state — ok,
+         *     failed (модель семейства не прошла проверку на истории: вероятности нет, в экспресс
+         *     нельзя) или none (модели нет). events — события (исход с кэфом из ввода и известным
+         *     итогом матча, общий счетчик всех участников); roi — как ординары на равную сумму по
+         *     кэфам из ввода; clv — средний CLV по закрытию, которое внесли участники, clv_n —
+         *     событий с закрытием. ROI показывается от private_min событий, CLV — от private_min
+         *     значений с закрытием (счетчик общий: иначе по одной ставке видно чужой кэф), до того —
+         *     null. ready — порог пройден у
          *     семейства «для сравнения» с вероятностью модели (событий ≥ need, с закрытием ≥
          *     clv_need и нижняя граница ДИ CLV выше нуля), can_promote — кнопка «Перевести в
          *     экспресс» доступна. Числа семейств могут отставать от ставок до 10 минут (кэш).
@@ -7069,6 +7075,11 @@ export interface components {
             suspended_markets: string[];
             /** Has Model */
             has_model: boolean;
+            /**
+             * Model State
+             * @enum {string}
+             */
+            model_state: "ok" | "failed" | "none";
             /** Promoted */
             promoted: boolean;
             /** Events */
@@ -7103,9 +7114,11 @@ export interface components {
          *     Р28: family и line — семейство и линия из кода рынка (у фор — линия выбранной
          *     стороны, у ML — null); status — express, suspended или compare («для сравнения»;
          *     suspended — по списку сейчас, у новых семейств — на момент анализа: так собирался его
-         *     экспресс); p_push — вероятность
-         *     возврата на целой линии (у половинной 0). У рынков по геймам вероятностей модели пока
-         *     нет (волна 3): p_base, p_claude, p_final, value — null, has_model — false.
+         *     экспресс); p_push — вероятность возврата на целой линии (у половинной 0). has_model —
+         *     есть вероятность модели, model_state — ok (есть), failed (модель семейства не прошла
+         *     проверку на истории, note_key analysis.leg.model_failed) или none (модели нет, у строк
+         *     рынков по геймам до этапа 7, волны 3; note_key analysis.leg.no_model): тогда p_base,
+         *     p_claude, p_final, value — null.
          */
         MarketRow: {
             /** Market */
@@ -7150,6 +7163,11 @@ export interface components {
             p_push: number;
             /** Has Model */
             has_model: boolean;
+            /**
+             * Model State
+             * @enum {string}
+             */
+            model_state: "ok" | "failed" | "none";
         };
         /**
          * MarketSliceOut
@@ -10689,8 +10707,9 @@ export interface components {
          * @description Вариант ставки (Р29, app/ml/variants.py): strategy — экспресс стратегии, safer —
          *     ординар «надежнее», value — ординар «лучший валуй», best_express — «Экспресс из
          *     лучших» (вне правил стратегии). kind — вид ставки при сохранении. also: ["value"] —
-         *     safer совпал с лучшим валуем (одна карточка). p — произведение итоговых вероятностей
-         *     ног, value — p·кэф − 1, value_tier — его уровень. stake — рекомендованная сумма (null —
+         *     safer совпал с лучшим валуем (одна карточка). p — вероятность варианта Π(pᵢ +
+         *     P(возврат)ᵢ / кэфᵢ) (без целых линий — произведение итоговых вероятностей ног), value —
+         *     p·кэф − 1, value_tier — его уровень. stake — рекомендованная сумма (null —
          *     суммы нет, почему — stake_calc.reason: no_value, total_range, below_min…), stake_calc —
          *     расчет для «Как посчитана сумма». why_key — ключ локали причины выбора
          *     (analysis.variants.why.*) и why_params. issues — правила экспресса, которые не прошел

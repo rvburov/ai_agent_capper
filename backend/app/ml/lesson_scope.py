@@ -9,7 +9,12 @@ Claude не пишет SQL и не трогает базу: в разборе о
 
 Случай урока — исход (рынок, сторона) сыгранного матча. Признаки считаются только по
 архиву и только до дня матча (WHERE день < день матча — без утечки исхода):
-- market — рынок исхода (ML, HCP_-1.5, HCP_+1.5); без условия — ML;
+- market — рынок исхода (ML, HCP_-1.5, HCP_+1.5) или семейство новых рынков Р28 (shcp —
+  фора ±2.5 по сетам, stot — тотал сетов, ghcp — фора по геймам, gtot — тотал геймов: линии
+  у букмекеров разные, поэтому урок про семейство целиком); без условия — ML. Случай
+  семейства на архиве — его основная линия (app/services/lesson_check.py), свои случаи —
+  ноги любого рынка семейства. У тотала (stot, gtot) исход не про сторону: признаки стороны
+  с ним не берутся, сторона случая — игрок 1;
 - surface, round, best_of — покрытие (ковер — хард, как у Эло), круг, формат;
 - role — фаворит или аутсайдер по Эло модели (рейтинги до матча с весом покрытия);
 - elo_gap — разница рейтингов сторон, которыми пользуется модель (с весом покрытия);
@@ -61,7 +66,9 @@ from app.db.models import (
     Prediction,
     Tournament,
 )
+from app.ml.games import PUSH_KEY
 from app.ml.market import REFERENCE_ORDER
+from app.ml.markets import FAMILY_GHCP, FAMILY_GTOT, FAMILY_SHCP, FAMILY_STOT, NEW_FAMILIES
 from app.ml.sets import MARKET_ML, MARKETS
 
 SCOPE_VERSION = 1
@@ -73,8 +80,9 @@ MAX_CONDITIONS = 6
 ROUNDS = ("R128", "R64", "R32", "R16", "RR", "QF", "SF", "F")
 ARCHIVE_SOURCES = ("sackmann", "tennis_data")
 RESULT_STATUSES = ("finished", "retired")
-# Набор сетов в счете архива: «6-4», «7-6(5)», «[10-8]» (как sets.SET_SCORE)
-SET_PATTERN = r"\d+-\d+"
+# Набор сетов в счете архива: «6-4», «7-6(5)», «[10-8]» (как sets.SET_SCORE); очки
+# тай-брейка «7-6(10-8)» сетом не считаются — перед сетом начало строки, пробел или «[»
+SET_PATTERN = r"(^|[ \[])\d+-\d+"
 
 
 class ScopeError(ValueError):
@@ -111,7 +119,7 @@ class Feature:
 FEATURES: dict[str, Feature] = {
     feature.name: feature
     for feature in (
-        Feature("market", "enum", values=MARKETS),
+        Feature("market", "enum", values=MARKETS + NEW_FAMILIES),
         Feature("surface", "enum", values=("hard", "clay", "grass"), base=True),
         Feature("round", "enum", values=ROUNDS, base=True),
         Feature("best_of", "enum", values=("3", "5"), base=True),
@@ -126,6 +134,10 @@ FEATURES: dict[str, Feature] = {
     )
 }
 FEATURE_ORDER = tuple(FEATURES)
+# Тоталы: исход не про сторону матча, признаки стороны к ним не подходят
+TOTAL_FAMILIES: tuple[str, ...] = (FAMILY_STOT, FAMILY_GTOT)
+# Рынки, где случаи двух сторон без признака стороны гасят друг друга
+SYMMETRIC_MARKETS = frozenset((MARKET_ML, FAMILY_GHCP))
 
 
 class Condition(BaseModel):
@@ -234,8 +246,13 @@ def validate_scope(raw: Any) -> Scope:
     except ValidationError:
         raise ScopeError("lesson.scope_format") from None
     side = any(FEATURES[item.feature].side for item in scope.conditions)
-    if not side and set(scope.markets()) <= {MARKET_ML}:
-        # «П1 или П2 на харде» — без своей стороны случаи двух игроков гасят друг друга
+    if side and set(scope.markets()) & set(TOTAL_FAMILIES):
+        # У тотала «сторона» — больше или меньше, а не игрок: признак стороны смешал бы
+        # «больше» при фаворите П1 и «меньше» при фаворите П2 (M1 волны 3)
+        raise ScopeError("lesson.scope_total_side")
+    if not side and set(scope.markets()) <= SYMMETRIC_MARKETS:
+        # «П1 или П2 на харде» — без своей стороны случаи двух игроков гасят друг друга;
+        # у форы по геймам так же: основные линии сторон L и −L дополняют друг друга
         raise ScopeError("lesson.scope_side")
     return scope
 
@@ -302,6 +319,24 @@ class EloModel:
     initial: float = 1500.0
 
 
+# Коды рынков семейства для своих ног: фора ±2.5 по сетам — два кода, остальные — префикс
+_FAMILY_CODES: dict[str, tuple[str, ...]] = {FAMILY_SHCP: ("HCP_-2.5", "HCP_+2.5")}
+_FAMILY_PREFIX: dict[str, str] = {FAMILY_STOT: "STOT_", FAMILY_GHCP: "GHCP_", FAMILY_GTOT: "GTOT_"}
+
+
+def market_clause(column: Any, values: Sequence[str]) -> ColumnElement[bool]:
+    """Рынок ноги подходит под значения признака market: код рынка или семейство (все
+    линии). Значения — параметры запроса."""
+    codes = [value for value in values if value in MARKETS]
+    for value in values:
+        codes.extend(_FAMILY_CODES.get(value, ()))
+    clauses: list[ColumnElement[bool]] = [column.in_(codes)] if codes else []
+    clauses.extend(
+        column.startswith(_FAMILY_PREFIX[value]) for value in values if value in _FAMILY_PREFIX
+    )
+    return or_(*clauses) if clauses else literal(False)
+
+
 def _surface(column: Any) -> ColumnElement[str | None]:
     """Покрытие рейтинга: ковер — хард (как ml/elo.rating_surface)."""
     return case((column == "carpet", "hard"), else_=column)
@@ -339,9 +374,12 @@ def _sides(
         func.coalesce(Match.best_of, Tournament.best_of, 3).label("best_of"),
         _surface(Tournament.surface).label("surface"),
         Match.round.label("round"),
+        Tournament.category.label("level"),
+        Tournament.name.label("tour"),
         literal(None, String).label("market"),
         literal(None, String).label("leg_result"),
         literal(None, Float).label("p_own"),
+        literal(None, Float).label("push_own"),
         literal(None, Integer).label("leg_id"),
     )
     first = (
@@ -367,12 +405,22 @@ def _sides(
     return union_all(first, second)
 
 
+def _push(prediction: Any, name: str) -> Any:
+    """features.p_push.<name> прогноза текстом (app/ml/games.PUSH_KEY)."""
+    return prediction.features[PUSH_KEY][name].astext
+
+
 def _own_sides() -> Select[*tuple[Any, ...]]:
     """Свои случаи: ноги рассчитанных ставок приложения с исходом (выигрыш или проигрыш)
     и прогнозом. День — день матча, иначе день ставки."""
     day = func.coalesce(Match.match_date, Tournament.start_date, cast(Bet.placed_at, Date))
-    pid = case((BetLeg.selection == 1, Match.player1_id), else_=Match.player2_id)
-    oid = case((BetLeg.selection == 1, Match.player2_id), else_=Match.player1_id)
+    # У тотала selection — больше или меньше, а не игрок: сторона — игрок 1, как у случая
+    # тотала на архиве (M1 волны 3)
+    total = or_(*(BetLeg.market.startswith(_FAMILY_PREFIX[family]) for family in TOTAL_FAMILIES))
+    first = or_(total, BetLeg.selection == 1)
+    pid = case((first, Match.player1_id), else_=Match.player2_id)
+    oid = case((first, Match.player2_id), else_=Match.player1_id)
+    side = case((total, literal(1, Integer)), else_=BetLeg.selection)
     return (
         select(
             Match.id.label("match_id"),
@@ -383,11 +431,24 @@ def _own_sides() -> Select[*tuple[Any, ...]]:
             func.coalesce(Match.best_of, Tournament.best_of, 3).label("best_of"),
             _surface(Tournament.surface).label("surface"),
             Match.round.label("round"),
+            Tournament.category.label("level"),
+            Tournament.name.label("tour"),
             BetLeg.market.label("market"),
             BetLeg.result.label("leg_result"),
             func.coalesce(Prediction.p_final, Prediction.p_claude).label("p_own"),
+            # Вероятность возврата той же оценки (целая линия по геймам; нет — 0)
+            func.coalesce(
+                cast(
+                    case(
+                        (Prediction.p_final.is_not(None), _push(Prediction, "final")),
+                        else_=_push(Prediction, "claude"),
+                    ),
+                    Float,
+                ),
+                0.0,
+            ).label("push_own"),
             BetLeg.id.label("leg_id"),
-            BetLeg.selection.label("side"),
+            side.label("side"),
             pid.label("pid"),
             oid.label("oid"),
         )
@@ -532,7 +593,8 @@ def cases_select(
 ) -> Select[*tuple[Any, ...]]:
     """Запрос случаев условия: архив (own=False, матчи с днем в [since, until)) или свои
     ноги рассчитанных ставок (own=True; leg_ids — только эти ноги). Колонки: match_id,
-    day, side, winner_id, pid, score, best_of, surface, round, market, leg_result, p_own,
+    day, side, winner_id, pid, oid, score, best_of, surface, round, level и tour (категория и
+    название турнира — правило решающего сета модели геймов), market, leg_result, p_own,
     leg_id, r_side, r_opp (рейтинги модели до матча), колонки признаков. scope None — без
     условия (признаки ног для фактов разбора); match_ids — обе стороны этих матчей (признаки
     общего разбора матча). Все значения условия и параметры модели — связанные параметры."""
@@ -553,7 +615,7 @@ def cases_select(
         _condition_sql(item, base_columns) for item in conditions if FEATURES[item.feature].base
     ]
     if own and scope is not None:
-        base_where.append(sides.c.market.in_(list(scope.markets())))
+        base_where.append(market_clause(sides.c.market, scope.markets()))
     if leg_ids is not None:
         base_where.append(sides.c.leg_id.in_(list(leg_ids)))
     weight = literal(model.weight, Float)
@@ -574,13 +636,17 @@ def cases_select(
             sides.c.side,
             sides.c.winner_id,
             sides.c.pid,
+            sides.c.oid,
             sides.c.score,
             sides.c.best_of,
             sides.c.surface,
             sides.c.round,
+            sides.c.level,
+            sides.c.tour,
             sides.c.market,
             sides.c.leg_result,
             sides.c.p_own,
+            sides.c.push_own,
             sides.c.leg_id,
             blended(sides.c.pid).label("r_side"),
             blended(sides.c.oid).label("r_opp"),
@@ -633,7 +699,8 @@ def ratings_select(
     """Сыгранные матчи архива с днем в [since, until) и рейтинги модели сторон до дня
     матча (r1 — игрок 1, r2 — игрок 2, с весом покрытия): для замороженного eval-набора и
     перекалибровки базовой модели (score — для поправки модели сетов). levels — уровни
-    турниров (основной тур); None — все."""
+    турниров (основной тур); None — все. level и tour — категория и название турнира
+    (правило решающего сета модели геймов)."""
     day = func.coalesce(Match.match_date, Tournament.start_date)
     where: list[ColumnElement[bool]] = [
         Match.status == "finished",
@@ -655,6 +722,8 @@ def ratings_select(
             Match.round.label("round"),
             func.coalesce(Match.best_of, Tournament.best_of, 3).label("best_of"),
             Match.score.label("score"),
+            Tournament.category.label("level"),
+            Tournament.name.label("tour"),
         )
         .join(Tournament, Tournament.id == Match.tournament_id)
         .where(*where)

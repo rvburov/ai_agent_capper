@@ -14,6 +14,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+import app.ml.markets as markets_ml
 from app.core.redis import redis_key
 from app.db.models import (
     Analysis,
@@ -155,16 +156,30 @@ async def test_new_markets_through_analysis_bet_and_settlement(
     assert (under["family"], under["line"], under["status"]) == ("stot", 2.5, "compare")
     assert under["has_model"] and under["note_key"] == "analysis.leg.market_compare"
     assert under["q_market"] is not None and under["p_push"] == 0.0
+    # Рынки по геймам — вероятность цепи модели геймов (этап 7, волна 3); у целой линии
+    # тотала 23 — вероятность возврата, валуй p·кэф + P(возврат) − 1
     games = rows[("GTOT_23", 2)]
-    assert games["p_final"] is None and games["p_base"] is None and games["value"] is None
-    assert not games["has_model"] and games["note_key"] == "analysis.leg.no_model"
+    over = rows[("GTOT_23", 1)]
+    assert games["has_model"] and games["model_state"] == "ok"
+    assert games["note_key"] == "analysis.leg.market_compare"
+    assert games["p_final"] is not None and games["p_base"] is not None
+    assert 0 < games["p_push"] < 0.2 and over["p_push"] == pytest.approx(games["p_push"])
+    assert games["p_final"] + over["p_final"] + games["p_push"] == pytest.approx(1, abs=1e-5)
+    assert games["value"] == pytest.approx(games["p_final"] * 2.05 + games["p_push"] - 1, abs=1e-5)
     hcp = rows[("GHCP_+3.5", 2)]
     assert (hcp["family"], hcp["line"]) == ("ghcp", 3.5)
+    assert hcp["p_push"] == 0.0
+    assert hcp["p_final"] + rows[("GHCP_-3.5", 1)]["p_final"] == pytest.approx(1, abs=1e-5)
     assert rows[("ML", 1)]["status"] == "express" and rows[("HCP_+1.5", 2)]["family"] == "h15"
     predictions = list(
         await db.scalars(select(Prediction).where(Prediction.analysis_id == analysis["id"]))
     )
     assert {p.market for p in predictions} >= {"STOT_2.5", "GTOT_23", "GHCP_-3.5", "GHCP_+3.5"}
+    by_key = {(p.market, p.selection): p for p in predictions}
+    under_games = by_key[("GTOT_23", 2)]
+    assert under_games.features["p_push"]["final"] == pytest.approx(games["p_push"], abs=1e-6)
+    assert under_games.features["games"]["decider"] == "tb7"
+    assert under_games.value_at_pred == pytest.approx(games["value"], abs=1e-5)
     # Экспресс и варианты Р29 — без рынков «для сравнения»
     used = [leg["market"] for variant in analysis["result"]["variants"] for leg in variant["legs"]]
     express = (analysis["result"]["express"] or {}).get("legs") or []
@@ -296,7 +311,8 @@ async def test_markets_counter_and_admin_switch(
     await _finish(db, match_id, winner=world["sinner"], score="6-4 7-6(5)")
 
     # Счетчик общий и виден любому участнику: тотал сетов — 2 события (больше и меньше),
-    # 2:0 — меньше 2.5 сыграло; тотал 23 гейма — ровно, возврат
+    # 2:0 — меньше 2.5 сыграло; тотал 23 гейма — ровно, возврат: событием не считается
+    # (как в «Аналитике»)
     response = await member.client.get("/api/markets")
     assert response.status_code == 200, response.text
     families = {item["family"]: item for item in response.json()["families"]}
@@ -307,11 +323,14 @@ async def test_markets_counter_and_admin_switch(
     )  # fmt: skip
     # Два события — меньше PRIVATE_MIN: только количество, ROI скрыт (счетчик общий)
     assert stot["roi"] is None and stot["roi_low"] is None and stot["clv"] is None
-    assert families["gtot"]["events"] == 2 and families["gtot"]["roi"] is None
+    assert families["gtot"]["events"] == 0 and families["gtot"]["roi"] is None
     events = await market_stats._events(db)
     assert sorted(events["stot"].returns) == pytest.approx([-1.0, 0.6])
-    assert events["gtot"].returns == [0.0, 0.0]
-    assert families["ghcp"]["has_model"] is False and families["ml"]["status"] == "express"
+    assert events["gtot"].returns == []
+    # Фора −3.5 Синнера при 13:10 — проигрыш, +3.5 Руне — выигрыш по 1.95
+    assert sorted(events["ghcp"].returns) == pytest.approx([-1.0, 0.95])
+    assert families["ghcp"]["has_model"] is True and families["ghcp"]["model_state"] == "ok"
+    assert families["ml"]["status"] == "express"
     assert response.json()["need"] == 150
     # Данные общие, не личные: as_user здесь не принимается (только чтение экранов участника)
     admin = await admin_signed_in(make_client, make_user, login)
@@ -320,15 +339,25 @@ async def test_markets_counter_and_admin_switch(
     anonymous = await (await make_client("10.0.0.9")).get("/api/markets")
     assert anonymous.status_code == 401
 
-    # Перевод в экспресс: участник — 403, просмотр as_user — 403, рынок по геймам — 422,
-    # порог не пройден — 409
+    # Перевод в экспресс: участник — 403, просмотр as_user — 403, рынок, модель которого не
+    # прошла проверку на истории, — 422, модели нет — 422, порог не пройден — 409
     path = "/api/admin/markets/stot"
     forbidden = await member.client.put(path, json={"express": True})
     assert forbidden.status_code == 403 and error_code(forbidden) == "common.forbidden"
     as_user = await admin.client.put(path, params={"as_user": member.id}, json={"express": True})
     assert as_user.status_code == 403 and error_code(as_user) == "common.forbidden"
-    no_model = await admin.client.put("/api/admin/markets/gtot", json={"express": True})
-    assert no_model.status_code == 422 and error_code(no_model) == "admin.markets.no_model"
+    with monkeypatch.context() as patch:
+        patch.setattr(markets_ml, "FAILED_FAMILIES", ("gtot",))
+        failed = await admin.client.put("/api/admin/markets/gtot", json={"express": True})
+        assert failed.status_code == 422 and error_code(failed) == "admin.markets.model_failed"
+        stats = {item.family: item for item in (await market_stats.market_stats(db)).families}
+        assert stats["gtot"].model_state == "failed" and not stats["gtot"].has_model
+        patch.setattr(markets_ml, "FAILED_FAMILIES", ())
+        patch.setattr(markets_ml, "MODEL_FAMILIES", ("ml", "h15", "shcp", "stot", "ghcp"))
+        no_model = await admin.client.put("/api/admin/markets/gtot", json={"express": True})
+        assert no_model.status_code == 422 and error_code(no_model) == "admin.markets.no_model"
+    games_early = await admin.client.put("/api/admin/markets/gtot", json={"express": True})
+    assert games_early.status_code == 409
     early = await admin.client.put(path, json={"express": True})
     assert early.status_code == 409 and error_code(early) == "admin.markets.not_ready"
     assert (
@@ -423,7 +452,9 @@ async def test_markets_threshold_privacy_and_cache(
 
     # 150 событий и CLV выше нуля, но с закрытием только 40 — порог не пройден
     families["stot"] = Family([0.1] * 150, [0.03, 0.05] * 20)
-    # У тотала геймов числа проходят, но модели нет — не «готов», уведомления нет
+    # У тотала геймов числа проходят, но модель не прошла проверку — не «готов», уведомления
+    # нет
+    monkeypatch.setattr(markets_ml, "FAILED_FAMILIES", ("gtot",))
     families["gtot"] = Family([0.1] * 150, [0.03, 0.05] * 30)
     stats = {item.family: item for item in (await market_stats.market_stats(db)).families}
     assert stats["stot"].clv_low is not None and stats["stot"].clv_low > 0

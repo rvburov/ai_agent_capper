@@ -12,8 +12,13 @@
 замороженных eval-наборов (на них сравниваются версии инструкций). Вероятность случая —
 прогноз базовой модели до матча (out-of-sample по времени: рейтинги Эло из player_ratings
 строго до дня матча, вес покрытия и калибровка Платта — из ml_models, как в досье),
-для фор — модель сетов. Случаи по дням делятся на историю и отложенную часть (последние
-HOLDOUT_SHARE).
+для фор — модель сетов. Семейство новых рынков (Р28) — его основная линия: фора ±2.5 —
+3:0 стороны (только до 3 побед), тотал сетов — больше 2.5 до 2 побед и больше 3.5 до 3;
+у фор и тоталов по геймам кэфов в архиве нет, поэтому линия — половинная, при которой
+вероятность модели ближе всего к 50% (так ставит основную линию букмекер), а вероятность
+— цепь модели геймов (app/ml/games.py) с темпом по подаче и приему обоих игроков за 52
+недели до матча, как в досье. Тотал не зависит от стороны: случай — один на матч.
+Случаи по дням делятся на историю и отложенную часть (последние HOLDOUT_SHARE).
 
 На истории:
 - остаток y − p и его 95% ДИ (бутстрэп с seed) — смещение модели в условии (effect);
@@ -30,20 +35,55 @@ insufficient — случаев на истории или в отложенно
 MIN_HOLDOUT (урок остается гипотезой). Бутстрэп детерминирован (seed в отчете).
 """
 
-from collections.abc import Sequence
+import asyncio
+from bisect import bisect_left
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any, Literal
 
 import numpy as np
-from sqlalchemy import RowMapping, select, text
+from sqlalchemy import RowMapping, and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
 
-from app.db.models import BetLeg, EvalSet, EvalSetItem
+from app.db.models import BetLeg, EvalSet, EvalSetItem, Match, MatchStat, Tournament
 from app.ml.backtest import PlattScaling
 from app.ml.elo import EloParams, win_probability
-from app.ml.lesson_scope import EloModel, Scope, cases_select
+from app.ml.games import (
+    GAMES_CAL,
+    GamesCalibration,
+    GamesDist,
+    ServeRecord,
+    decided_prob,
+    decider_rule,
+    games_calibration_of,
+    games_dist,
+    serve_mean,
+)
+from app.ml.lesson_scope import (
+    FEATURES,
+    RESULT_STATUSES,
+    TOTAL_FAMILIES,
+    EloModel,
+    Scope,
+    cases_select,
+)
+from app.ml.markets import (
+    FAMILY_GHCP,
+    FAMILY_GTOT,
+    FAMILY_SHCP,
+    FAMILY_STOT,
+    GAME_FAMILIES,
+    NEW_FAMILIES,
+    RESULT_WIN,
+    family_of,
+    games_complete,
+    games_leg_result,
+    market_code,
+)
 from app.ml.metrics import (
     BOOTSTRAP_SAMPLES,
     Estimate,
@@ -52,19 +92,27 @@ from app.ml.metrics import (
     clip_probabilities,
     log_losses,
 )
-from app.ml.model_versions import SETS_KEY
+from app.ml.model_versions import GAMES_KEY, SETS_KEY
 from app.ml.sets import (
     MARKET_MINUS,
     MARKET_ML,
     MARKET_PLUS,
+    MARKETS,
     SETS_PLATT,
     SetsCalibration,
+    archive_games,
     base_probs,
     leg_result,
+    market_prob,
     set_count_from_score,
     sets_calibration_of,
 )
-from app.services.dossier import calibrated_p1, model_params
+from app.services.dossier import (
+    SERVE_DAYS,
+    UNDATED_DAYS,
+    calibrated_p1,
+    model_params,
+)
 
 METHOD = "elo_prematch"
 HISTORY_YEARS = 8
@@ -155,17 +203,240 @@ def selection_outcome(row: RowMapping, market: str) -> int | None:
     return int(result == "win")
 
 
+# Основная линия тотала сетов по формату (случай семейства stot на архиве)
+_SET_TOTAL_MAIN: dict[int, Decimal] = {3: Decimal("2.5"), 5: Decimal("3.5")}
+# Поиск основной линии по геймам: половинные линии до этой величины
+_GAME_LINE_MAX = 30
+
+
+@dataclass(frozen=True)
+class _Stat:
+    """Матч игрока со статистикой подачи: с какого дня виден досье, день матча, очки на
+    своей подаче и выигранные, очки на подаче соперника и выигранные игроком на приеме."""
+
+    visible: date
+    day: date
+    serve_points: int
+    serve_won: int
+    return_points: int
+    return_won: int
+
+
+@dataclass(frozen=True)
+class PlayerServe:
+    """Матчи игрока со статистикой подачи по дню и префиксные суммы очков: окно в
+    SERVE_DAYS считается за два поиска (bisect), а не перебором всей истории на каждый
+    случай (M3 волны 3)."""
+
+    days: tuple[date, ...]
+    stats: tuple[_Stat, ...]
+    # sums[i] — суммы очков (подача, выиграно на подаче, прием, выиграно на приеме) по
+    # первым i матчам
+    sums: tuple[tuple[int, int, int, int], ...]
+
+    @classmethod
+    def of(cls, items: Sequence[_Stat]) -> "PlayerServe":
+        ordered = sorted(items, key=lambda item: item.day)
+        sums = [(0, 0, 0, 0)]
+        for item in ordered:
+            a, b, c, d = sums[-1]
+            sums.append(
+                (
+                    a + item.serve_points,
+                    b + item.serve_won,
+                    c + item.return_points,
+                    d + item.return_won,
+                )
+            )
+        return cls(tuple(item.day for item in ordered), tuple(ordered), tuple(sums))
+
+
+ServeHistory = dict[int, PlayerServe]
+
+
+def serve_index(items: Mapping[int, Sequence[_Stat]]) -> ServeHistory:
+    """Матчи со статистикой по игрокам → история с префиксными суммами."""
+    return {player_id: PlayerServe.of(stats) for player_id, stats in items.items()}
+
+
+async def serve_history(
+    db: AsyncSession, player_ids: Sequence[int], since: date, until: date
+) -> ServeHistory:
+    """Статистика подачи игроков по матчам с днем в [since, until) — для темпа модели
+    геймов на дату случая (окно и видимость — как dossier.serve_sums)."""
+    if not player_ids:
+        return {}
+    own, opp = aliased(MatchStat), aliased(MatchStat)
+    day = func.coalesce(Match.match_date, Tournament.start_date)
+    rows = await read_only(
+        db,
+        select(
+            own.player_id.label("pid"),
+            Match.match_date.label("match_date"),
+            day.label("day"),
+            own.serve_points.label("sv"),
+            (own.first_won + own.second_won).label("sw"),
+            opp.serve_points.label("rv"),
+            (opp.serve_points - opp.first_won - opp.second_won).label("rw"),
+        )
+        .select_from(Match)
+        .outerjoin(Tournament, Tournament.id == Match.tournament_id)
+        .join(own, and_(own.match_id == Match.id, own.player_id.in_(list(player_ids))))
+        .join(opp, and_(opp.match_id == Match.id, opp.player_id != own.player_id))
+        .where(
+            Match.status.in_(RESULT_STATUSES),
+            Match.winner_id.is_not(None),
+            day >= since,
+            day < until,
+            own.serve_points > 0,
+            opp.serve_points > 0,
+            own.first_won.is_not(None),
+            own.second_won.is_not(None),
+            opp.first_won.is_not(None),
+            opp.second_won.is_not(None),
+        ),
+    )
+    found: dict[int, list[_Stat]] = {}
+    for row in rows:
+        found.setdefault(int(row["pid"]), []).append(
+            _Stat(_visible(row["match_date"], row["day"]), row["day"], row["sv"], row["sw"],
+                  row["rv"], row["rw"])
+        )  # fmt: skip
+    return serve_index(found)
+
+
+def _visible(match_date: date | None, day: date) -> date:
+    """С какого дня матч виден досье: день после матча; без даты — после окна UNDATED_DAYS
+    от начала турнира."""
+    if match_date is not None:
+        return match_date + timedelta(days=1)
+    return day + UNDATED_DAYS + timedelta(days=1)
+
+
+def serve_record_on(history: ServeHistory, player_id: int, day: date) -> ServeRecord | None:
+    """Подача и прием игрока за SERVE_DAYS до дня day (только видимые к этому дню матчи).
+    Матч виден не позже чем через UNDATED_DAYS + 1 день после своего дня: матчи раньше
+    day − UNDATED_DAYS видны все и берутся префиксной суммой, проверка видимости — только у
+    последних."""
+    found = history.get(player_id)
+    if found is None:
+        return None
+    low = bisect_left(found.days, day - timedelta(days=SERVE_DAYS))
+    sure = max(low, bisect_left(found.days, day - UNDATED_DAYS))
+    high = bisect_left(found.days, day)
+    first, last = found.sums[low], found.sums[sure]
+    total = [last[index] - first[index] for index in range(4)]
+    for item in found.stats[sure:high]:
+        if item.visible <= day:
+            total[0] += item.serve_points
+            total[1] += item.serve_won
+            total[2] += item.return_points
+            total[3] += item.return_won
+    if total[0] <= 0 or total[2] <= 0:
+        return None
+    return ServeRecord(*total)
+
+
+@dataclass(frozen=True)
+class FamilyContext:
+    """Что нужно случаям семейств новых рынков: поправка сетов, слой модели геймов и
+    статистика подачи игроков (только у рынков по геймам)."""
+
+    sets: SetsCalibration = SETS_PLATT
+    games: GamesCalibration = GAMES_CAL
+    serve: ServeHistory = field(default_factory=dict)
+
+
+def _main_line(probs: dict[int, float], *, total: bool) -> tuple[Decimal, float]:
+    """Половинная линия, при которой вероятность «больше» (у тотала) или прохода форы
+    стороны (у форы, probs — разница геймов стороны) ближе всего к 50%."""
+    if total:
+        lines = [Decimal(k) + Decimal("0.5") for k in range(max(probs) + 1)]
+    else:
+        lines = [Decimal(k) + Decimal("0.5") for k in range(-_GAME_LINE_MAX - 1, _GAME_LINE_MAX)]
+    best: tuple[float, Decimal, float] | None = None
+    for line in lines:
+        if total:
+            p = sum(value for key, value in probs.items() if key > line)
+        else:
+            p = sum(value for key, value in probs.items() if key + line > 0)
+        found = (abs(p - 0.5), line, p)
+        if best is None or found < best:
+            best = found
+    assert best is not None
+    return best[1], best[2]
+
+
+def _games_dist(row: RowMapping, p_side: float, best_of: int, ctx: FamilyContext) -> GamesDist:
+    day = row["day"]
+    tempo = serve_mean(
+        serve_record_on(ctx.serve, int(row["pid"]), day),
+        serve_record_on(ctx.serve, int(row["oid"]), day),
+        row["surface"],
+    )
+    rule = decider_rule(row["level"], row["tour"], day.year, best_of)
+    probs = base_probs(p_side, best_of, ctx.sets)
+    return games_dist(probs, best_of, ctx.games.input_for(tempo, rule, best_of))
+
+
+def family_case(
+    row: RowMapping, family: str, p_side: float, ctx: FamilyContext
+) -> tuple[float, int] | None:
+    """(p, y) случая семейства новых рынков на основной линии со стороны row (p_side — ее
+    победа в матче). Рынка нет в формате или счет неполный — None."""
+    won = row["winner_id"] == row["pid"]
+    best_of = int(row["best_of"]) if row["best_of"] in (3, 5) else 3
+    if family in (FAMILY_SHCP, FAMILY_STOT):
+        if family == FAMILY_SHCP:
+            if best_of != 5:
+                return None
+            market = "HCP_-2.5"
+        else:
+            market = market_code(FAMILY_STOT, _SET_TOTAL_MAIN[best_of])
+        count = set_count_from_score(row["score"], winner_is_first=won)
+        result = leg_result(market, 1, count, best_of)
+        p = market_prob(base_probs(p_side, best_of, ctx.sets), best_of, market, 1)
+        if result is None or p is None:
+            return None
+        return p, int(result == RESULT_WIN)
+    games = archive_games(row["score"], winner_is_first=won)
+    if not games_complete(games, best_of):
+        return None
+    dist = _games_dist(row, p_side, best_of, ctx)
+    if family == FAMILY_GTOT:
+        line, p = _main_line(dist.total_probs(), total=True)
+        market = market_code(FAMILY_GTOT, line)
+    else:
+        line, p = _main_line(dist.diff_probs(), total=False)
+        market = market_code(FAMILY_GHCP, line)
+    return p, int(games_leg_result(market, 1, games) == RESULT_WIN)
+
+
 def archive_cases(
     rows: Sequence[RowMapping],
     scope: Scope,
     platt: PlattScaling | None,
     calibration: SetsCalibration = SETS_PLATT,
+    context: FamilyContext | None = None,
 ) -> list[Case]:
+    ctx = context or FamilyContext(sets=calibration)
     found: list[Case] = []
+    # Тотал не зависит от стороны: случай — один на матч
+    seen: set[tuple[int, str]] = set()
     for row in rows:
         p_raw = win_probability(float(row["r_side"]), float(row["r_opp"]))
         p_side = calibrated_p1(p_raw, platt)
         for market in scope.markets():
+            if market in NEW_FAMILIES:
+                key = (int(row["match_id"]), market)
+                if market in (FAMILY_STOT, FAMILY_GTOT) and key in seen:
+                    continue
+                pair = family_case(row, market, p_side, ctx)
+                if pair is None:
+                    continue
+                seen.add(key)
+                found.append(Case(int(row["match_id"]), row["day"], pair[0], pair[1]))
+                continue
             y = selection_outcome(row, market)
             if y is None:
                 continue
@@ -196,7 +467,17 @@ async def history_cases(db: AsyncSession, scope: Scope, *, today: date) -> list[
     rows = await read_only(db, cases_select(scope, model=model, since=since, until=today))
     frozen = await frozen_match_ids(db)
     kept = [row for row in rows if int(row["match_id"]) not in frozen]
-    return archive_cases(kept, scope, platt, calibration)
+    serve: ServeHistory = {}
+    if any(market in GAME_FAMILIES for market in scope.markets()) and kept:
+        players = sorted({int(row[key]) for row in kept for key in ("pid", "oid")})
+        first = min(row["day"] for row in kept) - timedelta(days=SERVE_DAYS)
+        serve = await serve_history(db, players, first, max(row["day"] for row in kept))
+    context = FamilyContext(
+        sets=calibration, games=games_calibration_of(params.get(GAMES_KEY)), serve=serve
+    )
+    # Цепь модели геймов — секунды и минуты счета на тысячах матчей: в потоке, чтобы цикл
+    # событий воркера не стоял и анализы шли (M3 волны 3)
+    return await asyncio.to_thread(archive_cases, kept, scope, platt, calibration, context)
 
 
 @dataclass(frozen=True)
@@ -223,8 +504,11 @@ async def own_cases(db: AsyncSession, scope: Scope) -> OwnCases:
             select(BetLeg.id, BetLeg.bet_id, BetLeg.prediction_id).where(BetLeg.id.in_(leg_ids))
         )
     ).all()
+    # Ноги — только выигрыши и проигрыши: у целой линии p — при условии «не возврат»
+    # (p / (1 − p_push)), как в калибровке «Аналитики» (M2 волны 3)
     residuals = [
-        (1.0 if row["leg_result"] == "win" else 0.0) - float(row["p_own"])
+        (1.0 if row["leg_result"] == "win" else 0.0)
+        - decided_prob(float(row["p_own"]), float(row["push_own"] or 0.0))
         for row in rows
         if row["p_own"] is not None
     ]
@@ -249,8 +533,9 @@ async def leg_features(db: AsyncSession, leg_ids: Sequence[int]) -> dict[int, di
 
 def _feature_row(row: RowMapping) -> dict[str, Any]:
     odds = row["odds"]
-    return {
-        "market": row["market"] or MARKET_ML,
+    market = _market_feature(row["market"])
+    features = {
+        "market": market,
         "surface": row["surface"],
         "round": row["round"] or None,
         "best_of": int(row["best_of"]) if row["best_of"] else None,
@@ -263,6 +548,21 @@ def _feature_row(row: RowMapping) -> dict[str, Any]:
         "h2h_matches": row["h2h_matches"],
         "h2h_wins": row["h2h_wins"],
     }
+    if market in TOTAL_FAMILIES:
+        # У тотала нет стороны игрока: признаки стороны в фактах только запутали бы
+        features.update({name: None for name, feature in FEATURES.items() if feature.side})
+    return features
+
+
+def _market_feature(code: str | None) -> str:
+    """Значение признака market у ноги: старые рынки — код, новые — семейство (так их
+    знает словарь условия урока: GTOT_22.5 → gtot)."""
+    if not code or code in MARKETS:
+        return code or MARKET_ML
+    try:
+        return family_of(code)
+    except ValueError:
+        return code
 
 
 @dataclass(frozen=True)
@@ -439,4 +739,5 @@ async def check_history(
 ) -> HistoryCheck:
     """Проверка урока на архиве (запрос только для чтения и evaluate)."""
     cases = await history_cases(db, scope, today=today)
-    return evaluate(cases, scope, shrink_k=shrink_k)
+    # Бутстрэп по тысячам случаев — тоже в потоке
+    return await asyncio.to_thread(evaluate, cases, scope, shrink_k=shrink_k)

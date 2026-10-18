@@ -75,6 +75,7 @@ from app.db.models.tennis import (
 from app.ingest.names import fold, has_cyrillic, translit_ru
 from app.ingest.sackmann import GENERIC_CATEGORY, PROMOTE_AFTER, PROMOTE_BEFORE
 from app.ml.elo import CURRENT_DAYS
+from app.ml.markets import SCORE_SIDES, SCORE_SWAPPED
 from app.schemas.players import PlayerCountsOut, PlayerRankingOut, PlayerRowOut
 from app.services import player_card
 from app.services.audit import write_audit
@@ -897,6 +898,18 @@ def _flipped(table: Table, flip: bool) -> Any:
     return case((total, selection), else_=3 - selection)
 
 
+def _total_score(table: Table, column: str) -> Any:
+    """Счет ноги на тотал при слиянии с обменом игроков: у тотала он хранится со стороны
+    игрока 1 (а не выбранной стороны), поэтому разворачивается; у других рынков — как есть
+    (сторона ноги меняется вместе с игроками)."""
+    market = table.c["market"]
+    score = table.c[column]
+    total = or_(
+        market.startswith("STOT_", autoescape=True), market.startswith("GTOT_", autoescape=True)
+    )
+    return case((total, func.regexp_replace(score, SCORE_SIDES, SCORE_SWAPPED, "g")), else_=score)
+
+
 async def _merge_matches(
     db: AsyncSession, source_id: int, target_id: int, flip: bool | None
 ) -> MatchMergeReport:
@@ -970,6 +983,9 @@ async def _merge_matches(
             values: dict[str, Any] = {column: target_id}
             if rule in ("odds", "selection"):
                 values["selection"] = _flipped(table, flip)
+            if flip and table_name == "bet_legs":
+                values["score"] = _total_score(table, "score")
+                values["archive_score"] = _total_score(table, "archive_score")
             try:
                 count = await _execute(db, update(table).where(ref == source_id).values(values))
             except IntegrityError:

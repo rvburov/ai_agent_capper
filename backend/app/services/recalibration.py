@@ -28,8 +28,15 @@ Brier — не выше +0,005 (правило TOKEN_ECONOMY.md, 2.4). Инач�
 матчей формата хватает (MIN_SETS_MATCHES для подбора, MIN_HOLDOUT для проверки); иначе
 остается прежняя (у версии без своих чисел — SETS_PLATT). Включение версии решает правило
 калибровки выше; числа сетов идут вместе с ней.
+
+Так же подбирается калибровочный слой модели геймов (params.games_cal, app/ml/games.py):
+сдвиг темпа по формату — сетка вокруг прежнего числа по Brier стандартных линий тоталов и
+фор фаворита на обучающих матчах с доигранным счетом и статистикой подачи. Новое число
+формата берется, если на отложенной части Brier с ним не выше, чем с прежним, и матчей
+хватает (MIN_SETS_MATCHES и MIN_HOLDOUT); иначе остается прежнее (без своих — GAMES_CAL).
 """
 
+import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -42,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.db.models import Match, MlModel, Prediction, User
 from app.ml.backtest import (
+    MIN_SETS_MATCHES,
     BacktestConfig,
     PlattScaling,
     SetsSample,
@@ -52,7 +60,17 @@ from app.ml.backtest import (
     side_flip,
 )
 from app.ml.elo import MODEL_ID, win_probability
+from app.ml.games import (
+    GamesCalibration,
+    GamesSample,
+    decider_rule,
+    fit_games_shift,
+    games_brier,
+    games_calibration_of,
+    serve_mean,
+)
 from app.ml.lesson_scope import ratings_select
+from app.ml.markets import games_complete
 from app.ml.metrics import (
     BOOTSTRAP_SAMPLES,
     block_bootstrap_diff_ci,
@@ -63,11 +81,19 @@ from app.ml.metrics import (
     log_loss,
     log_losses,
 )
-from app.ml.model_versions import CALIBRATION_KIND, SETS_KEY, active_calibration, version_id
+from app.ml.model_versions import (
+    CALIBRATION_KIND,
+    GAMES_KEY,
+    SETS_KEY,
+    active_calibration,
+    version_id,
+)
 from app.ml.sets import (
     BEST_OF,
     SetCount,
     SetsCalibration,
+    archive_games,
+    base_probs,
     complete_for,
     set_count_from_score,
     sets_calibration_json,
@@ -83,9 +109,9 @@ from app.schemas.learning import (
     WalkForwardOut,
 )
 from app.services.audit import write_audit
-from app.services.dossier import calibrated_p1
+from app.services.dossier import SERVE_DAYS, calibrated_p1
 from app.services.eval_sets import archive_market
-from app.services.lesson_check import elo_model, read_only
+from app.services.lesson_check import elo_model, read_only, serve_history, serve_record_on
 from app.services.model_alerts import notify_admins
 from app.services.sessions import utcnow
 
@@ -117,6 +143,11 @@ class Sample:
     q: float | None
     best_of: int = 3
     count: SetCount | None = None
+    # Для слоя модели геймов: счет по геймам стороны (None — недоигран), темп по подаче и
+    # приему обоих игроков до матча и правило решающего сета
+    games: tuple[tuple[int, int], ...] | None = None
+    tempo: float | None = None
+    decider: str = "tb7"
 
 
 async def samples(db: AsyncSession, *, since: date, until: date) -> list[Sample]:
@@ -127,26 +158,38 @@ async def samples(db: AsyncSession, *, since: date, until: date) -> list[Sample]
         ratings_select(model=model, since=since, until=until, levels=BacktestConfig().levels),
     )
     market = await archive_market(db, [int(row["match_id"]) for row in rows])
+    players = sorted({int(row[key]) for row in rows for key in ("p1", "p2")})
+    serve = await serve_history(db, players, since - timedelta(days=SERVE_DAYS), until)
     found: list[Sample] = []
     for row in rows:
         match_id = int(row["match_id"])
         flip = side_flip(match_id)
         r1, r2 = float(row["r1"]), float(row["r2"])
         side_player = row["p2"] if flip else row["p1"]
+        other = row["p1"] if flip else row["p2"]
         p_raw = win_probability(r2, r1) if flip else win_probability(r1, r2)
         q1 = market.get(match_id)
         won = row["winner_id"] == side_player
         best_of = int(row["best_of"]) if row["best_of"] in BEST_OF else 3
         count = set_count_from_score(row["score"], winner_is_first=won)
+        games = archive_games(row["score"], winner_is_first=won)
+        day = row["day"]
         found.append(
             Sample(
                 match_id=match_id,
-                day=row["day"],
+                day=day,
                 p_raw=p_raw,
                 y=1 if won else 0,
                 q=None if q1 is None else (1.0 - q1 if flip else q1),
                 best_of=best_of,
                 count=count if complete_for(count, best_of) else None,
+                games=tuple(games) if games_complete(games, best_of) else None,
+                tempo=serve_mean(
+                    serve_record_on(serve, int(side_player), day),
+                    serve_record_on(serve, int(other), day),
+                    row["surface"],
+                ),
+                decider=decider_rule(row["level"], row["tour"], day.year, best_of),
             )
         )
     return sorted(found, key=lambda item: (item.day, item.match_id))
@@ -216,6 +259,79 @@ def choose_sets(
             "taken": taken,
         }
     return chosen, report
+
+
+def _games_samples(
+    items: Sequence[Sample], platt: PlattScaling | None, sets: SetsCalibration
+) -> list[GamesSample]:
+    """Матчи с доигранным счетом по геймам для слоя модели геймов: три числа стороны — по
+    калиброванной вероятности и модели сетов новой версии."""
+    return [
+        GamesSample(
+            base_probs(calibrated_p1(item.p_raw, platt), item.best_of, sets),
+            item.best_of,
+            item.tempo,
+            item.decider,
+            item.games,
+        )
+        for item in items
+        if item.games is not None and item.tempo is not None
+    ]
+
+
+def choose_games(
+    train: Sequence[Sample],
+    holdout: Sequence[Sample],
+    platt: PlattScaling | None,
+    sets: SetsCalibration,
+    previous: GamesCalibration,
+) -> tuple[GamesCalibration, dict[str, Any]]:
+    """Слой модели геймов новой версии по формату (правило — в docstring модуля) и числа
+    для metrics.games: подбор, Brier стандартных линий на отложенной части с новым и
+    прежним сдвигом, что взято."""
+    fit_items = _games_samples(train, platt, sets)
+    test = _games_samples(holdout, platt, sets)
+    chosen = dict(previous.shift)
+    report: dict[str, Any] = {}
+    for best_of in BEST_OF:
+        n_train = sum(1 for item in fit_items if item.best_of == best_of)
+        n_holdout = sum(1 for item in test if item.best_of == best_of)
+        prev = previous.shift.get(best_of, 0.0)
+        new = fit_games_shift(fit_items, best_of, prev) if n_train >= MIN_SETS_MATCHES else None
+        prev_brier = games_brier(test, best_of, prev) if n_holdout else None
+        new_brier = games_brier(test, best_of, new) if new is not None and n_holdout else None
+        taken = (
+            new is not None
+            and new_brier is not None
+            and prev_brier is not None
+            and n_holdout >= MIN_HOLDOUT
+            and new_brier <= prev_brier
+        )
+        if taken and new is not None:
+            chosen[best_of] = new
+        report[str(best_of)] = {
+            "fitted": new,
+            "n_train": n_train,
+            "n_holdout": n_holdout,
+            "brier": new_brier,
+            "prev_brier": prev_brier,
+            "taken": taken,
+        }
+    return GamesCalibration(chosen), report
+
+
+def _choose_layers(
+    train: Sequence[Sample],
+    holdout: Sequence[Sample],
+    platt: PlattScaling,
+    params: dict[str, Any],
+) -> tuple[tuple[SetsCalibration, dict[str, Any]], tuple[GamesCalibration, dict[str, Any]]]:
+    """Модель сетов и слой модели геймов новой версии (без базы: идет в потоке)."""
+    sets = choose_sets(train, holdout, platt, sets_calibration_of(params.get(SETS_KEY)))
+    games = choose_games(
+        train, holdout, platt, sets[0], games_calibration_of(params.get(GAMES_KEY))
+    )
+    return sets, games
 
 
 def _fit(items: Sequence[Sample]) -> PlattScaling | None:
@@ -337,8 +453,10 @@ async def recalibrate(
         await db.commit()
         return RecalibrationOut(decision="skipped", reason="ml.too_few", version=None)
     old_platt = _platt_of(current.params)
-    sets, sets_report = choose_sets(
-        train, holdout, new_platt, sets_calibration_of((current.params or {}).get(SETS_KEY))
+    # Подбор модели сетов и слоя модели геймов — минуты счета цепи на тысячах матчей: в
+    # потоке, цикл событий воркера в это время ведет анализы (M3 волны 3)
+    (sets, sets_report), (games, games_report) = await asyncio.to_thread(
+        _choose_layers, train, holdout, new_platt, current.params or {}
     )
     y = [item.y for item in holdout]
     days = [item.day.isoformat() for item in holdout]
@@ -361,6 +479,7 @@ async def recalibrate(
             "base": MODEL_ID,
             "platt": {"a": new_platt.a, "b": new_platt.b},
             SETS_KEY: sets_calibration_json(sets),
+            GAMES_KEY: games.to_json(),
         },
         metrics={
             "n_train": len(train),
@@ -387,6 +506,7 @@ async def recalibrate(
             ],
             "walk_forward": walk_forward(data, today=day),
             "sets": sets_report,
+            "games": games_report,
             "seed": SEED,
             "rule": {"log_loss_margin": LOG_LOSS_MARGIN, "brier_margin": BRIER_MARGIN},
             "reason": reason,

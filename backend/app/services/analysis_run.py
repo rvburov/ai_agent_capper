@@ -69,6 +69,7 @@ from app.db.models import (
     StrategyVersion,
 )
 from app.ml import model_versions
+from app.ml.markets import GAME_FAMILIES, is_market, market_spec
 from app.ml.sets import Probs3
 from app.ml.strategy import (
     StrategyParams,
@@ -1137,10 +1138,17 @@ class _Runner:
         if self.steps[index].state == "done":
             return
         await self.set_step(index, "running")
+        # Рынки по геймам с принятой моделью считает цепь очко → гейм → сет → матч (Р28):
+        # шаг называет ее, если такой рынок есть хотя бы в одном событии
+        games = any(
+            spec.family in GAME_FAMILIES and spec.has_model
+            for event in self.events
+            for spec in (market_spec(code) for code in event.odds if is_market(code))
+        )
         await self.set_step(
             index,
             "done",
-            detail_key="analysis.steps.model",
+            detail_key="analysis.steps.model_games" if games else "analysis.steps.model",
             detail_params={"matches": len(self.events)},
         )
 
