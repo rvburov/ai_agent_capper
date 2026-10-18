@@ -57,6 +57,16 @@ from app.core.csv_safe import csv_cell
 from app.core.errors import AppError
 from app.core.i18n import t
 from app.db.models import BankrollLedger, Bet, BetLeg, Match, Prediction, Tournament, User
+from app.ml.markets import (
+    FAMILIES,
+    GAME_FAMILIES,
+    RESULT_VOID,
+    family_of,
+    games_complete,
+    games_leg_result,
+    is_market,
+    opposite,
+)
 from app.ml.metrics import (
     BOOTSTRAP_SAMPLES,
     Estimate,
@@ -70,7 +80,7 @@ from app.ml.metrics import (
     rolling_means,
     wilson_interval,
 )
-from app.ml.sets import leg_result, set_count_from_score
+from app.ml.sets import archive_games, leg_result, set_count_from_score
 from app.ml.strategy import StakeBand, StrategyParams
 from app.schemas.analyses import TextKey
 from app.schemas.analytics import (
@@ -87,6 +97,8 @@ from app.schemas.analytics import (
     ClvBinOut,
     ClvOut,
     ExportPart,
+    FamilyBrierOut,
+    FamilySliceOut,
     InsightAction,
     InsightCode,
     InsightFilterOut,
@@ -242,7 +254,13 @@ def _base_filters(filters: AnalyticsFiltersIn, window: Window) -> BetFiltersIn:
 
 
 def _bet_filters(filters: AnalyticsFiltersIn, base: BetFiltersIn) -> BetFiltersIn:
-    return base.model_copy(update={"market": filters.market, "surface": list(filters.surface)})
+    return base.model_copy(
+        update={
+            "market": filters.market,
+            "family": filters.family,
+            "surface": list(filters.surface),
+        }
+    )
 
 
 def _selection_condition(filters: AnalyticsFiltersIn, user: User) -> list[ColumnElement[bool]]:
@@ -639,22 +657,34 @@ class PredEvent:
 
 
 def _pred_pair(market: str, selection: int) -> tuple[str, int]:
-    """Пара дополняющих исходов: П1/П2; Ф1(−1.5) с Ф2(+1.5); Ф2(−1.5) с Ф1(+1.5)."""
-    if market == "ML":
-        return "ML", 0
-    return "HCP", selection if market == "HCP_-1.5" else 3 - selection
+    """Пара дополняющих исходов (app/ml/markets.py, opposite): П1/П2; Ф1(−1.5) с Ф2(+1.5);
+    Ф1(−3.5) с Ф2(+3.5) по геймам; больше и меньше тотала. Ключ пары — меньший исход."""
+    if not is_market(market):
+        return market, selection
+    return min((market, selection), opposite(market, selection))
+
+
+def _family(market: str) -> str:
+    return family_of(market) if is_market(market) else market
 
 
 def _pred_outcome(row: Any) -> int | None:
-    """Исход прогноза: по архиву (победитель и счет матча) или по своей ноге."""
+    """Исход прогноза: по архиву (победитель и счет матча) или по своей ноге. Возврат
+    (ровно на целой линии) исхода 0 или 1 не дает."""
     if row.winner_id is not None and row.status in ("finished", "retired"):
         winner_is_first = row.winner_id == row.player1_id
         if row.market == "ML":
             return int((row.selection == 1) == winner_is_first)
-        count = set_count_from_score(row.score, winner_is_first=winner_is_first)
-        result = leg_result(row.market, row.selection, count, int(row.best_of or 3))
-        if result is not None:
-            return int(result == "win")
+        if is_market(row.market) and _family(row.market) in GAME_FAMILIES:
+            games = archive_games(row.score, winner_is_first=winner_is_first)
+            if row.status == "finished" and games_complete(games, int(row.best_of or 3)):
+                found = games_leg_result(row.market, row.selection, games)
+                return None if found == RESULT_VOID else int(found == "win")
+        elif is_market(row.market):
+            count = set_count_from_score(row.score, winner_is_first=winner_is_first)
+            result = leg_result(row.market, row.selection, count, int(row.best_of or 3))
+            if result is not None:
+                return int(result == "win")
     if row.leg_result in ("win", "loss"):
         return int(row.leg_result == "win")
     return None
@@ -746,6 +776,8 @@ def _pred_ok(event: PredEvent, filters: AnalyticsFiltersIn) -> bool:
     """Прогноз под фильтрами рынка и покрытия (как ноги: _market_ok, _surface_ok)."""
     if filters.surface and (event.surface or "unknown") not in filters.surface:
         return False
+    if filters.family is not None and _family(event.market) != filters.family:
+        return False
     return filters.market is None or (
         event.market == filters.market and filters.selection in (None, event.selection)
     )
@@ -755,6 +787,8 @@ def _pred_ok(event: PredEvent, filters: AnalyticsFiltersIn) -> bool:
 
 
 def _market_ok(leg: LegRow, filters: AnalyticsFiltersIn) -> bool:
+    if filters.family is not None and _family(leg.market) != filters.family:
+        return False
     if filters.market is None:
         return True
     return leg.market == filters.market and (
@@ -787,11 +821,9 @@ def _return(leg: LegRow) -> float:
 
 
 def _pair_key(leg: LegRow) -> tuple[int, str, int]:
-    """Пара исходов матча: П1 и П2 — одна пара; Ф1(−1.5) и Ф2(+1.5) — другая."""
-    if leg.market == "ML":
-        return leg.match_id, "ML", 0
-    favourite = leg.selection if leg.market == "HCP_-1.5" else 3 - leg.selection
-    return leg.match_id, "HCP", favourite
+    """Пара исходов матча (_pred_pair): П1 и П2 — одна пара; Ф1(−1.5) и Ф2(+1.5) — другая;
+    больше и меньше одного тотала — третья."""
+    return leg.match_id, *_pred_pair(leg.market, leg.selection)
 
 
 @dataclass(frozen=True, slots=True)
@@ -984,6 +1016,36 @@ def _closing_part(inputs: Inputs, closing: Sequence[Event]) -> dict[str, Any]:
     }
 
 
+def family_brier(events: Sequence[Event]) -> list[FamilyBrierOut]:
+    """Brier по семействам рынков (Р28): модель на всех событиях семейства, рынок при
+    прогнозе — на событиях, где он есть."""
+    groups: dict[str, list[Event]] = defaultdict(list)
+    for event in events:
+        groups[_family(event.leg.market)].append(event)
+    out: list[FamilyBrierOut] = []
+    for family in FAMILIES:
+        rows = groups.get(family)
+        if not rows:
+            continue
+        model = sum((event.p - event.y) ** 2 for event in rows) / len(rows)
+        priced = [event for event in rows if event.leg.q_market is not None]
+        market = (
+            sum((float(event.leg.q_market or 0) - event.y) ** 2 for event in priced) / len(priced)
+            if priced
+            else None
+        )
+        out.append(
+            FamilyBrierOut(
+                family=family,  # type: ignore[arg-type]
+                n=len(rows),
+                model=model,
+                market_n=len(priced),
+                market=market,
+            )
+        )
+    return out
+
+
 def brier_block(inputs: Inputs, events: Sequence[Event]) -> BrierOut:
     """Brier модели против рынка при прогнозе (В2) и закрытия; скользящее окно. Ряд
     закрытия — по всем событиям с двумя сторонами закрытия, в том числе без рынка при
@@ -1156,14 +1218,23 @@ def slices_block(
         )
     ]
     market_groups = _groups(by_market, lambda leg: (leg.market, leg.selection))
+    # Шесть прежних исходов — по порядку, новые рынки Р28 — после них по коду
+    order = [key for key in OUTCOME_ORDER if key in market_groups] + sorted(
+        key for key in market_groups if key not in OUTCOME_ORDER
+    )
     markets = [
         MarketSliceOut(
-            market=key[0],  # type: ignore[arg-type]
+            market=key[0],
             selection=key[1],
             **_slice_values(market_groups[key], inputs),
         )
-        for key in OUTCOME_ORDER
-        if key in market_groups
+        for key in order
+    ]
+    family_groups = _groups(by_market, lambda leg: _family(leg.market))
+    families = [
+        FamilySliceOut(family=key, **_slice_values(family_groups[key], inputs))  # type: ignore[arg-type]
+        for key in FAMILIES
+        if key in family_groups
     ]
     markets_total = None
     if by_market:
@@ -1185,6 +1256,7 @@ def slices_block(
         surfaces=surfaces,
         markets=markets,
         markets_total=markets_total,
+        families=families,
         odds=odds,
         totals=[],
     )
@@ -1714,6 +1786,7 @@ def parts_of(inputs: Inputs) -> Parts:
     legs = [
         pair for pair in decided if _market_ok(pair[1], filters) and _surface_ok(pair[1], filters)
     ]
+    # Срез рынков и семейств не сужается фильтрами рынка и семейства
     by_market = [pair for pair in decided if _surface_ok(pair[1], filters)]
     by_surface = [pair for pair in decided if _market_ok(pair[1], filters)]
     kind: Literal["final", "claude"] = "claude" if filters.source == "legacy" else "final"
@@ -1755,6 +1828,9 @@ def build_analytics(inputs: Inputs) -> AnalyticsOut:
         slices = slices_block(inputs, parts.by_market, parts.by_surface, parts.legs)
         slices.totals = totals_job.result()
         kpi, brier, parlays = kpi_job.result(), brier_job.result(), parlays_job.result()
+    if parts.kind == "final":
+        # Р28: Brier по семействам — события без фильтра рынка и семейства (как срез рынков)
+        brier.families = family_brier(calibration_events(parts.by_market, "final"))
     prev = prev_block(inputs)
     return AnalyticsOut(
         currency=inputs.currency,

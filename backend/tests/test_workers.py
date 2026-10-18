@@ -65,6 +65,8 @@ from app.workers.main import (
     EVAL_RUN_TIMEOUT_SECONDS,
     LESSONS_HOUR_UTC,
     LESSONS_MINUTE,
+    MARKETS_HOUR_UTC,
+    MARKETS_MINUTE,
     POSTMORTEM_MINUTES,
     QUICK_CHECK_TIMEOUT_SECONDS,
     REAP_MINUTES,
@@ -279,6 +281,7 @@ def test_worker_settings(settings: Settings) -> None:
         collect_job,
         quick_job,
         lessons_job,
+        markets_job,
         recheck_job,
         eval_job,
         recalibrate_job,
@@ -344,10 +347,21 @@ def test_worker_settings(settings: Settings) -> None:
         submit,
         collect,
         lessons_cron,
+        markets_cron,
         recheck,
         recalibrate,
         weekly,
     ) = WorkerSettings.cron_jobs
+    # Р28: порог рынков «для сравнения» — раз в сутки, после проверки уроков, без повтора и
+    # не в минуты соседних задач
+    assert markets_job is jobs.check_markets and markets_cron.coroutine is jobs.check_markets
+    assert (markets_cron.hour, markets_cron.minute) == (MARKETS_HOUR_UTC, MARKETS_MINUTE)
+    assert markets_cron.max_tries == 1
+    assert MARKETS_MINUTE not in REAP_MINUTES | POSTMORTEM_MINUTES | COLLECT_MINUTES | {
+        0, CLEANUP_MINUTE, DATA_UPDATE_MINUTE, ACCOUNT_DELETION_MINUTE, AI_ALERTS_MINUTE,
+        WARM_NEW_DAY_MINUTE, REMIND_MINUTE, LESSONS_MINUTE, RECHECK_MINUTE, RECALIBRATE_MINUTE,
+        WEEKLY_REPORTS_MINUTE,
+    }  # fmt: skip
     # Еженедельный отчет — раз в час, без повтора, не в минуты соседних задач
     assert weekly.coroutine is jobs.weekly_reports and weekly.max_tries == 1
     assert weekly.hour is None and weekly.minute == WEEKLY_REPORTS_MINUTE
@@ -453,7 +467,7 @@ def test_worker_cron_can_be_turned_off(settings: Settings) -> None:
     # CAPPER_WORKER_CRON=false (стек сквозных тестов): только задачи из очереди, без
     # ночной загрузки архивов и уборщика
     jobs_on = build_cron_jobs(settings)
-    assert jobs_on is not None and len(jobs_on) == 13
+    assert jobs_on is not None and len(jobs_on) == 14
     assert build_cron_jobs(settings.model_copy(update={"worker_cron": False})) is None
     assert Settings.model_fields["worker_cron"].default is True
 

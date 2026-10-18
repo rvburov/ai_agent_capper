@@ -62,6 +62,7 @@ async def test_admin_prefs_include_archive_and_ai_alert(
     admin_kinds = [item["kind"] for item in body["items"] if item["admin"]]
     assert admin_kinds == [
         "learning",
+        "market_ready",
         "ai_mode_request",
         "limit_80",
         "limit_100",

@@ -18,7 +18,15 @@ from pydantic import (
     model_validator,
 )
 
-from app.schemas.analyses import BetKind, BetKindIn, DecimalOut, FormCurrency, Market, Surface
+from app.schemas.analyses import (
+    BetKind,
+    BetKindIn,
+    DecimalOut,
+    FormCurrency,
+    Market,
+    MarketFamily,
+    Surface,
+)
 from app.schemas.common import without_as_user
 
 OddsTakenIn = Annotated[Decimal, Field(gt=0, max_digits=6, decimal_places=3)]
@@ -160,8 +168,9 @@ Verdict = Literal[
     "legacy", "void", "no_closing", "edge_confirmed", "won_against_market", "variance",
     "model_error",
 ]  # fmt: skip
-# Счет по сетам из ввода: «2:1», первым — игрок 1 матча; формат проверяет сервис
-ScoreIn = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=7)]
+# Счет из ввода, первым — игрок 1 матча: по сетам («2:1») или, у рынков по геймам (Р28), по
+# геймам («6:4 7:6(5)»); формат проверяет сервис
+ScoreIn = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=48)]
 SearchText = Annotated[
     str, StringConstraints(strip_whitespace=True, max_length=100, pattern=r"^[^\x00-\x1f\x7f]*$")
 ]
@@ -177,7 +186,8 @@ DATE_MAX = date(2100, 12, 31)
 class BetFiltersIn(BaseModel):
     """Фильтры «Ставок»: период (или даты from–to по поясу участника, включительно, в
     пределах 2000–2100 годов), статус (settled — все рассчитанные: выигрыш, проигрыш,
-    возврат), рынок (есть нога этого рынка), покрытия (есть нога на одном из них),
+    возврат), рынок (есть нога этого рынка), семейство рынков (Р28: есть нога этого
+    семейства — ml, h15, shcp, stot, ghcp, gtot), покрытия (есть нога на одном из них),
     источник, вид ставки (Р29) и поиск по игрокам, турниру, букмекеру и номеру ставки
     (№12)."""
 
@@ -188,6 +198,7 @@ class BetFiltersIn(BaseModel):
     date_to: date | None = Field(default=None, alias="to", ge=DATE_MIN, le=DATE_MAX)
     status: BetStatusFilter | None = None
     market: Market | None = None
+    family: MarketFamily | None = None
     surface: list[SurfaceFilter] = Field(default_factory=list, max_length=5)
     source: BetSource | None = None
     kind: BetKindFilter = "all"
@@ -245,11 +256,13 @@ class NewsResultOut(BaseModel):
     """Подсказка исхода по новостям (этап 5, В1-Г): результат матча нашел шаг новостей
     перед анализом. Только подсказка — деньги по ней не считаются, исход вносит участник.
     winner — игрок 1 или 2 матча; sets — счет по сетам (первым — игрок 1), если в новости
-    полный счет; score — счет как в новости; retired — в новости снятие; source_name,
+    полный счет; games — счет по геймам («6:4 7:6(5)», первым — игрок 1; Р28, для ног по
+    геймам); score — счет как в новости; retired — в новости снятие; source_name,
     source_url, published_on — откуда и за какой день факт; found_at — когда его нашли."""
 
     winner: Literal[1, 2]
     sets: str | None
+    games: str | None
     score: str
     retired: bool
     source_name: str | None
@@ -267,11 +280,21 @@ class BetLegItemOut(BaseModel):
     окна расчета (отметить исход по счету, предупредить о расхождении); выбор исхода все
     равно за участником (В16). archive_result и archive_score — исход и счет (первым —
     игрок 1) по архиву, когда он разошелся с расчетом ставки (этап 5, Т3): банк не
-    меняли, участник проверяет сам. news_result — подсказка исхода по новостям."""
+    меняли, участник проверяет сам. news_result — подсказка исхода по новостям.
+
+    Р28: family и line — семейство и линия из кода рынка (у фор — линия выбранной стороны);
+    score_kind — какой счет вносит окно расчета: sets («2:1») или games — счет по геймам
+    («6:4 7:6», исход по нему считает окно, у целой линии «ровно» — возврат; score_outcomes
+    у таких ног пусто); void_hint — при снятии и отказе подсказывать «возврат» (рынки по
+    геймам)."""
 
     id: int
     match: LegMatchOut
     market: Market
+    family: MarketFamily
+    line: float | None
+    score_kind: Literal["sets", "games"]
+    void_hint: bool
     selection: int
     odds_taken: DecimalOut
     prediction_id: int | None

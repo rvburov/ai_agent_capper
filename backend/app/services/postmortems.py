@@ -752,7 +752,7 @@ async def bet_review(db: AsyncSession, user: User, bet_id: int) -> BetReviewOut:
                 LegReviewOut(
                     leg_id=leg.id,
                     match_id=leg.match_id,
-                    market=leg.market,  # type: ignore[arg-type]
+                    market=leg.market,
                     selection=leg.selection,
                     same_pick=True,
                     won=own_won,

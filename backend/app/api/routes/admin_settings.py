@@ -1,12 +1,15 @@
 """«Администрирование → Настройки»: /api/admin/settings — валюта программы с курсом (Р17,
-Т30) и часовой пояс по умолчанию для новых участников.
+Т30) и часовой пояс по умолчанию для новых участников; /api/admin/markets/{family} —
+перевод семейства новых рынков в экспресс (Р28).
 
 Доступ только у роли admin (require_admin на роутере). Смена валюты — опасное действие:
 в теле totp_code, текущий код 2FA (PLAN.md, раздел 7); предпросмотр (preview) — без кода
 и без записи.
 """
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Path
 
 from app.api.routes.admin import Confirm
 from app.core.deps import AdminUser, ClientIp, DbSession, RedisClient, require_admin
@@ -16,7 +19,9 @@ from app.schemas.admin_settings import (
     CurrencyIn,
     CurrencyPreviewOut,
 )
-from app.services import app_settings
+from app.schemas.analyses import ExtraFamily
+from app.schemas.markets import MarketExpressIn, MarketsOut
+from app.services import app_settings, market_stats
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -63,4 +68,22 @@ async def change_currency(
         preview=body.preview,
         confirm=confirm.with_code(body.totp_code),
         ip=ip,
+    )
+
+
+@router.put("/markets/{family}")
+async def set_market_express(
+    family: Annotated[ExtraFamily, Path()],
+    db: DbSession,
+    admin: AdminUser,
+    ip: ClientIp,
+    redis: RedisClient,
+    body: MarketExpressIn,
+) -> MarketsOut:
+    """Перевести семейство нового рынка в экспресс (express=true) или вернуть «для
+    сравнения» (false) — общая настройка для всех участников, в журнале администратора
+    settings_change. В экспресс — только семейство с вероятностью модели (рынки по геймам —
+    422 admin.markets.no_model) и пройденным порогом (409 admin.markets.not_ready)."""
+    return await market_stats.set_express(
+        db, family=family, express=body.express, actor=admin, ip=ip, redis=redis
     )

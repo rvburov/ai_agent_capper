@@ -92,6 +92,8 @@ def available_kinds(user: User) -> list[PrefKind]:
     if admin:
         kinds += [
             PrefKind("learning", "learning", admin=True),
+            # Р28: рынок «для сравнения» прошел порог — строка «Обучение модели»
+            PrefKind("market_ready", "learning", admin=True),
             PrefKind("ai_mode_request", "requests", admin=True),
             PrefKind("limit_80", "users", admin=True),
             PrefKind("limit_100", "users", admin=True),

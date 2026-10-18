@@ -78,6 +78,14 @@ from app.db.models import (
 )
 from app.ingest.match_link import archive_days, played_before
 from app.ml.market import REFERENCE_ORDER
+from app.ml.markets import (
+    UNIT_GAMES,
+    games_text,
+    is_market,
+    market_spec,
+    parse_games,
+    swapped_games,
+)
 from app.ml.metrics import clv, clv_fair, clv_fair_parlay, clv_parlay
 from app.ml.sets import SetCount, parse_set_count, score_outcomes
 from app.ml.strategy import StrategyParams
@@ -160,7 +168,7 @@ def bet_out(placed: PlacedBet) -> BetOut:
                 id=leg.id,
                 prediction_id=leg.prediction_id,
                 match_id=leg.match_id,
-                market=leg.market,  # type: ignore[arg-type]
+                market=leg.market,
                 selection=leg.selection,
                 odds_taken=short_odds(leg.odds_taken),
             )
@@ -655,6 +663,9 @@ def bet_conditions(
     if filters.market is not None:
         market = filters.market
         conds.append(_any_leg(user, page, lambda legs: legs.leg.market == market))
+    if filters.family is not None:
+        family = filters.family
+        conds.append(_any_leg(user, page, lambda legs: family_condition(legs.leg.market, family)))
     if filters.surface:
         conds.append(_any_leg(user, page, _surface_condition(filters.surface)))
     if filters.q:
@@ -826,17 +837,53 @@ async def leg_contexts(
     return out
 
 
-def score_from_own(score: str | None, selection: int) -> str | None:
-    """Счет ноги для показа (первым — игрок 1) из хранимого со стороны выбранного игрока."""
-    count = parse_set_count(score) if score else None
+# Р28: коды рынков семейства (app/ml/markets.py) — для фильтров по семейству
+_FAMILY_CODES: dict[str, tuple[str, ...]] = {
+    "ml": ("ML",),
+    "h15": ("HCP_-1.5", "HCP_+1.5"),
+    "shcp": ("HCP_-2.5", "HCP_+2.5"),
+}
+_FAMILY_PREFIX: dict[str, str] = {"stot": "STOT_", "ghcp": "GHCP_", "gtot": "GTOT_"}
+
+
+def family_condition(column: ColumnElement[str], family: str) -> ColumnElement[bool]:
+    """Рынок ноги или прогноза из семейства (SQL)."""
+    if family in _FAMILY_CODES:
+        return column.in_(_FAMILY_CODES[family])
+    return column.startswith(_FAMILY_PREFIX[family], autoescape=True)
+
+
+def _own_swaps(market: str, selection: int) -> bool:
+    """Хранимый счет ноги развернут к выбранному игроку: у ML и фор на игрока 2; у тотала
+    сторона — больше или меньше, счет хранится со стороны игрока 1 (Р28)."""
+    return selection == 2 and not (is_market(market) and market_spec(market).is_total)
+
+
+def score_from_own(score: str | None, selection: int, market: str = "ML") -> str | None:
+    """Счет ноги для показа (первым — игрок 1) из хранимого со стороны выбранного игрока:
+    по сетам («2:1») или, у рынков по геймам, по геймам («6:4 7:6»)."""
+    if not score:
+        return score
+    swap = _own_swaps(market, selection)
+    games = parse_games(score) if " " in score or len(score) > 3 else None
+    if games is not None and is_market(market) and market_spec(market).unit == UNIT_GAMES:
+        return games_text(swapped_games(games) if swap else games)
+    count = parse_set_count(score)
     if count is None:
         return score
-    return (count if selection == 1 else count.swapped()).text()
+    return (count.swapped() if swap else count).text()
 
 
-def score_to_own(count: SetCount, selection: int) -> str:
-    """Счет из ввода (первым — игрок 1) — для хранения со стороны выбранного игрока."""
-    return (count if selection == 1 else count.swapped()).text()
+def score_to_own(count: SetCount, selection: int, market: str = "ML") -> str:
+    """Счет по сетам из ввода (первым — игрок 1) — для хранения со стороны выбранного
+    игрока (у тотала — игрока 1)."""
+    return (count.swapped() if _own_swaps(market, selection) else count).text()
+
+
+def games_to_own(games: Sequence[tuple[int, int]], selection: int, market: str) -> str:
+    """Счет по геймам из ввода (первым — игрок 1) — для хранения: у форы со стороны
+    выбранного игрока, у тотала — игрока 1."""
+    return games_text(swapped_games(games) if _own_swaps(market, selection) else games)
 
 
 def closing_by(bookmaker: str | None) -> tuple[str, str | None]:
@@ -916,6 +963,8 @@ def _leg_out(context: LegContext, players: dict[int, Player], *, open_bet: bool)
     fair = clv_fair(leg.odds_taken, leg.q_close) if leg.q_close is not None else None
     # Прогноз ноги: итоговая вероятность, у ставок бота — оценка Claude
     p = context.p_final if context.p_final is not None else context.p_claude
+    spec = market_spec(leg.market)
+    games = spec.unit == UNIT_GAMES
     return BetLegItemOut(
         id=leg.id,
         match=LegMatchOut(
@@ -929,7 +978,11 @@ def _leg_out(context: LegContext, players: dict[int, Player], *, open_bet: bool)
             round=match.round,
             best_of=context.best_of,
         ),
-        market=leg.market,  # type: ignore[arg-type]
+        market=leg.market,
+        family=spec.family,  # type: ignore[arg-type]
+        line=float(spec.line) if spec.line is not None else None,
+        score_kind="games" if games else "sets",
+        void_hint=games,
         selection=leg.selection,
         odds_taken=short_odds(leg.odds_taken),
         prediction_id=leg.prediction_id,
@@ -938,7 +991,7 @@ def _leg_out(context: LegContext, players: dict[int, Player], *, open_bet: bool)
         p_claude=context.p_claude,
         edge=p - 1 / float(leg.odds_taken) if p is not None and leg.odds_taken > 0 else None,
         result=leg.result,  # type: ignore[arg-type]
-        score=score_from_own(leg.score, leg.selection),
+        score=score_from_own(leg.score, leg.selection, leg.market),
         settled_at=leg.settled_at,
         result_source=leg.result_source,  # type: ignore[arg-type]
         closing=_closing_out(leg),
@@ -950,7 +1003,7 @@ def _leg_out(context: LegContext, players: dict[int, Player], *, open_bet: bool)
             else None
         ),
         archive_result=leg.archive_result,  # type: ignore[arg-type]
-        archive_score=score_from_own(leg.archive_score, leg.selection),
+        archive_score=score_from_own(leg.archive_score, leg.selection, leg.market),
     )
 
 

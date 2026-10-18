@@ -14,7 +14,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
-from app.schemas.analyses import DecimalOut, Market, TextKey
+from app.schemas.analyses import DecimalOut, Market, MarketFamily, TextKey
 from app.schemas.bets import (
     DATE_MAX,
     DATE_MIN,
@@ -48,6 +48,7 @@ class AnalyticsFiltersIn(BaseModel):
     """Фильтры «Аналитики»: период (последние 7, 30, 90 дней с сегодняшним по поясу
     участника или все время) или даты from–to (включительно, по поясу участника);
     рынок (и по желанию сторона selection — один из шести исходов: П1, П2, Ф1(−1.5)…);
+    семейство рынков family (Р28: ml, h15, shcp, stot, ghcp, gtot);
     покрытия; источник ставок (приложение или старый бот, В5); вид ставки (Р29: все,
     экспрессы стратегии, ординары, свои). Ставка попадает в выборку, если поставлена в
     периоде, подходит по виду и у нее есть нога под фильтр рынка и покрытия — как на
@@ -60,6 +61,7 @@ class AnalyticsFiltersIn(BaseModel):
     date_to: date | None = Field(default=None, alias="to", ge=DATE_MIN, le=DATE_MAX)
     market: Market | None = None
     selection: int | None = Field(default=None, ge=1, le=2)
+    family: MarketFamily | None = None
     surface: list[SurfaceFilter] = Field(default_factory=list, max_length=5)
     source: BetSource | None = None
     kind: BetKindFilter = "all"
@@ -80,6 +82,7 @@ class AnalyticsFiltersIn(BaseModel):
         """Выбран рынок, покрытие, источник или вид ставки (период фильтром не считается)."""
         return (
             self.market is not None
+            or self.family is not None
             or bool(self.surface)
             or self.source is not None
             or self.kind != "all"
@@ -209,6 +212,17 @@ class BrierPointOut(BaseModel):
     market: float
 
 
+class FamilyBrierOut(BaseModel):
+    """Brier по семейству рынков (Р28): события калибровки этого семейства — модель и,
+    где есть, рынок при прогнозе без маржи (market_n событий)."""
+
+    family: MarketFamily
+    n: int
+    model: float
+    market_n: int
+    market: float | None
+
+
 class BrierOut(BaseModel):
     """Brier модели против рынка (В2): события — ноги рассчитанных ставок приложения с
     итоговой вероятностью модели (p_final) и рынком в момент прогноза без маржи
@@ -240,6 +254,8 @@ class BrierOut(BaseModel):
     closing_windows: int
     closing_better: int
     main: Literal["pred", "closing"]
+    # Р28: Brier по семействам рынков (события калибровки под фильтрами, кроме семейства)
+    families: list[FamilyBrierOut] = []
 
 
 class SeriesPointOut(BaseModel):
@@ -338,6 +354,12 @@ class MarketSliceOut(SliceOut):
     selection: int
 
 
+class FamilySliceOut(SliceOut):
+    """Семейство рынков (Р28): ml, h15, shcp, stot, ghcp, gtot — все исходы и линии."""
+
+    family: MarketFamily
+
+
 class OddsSliceOut(SliceOut):
     """Диапазон кэфа события: от low до high включительно (high null — и выше)."""
 
@@ -380,6 +402,7 @@ class SlicesOut(BaseModel):
     surfaces: list[SurfaceSliceOut]
     markets: list[MarketSliceOut]
     markets_total: MarketsTotalOut | None
+    families: list[FamilySliceOut]
     odds: list[OddsSliceOut]
     totals: list[TotalSliceOut]
 

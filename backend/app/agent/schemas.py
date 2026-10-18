@@ -14,7 +14,7 @@ from typing import Any, Literal
 import anthropic
 from pydantic import BaseModel, ConfigDict
 
-PARSE_SCHEMA_VERSION = "p1"
+PARSE_SCHEMA_VERSION = "p2"
 NEWS_SCHEMA_VERSION = "n1"
 ASSESSMENT_SCHEMA_VERSION = "a1"
 
@@ -43,6 +43,24 @@ class ParsedName(_Model):
     latin: str | None
 
 
+# Строка других рынков (схема p2, Р28): фора по сетам (кроме ±1.5 — поля h*), фора по
+# геймам, фора без «сет» и «гейм» (hcp — спорная, ее уточняет участник), тотал сетов,
+# тотал геймов, тотал без «сет» и «гейм» (total — до 5 сеты, от 15 геймы, решает код)
+LineKind = Literal["set_hcp", "game_hcp", "hcp", "set_total", "game_total", "total"]
+
+
+class ParsedLine(_Model):
+    """Фора или тотал из текста: line — у фор фора игрока 1 (Ф2(+4.5) — это −4.5), у
+    тоталов линия; odds1 — Ф1 или больше, odds2 — Ф2 или меньше; text — строка как есть."""
+
+    line_no: int
+    text: str
+    kind: LineKind
+    line: float
+    odds1: float | None
+    odds2: float | None
+
+
 class ParsedOdds(_Model):
     ml1: float | None
     ml2: float | None
@@ -50,6 +68,7 @@ class ParsedOdds(_Model):
     h1_plus: float | None
     h2_minus: float | None
     h2_plus: float | None
+    lines: list[ParsedLine]
 
 
 class ParsedEvent(_Model):
@@ -69,7 +88,8 @@ class UnknownLine(_Model):
 
 
 class ParsedInput(_Model):
-    """Ответ шага разбора: банк, букмекер, события и непонятые строки."""
+    """Ответ шага разбора: банк, букмекер, события и непонятые строки. Ответ схемы p1
+    (до Р28) — без odds.lines: его читает app/services/analysis_input.parsed_input."""
 
     bank: ParsedBank
     bookmaker: str | None

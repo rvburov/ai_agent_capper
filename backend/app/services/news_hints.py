@@ -6,6 +6,9 @@
 окне расчета). Факт подходит, если он про одного из игроков матча, соперник в нем —
 второй игрок (по фамилии латиницей или по-русски) и день результата — день матча ±1
 (пояс источника неизвестен). Несколько фактов — берется найденный последним.
+
+Р28: у ног по геймам окно расчета подставляет счет по геймам — поле games, первым всегда
+игрок 1 матча (как и sets), иначе фора по геймам считается за другого игрока.
 """
 
 import re
@@ -18,11 +21,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Player, PlayerNews
 from app.ingest.names import fold
+from app.ml.markets import parse_games
 from app.schemas.bets import NewsResultOut
 
 # Сет в счете из новости: «6-3», «6:3», «7–6(5)»
 _SET = re.compile(r"(\d{1,2})\s*[-:–]\s*(\d{1,2})(?:\s*\(\d+\))?")
 _RETIRED = re.compile(r"\b(ret|retired|retd|w/o|walkover|отказ|снял)", re.IGNORECASE)
+# Сет по геймам: «6-4», «7-6(5)», «7-6(7-5)», супер-тай-брейк «[10-8]»
+_GAME_SET = re.compile(
+    r"(\[)?(\d{1,2})\s*[-:–]\s*(\d{1,2})"
+    r"(?:\s*\((\d{1,2})(?:\s*[-:–]\s*(\d{1,2}))?\))?(\])?"
+)
 DAY_WINDOW = timedelta(days=1)
 SCORE_MAX = 80
 
@@ -52,6 +61,31 @@ def set_score(score: str, best_of: int | None) -> tuple[int, int] | None:
     if winner not in need or loser >= winner:
         return None
     return winner, loser
+
+
+def games_score(score: str, winner: int, number: int) -> str | None:
+    """Счет по геймам из новости, первым — игрок 1 матча («6:4 7:6(5)»); не счет — None.
+
+    С чьей стороны записан счет, решает сам счет: кто взял больше сетов, тот победитель
+    (winner). Счет без перевеса по сетам (снятие) — со стороны игрока новости (number), как
+    просит промпт новостей. Очки тай-брейка — меньшее число, как в записи «7-6(5)»."""
+    found = [m for m in _GAME_SET.finditer(score) if bool(m.group(1)) == bool(m.group(6))]
+    if not found:
+        return None
+    sets = [(int(m.group(2)), int(m.group(3))) for m in found]
+    left = sum(a > b for a, b in sets)
+    right = sum(b > a for a, b in sets)
+    # Слева победитель или проигравший — по сетам; поровну — сторона игрока новости
+    left_player = number if left == right else (winner if left > right else 3 - winner)
+    parts = []
+    for m, (a, b) in zip(found, sets, strict=True):
+        if left_player == 2:
+            a, b = b, a
+        points = [int(x) for x in (m.group(4), m.group(5)) if x is not None]
+        tiebreak = f"({min(points)})" if points else ""
+        parts.append(f"[{a}:{b}]" if m.group(1) else f"{a}:{b}{tiebreak}")
+    text = " ".join(parts)
+    return text if parse_games(text) is not None else None
 
 
 def _day(details: dict[str, Any]) -> date | None:
@@ -116,6 +150,7 @@ async def news_results(
             found[leg_id] = NewsResultOut(
                 winner=winner,  # type: ignore[arg-type]
                 sets=sets_text,
+                games=None if retired else games_score(score, winner, number),
                 score=score,
                 retired=retired,
                 source_name=news.source_name,

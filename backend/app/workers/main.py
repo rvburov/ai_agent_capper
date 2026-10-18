@@ -29,7 +29,8 @@ CAPPER_DATA_UPDATE_HOUR_UTC (по умолчанию 5) и 25 минут: пос
 Волна 2: очередь и пакет разборов ставок — каждые 15 минут с 13-й минуты, сбор пакетов
 Batch — каждые 15 минут с 6-й, быструю проверку урока (run_quick_check) ставит API; уроки:
 проверка гипотез — раз в сутки в 06:33 UTC (после ночного обновления), перепроверка —
-1-го числа в 06:48 UTC. Волна 3: прогон версии на наборе (run_eval) ставит API, следующие
+1-го числа в 06:48 UTC; рынки «для сравнения», прошедшие порог (Р28), — раз в сутки в
+06:39 UTC. Волна 3: прогон версии на наборе (run_eval) ставит API, следующие
 пакеты прогона уходят после сбора предыдущих (сбор пакетов, каждые 15 минут);
 перекалибровка базовой модели — по понедельникам в 06:12 UTC. Волна 4: еженедельный отчет —
 каждый час на 1-й минуте (тем, у кого по их поясу наступил понедельник 07:00). Этап 6:
@@ -59,6 +60,7 @@ from app.services.data_status import DATA_UPDATE_MINUTE
 from app.workers.jobs import (
     check_ai_alerts,
     check_lessons,
+    check_markets,
     cleanup_auth_records,
     collect_batches,
     delete_requested_accounts,
@@ -122,6 +124,10 @@ QUICK_CHECK_TIMEOUT_SECONDS = 900
 # Уроки: проверка гипотез — после ночного обновления данных, перепроверка — 1-го числа
 LESSONS_HOUR_UTC = 6
 LESSONS_MINUTE = 33
+# Р28: порог рынков «для сравнения» — раз в сутки после ночного обновления и авторасчета
+MARKETS_HOUR_UTC = 6
+MARKETS_MINUTE = 39
+MARKETS_TIMEOUT_SECONDS = 300
 RECHECK_DAY = 1
 RECHECK_MINUTE = 48
 LESSONS_TIMEOUT_SECONDS = 1800
@@ -223,6 +229,13 @@ def build_cron_jobs(settings: Settings) -> tuple[CronJob, ...] | None:
             timeout=LESSONS_TIMEOUT_SECONDS,
         ),
         cron(
+            check_markets,
+            hour=MARKETS_HOUR_UTC,
+            minute=MARKETS_MINUTE,
+            max_tries=1,
+            timeout=MARKETS_TIMEOUT_SECONDS,
+        ),
+        cron(
             recheck_lessons,
             day=RECHECK_DAY,
             hour=LESSONS_HOUR_UTC,
@@ -266,6 +279,7 @@ class WorkerSettings:
         collect_batches,
         job_function(run_quick_check, timeout=QUICK_CHECK_TIMEOUT_SECONDS, max_tries=1),
         check_lessons,
+        check_markets,
         recheck_lessons,
         job_function(run_eval, timeout=EVAL_RUN_TIMEOUT_SECONDS, max_tries=1),
         recalibrate_model,

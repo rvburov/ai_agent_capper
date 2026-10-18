@@ -93,6 +93,7 @@ from app.ingest.runs import (
     last_ok_file_hashes,
     update_lock,
 )
+from app.ml.markets import is_market, swapped_side
 from app.services.bet_versions import touch_bets_on_matches
 
 SOURCE = "sackmann"
@@ -929,6 +930,13 @@ def _player_changes(state: _PlayerState, info: PlayerInfo) -> dict[str, Any] | N
     return want
 
 
+def _is_total(column: InstrumentedAttribute[str]) -> ColumnElement[bool]:
+    """Рынок — тотал (сторона: больше или меньше)."""
+    return or_(
+        column.startswith("STOT_", autoescape=True), column.startswith("GTOT_", autoescape=True)
+    )
+
+
 async def _flip_sides(db: AsyncSession, match_ids: Sequence[int]) -> None:
     """Игроки матча меняются местами: исход 1 ↔ 2 у кэфов, прогнозов и событий ставок.
 
@@ -938,6 +946,8 @@ async def _flip_sides(db: AsyncSession, match_ids: Sequence[int]) -> None:
     ссылаются ставки) к рынку на время обмена добавляется метка. У ставок с ногами на
     этих матчах — новая версия: счет из окна расчета («первым — игрок 1»), открытого до
     обмена, относился бы уже к другому игроку (app/services/bet_versions.py).
+
+    У тоталов (STOT_, GTOT_, Р28) сторона — больше или меньше, а не игрок: она не меняется.
     """
     if not match_ids:
         return
@@ -950,18 +960,23 @@ async def _flip_sides(db: AsyncSession, match_ids: Sequence[int]) -> None:
         .all()
     )
     if old:
-        flipped = [{**row, "selection": 3 - row["selection"]} for row in old]
+        flipped = [
+            {**row, "selection": swapped_side(row["market"], row["selection"])}
+            if is_market(row["market"])
+            else {**row, "selection": 3 - row["selection"]}
+            for row in old
+        ]
         await db.execute(insert(odds), flipped)
     no_sync = {"synchronize_session": False}
     await db.execute(
         update(BetLeg)
-        .where(BetLeg.match_id.in_(ids))
+        .where(BetLeg.match_id.in_(ids), ~_is_total(BetLeg.market))
         .values(selection=3 - BetLeg.selection)
         .execution_options(**no_sync)
     )
     await db.execute(
         update(Prediction)
-        .where(Prediction.match_id.in_(ids))
+        .where(Prediction.match_id.in_(ids), ~_is_total(Prediction.market))
         .values(market=Prediction.market + _SWAP_MARK, selection=3 - Prediction.selection)
         .execution_options(**no_sync)
     )

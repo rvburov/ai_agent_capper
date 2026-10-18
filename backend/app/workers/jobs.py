@@ -95,6 +95,7 @@ from app.services import (
     eval_runs,
     lesson_quick,
     lessons,
+    market_stats,
     postmortems,
     recalibration,
     weekly_report,
@@ -641,6 +642,17 @@ async def check_lessons(ctx: dict[Any, Any]) -> dict[str, int]:
     if summary.get("ready") or summary.get("rejected"):
         log.info("worker.check_lessons", **summary)
     return summary
+
+
+async def check_markets(ctx: dict[Any, Any]) -> list[str]:
+    """Задача arq (cron раз в сутки, Р28): рынки «для сравнения», прошедшие порог (150
+    событий и CLV выше нуля), — уведомление администраторам, одно на семейство."""
+    sessionmaker: async_sessionmaker[AsyncSession] = ctx["sessionmaker"]
+    async with sessionmaker() as db:
+        ready = await market_stats.notify_ready(db)
+    if ready:
+        log.info("worker.check_markets", ready=ready)
+    return ready
 
 
 async def recheck_lessons(ctx: dict[Any, Any]) -> dict[str, int]:

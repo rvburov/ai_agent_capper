@@ -972,7 +972,11 @@ _MARKET_KEYS = {"ML": "ml", "HCP_-1.5": "minus", "HCP_+1.5": "plus"}
 
 
 def _market(market: str, side: int) -> str:
-    return t(f"cli.parse_eval.markets.{_MARKET_KEYS.get(market, 'ml')}", side=side)
+    """Подпись исхода: П1, П2(+1.5); новые рынки Р28 — кодом и стороной (у тоталов 1 —
+    больше, 2 — меньше)."""
+    if market not in _MARKET_KEYS:
+        return t("cli.parse_eval.markets.other", market=market, side=side)
+    return t(f"cli.parse_eval.markets.{_MARKET_KEYS[market]}", side=side)
 
 
 def _diff_text(diff: parse_eval.Diff) -> str:

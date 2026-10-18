@@ -41,12 +41,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.i18n import t
 from app.db.models import BankrollLedger, Bet, BetLeg, User
+from app.ml.markets import UNIT_GAMES, market_spec, parse_games
 from app.ml.sets import BEST_OF, parse_set_count
 from app.schemas.bets import BetItemOut, LegSettleIn, ReverseIn, SettleIn
 from app.services import postmortems
 from app.services.bank import MONEY_MAX
 from app.services.bet_versions import same_version, touch
-from app.services.bets import bet_detail, leg_contexts, money, score_to_own, settle_odds
+from app.services.bets import (
+    bet_detail,
+    games_to_own,
+    leg_contexts,
+    money,
+    score_to_own,
+    settle_odds,
+)
 from app.services.closing import (
     SETTLED_MANUAL,
     apply_closing,
@@ -83,15 +91,22 @@ def payout_amount(stake: Decimal, status: str, odds: Decimal | None) -> Decimal:
 
 def _own_score(text: str | None, leg: BetLeg, best_of: int | None) -> str | None:
     """Счет из ввода (первым — игрок 1) → хранимый со стороны выбранного игрока. Неполный
-    или не тот формат — 422 bet.bad_score."""
+    или не тот формат — 422 bet.bad_score. У рынков по геймам (Р28) — счет по геймам
+    («6:4 7:6(5)»): не разобрать — 422 bet.bad_games_score; исход он не выбирает (снятие,
+    В16), окно расчета считает по нему подсказку."""
     if text is None:
         return None
+    if market_spec(leg.market).unit == UNIT_GAMES:
+        games = parse_games(text)
+        if games is None:
+            raise AppError(422, "bet.bad_games_score", score=text)
+        return games_to_own(games, leg.selection, leg.market)
     count = parse_set_count(text, best_of)
     if count is None:
         formats = (best_of,) if best_of in BEST_OF else BEST_OF
         examples = ", ".join(_SCORE_EXAMPLES[value] for value in formats if value is not None)
         raise AppError(422, "bet.bad_score", score=text, examples=examples)
-    return score_to_own(count, leg.selection)
+    return score_to_own(count, leg.selection, leg.market)
 
 
 def _same_result(

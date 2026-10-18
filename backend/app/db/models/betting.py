@@ -357,6 +357,8 @@ class BetLeg(Base):
     Исход и счет вносит участник (в matches не пишутся: матч общий, и Эло посчитало бы
     его дважды, решение Т11). score — счет по сетам со стороны выбранного игрока («2:1» —
     его 2 сета): при слиянии матчей сторона ноги переворачивается, а счет остается верным.
+    У рынков по геймам (Р28) score — счет по геймам («6:4 7:6»): у форы — со стороны
+    выбранного игрока, у тотала — игрока 1 (исход тотала от стороны не зависит).
     result_source и settled_at — кто и когда рассчитал ногу.
 
     Закрывающий кэф (В1, Р24): closing_odds — на свой исход, closing_opp_odds — на
@@ -399,7 +401,8 @@ class BetLeg(Base):
     # NULL — событие еще не рассчитано
     result: Mapped[str | None] = mapped_column(String(8))
     clv: Mapped[float | None]
-    score: Mapped[str | None] = mapped_column(String(32))
+    # Счет по сетам («2:1») или, у рынков по геймам, по геймам («6:4 7:6(5)», Р28)
+    score: Mapped[str | None] = mapped_column(String(64))
     settled_at: Mapped[datetime | None]
     result_source: Mapped[str | None] = mapped_column(String(8))
     closing_opp_odds: Mapped[Odds | None]
@@ -407,7 +410,7 @@ class BetLeg(Base):
     closing_source: Mapped[str | None] = mapped_column(String(8))
     q_close: Mapped[float | None]
     archive_result: Mapped[str | None] = mapped_column(String(8))
-    archive_score: Mapped[str | None] = mapped_column(String(32))
+    archive_score: Mapped[str | None] = mapped_column(String(64))
 
 
 class BankrollLedger(CreatedAtMixin, Base):

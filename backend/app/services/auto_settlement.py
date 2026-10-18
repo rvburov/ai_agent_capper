@@ -2,7 +2,8 @@
 
 Ставка приложения рассчитывается сама, когда все ее ноги — на матчах архива (после
 привязки, app/ingest/match_link.py) и у каждого матча есть исход: победитель и счет.
-Исход ноги — app/ml/sets.py, match_leg_outcome: у П1/П2 хватает победителя, у фор нужен
+Исход ноги — app/ml/sets.py, match_leg_outcome (рынки по геймам — по счету по геймам
+архива, Р28): у П1/П2 хватает победителя, у фор нужен
 полный счет. Запись расчета — та же функция, что у ручного (settlement.apply_settlement):
 settled_by = auto, у ног result_source = auto, ставка помнит запуск расчета
 (settle_run_id). Участнику — уведомление bet_settled со ссылкой /bets?bet=<id>.
@@ -51,18 +52,20 @@ from app.core.formatting import format_money
 from app.core.i18n import t
 from app.db.models import Bet, BetLeg, Match, Player, Tournament, User
 from app.ingest.match_link import archive_day, played_before
+from app.ml.markets import UNIT_GAMES, market_spec
 from app.ml.sets import (
     BEST_OF,
     OUTCOME_INCOMPLETE,
     OUTCOME_NO_RESULT,
     RESULT_LOSS,
+    archive_games,
     complete_for,
     infer_best_of,
     match_leg_outcome,
     set_count_from_score,
 )
 from app.services.bank import bank_state, local_today, lock_member_money, user_zone
-from app.services.bets import PLAYED_STATUSES, leg_contexts, score_to_own
+from app.services.bets import PLAYED_STATUSES, games_to_own, leg_contexts, score_to_own
 from app.services.notifications import notify
 from app.services.sessions import utcnow
 from app.services.settlement import LegSettlement, apply_settlement
@@ -173,11 +176,15 @@ def leg_verdict(
     if outcome.result is None:
         return LegVerdict(None, outcome.reason)
     score: str | None = None
-    if match.winner_is_p1 is not None:
+    if match.winner_is_p1 is not None and market_spec(leg.market).unit == UNIT_GAMES:
+        # Р28: у рынков по геймам — счет по геймам (исход посчитан по нему)
+        games = archive_games(match.score, winner_is_first=match.winner_is_p1)
+        score = games_to_own(games, leg.selection, leg.market) if games else None
+    elif match.winner_is_p1 is not None:
         count = set_count_from_score(match.score, winner_is_first=match.winner_is_p1)
         fmt = match.best_of if match.best_of in BEST_OF else infer_best_of(count)
         if fmt is not None and complete_for(count, fmt):
-            score = score_to_own(count, leg.selection)
+            score = score_to_own(count, leg.selection, leg.market)
     return LegVerdict(LegSettlement(outcome.result, score))
 
 

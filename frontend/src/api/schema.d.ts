@@ -1461,6 +1461,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/markets/{family}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Market Express
+         * @description Перевести семейство нового рынка в экспресс (express=true) или вернуть «для
+         *     сравнения» (false) — общая настройка для всех участников, в журнале администратора
+         *     settings_change. В экспресс — только семейство с вероятностью модели (рынки по геймам —
+         *     422 admin.markets.no_model) и пройденным порогом (409 admin.markets.not_ready).
+         */
+        put: operations["set_market_express_api_admin_markets__family__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/messages": {
         parameters: {
             query?: never;
@@ -2217,6 +2240,28 @@ export interface paths {
          * @description Выгрузка под фильтрами одним архивом: каждая выбранная часть — отдельный CSV.
          */
         get: operations["export_analytics_zip_api_analytics_export_zip_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/markets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Markets
+         * @description Семейства рынков: ml, h15 (фора ±1.5), shcp (фора ±2.5), stot, ghcp, gtot — статус,
+         *     события, ROI и CLV с интервалами, сколько событий с закрытием, пройден ли порог. Числа
+         *     семейств — из кэша Redis до 10 минут (app/services/market_stats.py).
+         */
+        get: operations["get_markets_api_markets_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4143,11 +4188,8 @@ export interface components {
             prediction_id: number | null;
             /** Match Id */
             match_id: number;
-            /**
-             * Market
-             * @enum {string}
-             */
-            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Market */
+            market: string;
             /** Selection */
             selection: number;
             /** Odds Taken */
@@ -4165,7 +4207,7 @@ export interface components {
             /** Match Id */
             match_id?: number | null;
             /** Market */
-            market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+            market?: string | null;
             /** Selection */
             selection?: (1 | 2) | null;
             /** Odds Taken */
@@ -4182,16 +4224,33 @@ export interface components {
          *     равно за участником (В16). archive_result и archive_score — исход и счет (первым —
          *     игрок 1) по архиву, когда он разошелся с расчетом ставки (этап 5, Т3): банк не
          *     меняли, участник проверяет сам. news_result — подсказка исхода по новостям.
+         *
+         *     Р28: family и line — семейство и линия из кода рынка (у фор — линия выбранной стороны);
+         *     score_kind — какой счет вносит окно расчета: sets («2:1») или games — счет по геймам
+         *     («6:4 7:6», исход по нему считает окно, у целой линии «ровно» — возврат; score_outcomes
+         *     у таких ног пусто); void_hint — при снятии и отказе подсказывать «возврат» (рынки по
+         *     геймам).
          */
         BetLegItemOut: {
             /** Id */
             id: number;
             match: components["schemas"]["LegMatchOut"];
+            /** Market */
+            market: string;
             /**
-             * Market
+             * Family
              * @enum {string}
              */
-            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            family: "ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot";
+            /** Line */
+            line: number | null;
+            /**
+             * Score Kind
+             * @enum {string}
+             */
+            score_kind: "sets" | "games";
+            /** Void Hint */
+            void_hint: boolean;
             /** Selection */
             selection: number;
             /** Odds Taken */
@@ -4237,11 +4296,8 @@ export interface components {
             prediction_id: number | null;
             /** Match Id */
             match_id: number;
-            /**
-             * Market
-             * @enum {string}
-             */
-            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Market */
+            market: string;
             /** Selection */
             selection: number;
             /** Odds Taken */
@@ -4454,6 +4510,11 @@ export interface components {
              * @enum {string}
              */
             main: "pred" | "closing";
+            /**
+             * Families
+             * @default []
+             */
+            families: components["schemas"]["FamilyBrierOut"][];
         };
         /**
          * BrierPointOut
@@ -4836,6 +4897,8 @@ export interface components {
             /** Round */
             round: string;
             odds: components["schemas"]["OddsPairsOut"];
+            /** Extra */
+            extra: components["schemas"]["ExtraOddsOut"][];
             /** Bookmaker */
             bookmaker: string | null;
         };
@@ -4852,11 +4915,8 @@ export interface components {
         };
         /** CorridorOut */
         CorridorOut: {
-            /**
-             * Market
-             * @enum {string}
-             */
-            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Market */
+            market: string;
             /** Selection */
             selection: number;
             /** Odds */
@@ -5230,6 +5290,37 @@ export interface components {
              */
             delete_at: string;
         };
+        /**
+         * DisputedIn
+         * @description Спорная фора из разбора без ответа «по сетам или по геймам?»: пока она в событии,
+         *     анализ не запускается (422 analysis.hcp_unit).
+         */
+        DisputedIn: {
+            /** Line */
+            line: number | string;
+            /** O1 */
+            o1?: number | string | null;
+            /** O2 */
+            o2?: number | string | null;
+        };
+        /**
+         * DisputedOut
+         * @description Спорная фора из текста («Ф1(-1.5) = 2.05» без «сет» и «гейм»): вопрос «по сетам
+         *     или по геймам?». line — фора игрока 1, o1 и o2 — кэфы Ф1 и Ф2. hint — подсказка по
+         *     кэфу победы (analysis.draft.hcp_hint.sets или .games, params: odds, ml) или null.
+         *     sets_ok — по сетам такая линия возможна в этом формате (±1.5; ±2.5 — до 3 побед).
+         */
+        DisputedOut: {
+            /** Line */
+            line: number;
+            /** O1 */
+            o1: string | null;
+            /** O2 */
+            o2: string | null;
+            hint: components["schemas"]["TextKey"] | null;
+            /** Sets Ok */
+            sets_ok: boolean;
+        };
         /** DraftEventOut */
         DraftEventOut: {
             /** Position */
@@ -5250,6 +5341,10 @@ export interface components {
             /** Round */
             round: string;
             odds: components["schemas"]["OddsPairsOut"];
+            /** Extra */
+            extra: components["schemas"]["ExtraOddsOut"][];
+            /** Disputed */
+            disputed: components["schemas"]["DisputedOut"][];
             /** Bookmaker */
             bookmaker: string | null;
             /** Warnings */
@@ -5717,6 +5812,16 @@ export interface components {
              */
             round: string;
             odds: components["schemas"]["OddsPairsIn"];
+            /**
+             * Extra
+             * @default []
+             */
+            extra: components["schemas"]["ExtraOddsIn"][];
+            /**
+             * Disputed
+             * @default []
+             */
+            disputed: components["schemas"]["DisputedIn"][];
             /** Bookmaker */
             bookmaker?: string | null;
             /** Line No */
@@ -5754,11 +5859,8 @@ export interface components {
             prediction_id: number;
             /** Match Id */
             match_id: number;
-            /**
-             * Market
-             * @enum {string}
-             */
-            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Market */
+            market: string;
             /** Selection */
             selection: number;
             /** P */
@@ -5779,6 +5881,43 @@ export interface components {
             stake: components["schemas"]["StakeOut"];
             /** Rules */
             rules: components["schemas"]["RuleCheck"][];
+        };
+        /**
+         * ExtraOddsIn
+         * @description Строка «Другие рынки» (Р28): семейство, линия и кэфы двух исходов. У фор line —
+         *     фора игрока 1, o1 — Ф1(line), o2 — Ф2(−line); у тоталов o1 — больше, o2 — меньше.
+         *     Линии по сетам: фора ±2.5 (только до 3 побед), тотал 2.5 (до 2 побед), 3.5 и 4.5 (до 3
+         *     побед); по геймам — половинная или целая (при «ровно» — возврат).
+         */
+        ExtraOddsIn: {
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "shcp" | "stot" | "ghcp" | "gtot";
+            /** Line */
+            line: number | string;
+            /** O1 */
+            o1?: number | string | null;
+            /** O2 */
+            o2?: number | string | null;
+        };
+        /**
+         * ExtraOddsOut
+         * @description Строка «Другие рынки» (как ExtraOddsIn): line — число (у фор — игрока 1).
+         */
+        ExtraOddsOut: {
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "shcp" | "stot" | "ghcp" | "gtot";
+            /** Line */
+            line: number;
+            /** O1 */
+            o1: string | null;
+            /** O2 */
+            o2: string | null;
         };
         /** FactorOut */
         FactorOut: {
@@ -5805,15 +5944,56 @@ export interface components {
          * @description Рынок без маржи: вероятность исхода по паре кэфов.
          */
         FairOut: {
-            /**
-             * Market
-             * @enum {string}
-             */
-            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Market */
+            market: string;
             /** Selection */
             selection: number;
             /** Q */
             q: number;
+        };
+        /**
+         * FamilyBrierOut
+         * @description Brier по семейству рынков (Р28): события калибровки этого семейства — модель и,
+         *     где есть, рынок при прогнозе без маржи (market_n событий).
+         */
+        FamilyBrierOut: {
+            /**
+             * Family
+             * @enum {string}
+             */
+            family: "ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot";
+            /** N */
+            n: number;
+            /** Model */
+            model: number;
+            /** Market N */
+            market_n: number;
+            /** Market */
+            market: number | null;
+        };
+        /**
+         * FamilySliceOut
+         * @description Семейство рынков (Р28): ml, h15, shcp, stot, ghcp, gtot — все исходы и линии.
+         */
+        FamilySliceOut: {
+            /** N */
+            n: number;
+            /** Wins */
+            wins: number;
+            /** Winrate */
+            winrate: number;
+            /** Roi */
+            roi: number;
+            roi_ci: components["schemas"]["CiOut"] | null;
+            /** Avg Odds */
+            avg_odds: number;
+            /** Small */
+            small: boolean;
+            /**
+             * Family
+             * @enum {string}
+             */
+            family: "ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot";
         };
         /**
          * FeatureOut
@@ -5969,7 +6149,7 @@ export interface components {
             /** Surface */
             surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown") | null;
             /** Market */
-            market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+            market?: string | null;
             /** Selection */
             selection?: number | null;
         };
@@ -6401,11 +6581,8 @@ export interface components {
             leg_id: number;
             /** Match Id */
             match_id: number;
-            /**
-             * Market
-             * @enum {string}
-             */
-            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Market */
+            market: string;
             /** Selection */
             selection: number;
             /** Same Pick */
@@ -6856,29 +7033,93 @@ export interface components {
             user?: components["schemas"]["MeOut"] | null;
         };
         /**
+         * MarketExpressIn
+         * @description express true — перевести семейство в экспресс, false — вернуть «для сравнения».
+         */
+        MarketExpressIn: {
+            /** Express */
+            express: boolean;
+        };
+        /**
+         * MarketFamilyOut
+         * @description Семейство рынков: status — express (идет в экспресс), suspended (на проверке, рынки
+         *     — suspended_markets), compare («для сравнения»). promoted — администратор перевел
+         *     новое семейство в экспресс. has_model — есть вероятность модели (у рынков по геймам —
+         *     с волны 3). events — события (исход с кэфом из ввода и известным итогом матча, общий
+         *     счетчик всех участников); roi — как ординары на равную сумму по кэфам из ввода; clv —
+         *     средний CLV по закрытию, которое внесли участники, clv_n — событий с закрытием. ROI
+         *     показывается от private_min событий, CLV — от private_min значений с закрытием (счетчик
+         *     общий: иначе по одной ставке видно чужой кэф), до того — null. ready — порог пройден у
+         *     семейства «для сравнения» с вероятностью модели (событий ≥ need, с закрытием ≥
+         *     clv_need и нижняя граница ДИ CLV выше нуля), can_promote — кнопка «Перевести в
+         *     экспресс» доступна. Числа семейств могут отставать от ставок до 10 минут (кэш).
+         */
+        MarketFamilyOut: {
+            /**
+             * Family
+             * @enum {string}
+             */
+            family: "ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "express" | "suspended" | "compare";
+            /** Suspended Markets */
+            suspended_markets: string[];
+            /** Has Model */
+            has_model: boolean;
+            /** Promoted */
+            promoted: boolean;
+            /** Events */
+            events: number;
+            /** Roi */
+            roi: number | null;
+            /** Roi Low */
+            roi_low: number | null;
+            /** Roi High */
+            roi_high: number | null;
+            /** Clv */
+            clv: number | null;
+            /** Clv Low */
+            clv_low: number | null;
+            /** Clv High */
+            clv_high: number | null;
+            /** Clv N */
+            clv_n: number;
+            /** Ready */
+            ready: boolean;
+            /** Can Promote */
+            can_promote: boolean;
+        };
+        /**
          * MarketRow
          * @description Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф
-         *     участника, валуй p_final·кэф − 1 и уровень, попал ли в экспресс, почему нет
+         *     участника, валуй p_final·кэф + p_push − 1 и уровень, попал ли в экспресс, почему нет
          *     (note_key — ключ analysis.leg.*). suspended — рынок на проверке (SUSPENDED_MARKETS,
          *     Р28): в экспресс и варианты не идет, своей ставкой поставить можно; признак — по
          *     списку сейчас, и у старых анализов тоже.
+         *
+         *     Р28: family и line — семейство и линия из кода рынка (у фор — линия выбранной
+         *     стороны, у ML — null); status — express, suspended или compare («для сравнения»;
+         *     suspended — по списку сейчас, у новых семейств — на момент анализа: так собирался его
+         *     экспресс); p_push — вероятность
+         *     возврата на целой линии (у половинной 0). У рынков по геймам вероятностей модели пока
+         *     нет (волна 3): p_base, p_claude, p_final, value — null, has_model — false.
          */
         MarketRow: {
-            /**
-             * Market
-             * @enum {string}
-             */
-            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Market */
+            market: string;
             /** Selection */
             selection: number;
             /** Prediction Id */
             prediction_id: number | null;
             /** P Base */
-            p_base: number;
+            p_base: number | null;
             /** P Claude */
-            p_claude: number;
+            p_claude: number | null;
             /** P Final */
-            p_final: number;
+            p_final: number | null;
             /** Q Market */
             q_market: number | null;
             /** Odds */
@@ -6893,6 +7134,22 @@ export interface components {
             note_key: string | null;
             /** Suspended */
             suspended: boolean;
+            /**
+             * Family
+             * @enum {string}
+             */
+            family: "ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot";
+            /** Line */
+            line: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "express" | "suspended" | "compare";
+            /** P Push */
+            p_push: number;
+            /** Has Model */
+            has_model: boolean;
         };
         /**
          * MarketSliceOut
@@ -6912,13 +7169,29 @@ export interface components {
             avg_odds: number;
             /** Small */
             small: boolean;
-            /**
-             * Market
-             * @enum {string}
-             */
-            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Market */
+            market: string;
             /** Selection */
             selection: number;
+        };
+        /**
+         * MarketsOut
+         * @description Рынки по семействам (порядок экрана: ml, h15, shcp, stot, ghcp, gtot). need — порог
+         *     событий (150), need_max — верхняя граница диапазона решения (200), clv_need — сколько
+         *     из них нужно с закрытием (50), private_min — с какого числа значений видны ROI и CLV
+         *     семейства (10).
+         */
+        MarketsOut: {
+            /** Need */
+            need: number;
+            /** Need Max */
+            need_max: number;
+            /** Clv Need */
+            clv_need: number;
+            /** Private Min */
+            private_min: number;
+            /** Families */
+            families: components["schemas"]["MarketFamilyOut"][];
         };
         /**
          * MarketsTotalOut
@@ -7349,11 +7622,8 @@ export interface components {
             bet_id: number;
             /** Leg Id */
             leg_id: number;
-            /**
-             * Market
-             * @enum {string}
-             */
-            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Market */
+            market: string;
             /** Selection */
             selection: number;
             /** Odds Taken */
@@ -7390,7 +7660,8 @@ export interface components {
          * @description Подсказка исхода по новостям (этап 5, В1-Г): результат матча нашел шаг новостей
          *     перед анализом. Только подсказка — деньги по ней не считаются, исход вносит участник.
          *     winner — игрок 1 или 2 матча; sets — счет по сетам (первым — игрок 1), если в новости
-         *     полный счет; score — счет как в новости; retired — в новости снятие; source_name,
+         *     полный счет; games — счет по геймам («6:4 7:6(5)», первым — игрок 1; Р28, для ног по
+         *     геймам); score — счет как в новости; retired — в новости снятие; source_name,
          *     source_url, published_on — откуда и за какой день факт; found_at — когда его нашли.
          */
         NewsResultOut: {
@@ -7401,6 +7672,8 @@ export interface components {
             winner: 1 | 2;
             /** Sets */
             sets: string | null;
+            /** Games */
+            games: string | null;
             /** Score */
             score: string;
             /** Retired */
@@ -7472,7 +7745,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert" | "bet_needs_result" | "settle_conflict" | "weekly_report" | "learning";
+            kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert" | "bet_needs_result" | "settle_conflict" | "weekly_report" | "learning" | "market_ready";
             /** On Site */
             on_site?: boolean | null;
             /** Push */
@@ -7490,7 +7763,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert" | "bet_needs_result" | "settle_conflict" | "weekly_report" | "learning";
+            kind: "bet_settled" | "data_stale" | "limit_80" | "limit_100" | "new_device" | "admin_message" | "login_failures" | "ai_key_failed" | "ai_mode_request" | "ai_mode_decision" | "budget_80" | "budget_100" | "ai_alert" | "bet_needs_result" | "settle_conflict" | "weekly_report" | "learning" | "market_ready";
             /** Group */
             group: string;
             /** On Site */
@@ -9504,6 +9777,8 @@ export interface components {
             /** Markets */
             markets: components["schemas"]["MarketSliceOut"][];
             markets_total: components["schemas"]["MarketsTotalOut"] | null;
+            /** Families */
+            families: components["schemas"]["FamilySliceOut"][];
             /** Odds */
             odds: components["schemas"]["OddsSliceOut"][];
             /** Totals */
@@ -10157,12 +10432,19 @@ export interface components {
              */
             remember_device: boolean;
         };
-        /** UnknownLineOut */
+        /**
+         * UnknownLineOut
+         * @description Строка, которую разбор не понял; reason_key — почему (четвертная линия —
+         *     analysis.draft.unknown.quarter, тотал между 5 и 15 — analysis.draft.unknown.total_unit),
+         *     null — просто не понял.
+         */
         UnknownLineOut: {
             /** Line No */
             line_no: number;
             /** Text */
             text: string;
+            /** Reason Key */
+            reason_key?: string | null;
         };
         /**
          * UnlinkedMatchOut
@@ -13352,6 +13634,41 @@ export interface operations {
             };
         };
     };
+    set_market_express_api_admin_markets__family__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family: "shcp" | "stot" | "ghcp" | "gtot";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketExpressIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketsOut"];
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     list_messages_api_admin_messages_get: {
         parameters: {
             query?: never;
@@ -14127,7 +14444,8 @@ export interface operations {
                 from?: string | null;
                 to?: string | null;
                 status?: ("open" | "won" | "lost" | "void" | "settled") | null;
-                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                market?: string | null;
+                family?: ("ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
                 kind?: "all" | "strategy" | "single" | "own";
@@ -14203,7 +14521,8 @@ export interface operations {
                 from?: string | null;
                 to?: string | null;
                 status?: ("open" | "won" | "lost" | "void" | "settled") | null;
-                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                market?: string | null;
+                family?: ("ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
                 kind?: "all" | "strategy" | "single" | "own";
@@ -14276,7 +14595,8 @@ export interface operations {
                 from?: string | null;
                 to?: string | null;
                 status?: ("open" | "won" | "lost" | "void" | "settled") | null;
-                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                market?: string | null;
+                family?: ("ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
                 kind?: "all" | "strategy" | "single" | "own";
@@ -14623,8 +14943,9 @@ export interface operations {
                 period?: "7d" | "30d" | "90d" | "all";
                 from?: string | null;
                 to?: string | null;
-                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                market?: string | null;
                 selection?: number | null;
+                family?: ("ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
                 kind?: "all" | "strategy" | "single" | "own";
@@ -14663,8 +14984,9 @@ export interface operations {
                 period?: "7d" | "30d" | "90d" | "all";
                 from?: string | null;
                 to?: string | null;
-                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                market?: string | null;
                 selection?: number | null;
+                family?: ("ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
                 kind?: "all" | "strategy" | "single" | "own";
@@ -14704,8 +15026,9 @@ export interface operations {
                 period?: "7d" | "30d" | "90d" | "all";
                 from?: string | null;
                 to?: string | null;
-                market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+                market?: string | null;
                 selection?: number | null;
+                family?: ("ml" | "h15" | "shcp" | "stot" | "ghcp" | "gtot") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
                 kind?: "all" | "strategy" | "single" | "own";
@@ -14726,6 +15049,35 @@ export interface operations {
                 };
                 content: {
                     "application/zip": unknown;
+                };
+            };
+            /** @description Ошибка: {error: {code, message}} */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_markets_api_markets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketsOut"];
                 };
             };
             /** @description Ошибка: {error: {code, message}} */

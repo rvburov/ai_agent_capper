@@ -57,6 +57,8 @@ NOTIFICATION_KINDS = (
     "settle_conflict",
     "weekly_report",
     "learning",
+    # Р28: рынок «для сравнения» прошел порог (150 событий и CLV выше нуля) — администраторам
+    "market_ready",
 )
 DEFAULT_TZ = "Europe/Helsinki"
 # Тихие часы push по умолчанию (этап 6, В3): с 23:00 до 08:00 по поясу пользователя

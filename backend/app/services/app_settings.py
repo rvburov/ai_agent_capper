@@ -64,6 +64,7 @@ from app.db.models import (
     StrategyVersion,
     User,
 )
+from app.ml.markets import NEW_FAMILIES
 from app.ml.strategy import StrategyParams
 from app.schemas.admin_settings import (
     AdminSettingsOut,
@@ -86,6 +87,11 @@ _SCAN_COUNT = 500
 BANK_DIFFERS = "analysis.warnings.bank_differs"
 
 
+def express_families(settings: AppSettings) -> tuple[str, ...]:
+    """Семейства новых рынков Р28, которые администратор перевел в экспресс."""
+    return tuple(family for family in settings.express_markets or () if family in NEW_FAMILIES)
+
+
 async def get_app_settings(db: AsyncSession) -> AppSettings:
     row = await db.get(AppSettings, SETTINGS_ROW_ID)
     if row is None:
@@ -101,6 +107,11 @@ def check_currency(settings: AppSettings, given: str | None) -> None:
     проверкой и записью."""
     if given is not None and given != settings.currency:
         raise AppError(409, "common.currency_changed", currency=settings.currency)
+
+
+async def locked_settings(db: AsyncSession) -> AppSettings:
+    """Строка настроек под FOR UPDATE (смена настроек одной транзакцией)."""
+    return await _locked_settings(db)
 
 
 async def _locked_settings(db: AsyncSession) -> AppSettings:

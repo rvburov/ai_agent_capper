@@ -17,10 +17,17 @@ apply_claude. Решающий сет = 1 − cover'₁ − cover'₂, побе�
 П1 выигрывает с разницей ≥ 2 сета (П1(−1.5)), p2_cover — то же для П2. Остальные исходы
 выводятся: П2 = 1 − p1_win, П2(+1.5) = 1 − p1_cover, П1(+1.5) = 1 − p2_cover.
 
-Вторая половина модуля — счет по сетам после матча: разбор счета архива по геймам (общий
-для досье и расчета ставок) и исход ноги ставки (ML и форы ±1.5) по числу выигранных
-сетов. Отказ (walkover), снятие (retired) и неполный счет исхода не дают: его выбирает
-участник по правилам своего букмекера (решение В16, Р24).
+Новые рынки по сетам (Р28) выводятся из тех же трех чисел (set_score_probs): до 2 побед
+счет по сетам задан ими целиком (2:1 = p1_win − p1_cover), до 3 побед Ф(−1.5) делится на
+3:0 и 3:1 по доле 3:0 независимых сетов 1/(1 + 3(1 − s)), которую поправляет Платт
+формата (SET30_PLATT: независимые сета занижают 3:0). Так поправка Claude к p1_win и cover
+переносится на фору ±2.5 и тоталы сетов кодом, Claude новых чисел не дает.
+
+Вторая половина модуля — счет после матча: разбор счета архива по геймам (общий для
+досье и расчета ставок) и исход ноги ставки: рынки по сетам — по числу выигранных сетов,
+рынки по геймам — по счету по геймам (app/ml/markets.py). Отказ (walkover), снятие
+(retired) и неполный счет исхода не дают: его выбирает участник по правилам своего
+букмекера (решение В16, Р24).
 """
 
 import math
@@ -31,6 +38,16 @@ from types import MappingProxyType
 from typing import Any
 
 from app.core.i18n import t
+from app.ml.markets import (
+    FAMILY_ML,
+    FAMILY_SHCP,
+    GAME_FAMILIES,
+    UNIT_SETS,
+    fits_format,
+    games_complete,
+    games_leg_result,
+    market_spec,
+)
 
 MARKET_ML = "ML"
 MARKET_MINUS = "HCP_-1.5"
@@ -211,6 +228,69 @@ def market_probs(p1_win: float, p1_cover: float, p2_cover: float) -> dict[tuple[
     }
 
 
+# Поправка доли 3:0 внутри Ф(−1.5) (до 3 побед): σ(a + b·logit r), r — доля 3:0 по
+# независимым сетам. Подобрана на 2016–2022 (Эло проекта с Платтом бэктеста и SETS_PLATT,
+# обе стороны, только матчи, где сторона выиграла с разницей ≥ 2 сета); проверка на
+# 2023–2025 — PLAN.md, Р28. Без нее модель занижает 3:0 на 7–13 п.п. по годам
+SET30_PLATT: SetsCalibration = MappingProxyType({5: CoverPlatt(a=0.702, b=1.628)})
+
+
+def set_score_probs(
+    probs: Probs3, best_of: int, share: SetsCalibration | None = SET30_PLATT
+) -> dict[tuple[int, int], float]:
+    """Вероятности полного счета по сетам (сеты игрока 1, игрока 2), согласованные с тремя
+    числами матча: сумма побед стороны — ее p_win, сумма побед с разницей ≥ 2 — ее cover.
+    До 3 побед cover делится на 3:0 и 3:1 по доле 3:0 независимых сетов при s из p1_win
+    (share — ее поправка по формату, None — без поправки)."""
+    _check_best_of(best_of)
+    p1 = min(1.0, max(0.0, probs.p1_win))
+    c1 = min(max(0.0, probs.p1_cover), p1)
+    c2 = min(max(0.0, probs.p2_cover), 1.0 - p1)
+    if best_of == 3:
+        return {(2, 0): c1, (2, 1): p1 - c1, (1, 2): 1.0 - p1 - c2, (0, 2): c2}
+    s = set_prob_from_match(p1, best_of)
+    r1 = 1.0 / (1.0 + 3.0 * (1.0 - s))
+    r2 = 1.0 / (1.0 + 3.0 * s)
+    platt = share.get(best_of) if share is not None else None
+    if platt is not None:
+        r1, r2 = platt.apply(r1), platt.apply(r2)
+    return {
+        (3, 0): c1 * r1,
+        (3, 1): c1 * (1.0 - r1),
+        (3, 2): p1 - c1,
+        (2, 3): 1.0 - p1 - c2,
+        (1, 3): c2 * (1.0 - r2),
+        (0, 3): c2 * r2,
+    }
+
+
+def market_prob(probs: Probs3, best_of: int, market: str, selection: int) -> float | None:
+    """Вероятность исхода любого рынка по сетам (ML, форы ±1.5 и ±2.5, тоталы сетов) по
+    трем числам матча. Рынок по геймам (модели пока нет, волна 3) или невозможный в этом
+    формате (фора ±2.5 до 2 побед) — None."""
+    if selection not in (1, 2):
+        raise ValueError(t("ml.sets.bad_selection", selection=selection))
+    spec = market_spec(market)
+    if spec.family in GAME_FAMILIES or not fits_format(market, best_of):
+        return None
+    if market in MARKETS:
+        return probs.markets()[(market, selection)]
+    scores = set_score_probs(probs, best_of)
+    assert spec.line is not None
+    line = float(spec.line)
+    if spec.family == FAMILY_SHCP:
+        # Сторона с форой line: (свои сеты − чужие) + line > 0
+        found = sum(
+            p
+            for (first, second), p in scores.items()
+            if ((first - second) if selection == 1 else (second - first)) + line > 0
+        )
+    else:
+        over = sum(p for (first, second), p in scores.items() if first + second > line)
+        found = over if selection == 1 else 1.0 - over
+    return min(1.0, max(0.0, found))
+
+
 # --- счет по сетам и исход ноги ---
 
 # Сет в счете архива: «6-4», «7-6(5)», «[10-8]» (супер-тай-брейк)
@@ -234,6 +314,21 @@ def parse_sets(score: str | None) -> list[tuple[int, int, str]]:
         match = SET_SCORE.match(token)
         if match:
             found.append((int(match.group(1)), int(match.group(2)), match.group(3) or ""))
+    return found
+
+
+def archive_games(score: str | None, *, winner_is_first: bool) -> list[tuple[int, int]]:
+    """Счет по геймам из счета архива (он со стороны победителя): сеты (геймы первой
+    стороны, геймы второй); супер-тай-брейк [10-8] — один гейм."""
+    found: list[tuple[int, int]] = []
+    for token in (score or "").split():
+        match = SET_SCORE.match(token)
+        if match is None:
+            continue
+        won, lost = int(match.group(1)), int(match.group(2))
+        if token.startswith("["):
+            won, lost = (1, 0) if won > lost else (0, 1)
+        found.append((won, lost) if winner_is_first else (lost, won))
     return found
 
 
@@ -316,22 +411,27 @@ def set_count_from_score(score: str | None, *, winner_is_first: bool) -> SetCoun
 
 
 def leg_result(market: str, selection: int, count: SetCount, best_of: int) -> str | None:
-    """Исход ноги по полному счету (count — сеты игрока 1 и игрока 2): win или loss.
-    Неполный счет — None. Фора −1.5 — победа с разницей не меньше 2 сетов, +1.5 —
-    поражение не больше чем с разницей в 1 сет или победа."""
-    if market not in MARKETS:
+    """Исход ноги рынка по сетам по полному счету (count — сеты игрока 1 и игрока 2): win
+    или loss (линии по сетам половинные — возврата нет). Неполный счет — None. Фора —
+    разница сетов стороны плюс линия больше нуля; тотал — сумма сетов больше линии
+    (selection 1) или меньше (2). Рынок по геймам — ValueError (games_leg_result)."""
+    spec = market_spec(market)
+    if spec.unit != UNIT_SETS:
         raise ValueError(t("ml.sets.bad_market", market=market))
     if selection not in (1, 2):
         raise ValueError(t("ml.sets.bad_selection", selection=selection))
     if not complete_for(count, best_of):
         return None
     own, other = (count.first, count.second) if selection == 1 else (count.second, count.first)
-    if market == MARKET_ML:
+    if spec.family == FAMILY_ML:
         won = own > other
-    elif market == MARKET_MINUS:
-        won = own - other >= 2
+    elif spec.is_handicap:
+        assert spec.line is not None
+        won = own - other + spec.line > 0
     else:
-        won = other - own < 2
+        assert spec.line is not None
+        total = count.first + count.second
+        won = total > spec.line if selection == 1 else total < spec.line
     return RESULT_WIN if won else RESULT_LOSS
 
 
@@ -349,8 +449,11 @@ def complete_scores(best_of: int | None) -> list[SetCount]:
 
 def score_outcomes(market: str, selection: int, best_of: int | None) -> dict[str, str]:
     """Исход ноги по каждому полному счету («2:1» → win или loss; первым — игрок 1):
-    по этой таблице окно расчета отмечает исход по счету, не повторяя правило фор."""
+    по этой таблице окно расчета отмечает исход по счету, не повторяя правило фор. У рынка
+    по геймам таблицы нет (пусто): исход считается по счету по геймам."""
     outcomes: dict[str, str] = {}
+    if market_spec(market).unit != UNIT_SETS:
+        return outcomes
     for count in complete_scores(best_of):
         fmt = best_of if best_of in BEST_OF else infer_best_of(count)
         result = leg_result(market, selection, count, fmt) if fmt is not None else None
@@ -379,13 +482,19 @@ def match_leg_outcome(
 ) -> LegOutcome:
     """Исход ноги по сыгранному матчу архива (status, победитель, счет со стороны
     победителя). Отказ и снятие — выбор участника (В16); у ML при обычном окончании
-    хватает победителя, у фор нужен полный счет по сетам."""
+    хватает победителя, у фор и тоталов сетов нужен полный счет по сетам, у рынков по
+    геймам — доигранный счет по геймам (возврат при «ровно» на целой линии)."""
     if status == "walkover":
         return LegOutcome(None, OUTCOME_WALKOVER)
     if status == "retired":
         return LegOutcome(None, OUTCOME_RETIRED)
     if status != "finished" or winner_is_p1 is None:
         return LegOutcome(None, OUTCOME_NO_RESULT)
+    if market_spec(market).unit != UNIT_SETS:
+        games = archive_games(score, winner_is_first=winner_is_p1)
+        if not games_complete(games, best_of if best_of in BEST_OF else None):
+            return LegOutcome(None, OUTCOME_INCOMPLETE)
+        return LegOutcome(games_leg_result(market, selection, games))
     count = set_count_from_score(score, winner_is_first=winner_is_p1)
     fmt = best_of if best_of in BEST_OF else infer_best_of(count)
     result = leg_result(market, selection, count, fmt) if fmt is not None else None

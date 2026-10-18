@@ -110,6 +110,7 @@ PARSED = {
                 "h1_plus": None,
                 "h2_minus": None,
                 "h2_plus": 2.3,
+                "lines": [],
             },
             "bookmaker": None,
         }
@@ -132,8 +133,8 @@ async def test_parse_request_and_answer(claude: ClaudeMock) -> None:
     assert claude.keys == [KEY]
     assert [info.kind for info in hooks.after] == ["parse"]
     assert hooks.after[0].error is None and hooks.after[0].usage.input_tokens == 1000
-    assert hooks.after[0].prompt_version == "parse_input.v1"
-    assert hooks.after[0].schema_version == "p1"
+    assert hooks.after[0].prompt_version == "parse_input.v2"
+    assert hooks.after[0].schema_version == "p2"
 
 
 async def test_parse_answer_not_by_schema_is_recorded(claude: ClaudeMock) -> None:

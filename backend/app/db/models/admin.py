@@ -11,9 +11,11 @@ from sqlalchemy import (
     LargeBinary,
     SmallInteger,
     String,
+    Text,
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import CURRENCIES, Base, BigIntPK, CurrencyCode, IpAddress, UsdLimit, check_in
@@ -92,6 +94,10 @@ class AppSettings(Base):
         CheckConstraint("per_analysis_soft_usd <= per_analysis_hard_usd", name="soft_le_hard"),
         check_in("budget_alert_pct", BUDGET_ALERT_PCTS, "budget_alert_pct"),
         CheckConstraint("eval_budget_usd >= 0", name="eval_budget_non_negative"),
+        CheckConstraint(
+            "express_markets <@ ARRAY['shcp', 'stot', 'ghcp', 'gtot']::text[]",
+            name="express_markets_known",
+        ),
     )
 
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, autoincrement=False)
@@ -111,6 +117,16 @@ class AppSettings(Base):
     eval_budget_usd: Mapped[UsdLimit] = mapped_column(server_default="25")
     # Часовой пояс новых участников по умолчанию (у каждого участника свой users.tz)
     default_tz: Mapped[str] = mapped_column(String(64), server_default=DEFAULT_TZ)
+    # Р28: семейства новых рынков, которые администратор перевел в экспресс (было «для
+    # сравнения»): shcp, stot, ghcp, gtot (app/ml/markets.py)
+    express_markets: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    # Семейства, о пройденном пороге которых администраторы уже получили уведомление
+    # market_ready (одно на семейство)
+    markets_notified: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
     updated_by: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )

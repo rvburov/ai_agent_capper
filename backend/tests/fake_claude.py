@@ -129,8 +129,55 @@ def _odds_in(line: str, label: str) -> float | None:
     return _num(found.group(1)) if found else None
 
 
+# Схема p2 (Р28): фора «П1(-4.5) = 1.85», «Ф2(+3) = 1.9» и тотал «Б(22.5) = 1.9»,
+# «ТМ 22 = 2.05», «больше 22.5 = 1.9»
+_HCP = re.compile(
+    r"[ПФ]\s*([12])\s*\(\s*([+\-\u2212\u2013]?)\s*(\d+(?:[.,]\d+)?)\s*\)\s*[=:]\s*" + _ODD
+)
+_TOTAL = re.compile(
+    r"(?:^|[\s,;:(])(?:Т|т)?(Б|М|больше|меньше)\s*\(?\s*(\d+(?:[.,]\d+)?)\s*\)?\s*[=:]\s*" + _ODD
+)
+
+
+def _lines_of(line: str, number: int, odds: dict[str, Any]) -> bool:
+    """Форы и тоталы строки в odds (h* — фора по сетам ±1.5 со словом «сет», остальное —
+    lines). Строка без фор и тоталов — False."""
+    low = line.lower()
+    unit = "set" if "сет" in low else "game" if "гейм" in low else ""
+    found: dict[tuple[str, float], dict[str, Any]] = {}
+    hits = False
+    for side, sign, number_text, odd in _HCP.findall(line):
+        hits = True
+        value = _num(number_text) * (-1 if sign in ("-", "\u2212", "\u2013") else 1)
+        p1_line = value if side == "1" else -value
+        if unit == "set" and abs(value) == 1.5:
+            key = f"h{side}_{'minus' if value < 0 else 'plus'}"
+            odds[key] = _num(odd)
+            continue
+        kind = {"set": "set_hcp", "game": "game_hcp"}.get(unit, "hcp")
+        row = found.setdefault(
+            (kind, p1_line),
+            {"line_no": number, "text": line, "kind": kind, "line": p1_line,
+             "odds1": None, "odds2": None},
+        )  # fmt: skip
+        row["odds1" if side == "1" else "odds2"] = _num(odd)
+    for side, number_text, odd in _TOTAL.findall(line):
+        hits = True
+        value = _num(number_text)
+        kind = {"set": "set_total", "game": "game_total"}.get(unit, "total")
+        row = found.setdefault(
+            (kind, value),
+            {"line_no": number, "text": line, "kind": kind, "line": value,
+             "odds1": None, "odds2": None},
+        )  # fmt: skip
+        over = side.lower() in ("б", "больше")
+        row["odds1" if over else "odds2"] = _num(odd)
+    odds["lines"].extend(found.values())
+    return hits
+
+
 def parse_text(text: str) -> dict[str, Any]:
-    """Разбор текста формата бота (ответ по схеме ParsedInput)."""
+    """Разбор текста формата бота (ответ по схеме ParsedInput, p2)."""
     bank: dict[str, Any] = {"amount": None, "currency": None}
     bookmaker: str | None = None
     events: list[dict[str, Any]] = []
@@ -167,12 +214,7 @@ def parse_text(text: str) -> dict[str, Any]:
             odds["ml1"] = _odds_in(stripped, "П1") or odds["ml1"]
             odds["ml2"] = _odds_in(stripped, "П2") or odds["ml2"]
             continue
-        if "фора" in stripped.lower() and events:
-            odds = events[-1]["odds"]
-            odds["h1_minus"] = _odds_in(stripped, "П1(-1.5)")
-            odds["h1_plus"] = _odds_in(stripped, "П1(+1.5)")
-            odds["h2_minus"] = _odds_in(stripped, "П2(-1.5)")
-            odds["h2_plus"] = _odds_in(stripped, "П2(+1.5)")
+        if events and _lines_of(stripped, number, events[-1]["odds"]):
             continue
         event = _EVENT.match(stripped)
         if event and " vs " in f" {stripped.lower()} ":
@@ -194,8 +236,11 @@ def parse_text(text: str) -> dict[str, Any]:
                     "surface": surface,
                     "round": round_code,
                     "odds": {
-                        key: None
-                        for key in ("ml1", "ml2", "h1_minus", "h1_plus", "h2_minus", "h2_plus")
+                        **{
+                            key: None
+                            for key in ("ml1", "ml2", "h1_minus", "h1_plus", "h2_minus", "h2_plus")
+                        },
+                        "lines": [],
                     },
                     "bookmaker": None,
                 }

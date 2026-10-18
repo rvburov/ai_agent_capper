@@ -240,7 +240,7 @@ async def my_matches(
             MyMatchBetOut(
                 bet_id=leg.bet_id,
                 leg_id=leg.id,
-                market=leg.market,  # type: ignore[arg-type]
+                market=leg.market,
                 selection=leg.selection,
                 odds_taken=leg.odds_taken,
             )

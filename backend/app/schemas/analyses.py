@@ -10,11 +10,40 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    StringConstraints,
+)
 
+from app.ml.markets import market_spec
 from app.schemas.admin import UsdOut
 
-Market = Literal["ML", "HCP_-1.5", "HCP_+1.5"]
+
+def _market_code(value: str) -> str:
+    """Код рынка проверяет разборщик (app/ml/markets.py): линия и ее пределы."""
+    market_spec(value)
+    return value
+
+
+# Код рынка с линией (Р28, app/ml/markets.py): ML, HCP_±1.5, HCP_±2.5, STOT_2.5|3.5|4.5,
+# GHCP_±X или ±X.5, GTOT_X или X.5. У фор линия — у выбранной стороны, у тоталов
+# selection 1 — больше, 2 — меньше
+MARKET_PATTERN = r"^(ML|HCP_[+-][12]\.5|STOT_[234]\.5|GHCP_[+-]\d{1,2}(\.5)?|GTOT_\d{1,2}(\.5)?)$"
+Market = Annotated[
+    str, StringConstraints(pattern=MARKET_PATTERN, max_length=16), AfterValidator(_market_code)
+]
+# Семейство рынка: ml — победа, h15 — фора по сетам ±1.5, shcp — фора по сетам ±2.5,
+# stot — тотал сетов, ghcp — фора по геймам, gtot — тотал геймов
+MarketFamily = Literal["ml", "h15", "shcp", "stot", "ghcp", "gtot"]
+# «Другие рынки» формы ввода (фора ±1.5 — прежние поля HCP_-1.5 и HCP_+1.5)
+ExtraFamily = Literal["shcp", "stot", "ghcp", "gtot"]
+# Статус рынка: express — идет в экспресс, suspended — на проверке (SUSPENDED_MARKETS),
+# compare — «для сравнения» (новые рынки до решения администратора)
+MarketStatus = Literal["express", "suspended", "compare"]
 Surface = Literal["hard", "clay", "grass", "carpet"]
 AnalysisStatus = Literal[
     "created",
@@ -93,6 +122,32 @@ class OddsPairsIn(BaseModel):
     )
 
 
+# Линия на входе: число или строка; половинная или целая (четвертную 22.25 отклоняет
+# сервис с понятной ошибкой analysis.line_quarter)
+LineIn = Annotated[Decimal, Field(ge=-99, le=99, max_digits=4, decimal_places=2)]
+
+
+class ExtraOddsIn(BaseModel):
+    """Строка «Другие рынки» (Р28): семейство, линия и кэфы двух исходов. У фор line —
+    фора игрока 1, o1 — Ф1(line), o2 — Ф2(−line); у тоталов o1 — больше, o2 — меньше.
+    Линии по сетам: фора ±2.5 (только до 3 побед), тотал 2.5 (до 2 побед), 3.5 и 4.5 (до 3
+    побед); по геймам — половинная или целая (при «ровно» — возврат)."""
+
+    market: ExtraFamily
+    line: LineIn
+    o1: OddsIn | None = None
+    o2: OddsIn | None = None
+
+
+class DisputedIn(BaseModel):
+    """Спорная фора из разбора без ответа «по сетам или по геймам?»: пока она в событии,
+    анализ не запускается (422 analysis.hcp_unit)."""
+
+    line: LineIn
+    o1: OddsIn | None = None
+    o2: OddsIn | None = None
+
+
 class EventIn(BaseModel):
     """Событие, которое подтвердил участник. Игроки — id из базы (подсказки GET /players
     или черновик разбора). Турнир — id из черновика или название (новый турнир)."""
@@ -105,6 +160,8 @@ class EventIn(BaseModel):
     best_of: Literal[3, 5] | None = None
     round: RoundText = ""
     odds: OddsPairsIn
+    extra: list[ExtraOddsIn] = Field(default=[], max_length=12)
+    disputed: list[DisputedIn] = Field(default=[], max_length=12)
     bookmaker: ShortText | None = None
     line_no: int | None = Field(default=None, ge=0, le=100000)
 
@@ -181,9 +238,36 @@ class OddsPairsOut(BaseModel):
     plus: list[DecimalOut | None] = Field(alias="HCP_+1.5")
 
 
+class ExtraOddsOut(BaseModel):
+    """Строка «Другие рынки» (как ExtraOddsIn): line — число (у фор — игрока 1)."""
+
+    market: ExtraFamily
+    line: float
+    o1: DecimalOut | None
+    o2: DecimalOut | None
+
+
+class DisputedOut(BaseModel):
+    """Спорная фора из текста («Ф1(-1.5) = 2.05» без «сет» и «гейм»): вопрос «по сетам
+    или по геймам?». line — фора игрока 1, o1 и o2 — кэфы Ф1 и Ф2. hint — подсказка по
+    кэфу победы (analysis.draft.hcp_hint.sets или .games, params: odds, ml) или null.
+    sets_ok — по сетам такая линия возможна в этом формате (±1.5; ±2.5 — до 3 побед)."""
+
+    line: float
+    o1: DecimalOut | None
+    o2: DecimalOut | None
+    hint: TextKey | None
+    sets_ok: bool
+
+
 class UnknownLineOut(BaseModel):
+    """Строка, которую разбор не понял; reason_key — почему (четвертная линия —
+    analysis.draft.unknown.quarter, тотал между 5 и 15 — analysis.draft.unknown.total_unit),
+    null — просто не понял."""
+
     line_no: int
     text: str
+    reason_key: str | None = None
 
 
 class DraftEventOut(BaseModel):
@@ -198,6 +282,8 @@ class DraftEventOut(BaseModel):
     best_of: int
     round: str
     odds: OddsPairsOut
+    extra: list[ExtraOddsOut]
+    disputed: list[DisputedOut]
     bookmaker: str | None
     warnings: list[TextKey]
 
@@ -381,17 +467,24 @@ class FlagsOut(BaseModel):
 
 class MarketRow(BaseModel):
     """Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф
-    участника, валуй p_final·кэф − 1 и уровень, попал ли в экспресс, почему нет
+    участника, валуй p_final·кэф + p_push − 1 и уровень, попал ли в экспресс, почему нет
     (note_key — ключ analysis.leg.*). suspended — рынок на проверке (SUSPENDED_MARKETS,
     Р28): в экспресс и варианты не идет, своей ставкой поставить можно; признак — по
-    списку сейчас, и у старых анализов тоже."""
+    списку сейчас, и у старых анализов тоже.
+
+    Р28: family и line — семейство и линия из кода рынка (у фор — линия выбранной
+    стороны, у ML — null); status — express, suspended или compare («для сравнения»;
+    suspended — по списку сейчас, у новых семейств — на момент анализа: так собирался его
+    экспресс); p_push — вероятность
+    возврата на целой линии (у половинной 0). У рынков по геймам вероятностей модели пока
+    нет (волна 3): p_base, p_claude, p_final, value — null, has_model — false."""
 
     market: Market
     selection: int
     prediction_id: int | None
-    p_base: float
-    p_claude: float
-    p_final: float
+    p_base: float | None
+    p_claude: float | None
+    p_final: float | None
     q_market: float | None
     odds: DecimalOut | None
     value: float | None
@@ -399,6 +492,11 @@ class MarketRow(BaseModel):
     in_express: bool
     note_key: str | None
     suspended: bool
+    family: MarketFamily
+    line: float | None
+    status: MarketStatus
+    p_push: float
+    has_model: bool
 
 
 class MatchResult(BaseModel):
@@ -552,6 +650,7 @@ class ConfirmedEventOut(BaseModel):
     best_of: int
     round: str
     odds: OddsPairsOut
+    extra: list[ExtraOddsOut]
     bookmaker: str | None
 
 

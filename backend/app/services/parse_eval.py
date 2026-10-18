@@ -10,9 +10,15 @@ Haiku 5.5 разбирает эталонные сообщения, код св�
 
 Игрок в эталоне — имя (ищется в базе так же, как игрок из разбора: resolve_player) или id.
 Рынка нет в эталоне — у него нет кэфов. Сообщение верно, если события совпали по числу и
-порядку, игроки после поиска в базе — те же, кэфы всех трех рынков (ML, HCP_-1.5,
-HCP_+1.5) на обе стороны равны с точностью до 0,001. Остальные поля пары (source, check)
-не читаются: их пишет черновик.
+порядку, игроки после поиска в базе — те же, кэфы всех рынков (ML, HCP_-1.5, HCP_+1.5 и
+новые рынки Р28 кодами с линией: HCP_-2.5, STOT_2.5, GHCP_-3.5, GTOT_22…; разбор
+сводится к ним так же, как в черновике анализа, app/services/analysis_input.py,
+parsed_lines) на обе стороны равны с точностью до 0,001, спорные форы («Ф1(-1.5)» без
+«сет» и «гейм», в эталоне — "disputed": [{"line": -1.5, "o1": "2.05", "o2": "1.72"}], у
+форы line — игрока 1) совпали, а строки «Не понял» с причиной (четвертная линия, тотал
+между 5 и 15 — "unknown": ["quarter", "total_unit"]) — тоже. Остальные поля пары
+(source, check) не читаются: их пишет черновик. Эталон новых рынков —
+backend/tests/fixtures/parse_markets.json.
 
 Черновик эталона (draft_pairs) — из экспорта чата Telegram Desktop (result.json,
 messages[].text — строка или список кусков): сообщения владельца в формате бота (строка
@@ -46,8 +52,15 @@ from app.agent.prompts import PARSE_PROMPT, load_prompt
 from app.agent.runs import price_for, record_run, worst_case_usd
 from app.agent.schemas import ParsedInput
 from app.db.models import Player
+from app.ml.markets import extra_into, is_market, to_line
 from app.ml.sets import MARKETS
-from app.services.analysis_input import OddsMap, parsed_odds, resolve_player, to_odds
+from app.services.analysis_input import (
+    OddsMap,
+    parsed_lines,
+    parsed_odds,
+    resolve_player,
+    to_odds,
+)
 
 # Сообщений, которые разбираются одновременно
 CONCURRENCY = 4
@@ -79,11 +92,17 @@ class PairsError(Exception):
 PlayerRef = str | int
 
 
+# Спорная фора: линия игрока 1 и кэфы Ф1, Ф2
+DisputedKey = tuple[Decimal, Decimal | None, Decimal | None]
+
+
 @dataclass(frozen=True)
 class ExpectedEvent:
     player1: PlayerRef
     player2: PlayerRef
     odds: OddsMap
+    disputed: tuple[DisputedKey, ...] = ()
+    unknown: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -108,11 +127,11 @@ def _odds(value: Any, number: int, event: int) -> OddsMap:
         value = {}
     if not isinstance(value, dict):
         raise PairsError("odds", pair=number, event=event)
-    unknown = sorted(set(value) - set(MARKETS))
+    unknown = sorted(market for market in value if not is_market(str(market)))
     if unknown:
         raise PairsError("market", pair=number, event=event, market=unknown[0])
     found: OddsMap = {}
-    for market in MARKETS:
+    for market in [*MARKETS, *(key for key in value if key not in MARKETS)]:
         pair = value.get(market, [None, None])
         if not isinstance(pair, list) or len(pair) != 2:
             raise PairsError("odds", pair=number, event=event)
@@ -124,6 +143,44 @@ def _odds(value: Any, number: int, event: int) -> OddsMap:
             sides.append(odds)
         found[market] = sides
     return found
+
+
+def _disputed(value: Any, number: int, event: int) -> tuple[DisputedKey, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise PairsError("odds", pair=number, event=event)
+    found: list[DisputedKey] = []
+    for item in value:
+        line = to_line(item.get("line")) if isinstance(item, dict) else None
+        if line is None or not isinstance(item, dict):
+            raise PairsError("odds", pair=number, event=event)
+        found.append((line, to_odds(item.get("o1")), to_odds(item.get("o2"))))
+    return tuple(found)
+
+
+def _unknown(value: Any, number: int, event: int) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise PairsError("odds", pair=number, event=event)
+    return tuple(value)
+
+
+def parsed_market_odds(odds: Any) -> tuple[OddsMap, tuple[DisputedKey, ...], tuple[str, ...]]:
+    """Кэфы разбора всеми рынками (как черновик анализа), спорные форы и причины «Не
+    понял» (последняя часть ключа analysis.draft.unknown.*)."""
+    found = parsed_odds(odds)
+    lines = parsed_lines(odds)
+    for market, pair in lines.base.items():
+        current = found.setdefault(market, [None, None])
+        found[market] = [
+            old if old is not None else new for old, new in zip(current, pair, strict=True)
+        ]
+    extra_into(found, lines.extra)
+    disputed = tuple((item.line, item.o1, item.o2) for item in lines.disputed)
+    reasons = tuple(reason.rsplit(".", 1)[-1] for _, _, reason in lines.unknown)
+    return found, disputed, reasons
 
 
 def load_pairs(raw: Any) -> list[Pair]:
@@ -150,6 +207,8 @@ def load_pairs(raw: Any) -> list[Pair]:
                     player1=_player_ref(event.get("player1"), number, index, 1),
                     player2=_player_ref(event.get("player2"), number, index, 2),
                     odds=_odds(event.get("odds"), number, index),
+                    disputed=_disputed(event.get("disputed"), number, index),
+                    unknown=_unknown(event.get("unknown"), number, index),
                 )
             )
         pairs.append(Pair(number=number, text=text, events=tuple(parsed_events)))
@@ -219,10 +278,11 @@ async def compare(
                         },
                     )
                 )
-        odds = parsed_odds(event.odds)
-        for market in MARKETS:
+        odds, disputed, reasons = parsed_market_odds(event.odds)
+        markets = [*MARKETS, *(m for m in [*odds, *want.odds] if m not in MARKETS)]
+        for market in dict.fromkeys(markets):
             for side in (1, 2):
-                have = odds[market][side - 1]
+                have = odds.get(market, [None, None])[side - 1]
                 need = want.odds.get(market, [None, None])[side - 1]
                 if have != need:
                     diffs.append(
@@ -237,7 +297,41 @@ async def compare(
                             },
                         )
                     )
+        if sorted(disputed, key=_dispute_order) != sorted(want.disputed, key=_dispute_order):
+            diffs.append(
+                (
+                    "disputed",
+                    {
+                        "event": index,
+                        "expected": _disputed_text(want.disputed),
+                        "parsed": _disputed_text(disputed),
+                    },
+                )
+            )
+        if sorted(reasons) != sorted(want.unknown):
+            diffs.append(
+                (
+                    "unknown",
+                    {
+                        "event": index,
+                        "expected": ", ".join(sorted(want.unknown)) or "—",
+                        "parsed": ", ".join(sorted(reasons)) or "—",
+                    },
+                )
+            )
     return diffs
+
+
+def _dispute_order(item: DisputedKey) -> tuple[Decimal, str, str]:
+    return item[0], str(item[1]), str(item[2])
+
+
+def _disputed_text(items: Sequence[DisputedKey]) -> str:
+    if not items:
+        return "—"
+    return "; ".join(
+        f"{line.normalize():f}: {_odds_text(o1)} / {_odds_text(o2)}" for line, o1, o2 in items
+    )
 
 
 # --- вызовы ---
@@ -507,13 +601,24 @@ async def draft_pair(
                             },
                         }
                     )
-            events.append(
-                {
-                    "player1": names[0],
-                    "player2": names[1],
-                    "odds": _odds_json(parsed_odds(event.odds)),
-                }
-            )
+            odds, disputed, reasons = parsed_market_odds(event.odds)
+            item: dict[str, Any] = {
+                "player1": names[0],
+                "player2": names[1],
+                "odds": _odds_json(odds),
+            }
+            if disputed:
+                item["disputed"] = [
+                    {
+                        "line": f"{line.normalize():f}",
+                        "o1": _odds_json_value(o1),
+                        "o2": _odds_json_value(o2),
+                    }
+                    for line, o1, o2 in disputed
+                ]
+            if reasons:
+                item["unknown"] = list(reasons)
+            events.append(item)
         for line in outcome.parsed.unknown_lines:
             checks.append(
                 {"key": "unknown_line", "params": {"line": line.line_no, "text": line.text}}

@@ -885,8 +885,16 @@ def _match_rules() -> dict[str, tuple[_MatchRule, tuple[str, ...]]]:
 
 
 def _flipped(table: Table, flip: bool) -> Any:
+    """Сторона исхода при слиянии матчей с обменом игроков: у тоталов (STOT_, GTOT_, Р28)
+    сторона — больше или меньше, она не меняется."""
     selection = table.c["selection"]
-    return 3 - selection if flip else selection
+    if not flip:
+        return selection
+    market = table.c["market"]
+    total = or_(
+        market.startswith("STOT_", autoescape=True), market.startswith("GTOT_", autoescape=True)
+    )
+    return case((total, selection), else_=3 - selection)
 
 
 async def _merge_matches(

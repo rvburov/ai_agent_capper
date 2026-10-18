@@ -19,7 +19,10 @@ strategy_versions.params (StrategyParams.from_params / to_params), значен�
 (решение В7, Р24): они опираются на шум.
 
 Рынки на проверке (SUSPENDED_MARKETS, сейчас пусто) в экспресс и сумму не идут при
-любых params.markets: модель сетов их завышает (PLAN.md, Р28).
+любых params.markets: модель сетов их завышает (PLAN.md, Р28). Новые рынки Р28 (фора ±2.5,
+тоталы, рынки по геймам) — «для сравнения»: в params.markets их нет, в экспресс и
+варианты они попадают, только когда администратор перевел семейство в экспресс
+(app_settings.express_markets, express_codes). Целая линия: валуй = p·кэф + P(возврат) − 1.
 
 Ординары и «Экспресс из лучших» (Р29) считаются той же функцией stake с другой таблицей:
 ординар — своя таблица single_bands (кэф до 1.60 — 1,5% банка, 1.61–2.20 — 1,25%, от
@@ -38,7 +41,15 @@ from types import MappingProxyType
 from typing import Any, Literal, Protocol, Self
 
 from app.core.i18n import t
-from app.ml.sets import MARKET_MINUS, MARKETS, PROBS3_FIELDS, SHOWN_DIGITS, Probs3
+from app.ml.markets import MODEL_FAMILIES, NEW_FAMILIES, is_market, market_spec
+from app.ml.sets import (
+    MARKET_MINUS,
+    MARKETS,
+    PROBS3_FIELDS,
+    SHOWN_DIGITS,
+    Probs3,
+    market_prob,
+)
 
 CURRENCIES: tuple[str, ...] = ("RUB", "USD", "EUR")
 # Ключи правил адаптации суммы в params.adapt (карточка «Адаптации ставки» макета)
@@ -57,6 +68,10 @@ BLOCKING_FLAGS: tuple[str, ...] = ("injury", "fatigue")
 # проверке 17–18.10.2026 (модель сетов завышала вероятность взять сет на 4–9 п.п.) и
 # вернулся по решению владельца после поправки модели сетов (PLAN.md, Р28).
 SUSPENDED_MARKETS: frozenset[str] = frozenset()
+# Статусы рынка (Р28): идет в экспресс, на проверке, «для сравнения»
+STATUS_EXPRESS = "express"
+STATUS_SUSPENDED = "suspended"
+STATUS_COMPARE = "compare"
 # Градации валуя (шаг 3): не меньше порога → уровень; больше 0 — low, иначе none
 VALUE_TIERS: tuple[tuple[str, float], ...] = (("strong", 0.15), ("good", 0.10), ("small", 0.05))
 # Сколько знаков сравнивать у float на стыках (|p_claude − p_base| = 0,08 ровно — не
@@ -79,9 +94,10 @@ def _dec(value: Decimal | float | int | str) -> Decimal:
 # --- валуй и маржа ---
 
 
-def value(p: float, odds: Decimal | float) -> float:
-    """Валуй исхода: p·кэф − 1 (больше 0 — ставка с перевесом)."""
-    return float(_dec(p) * _dec(odds) - 1)
+def value(p: float, odds: Decimal | float, push: float = 0.0) -> float:
+    """Валуй исхода: p·кэф + P(возврат) − 1 (больше 0 — ставка с перевесом). push —
+    вероятность возврата («ровно» на целой линии), у половинной линии 0."""
+    return float(_dec(p) * _dec(odds) + _dec(push) - 1)
 
 
 def value_tier(value: float) -> str:
@@ -559,11 +575,13 @@ class Leg:
     odds: Decimal
     value: float
     blocks: tuple[str, ...] = ()
+    # Вероятность возврата (целая линия, «ровно»)
+    push: float = 0.0
 
     @property
     def edge(self) -> float:
-        """Перевес p·кэф, как у Outcome бэктеста: больше 1 — есть валуй."""
-        return self.p * float(self.odds)
+        """Перевес p·кэф + P(возврат), как у Outcome бэктеста: больше 1 — есть валуй."""
+        return self.p * float(self.odds) + self.push
 
 
 def make_leg(
@@ -574,9 +592,10 @@ def make_leg(
     odds: Decimal,
     *,
     blocks: Sequence[str] = (),
+    push: float = 0.0,
 ) -> Leg:
     """Leg с посчитанным валуем."""
-    return Leg(match_id, market, selection, p, odds, value(p, odds), tuple(blocks))
+    return Leg(match_id, market, selection, p, odds, value(p, odds, push), tuple(blocks), push)
 
 
 def selection_blocks(
@@ -595,6 +614,49 @@ def selection_blocks(
     return tuple(blocks)
 
 
+def market_status(code: str, promoted: Iterable[str] = ()) -> str:
+    """Статус рынка: suspended — на проверке (SUSPENDED_MARKETS); compare — новое семейство
+    Р28, которое администратор не перевел в экспресс (или у него нет вероятности модели);
+    иначе express. Список рынков версии стратегии (params.markets) статус не меняет: его
+    объясняет note_key строки."""
+    if code in SUSPENDED_MARKETS:
+        return STATUS_SUSPENDED
+    spec = market_spec(code)
+    if spec.is_new and (spec.family not in set(promoted) or not spec.has_model):
+        return STATUS_COMPARE
+    return STATUS_EXPRESS
+
+
+def market_meta(code: str, promoted: Iterable[str] = ()) -> dict[str, Any]:
+    """Поля строки рынка, которые выводятся из кода и текущих списков (MarketRow): семейство,
+    линия, статус, на проверке, есть ли вероятность модели."""
+    spec = market_spec(code)
+    status = market_status(code, promoted)
+    return {
+        "family": spec.family,
+        "line": float(spec.line) if spec.line is not None else None,
+        "status": status,
+        "suspended": status == STATUS_SUSPENDED,
+        "has_model": spec.has_model,
+    }
+
+
+def express_codes(
+    codes: Iterable[str], params: StrategyParams, promoted: Iterable[str] = ()
+) -> tuple[str, ...]:
+    """Рынки, которые отбор может взять в экспресс: из params.markets и рынки новых
+    семейств, которые администратор перевел в экспресс (promoted, Р28), если у них есть
+    вероятность модели. codes — рынки с кэфами; порядок — params.markets, потом codes."""
+    allowed = set(promoted) & set(NEW_FAMILIES) & set(MODEL_FAMILIES)
+    found = list(params.markets)
+    for code in codes:
+        if code in found or not is_market(code):
+            continue
+        if market_spec(code).family in allowed:
+            found.append(code)
+    return tuple(found)
+
+
 def legs_for_match(
     match_id: int,
     probs: Probs3,
@@ -602,31 +664,33 @@ def legs_for_match(
     params: StrategyParams,
     *,
     blocks: Mapping[int, Sequence[str]] | None = None,
+    best_of: int | None = None,
+    markets: Sequence[str] | None = None,
 ) -> list[Leg]:
     """Исходы матча с кэфами участника: odds — рынок → [кэф на игрока 1, на игрока 2]
-    (None — кэфа нет), как в analyses.confirmed; рынки — только из params.markets.
-    Рынок на проверке (SUSPENDED_MARKETS) тоже дает исход: его не берет отбор, а экран
-    объясняет причину (leg_issues). blocks — selection → причины (selection_blocks)."""
-    probabilities = probs.markets()
+    (None — кэфа нет), как в analyses.confirmed; рынки — из markets (по умолчанию
+    params.markets; с новыми семействами — express_codes). Рынок на проверке
+    (SUSPENDED_MARKETS) тоже дает исход: его не берет отбор, а экран объясняет причину
+    (leg_issues). blocks — selection → причины (selection_blocks). best_of нужен рынкам
+    кроме ML и фор ±1.5; рынок без вероятности модели исхода не дает."""
     legs: list[Leg] = []
-    for market in params.markets:
+    for market in markets if markets is not None else params.markets:
         pair = odds.get(market)
         if not pair:
             continue
         for selection, price in enumerate(pair, start=1):
             if price is None or price <= 1:
                 continue
+            if market in MARKETS:
+                p: float | None = probs.markets()[(market, selection)]
+            elif best_of is None:
+                continue
+            else:
+                p = market_prob(probs, best_of, market, selection)
+            if p is None:
+                continue
             reasons = tuple((blocks or {}).get(selection, ()))
-            legs.append(
-                make_leg(
-                    match_id,
-                    market,
-                    selection,
-                    probabilities[(market, selection)],
-                    price,
-                    blocks=reasons,
-                )
-            )
+            legs.append(make_leg(match_id, market, selection, p, price, blocks=reasons))
     return legs
 
 
@@ -666,11 +730,11 @@ def _qualifies(item: Pick, limits: _Limits) -> bool:
     )
 
 
-def _market_rank(market: str) -> int:
-    return MARKETS.index(market) if market in MARKETS else len(MARKETS)
+def _market_rank(market: str) -> tuple[int, str]:
+    return (MARKETS.index(market), "") if market in MARKETS else (len(MARKETS), market)
 
 
-def _by_edge(item: Pick) -> tuple[float, int, int, int]:
+def _by_edge(item: Pick) -> tuple[float, int, tuple[int, str], int]:
     return (-item.edge, item.match_id, _market_rank(item.market), item.selection)
 
 

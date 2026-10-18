@@ -359,8 +359,8 @@ def suspend_plus(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ф(+1.5) на проверке: механизм SUSPENDED_MARKETS (сейчас список пуст) проверяется
     на этом рынке. Имя импортировано в нескольких модулях — подменяется в каждом."""
     from app.ml import strategy, variants
-    from app.services import analysis_result, analysis_view
+    from app.services import analyses, market_stats
 
     markets = frozenset({"HCP_+1.5"})
-    for module in (strategy, variants, analysis_result, analysis_view):
+    for module in (strategy, variants, analyses, market_stats):
         monkeypatch.setattr(module, "SUSPENDED_MARKETS", markets)

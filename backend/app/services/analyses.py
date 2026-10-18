@@ -47,7 +47,8 @@ from app.db.models import (
     User,
 )
 from app.db.session import create_sessionmaker
-from app.ml.strategy import StrategyParams, margin
+from app.ml.markets import extra_into
+from app.ml.strategy import SUSPENDED_MARKETS, StrategyParams, express_codes, margin
 from app.schemas.analyses import (
     AnalysisListItem,
     AnalysisListOut,
@@ -80,10 +81,12 @@ from app.services.analysis_input import (
     Confirmed,
     ConfirmedEvent,
     EventDraft,
+    OddsMap,
     Problem,
     archive_date,
     attach_matches,
     check_events,
+    extra_problems,
     find_match,
     money,
     odds_snapshots,
@@ -103,7 +106,7 @@ from app.services.analysis_run import (
     running_claude_steps,
 )
 from app.services.analysis_view import access_out, analysis_out, parse_cost, progress_event
-from app.services.app_settings import check_currency, get_app_settings
+from app.services.app_settings import check_currency, express_families, get_app_settings
 from app.services.bank import CURRENCY_LOCK
 from app.services.claude_key import key_for
 from app.services.progress import publish
@@ -343,12 +346,15 @@ class Estimate:
 
 def _drafts(events: Sequence[EventIn]) -> list[EventDraft]:
     drafts: list[EventDraft] = []
-    for event in events:
-        odds = {
+    for position, event in enumerate(events, start=1):
+        odds: OddsMap = {
             "ML": [to_odds(value) for value in event.odds.ml],
             "HCP_-1.5": [to_odds(value) for value in event.odds.minus],
             "HCP_+1.5": [to_odds(value) for value in event.odds.plus],
         }
+        # Р28: «Другие рынки» — в ту же карту кэфов кодами рынков с линией
+        extra, extra_errors = extra_problems(event.extra, position=position)
+        extra_into(odds, extra)
         drafts.append(
             EventDraft(
                 player1_id=event.player1_id,
@@ -361,6 +367,8 @@ def _drafts(events: Sequence[EventIn]) -> list[EventDraft]:
                 odds=odds,
                 bookmaker=event.bookmaker or None,
                 line_no=event.line_no,
+                extra_problems=tuple(extra_errors),
+                disputed=len(event.disputed),
             )
         )
     return drafts
@@ -566,7 +574,7 @@ async def _input_drafts(analysis: Analysis, body: ConfirmIn | None) -> list[Even
 
 def _fair_out(fair: dict[tuple[str, int], float]) -> list[FairOut]:
     return [
-        FairOut(market=market, selection=selection, q=round(q, 4))  # type: ignore[arg-type]
+        FairOut(market=market, selection=selection, q=round(q, 4))
         for (market, selection), q in sorted(fair.items())
     ]
 
@@ -584,11 +592,17 @@ def _margins(event: EventDraft) -> tuple[float | None, float | None]:
     return margin_ml, margin_hcp
 
 
-def _corridor(event: EventDraft, params: StrategyParams) -> list[CorridorOut]:
+def _corridor(
+    event: EventDraft, params: StrategyParams, promoted: Sequence[str] = ()
+) -> list[CorridorOut]:
+    """Кэфы в коридоре стратегии — только у рынков, которые идут в экспресс (не на
+    проверке и не «для сравнения», Р28)."""
     low, high = params.leg_odds
+    allowed = set(express_codes(event.odds, params, promoted)) - SUSPENDED_MARKETS
     return [
-        CorridorOut(market=market, selection=selection, odds=short_odds(value))  # type: ignore[arg-type]
+        CorridorOut(market=market, selection=selection, odds=short_odds(value))
         for market, pair in event.odds.items()
+        if market in allowed
         for selection, value in enumerate(pair, start=1)
         if value is not None and low <= value <= high
     ]
@@ -605,6 +619,7 @@ async def preview(
     config = await load_agent_config(db)
     version = await active_version(db, user.id)
     params = params_of(version)
+    promoted = express_families(await get_app_settings(db))
     drafts = await _input_drafts(analysis, body)
     confirmed, problems = await check_events(db, drafts, today=today)
     estimate = await estimate_run(
@@ -645,7 +660,7 @@ async def preview(
                 margin_ml=margin_ml,
                 margin_hcp=margin_hcp,
                 market_p=_fair_out(fair_probs(draft.odds)),
-                in_corridor=_corridor(draft, params),
+                in_corridor=_corridor(draft, params, promoted),
                 players=players,
                 reused=position in estimate.reused,
                 problems=[

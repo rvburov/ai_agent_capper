@@ -114,7 +114,11 @@ async def test_text_is_parsed_into_draft(
     assert first.surface == "hard"
     raw = response.json()["draft"]["events"][0]["odds"]
     assert raw == {"ML": ["1.30", "3.60"], "HCP_-1.5": ["1.62", None], "HCP_+1.5": [None, "2.30"]}
-    assert [line.text for line in draft.unknown_lines] == ["Тотал больше 22.5 = 1.80"]
+    # Р28: тотал без «сет» и «гейм» от 15 — тотал геймов («Другие рынки»), не «Не понял»
+    assert draft.unknown_lines == []
+    assert response.json()["draft"]["events"][1]["extra"] == [
+        {"market": "gtot", "line": 22.5, "o1": "1.80", "o2": None}
+    ]
     assert draft.parse_cost_usd > 0
     runs = list(await db.scalars(select(AgentRun).where(AgentRun.analysis_id == data.id)))
     assert [(run.kind, run.model, run.key_source) for run in runs] == [

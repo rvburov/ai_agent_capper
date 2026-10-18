@@ -32,6 +32,7 @@ NotificationKind = Literal[
     "settle_conflict",
     "weekly_report",
     "learning",
+    "market_ready",
 ]
 Currency = Literal["RUB", "USD", "EUR"]
 

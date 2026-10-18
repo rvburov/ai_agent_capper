@@ -51,6 +51,7 @@ PUBLISHED = {
     "news_request.v2": "4ec0f4d796e31bb8faf017e83edc173509a786c92ab182f3691fb5d70dceb026",
     "news_retry.v1": "a3f33a19f390523250626ff698135b6f1ec015123678052f7ae4d5b447917f4f",
     "parse_input.v1": "7bbb18f5a817f99878923cde98a05014850f9f6597f919ce2aa71a66f710c5bb",
+    "parse_input.v2": "062d36ea1f6cc3a93d343a1a8c552f45a7017f9280b1aae9d67b1bc042bf07d7",
     "postmortem.v1": "5c693bfaac5850f257dbf97c3d11030553396c2a3dc3abfb4ce28ddb084d1fcf",
     "postmortem_request.v1": "f1b04fcf1b18bbfd8f643a00b6a48f960a072b6c4038b73c878f476df844c184",
 }

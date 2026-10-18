@@ -28,7 +28,7 @@ SINNER_RUNE = """Текущий банк: 10 000 ₽
 События:
 Jannik Sinner vs Holger Rune, Shanghai, хард, 1/8
 Кэфы: П1 = 1.17, П2 = 5.10
-Фора: П1(-1.5) = 1.62, П2(+1.5) = 2.30"""
+Фора по сетам: П1(-1.5) = 1.62, П2(+1.5) = 2.30"""
 
 TWO_EVENTS = """Djokovic vs Rublev, Paris, хард
 Кэфы: П1 = 1.45, П2 = 2.80
@@ -125,7 +125,7 @@ def _write(path: Path, data: Any) -> str:
                     "text": "a",
                     "expected": {
                         "events": [
-                            {"player1": "A", "player2": "B", "odds": {"HCP_-2.5": [None, None]}}
+                            {"player1": "A", "player2": "B", "odds": {"HCP_-3.5": [None, None]}}
                         ]
                     },
                 }
@@ -363,7 +363,7 @@ def test_telegram_messages() -> None:
 BOT_HELP = (
     "Tennis Analytics Bot\n\nОтправьте матчи в формате:\n\nТекущий банк: 10 000₽\n"
     "Букмекер: Лига Ставок\n\nСобытия:\nСиннер vs Медведев, Рим, грунт\n"
-    "Кэфы: П1 = 1.35, П2 = 3.10\nФора: П1(-1.5) = 1.80, П2(+1.5) = 1.95\n\n"
+    "Кэфы: П1 = 1.35, П2 = 3.10\nФора по сетам: П1(-1.5) = 1.80, П2(+1.5) = 1.95\n\n"
     "/статистика — банк и винрейт\n/игроки — список базы\n/результат — внести итог ставки"
 )
 
@@ -409,7 +409,7 @@ async def test_draft_from_telegram_then_eval(
                 "id": 8,
                 "type": "message",
                 "text": (
-                    "Хольгерр Рунеее vs Синнер\nКэфы: П1 = 5.1, П2 = 1.17\nТотал больше 22.5 = 1.9"
+                    "Хольгерр Рунеее vs Синнер\nКэфы: П1 = 5.1, П2 = 1.17\nТочный счет 2:0 = 3.1"
                 ),
             },
             {"id": 9, "type": "message", "text": "просто текст"},
@@ -449,7 +449,7 @@ async def test_draft_from_telegram_then_eval(
     ]
     assert drafts[0]["source"] == {"message_id": 7, "date": "2025-03-01T10:00:00"}
     checks = " ".join(drafts[1]["check"])
-    assert "не разобрана" in checks and "Тотал" in checks
+    assert "не разобрана" in checks and "Точный счет" in checks
     assert (
         await db.scalar(select(func.count()).select_from(AgentRun).where(AgentRun.kind == "eval"))
         == 2
@@ -468,3 +468,42 @@ async def test_draft_from_telegram_then_eval(
         == 1
     )
     assert "нет сообщений владельца в формате бота" in capsys.readouterr().err
+
+
+# --- Р28: эталон новых рынков ---
+
+MARKETS_PAIRS = Path(__file__).parent / "fixtures" / "parse_markets.json"
+
+
+async def test_markets_pairs_on_fake_parse(db: AsyncSession, world: dict[str, int]) -> None:
+    """Эталон новых рынков (33 сообщения): форы и тоталы сетов и геймов, целые линии,
+    спорная фора без «сет» и «гейм», четвертная линия и тотал между 5 и 15 в «Не понял».
+    Поддельный разбор следует правилам parse_input.v2; сверка — та же, что у parse-eval
+    на настоящем Haiku (код сводит строки разбора к рынкам, как черновик анализа)."""
+    pairs = parse_eval.load_pairs(json.loads(MARKETS_PAIRS.read_text(encoding="utf-8")))
+    assert len(pairs) >= 30
+    families: set[str] = set()
+    for pair in pairs:
+        parsed = ParsedInput.model_validate(parse_text(pair.text))
+        assert await parse_eval.compare(db, parsed, pair.events) == [], pair.number
+        families |= {market.split("_")[0] for event in pair.events for market in event.odds}
+    assert families >= {"ML", "HCP", "STOT", "GHCP", "GTOT"}
+    assert any(event.disputed for pair in pairs for event in pair.events)
+    assert {"quarter", "total_unit"} <= {
+        reason for pair in pairs for event in pair.events for reason in event.unknown
+    }
+
+
+async def test_markets_diff_texts(db: AsyncSession, world: dict[str, int]) -> None:
+    """Расхождение по новому рынку и по спорной форе видно в сверке."""
+    pairs = parse_eval.load_pairs(json.loads(MARKETS_PAIRS.read_text(encoding="utf-8")))
+    first = pairs[0]
+    parsed = ParsedInput.model_validate(parse_text(first.text.replace("М(22.5) = 1.90", "")))
+    diffs = await parse_eval.compare(db, parsed, first.events)
+    assert ("odds", {"event": 1, "market": "GTOT_22.5", "side": 2, "expected": "1.9",
+                     "parsed": "—"}) in diffs  # fmt: skip
+    disputed = next(pair for pair in pairs if pair.events[0].disputed)
+    parsed = ParsedInput.model_validate(parse_text(disputed.text.replace("Ф1(-1.5)", "П1(-1)")))
+    kinds = [kind for kind, _ in await parse_eval.compare(db, parsed, disputed.events)]
+    assert "disputed" in kinds and "odds" in kinds
+    assert acceptance._market("GTOT_22.5", 2) == "GTOT_22.5, сторона 2"

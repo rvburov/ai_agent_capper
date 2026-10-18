@@ -1384,3 +1384,77 @@ async def test_quiet_hours_off_migration(settings: Settings) -> None:
                 await conn.run_sync(run_alembic_upgrade, "head")
         finally:
             await engine.dispose()
+
+
+async def test_new_markets_migration(settings: Settings) -> None:
+    """0013 → 0014 (Р28): счет ноги до 64 символов (счет по геймам), семейства новых рынков
+    в экспрессе (только известные) и вид уведомления market_ready. Откат обрезает длинный
+    счет, удаляет уведомления market_ready и столбцы настроек; повторный upgrade проходит."""
+    async with _temp_database(settings, "markets") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0013")
+                await conn.execute(text("INSERT INTO users (email) VALUES ('m@example.com')"))
+                await conn.execute(
+                    text("INSERT INTO players (name) VALUES ('Sinner J.'), ('Alcaraz C.')")
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO matches (player1_id, player2_id, source, source_ref)"
+                        " VALUES (1, 2, 'user', 'm1')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO bets (user_id, placed_at, bookmaker, stake, currency,"
+                        " total_odds, status, source, source_ref) VALUES"
+                        " (1, '2026-10-01', 'Fonbet', 100, 'RUB', 1.8, 'open', 'app', 'c1')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO bet_legs (bet_id, match_id, market, selection, odds_taken,"
+                        " score) VALUES (1, 1, 'ML', 1, 1.8, '2:1')"
+                    )
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+                # Миграция не ждет блокировку дольше 5 с (SET LOCAL — до конца транзакции)
+                assert await conn.scalar(text("SHOW lock_timeout")) == "5s"
+            long_score = "7:6 6:7 7:6 6:7 13:11 extra-long-score"
+            async with engine.begin() as conn:
+                assert await conn.scalar(text("SELECT score FROM bet_legs")) == "2:1"
+                await conn.execute(
+                    text("UPDATE bet_legs SET market = 'GTOT_22', score = :score"),
+                    {"score": long_score},
+                )
+                assert await conn.scalar(text("SELECT express_markets FROM app_settings")) == []
+                await conn.execute(text("UPDATE app_settings SET express_markets = '{stot}'"))
+                assert await _refused(conn, "UPDATE app_settings SET express_markets = '{ml}'")
+                await conn.execute(
+                    text(
+                        "INSERT INTO notifications (user_id, kind, title) VALUES"
+                        " (1, 'market_ready', 'x'), (1, 'learning', 'y')"
+                    )
+                )
+                assert await _refused(
+                    conn, "INSERT INTO notifications (user_id, kind, title) VALUES (1, 'z', 'z')"
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0013")
+                assert await conn.scalar(text("SHOW lock_timeout")) == "5s"
+            async with engine.begin() as conn:
+                assert await conn.scalar(text("SHOW lock_timeout")) == "0"
+                assert await conn.scalar(text("SELECT score FROM bet_legs")) == long_score[:32]
+                kinds = await conn.execute(text("SELECT kind FROM notifications"))
+                assert list(kinds.scalars()) == ["learning"]
+                columns = await conn.run_sync(
+                    lambda sync: {
+                        item["name"] for item in inspect(sync).get_columns("app_settings")
+                    }
+                )
+                assert not {"express_markets", "markets_notified"} & columns
+                await conn.run_sync(run_alembic_upgrade, "head")
+        finally:
+            await engine.dispose()

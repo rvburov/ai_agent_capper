@@ -27,6 +27,7 @@ from app.api.routes import (
     health,
     learning,
     lessons,
+    markets,
     me,
     players,
     push,
@@ -57,6 +58,7 @@ api_router.include_router(analyses.router)
 api_router.include_router(bets.router)
 api_router.include_router(bank.router)
 api_router.include_router(analytics.router)
+api_router.include_router(markets.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(players.router)
 api_router.include_router(strategy.router)

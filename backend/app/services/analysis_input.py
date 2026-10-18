@@ -11,6 +11,12 @@
 matches.source = 'user' с source_ref «user:<дата>:<min id>:<max id>»: два участника,
 которые ввели один матч, получат одну строку. Порядок игроков события подстраивается
 под матч: прогнозы считаются со стороны matches.player1_id (кэфы переставляются).
+
+Кэфы (OddsMap) — рынок → [сторона 1, сторона 2] для любых рынков Р28: ML и форы ±1.5
+(прежние поля формы) и «Другие рынки» (extra, app/ml/markets.py: фора ±2.5, тоталы сетов,
+форы и тоталы геймов). В analyses.confirmed (format 2) прежние рынки лежат в odds, новые —
+списком extra строками формы (у jsonb нет порядка ключей); анализы без format читаются как
+раньше. При перемене игроков местами у фор меняется сторона, у тоталов — нет.
 """
 
 import re
@@ -30,6 +36,15 @@ from app.db.models import Match, OddsSnapshot, Player, PlayerEloCurrent, Tournam
 from app.ingest.names import fold
 from app.ingest.rounds import ROUNDS
 from app.ml.elo import RESULT_STATUSES
+from app.ml.markets import (
+    ExtraLine,
+    extra_into,
+    extra_lines,
+    fits_format,
+    is_market,
+    swapped_side,
+    to_line,
+)
 from app.ml.sets import MARKETS
 from app.services.dossier import UNDATED_DAYS
 from app.services.players import PlayerError, search_players
@@ -437,6 +452,8 @@ def short_odds(value: Decimal) -> Decimal:
 
 
 OddsMap = dict[str, list[Decimal | None]]
+# Версия формата analyses.confirmed: 2 — новые рынки Р28 списком extra
+CONFIRMED_FORMAT = 2
 
 
 def empty_odds() -> OddsMap:
@@ -444,7 +461,8 @@ def empty_odds() -> OddsMap:
 
 
 def parsed_odds(odds: Any) -> OddsMap:
-    """Кэфы ответа разбора → рынок: [на игрока 1, на игрока 2]."""
+    """Кэфы ответа разбора → рынок: [на игрока 1, на игрока 2] (ML и форы ±1.5 по сетам;
+    строки других рынков разбирает parsed_lines)."""
     return {
         "ML": [to_odds(odds.ml1), to_odds(odds.ml2)],
         "HCP_-1.5": [to_odds(odds.h1_minus), to_odds(odds.h2_minus)],
@@ -452,38 +470,120 @@ def parsed_odds(odds: Any) -> OddsMap:
     }
 
 
-def odds_from_json(raw: Mapping[str, Any]) -> OddsMap:
-    """Кэфы из analyses.confirmed (строки Decimal)."""
+def _pair(raw: Any) -> list[Decimal | None]:
+    pair = list(raw or [None, None])
+    return [
+        to_odds(pair[0]) if len(pair) > 0 else None,
+        to_odds(pair[1]) if len(pair) > 1 else None,
+    ]
+
+
+def extra_from_json(raw: Any) -> list[ExtraLine]:
+    """Строки «Другие рынки» из analyses.confirmed; неверная строка пропускается."""
+    found: list[ExtraLine] = []
+    for item in raw or []:
+        if not isinstance(item, Mapping):
+            continue
+        line = to_line(item.get("line"))
+        if line is None:
+            continue
+        row = ExtraLine(
+            str(item.get("market")), line, to_odds(item.get("o1")), to_odds(item.get("o2"))
+        )
+        try:
+            row.codes()
+        except ValueError:
+            continue
+        found.append(row)
+    return found
+
+
+def odds_from_json(raw: Mapping[str, Any], extra: Any = None) -> OddsMap:
+    """Кэфы из analyses.confirmed (строки Decimal): прежние рынки из odds, новые — из
+    extra (format 2)."""
     found = empty_odds()
     for market in MARKETS:
-        pair = raw.get(market) or [None, None]
-        found[market] = [
-            to_odds(pair[0]) if len(pair) > 0 else None,
-            to_odds(pair[1]) if len(pair) > 1 else None,
-        ]
+        found[market] = _pair(raw.get(market))
+    extra_into(found, extra_from_json(extra))
     return found
 
 
 def odds_to_json(odds: Mapping[str, Sequence[Decimal | None]]) -> dict[str, list[str | None]]:
+    """Прежние рынки (ML, форы ±1.5) для analyses.confirmed.odds."""
     return {
         market: [str(value) if value is not None else None for value in odds.get(market, ())]
         for market in MARKETS
     }
 
 
+def extra_to_json(odds: Mapping[str, Sequence[Decimal | None]]) -> list[dict[str, Any]]:
+    """Новые рынки для analyses.confirmed.extra: строки формы по порядку ввода."""
+    return [
+        {
+            "market": row.family,
+            "line": str(row.line),
+            "o1": str(row.o1) if row.o1 is not None else None,
+            "o2": str(row.o2) if row.o2 is not None else None,
+        }
+        for row in extra_lines(odds)
+    ]
+
+
 def swapped_odds(odds: Mapping[str, Sequence[Decimal | None]]) -> OddsMap:
-    """Кэфы со стороны другого игрока: пары переставлены."""
-    return {market: list(reversed(list(odds.get(market, [None, None])))) for market in MARKETS}
+    """Кэфы со стороны другого игрока: у ML и фор пары переставлены (линия фор — у
+    выбранной стороны, поэтому код рынка тот же), у тоталов — нет."""
+    found: OddsMap = {}
+    for market, pair in odds.items():
+        values: list[Decimal | None] = list(pair) if pair else [None, None]
+        if is_market(market) and swapped_side(market, 1) == 1:
+            found[market] = values
+        else:
+            found[market] = list(reversed(values))
+    for market in MARKETS:
+        found.setdefault(market, [None, None])
+    return found
 
 
 def odds_problems(odds: Mapping[str, Sequence[Decimal | None]]) -> list[tuple[str, Decimal]]:
     """Кэфы вне 1.01–50: (рынок, кэф)."""
     return [
         (market, value)
-        for market in MARKETS
-        for value in odds.get(market, ())
+        for market, pair in odds.items()
+        for value in pair
         if value is not None and not odds_ok(value)
     ]
+
+
+def extra_problems(
+    rows: Sequence[Any], *, position: int
+) -> tuple[list[ExtraLine], list["Problem"]]:
+    """Строки «Другие рынки» из запроса (ExtraOddsIn): годные и ошибки. Четвертная
+    линия — analysis.line_quarter, линия вне пределов семейства — analysis.market_line,
+    строка без кэфов пропускается."""
+    found: list[ExtraLine] = []
+    problems: list[Problem] = []
+    for item in rows:
+        line = to_line(item.line)
+        if line is None:
+            problems.append(
+                Problem("analysis.line_quarter", {"position": position, "line": str(item.line)})
+            )
+            continue
+        row = ExtraLine(item.market, line, to_odds(item.o1), to_odds(item.o2))
+        if row.o1 is None and row.o2 is None:
+            continue
+        try:
+            row.codes()
+        except ValueError:
+            problems.append(
+                Problem(
+                    "analysis.market_line",
+                    {"position": position, "market": item.market, "line": str(line)},
+                )
+            )
+            continue
+        found.append(row)
+    return found, problems
 
 
 # --- подтвержденные события ---
@@ -526,6 +626,7 @@ class ConfirmedEvent:
             "best_of": self.best_of,
             "round": self.round,
             "odds": odds_to_json(self.odds),
+            "extra": extra_to_json(self.odds),
             "bookmaker": self.bookmaker,
             "line_no": self.line_no,
         }
@@ -539,7 +640,7 @@ class ConfirmedEvent:
             surface=str(raw["surface"]),
             best_of=int(raw["best_of"]),
             round=str(raw.get("round") or ""),
-            odds=odds_from_json(raw.get("odds") or {}),
+            odds=odds_from_json(raw.get("odds") or {}, raw.get("extra")),
             bookmaker=raw.get("bookmaker"),
             match_id=int(raw["match_id"]) if raw.get("match_id") is not None else None,
             tournament_id=(
@@ -560,6 +661,7 @@ class Confirmed:
 
     def to_json(self) -> dict[str, Any]:
         return {
+            "format": CONFIRMED_FORMAT,
             "bank": str(self.bank) if self.bank is not None else None,
             "bookmaker": self.bookmaker,
             "events": [event.to_json() for event in self.events],
@@ -591,6 +693,9 @@ class EventDraft:
     odds: OddsMap
     bookmaker: str | None
     line_no: int | None = None
+    # Ошибки строк «Другие рынки» (extra_problems) и спорные форы без ответа
+    extra_problems: tuple["Problem", ...] = ()
+    disputed: int = 0
 
 
 async def check_events(
@@ -633,6 +738,9 @@ async def check_events(
             problems.append(Problem("analysis.same_players", {"position": position}))
         if any(value is None for value in event.odds.get("ML", [None, None])):
             problems.append(Problem("analysis.odds_ml", {"position": position}))
+        problems.extend(event.extra_problems)
+        if event.disputed:
+            problems.append(Problem("analysis.hcp_unit", {"position": position}))
         for market, value in odds_problems(event.odds):
             problems.append(
                 Problem(
@@ -654,12 +762,21 @@ async def check_events(
             if pair in pairs:
                 problems.append(Problem("analysis.duplicate_event", {"position": position}))
             pairs.add(pair)
-        if len(problems) > bad or surface is None:
-            continue
-        assert event.player1_id is not None and event.player2_id is not None
         best_of = event.best_of or (tournament.best_of if tournament else None)
         if best_of is None and guess is not None:
             best_of = guess.best_of
+        fmt = best_of if best_of in (3, 5) else DEFAULT_BEST_OF
+        for market, prices in event.odds.items():
+            if any(value is not None for value in prices) and not fits_format(market, fmt):
+                problems.append(
+                    Problem(
+                        "analysis.market_format",
+                        {"position": position, "market": market, "best_of": fmt},
+                    )
+                )
+        if len(problems) > bad or surface is None:
+            continue
+        assert event.player1_id is not None and event.player2_id is not None
         name = tournament.name if tournament else (guess.name if guess else None)
         round_code = event.round.strip().upper()
         confirmed.append(
@@ -819,8 +936,8 @@ def odds_snapshots(
     rows: list[OddsSnapshot] = []
     for event in events:
         assert event.match_id is not None
-        for market in MARKETS:
-            for selection, value in enumerate(event.odds.get(market, ()), start=1):
+        for market, pair in event.odds.items():
+            for selection, value in enumerate(pair, start=1):
                 if value is None:
                     continue
                 rows.append(
@@ -841,13 +958,121 @@ def odds_snapshots(
 
 
 def parsed_input(raw: Mapping[str, Any] | None) -> ParsedInput | None:
-    """Сырой ответ разбора из analyses.parsed."""
+    """Сырой ответ разбора из analyses.parsed. Ответ схемы p1 (до Р28) — без odds.lines."""
     if not raw:
         return None
+    data = dict(raw)
+    events = []
+    for event in data.get("events") or []:
+        if isinstance(event, Mapping) and isinstance(event.get("odds"), Mapping):
+            odds = dict(event["odds"])
+            odds.setdefault("lines", [])
+            event = {**event, "odds": odds}
+        events.append(event)
+    data["events"] = events
     try:
-        return ParsedInput.model_validate(raw)
+        return ParsedInput.model_validate(data)
     except ValueError:
         return None
+
+
+# Тотал без «сет» и «гейм»: до этой линии — сеты, от GAME_TOTAL_FROM — геймы (Р28)
+SET_TOTAL_UPTO = Decimal("5")
+GAME_TOTAL_FROM = Decimal("15")
+# Спорная фора: кэф форы стороны с минусом к ее кэфу победы. Выше SETS_RATIO — похоже на
+# сеты (2:0 намного реже победы), ниже GAMES_RATIO — на геймы
+SETS_RATIO = Decimal("1.25")
+GAMES_RATIO = Decimal("1.15")
+_SET_HCP_DISPUTED = (Decimal("1.5"), Decimal("2.5"))
+
+
+@dataclass(frozen=True)
+class Disputed:
+    """Фора без «сет» и «гейм» (±1.5 или ±2.5): по сетам или по геймам — решает участник.
+    line — фора игрока 1, o1 и o2 — Ф1 и Ф2."""
+
+    line: Decimal
+    o1: Decimal | None
+    o2: Decimal | None
+
+    def hint(self, ml: Sequence[Decimal | None]) -> tuple[str, Decimal, Decimal] | None:
+        """Подсказка по кэфу победы: (sets | games, кэф форы стороны с минусом, ее кэф
+        победы); не сравнить — None."""
+        own, win = (self.o1, ml[0]) if self.line < 0 else (self.o2, ml[1])
+        if own is None or win is None or win <= 1:
+            return None
+        ratio = own / win
+        if ratio >= SETS_RATIO:
+            return "sets", own, win
+        if ratio < GAMES_RATIO:
+            return "games", own, win
+        return None
+
+    def sets_ok(self, best_of: int) -> bool:
+        return abs(self.line) == Decimal("1.5") or best_of == 5
+
+
+@dataclass(frozen=True)
+class ParsedLines:
+    """Строки форм и тоталов разбора: годные (extra), спорные форы и непонятые с причиной
+    (line_no, текст, ключ причины)."""
+
+    extra: list[ExtraLine]
+    base: OddsMap
+    disputed: list[Disputed]
+    unknown: list[tuple[int, str, str]]
+
+
+def _resolved_family(kind: str, line: Decimal) -> str | None:
+    """Семейство строки разбора; None — спорная фора (hcp ±1.5 и ±2.5)."""
+    if kind == "set_hcp":
+        return "h15" if abs(line) == Decimal("1.5") else "shcp"
+    if kind == "game_hcp":
+        return "ghcp"
+    if kind == "hcp":
+        return None if abs(line) in _SET_HCP_DISPUTED else "ghcp"
+    if kind == "set_total":
+        return "stot"
+    if kind == "game_total":
+        return "gtot"
+    if line <= SET_TOTAL_UPTO:
+        return "stot"
+    if line >= GAME_TOTAL_FROM:
+        return "gtot"
+    return "total_unit"
+
+
+def parsed_lines(odds: Any) -> ParsedLines:
+    """Форы и тоталы ответа разбора (схема p2, odds.lines). Четвертная линия и тотал между
+    5 и 15 — в «Не понял» с причиной; линия вне пределов рынка — тоже."""
+    extra: list[ExtraLine] = []
+    base: OddsMap = {}
+    disputed: list[Disputed] = []
+    unknown: list[tuple[int, str, str]] = []
+    for item in getattr(odds, "lines", None) or []:
+        line = to_line(item.line)
+        if line is None:
+            unknown.append((item.line_no, item.text, "analysis.draft.unknown.quarter"))
+            continue
+        o1, o2 = to_odds(item.odds1), to_odds(item.odds2)
+        family = _resolved_family(item.kind, line)
+        if family is None:
+            disputed.append(Disputed(line, o1, o2))
+            continue
+        if family == "total_unit":
+            unknown.append((item.line_no, item.text, "analysis.draft.unknown.total_unit"))
+            continue
+        row = ExtraLine(family, line, o1, o2)
+        try:
+            row.codes()
+        except ValueError:
+            unknown.append((item.line_no, item.text, "analysis.draft.unknown.market_line"))
+            continue
+        if family == "h15":
+            extra_into(base, [row])
+        else:
+            extra.append(row)
+    return ParsedLines(extra, base, disputed, unknown)
 
 
 def money(value: float | Decimal | None) -> Decimal | None:

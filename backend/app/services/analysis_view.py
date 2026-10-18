@@ -14,7 +14,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AgentRun, Analysis, Bet, BetLeg, Player, StrategyVersion
-from app.ml.strategy import SUSPENDED_MARKETS
+from app.ml.markets import NEW_FAMILIES, extra_into, extra_lines
+from app.ml.strategy import STATUS_COMPARE, STATUS_EXPRESS, STATUS_SUSPENDED, market_meta
 from app.schemas.analyses import (
     AccessOut,
     AnalysisOut,
@@ -22,9 +23,11 @@ from app.schemas.analyses import (
     BetLegBrief,
     ConfirmedEventOut,
     ConfirmedPlayer,
+    DisputedOut,
     DraftEventOut,
     DraftOut,
     ErrorInfoOut,
+    ExtraOddsOut,
     OddsPairsOut,
     PlayerBrief,
     PlayerCandidate,
@@ -47,6 +50,7 @@ from app.services.analysis_input import (
     money,
     odds_problems,
     parsed_input,
+    parsed_lines,
     parsed_odds,
     player_facts,
     resolve_player,
@@ -54,7 +58,7 @@ from app.services.analysis_input import (
     short_odds,
 )
 from app.services.analysis_result import stored_variants
-from app.services.app_settings import get_app_settings
+from app.services.app_settings import express_families, get_app_settings
 from app.services.bank import bank_state
 from app.services.strategy_versions import params_of
 
@@ -68,6 +72,19 @@ def odds_out(odds: dict[str, list[Decimal | None]]) -> OddsPairsOut:
     return OddsPairsOut.model_validate(
         {"ML": pair("ML"), "HCP_-1.5": pair("HCP_-1.5"), "HCP_+1.5": pair("HCP_+1.5")}
     )
+
+
+def extra_out(odds: dict[str, list[Decimal | None]]) -> list[ExtraOddsOut]:
+    """Строки «Другие рынки» (новые рынки Р28) по карте кэфов, у фор — линия игрока 1."""
+    return [
+        ExtraOddsOut(
+            market=row.family,  # type: ignore[arg-type]
+            line=float(row.line),
+            o1=short_odds(row.o1) if row.o1 is not None else None,
+            o2=short_odds(row.o2) if row.o2 is not None else None,
+        )
+        for row in extra_lines(odds)
+    ]
 
 
 def _brief(facts: PlayerFacts | None, player_id: int, name: str) -> PlayerBrief:
@@ -148,11 +165,46 @@ async def build_draft(db: AsyncSession, analysis: Analysis, *, today: date) -> D
     ids = {pick.best.player_id for pair in picks for pick in pair if pick.best is not None}
     facts = await player_facts(db, ids, today=today)
     events: list[DraftEventOut] = []
+    unknown = [
+        UnknownLineOut(line_no=line.line_no, text=line.text)
+        for line in (parsed.unknown_lines if parsed else [])
+    ]
     for position, (event, (pick1, pick2)) in enumerate(
         zip(parsed.events if parsed else [], picks, strict=True), start=1
     ):
         tournament = await resolve_tournament(db, event.tournament, today=today)
+        best_of = (tournament.best_of if tournament and tournament.best_of else None) or (
+            DEFAULT_BEST_OF
+        )
         odds = parsed_odds(event.odds)
+        lines = parsed_lines(event.odds)
+        for market, pair in lines.base.items():
+            current = odds.setdefault(market, [None, None])
+            odds[market] = [
+                old if old is not None else new for old, new in zip(current, pair, strict=True)
+            ]
+        extra_into(odds, lines.extra)
+        unknown.extend(
+            UnknownLineOut(line_no=line_no, text=text, reason_key=reason)
+            for line_no, text, reason in lines.unknown
+        )
+        disputed = []
+        for item in lines.disputed:
+            hint = item.hint(odds["ML"])
+            disputed.append(
+                DisputedOut(
+                    line=float(item.line),
+                    o1=short_odds(item.o1) if item.o1 is not None else None,
+                    o2=short_odds(item.o2) if item.o2 is not None else None,
+                    hint=TextKey(
+                        key=f"analysis.draft.hcp_hint.{hint[0]}",
+                        params={"odds": str(short_odds(hint[1])), "ml": str(short_odds(hint[2]))},
+                    )
+                    if hint is not None
+                    else None,
+                    sets_ok=item.sets_ok(best_of),
+                )
+            )
         event_warnings = _pick_warnings(position, 1, pick1) + _pick_warnings(position, 2, pick2)
         if (
             pick1.best is not None
@@ -196,10 +248,11 @@ async def build_draft(db: AsyncSession, analysis: Analysis, *, today: date) -> D
                 if tournament is not None
                 else None,
                 surface=surface,  # type: ignore[arg-type]
-                best_of=(tournament.best_of if tournament and tournament.best_of else None)
-                or DEFAULT_BEST_OF,
+                best_of=best_of,
                 round=(event.round or "").strip()[:16],
                 odds=odds_out(odds),
+                extra=extra_out(odds),
+                disputed=disputed,
                 bookmaker=event.bookmaker or (parsed.bookmaker if parsed else None),
                 warnings=event_warnings,
             )
@@ -215,10 +268,7 @@ async def build_draft(db: AsyncSession, analysis: Analysis, *, today: date) -> D
         bank_note_key=note,
         bookmaker=parsed.bookmaker if parsed else analysis.bookmaker,
         events=events,
-        unknown_lines=[
-            UnknownLineOut(line_no=line.line_no, text=line.text)
-            for line in (parsed.unknown_lines if parsed else [])
-        ],
+        unknown_lines=sorted(unknown, key=lambda line: line.line_no),
         parse_cost_usd=await parse_cost(db, analysis.id),
         warnings=warnings,
     )
@@ -329,6 +379,7 @@ async def confirmed_events(db: AsyncSession, analysis: Analysis) -> list[Confirm
             best_of=event.best_of,
             round=event.round,
             odds=odds_out(event.odds),
+            extra=extra_out(event.odds),
             bookmaker=event.bookmaker,
         )
         for event in events
@@ -360,7 +411,7 @@ async def bet_briefs(db: AsyncSession, analysis_id: int) -> list[BetBrief]:
                 BetLegBrief(
                     prediction_id=leg.prediction_id,
                     match_id=leg.match_id,
-                    market=leg.market,  # type: ignore[arg-type]
+                    market=leg.market,
                     selection=leg.selection,
                     odds_taken=short_odds(leg.odds_taken),
                 )
@@ -371,6 +422,22 @@ async def bet_briefs(db: AsyncSession, analysis_id: int) -> list[BetBrief]:
     ]
 
 
+def _row_meta(row: dict[str, Any], promoted: Sequence[str]) -> dict[str, Any]:
+    """Поля строки рынка из кода (market_meta). Статус «на проверке» — по списку сейчас.
+    У новых семейств (Р28) — статус на момент анализа, если он сохранен: экспресс и
+    варианты анализа собраны по нему, и строка не должна писать «идет в экспресс», если
+    рынок в экспресс этого анализа не мог попасть (или наоборот)."""
+    meta = market_meta(str(row.get("market")), promoted)
+    stored = row.get("status")
+    if (
+        meta["family"] in NEW_FAMILIES
+        and meta["status"] != STATUS_SUSPENDED
+        and stored in (STATUS_COMPARE, STATUS_EXPRESS)
+    ):
+        meta["status"] = stored
+    return meta
+
+
 async def result_of(
     db: AsyncSession, analysis: Analysis, version: StrategyVersion | None
 ) -> ResultOut | None:
@@ -379,25 +446,27 @@ async def result_of(
     if not analysis.result:
         return None
     data = dict(analysis.result)
-    # Рынок на проверке — по списку сейчас (Р28): список меняет решение владельца
+    settings = await get_app_settings(db)
+    promoted = express_families(settings)
+    # Семейство и линия — из кода рынка (и у старых анализов); статус — _row_meta
     data["matches"] = [
         {
             **match,
             "markets": [
-                {**row, "suspended": row.get("market") in SUSPENDED_MARKETS}
+                {"p_push": 0.0, **row, **_row_meta(row, promoted)}
                 for row in match.get("markets") or []
             ],
         }
         for match in data.get("matches") or []
     ]
     if "variants" not in data:
-        settings = await get_app_settings(db)
         data["variants"] = stored_variants(
             data,
             params=params_of(version),
             state=await bank_state(db, analysis.user_id),
             bank_input=analysis.bank_input,
             currency=settings.currency,
+            promoted=promoted,
         )
     return ResultOut.model_validate(data)
 
