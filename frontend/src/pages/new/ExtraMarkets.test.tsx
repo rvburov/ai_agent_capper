@@ -86,7 +86,10 @@ describe('Новый анализ: другие рынки (Р28)', () => {
 
     await user.click(screen.getByRole('button', { name: 'По геймам' }));
     expect(screen.queryByText(/фора по сетам или по геймам\?/)).toBeNull();
-    expect(screen.getByRole('group', { name: 'Фора по геймам: Синнер −1.5' })).toBeInTheDocument();
+    // у тотала геймов модель не прошла проверку, у форы по геймам модели пока нет (marketsOut)
+    expect(within(total).getByText(/Модель не прошла проверку на истории: вероятность не покажем/)).toBeInTheDocument();
+    const hcp = screen.getByRole('group', { name: 'Фора по геймам: Синнер −1.5' });
+    expect(within(hcp).getByText(/Оценку модели по геймам покажем позже/)).toBeInTheDocument();
 
     const launch = screen.getByRole('button', { name: 'Запустить анализ' });
     await waitFor(() => expect(launch).toBeEnabled());

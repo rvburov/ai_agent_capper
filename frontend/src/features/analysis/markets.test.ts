@@ -134,6 +134,16 @@ describe('счет по геймам', () => {
     expect(parseGamesScore('6:6', 3).kind).toBe('invalid');
   });
 
+  it('решающий сет 13:12 (Уимблдон 2019–2021) и тай-брейк полностью «7-6(10-8)»', () => {
+    expect(parseGamesScore('6:7(5) 7:6(8) 6:4 4:6 13:12', 5)).toMatchObject({ kind: 'ok', score: { games: [36, 35] } });
+    // 13:12 — только в последнем сете
+    expect(parseGamesScore('13:12 6:4', 3).kind).toBe('invalid');
+    // на сервер — очки проигравшего тай-брейк, как «7:6(8)»
+    expect(parseGamesScore('6:4 7-6(10-8)', 3)).toMatchObject({ kind: 'ok', score: { games: [13, 10], text: '6:4 7:6(8)' } });
+    expect(parseGamesScore('4:6 6:7(8-10)', 3)).toMatchObject({ kind: 'ok', score: { text: '4:6 6:7(8)' } });
+    expect(parseGamesScore('6:4 7:6(9-8)', 3).kind).toBe('invalid');
+  });
+
   it('исход: ровно линия — возврат, фора — разница плюс линия', () => {
     const score = { sets: [], games: [13, 10] as [number, number], text: '' };
     expect(gamesOutcome('GTOT_23', 2, score)).toEqual({ result: 'void', value: 23, line: 23 });

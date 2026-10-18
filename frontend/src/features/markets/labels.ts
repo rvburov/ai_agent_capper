@@ -17,3 +17,16 @@ export function familyTitle(family: MarketFamily): string {
 export function statusChipLabel(status: MarketStatusKind): string {
   return tr(`analysis.marketChip.${status}`);
 }
+
+/** Оценка модели у рынка: ok — есть, failed — модель не прошла проверку на истории, none — еще нет. */
+export type ModelState = 'ok' | 'failed' | 'none';
+
+export function modelState(x: { has_model: boolean; model_state?: string | null }): ModelState {
+  if (x.has_model) return 'ok';
+  return x.model_state === 'failed' ? 'failed' : 'none';
+}
+
+/** Почему у рынка нет вероятности: «модель не прошла проверку» или «оценка модели — скоро». */
+export function noModelLabel(state: ModelState): string {
+  return tr(state === 'failed' ? 'analysis.marketChip.modelFailed' : 'analysis.marketChip.noModel');
+}

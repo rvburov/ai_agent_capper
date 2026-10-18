@@ -10,6 +10,7 @@ import { shortName } from '../../features/analysis/draft';
 import { formatProb, outcomeLabel, ppDelta, valueTier, type MarketFamily, type SideNames } from '../../features/analysis/markets';
 import { groupTitle, marketDescription, marketGroups } from '../../features/analysis/outcomes';
 import { useMarketStatuses } from '../../features/markets/api';
+import { modelState } from '../../features/markets/labels';
 import { statusChipKind, statusHint, statusLabel, type MarketStatusMap } from '../../features/markets/status';
 import type { MarketStatusKind } from '../../features/markets/types';
 import { slipEligible } from '../../features/analysis/ownBet';
@@ -49,7 +50,15 @@ export function outcomeDesc(row: Pick<MarketRow, 'market' | 'selection'>, match:
 
 function ValueCell({ row }: { row: MarketRow }) {
   const { t } = useTranslation();
-  if (!row.has_model) return <span className="analysis-val-none">{t('analysis.match.modelSoon')}</span>;
+  if (!row.has_model) {
+    return modelState(row) === 'failed' ? (
+      <span className="analysis-val-none" title={t('analysis.marketChip.modelFailedHint')}>
+        {t('analysis.marketChip.modelFailed')}
+      </span>
+    ) : (
+      <span className="analysis-val-none">{t('analysis.match.modelSoon')}</span>
+    );
+  }
   if (row.value === null) return <span className="analysis-val-none">—</span>;
   const tier = valueTier(row.tier);
   return (
@@ -87,6 +96,14 @@ function StatusChip({ status, family, statuses }: { status: MarketStatusKind; fa
       </Chip>
     </span>
   );
+}
+
+/** Почему у рынка нет вероятности: модель не прошла проверку. Текстом под заголовком группы,
+ *  а не только в title: на телефоне подсказку title не увидеть. */
+function FailedHint({ row }: { row: MarketRow }) {
+  const { t } = useTranslation();
+  if (modelState(row) !== 'failed') return null;
+  return <div className="xsmall muted">{t('analysis.marketChip.modelFailedHint')}</div>;
 }
 
 /** «В свою ставку» у исхода таблицы (Р29); в режиме просмотра — неактивна с подсказкой. */
@@ -127,7 +144,8 @@ function Outcome({ row, match, names, slip }: { row: MarketRow; match: MatchResu
           {t('analysis.match.inExpress')}
         </Chip>
       ) : (
-        // статус рынка — у заголовка группы, «оценка модели — скоро» — в колонке валуя (как в макете)
+        // статус рынка — у заголовка группы, «оценка модели — скоро» или «модель не прошла проверку» —
+        // в колонке валуя (как в макете)
         row.note_key && row.status === 'express' && row.has_model && <small>{keyText(row.note_key, {}, '')}</small>
       )}
       {slip && <SlipButton row={row} match={match} names={names} slip={slip} />}
@@ -194,6 +212,7 @@ function ProbTable({
                     <b>{groupTitle(group, sides)}</b>
                     {first && <StatusChip status={first.status} family={group.family} statuses={statuses} />}
                   </span>
+                  {first && <FailedHint row={first} />}
                 </th>
               </tr>
               {group.rows.map((row) => (
@@ -243,6 +262,7 @@ function ProbList({ match, names, slip, statuses }: { match: MatchResult; names:
               <b>{title}</b>
               {first && <StatusChip status={first.status} family={group.family} statuses={statuses} />}
             </div>
+            {first && <FailedHint row={first} />}
             <ul className="analysis-plist" aria-label={t('analysis.match.probs')}>
               {group.rows.map((row) => (
                 <li key={`${row.market}-${row.selection}`} className={cx('analysis-pitem', row.in_express && 'is-pick')}>

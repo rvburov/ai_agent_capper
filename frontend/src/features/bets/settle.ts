@@ -97,15 +97,26 @@ export interface GamesScore {
   text: string;
 }
 
-const SET_GAMES = /^(\[)?(\d{1,2})[:\-\u2013](\d{1,2})(?:\((\d{1,2})\))?(\])?$/;
+// Тай-брейк — «(5)» или полностью «(10-8)»: на сервер уходит очки проигравшего, «7:6(8)»
+const SET_GAMES = /^(\[)?(\d{1,2})[:\-\u2013](\d{1,2})(?:\((\d{1,2})(?:[:\-\u2013](\d{1,2}))?\))?(\])?$/;
 
-// Сет доигран: 6:0–6:4, 7:5, 7:6 или затяжной (разница 2 после 6:6)
-function finishedSet(a: number, b: number): boolean {
+// Сет доигран: 6:0–6:4, 7:5, 7:6 или затяжной (разница 2 после 6:6); решающий — и 13:12
+// (Уимблдон 2019–2021: тай-брейк при 12:12)
+function finishedSet(a: number, b: number, last: boolean): boolean {
   const hi = Math.max(a, b);
   const lo = Math.min(a, b);
   if (hi === 6) return lo <= 4;
   if (hi === 7) return lo === 5 || lo === 6;
+  if (hi === 13 && lo === 12) return last;
   return hi > 7 && hi - lo === 2;
+}
+
+/** Очки проигравшего тай-брейк: «(5)» — 5, «(10-8)» — 8; нет тай-брейка — null, не счет — false. */
+function tiebreak(first: string | undefined, second: string | undefined): number | null | false {
+  if (first === undefined) return null;
+  if (second === undefined) return Number(first);
+  const [x, y] = [Number(first), Number(second)];
+  return Math.max(x, y) >= 7 && Math.abs(x - y) >= 2 ? Math.min(x, y) : false;
 }
 
 export type GamesParse = { kind: 'ok'; score: GamesScore } | { kind: 'unfinished' } | { kind: 'invalid' };
@@ -123,7 +134,7 @@ export function parseGamesScore(text: string, bestOf: number | null | undefined)
   let open = false;
   for (const [i, token] of tokens.entries()) {
     const found = SET_GAMES.exec(token);
-    if (!found || Boolean(found[1]) !== Boolean(found[5])) return { kind: 'invalid' };
+    if (!found || Boolean(found[1]) !== Boolean(found[6])) return { kind: 'invalid' };
     const a = Number(found[2]);
     const b = Number(found[3]);
     if (a === b) return { kind: 'invalid' };
@@ -134,12 +145,15 @@ export function parseGamesScore(text: string, bestOf: number | null | undefined)
       shown.push(`[${a}-${b}]`);
       continue;
     }
-    if (!finishedSet(a, b)) {
-      if (i !== tokens.length - 1 || Math.max(a, b) > 6) return { kind: 'invalid' };
+    const last = i === tokens.length - 1;
+    if (!finishedSet(a, b, last)) {
+      if (!last || Math.max(a, b) > 6) return { kind: 'invalid' };
       open = true;
     }
     sets.push({ a, b });
-    shown.push(`${a}:${b}${found[4] === undefined ? '' : `(${found[4]})`}`);
+    const tb = tiebreak(found[4], found[5]);
+    if (tb === false) return { kind: 'invalid' };
+    shown.push(`${a}:${b}${tb === null ? '' : `(${tb})`}`);
   }
   const done = open ? sets.slice(0, -1) : sets;
   const wins = [done.filter((x) => x.a > x.b).length, done.filter((x) => x.b > x.a).length];

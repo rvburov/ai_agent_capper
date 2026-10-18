@@ -50,9 +50,11 @@ describe('Аналитика: рынки (Р28)', () => {
     const ml = rows.find((r) => r.textContent?.includes('Победа в матче'))!;
     expect(within(ml).getByText('в экспрессе')).toBeInTheDocument();
     expect(within(ml).getByText('с закрытием: 300')).toBeInTheDocument();
-    // У тотала геймов событий 160, но модели геймов нет: порог не пройден
+    // У тотала геймов событий 160, но модель не прошла проверку: порог не пройден, метка с причиной
     const gtot = rows.find((r) => r.textContent?.includes('Тотал геймов'))!;
     expect(within(gtot).queryByText('порог пройден')).toBeNull();
+    expect(within(gtot).getByText('модель не прошла проверку').closest('[title]')).toHaveAttribute('title', expect.stringMatching(/^Модель этого рынка на проверке по архиву/));
+    expect(within(ghcp).queryByText('модель не прошла проверку')).toBeNull();
   });
 
   it('«Сводка по рынкам»: семейство новых рынков — строкой «для сравнения», нажатие ставит фильтр family', async () => {
@@ -73,5 +75,8 @@ describe('Аналитика: рынки (Р28)', () => {
     await screen.findByRole('heading', { level: 3, name: 'Рынки: в экспрессе, на проверке, для сравнения' });
     const block = card('Рынки: в экспрессе, на проверке, для сравнения');
     expect(await within(block).findAllByRole('listitem')).toHaveLength(6);
+    // Почему модель не прошла проверку — текстом, а не только в title (на телефоне его не видно)
+    const gtot = within(block).getAllByRole('listitem').find((li) => li.textContent?.includes('Тотал геймов'))!;
+    expect(within(gtot).getByText(/^Модель этого рынка на проверке по архиву/)).toBeVisible();
   });
 });

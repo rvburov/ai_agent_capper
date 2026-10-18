@@ -1,3 +1,4 @@
+import { modelState, type ModelState } from '../markets/labels';
 import type { MarketStatusKind } from '../markets/types';
 import { totalOdds } from './stake';
 import type { Market, MarketRow, MatchResult } from './types';
@@ -13,10 +14,12 @@ export interface SlipItem {
   selection: number;
   /** Кэф из анализа. */
   odds: number;
-  /** Итоговая вероятность исхода (после поправки Claude); у рынков по геймам пока нет — null. */
+  /** Итоговая вероятность исхода (после поправки Claude); нет оценки модели — null. */
   p: number | null;
   /** Вероятность возврата на целой линии (Р28). */
   pPush: number;
+  /** Оценка модели: нет вероятности — «пока нет» или «модель не прошла проверку». */
+  model: ModelState;
   name: string;
   match: string;
   /** Статус рынка (Р28): на проверке и «для сравнения» в варианты не идут. */
@@ -39,6 +42,7 @@ export function slipItem(row: MarketRow, match: MatchResult, name: string, title
     odds: Number(row.odds),
     p: row.p_final,
     pPush: row.p_push,
+    model: modelState(row),
     name,
     match: title,
     status: row.status,
@@ -72,7 +76,7 @@ export interface SlipNumbers {
   total: number;
   /** Вероятность по модели — произведение вероятностей событий; у события нет оценки — null. */
   p: number | null;
-  /** Валуй по модели: p × кэф − 1, у ординара на целой линии + P(возврат). */
+  /** Валуй по модели: p × кэф − 1; с целыми линиями — Π(pᵢ·кэфᵢ + P(возврат)ᵢ) − 1. */
   ev: number | null;
 }
 
@@ -92,7 +96,12 @@ export function slipNumbers(items: readonly Pick<SlipItem, 'p' | 'odds' | 'pPush
   const total = totalOdds(odds);
   const p = slipProb(items);
   if (p === null) return { total, p, ev: null };
-  // У ординара на целой линии «ровно» — возврат: валуй = p·кэф + P(возврат) − 1
-  const push = items.length === 1 ? (items[0]?.pPush ?? 0) : 0;
-  return { total, p, ev: p * total + push - 1 };
+  // «Ровно» на целой линии — возврат, нога идет с кэфом 1: валуй = Π(pᵢ·кэфᵢ + P(возврат)ᵢ) − 1
+  // (у ординара — p·кэф + P(возврат) − 1). Без возвратов — по итоговому кэфу, как у сервера.
+  if (!items.some((x) => x.pPush > 0)) return { total, p, ev: p * total - 1 };
+  let ret = 1;
+  items.forEach((x, i) => {
+    ret *= (x.p ?? 0) * (odds[i] ?? x.odds) + x.pPush;
+  });
+  return { total, p, ev: ret - 1 };
 }

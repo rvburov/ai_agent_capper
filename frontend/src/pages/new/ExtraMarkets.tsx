@@ -21,7 +21,9 @@ import {
   type HcpUnit,
 } from '../../features/analysis/draft';
 import { EXTRA_FAMILIES, isGamesFamily, isHalfOrWhole, type ExtraFamily } from '../../features/analysis/markets';
+import { modelState } from '../../features/markets/labels';
 import { statusChipKind, statusHint, statusLabel, type MarketStatusMap } from '../../features/markets/status';
+import type { MarketStatusInfo } from '../../features/markets/types';
 import { hasText, keyText } from '../../features/analysis/codes';
 import { formatLine } from '../../lib/format';
 import { cx } from '../../lib/cx';
@@ -58,6 +60,13 @@ function rowTitle(event: EditEvent, x: ExtraMarket, t: TFunction): string {
   });
 }
 
+/** Что покажем по рынку: оценку и валуй; у модели, не прошедшей проверку, — только расчет по счету. */
+function noteKey(family: ExtraFamily, info: MarketStatusInfo | undefined): 'new.extra.noteFailed' | 'new.extra.noteGames' | 'new.extra.note' {
+  const state = info ? modelState(info) : 'ok';
+  if (state === 'failed') return 'new.extra.noteFailed';
+  return state === 'none' && isGamesFamily(family) ? 'new.extra.noteGames' : 'new.extra.note';
+}
+
 function Note({ x, statuses }: { x: ExtraMarket; statuses: MarketStatusMap | undefined }) {
   const { t } = useTranslation();
   const info = statuses?.get(x.family);
@@ -71,7 +80,7 @@ function Note({ x, statuses }: { x: ExtraMarket; statuses: MarketStatusMap | und
       </span>
       <span>
         {Number.isInteger(line) ? `${t('new.extra.whole', { n: formatLine(Math.abs(line)) })} ` : ''}
-        {isGamesFamily(x.family) ? t('new.extra.noteGames') : t('new.extra.note')}
+        {t(noteKey(x.family, info))}
       </span>
     </div>
   );

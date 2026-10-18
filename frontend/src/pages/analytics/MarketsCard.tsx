@@ -6,6 +6,7 @@ import { useMe } from '../../api/hooks/useMe';
 import { paths } from '../../app/paths';
 import { Button, Card, Chip, Meter, Skeleton } from '../../components';
 import { useMarkets } from '../../features/markets/api';
+import { modelState } from '../../features/markets/labels';
 import { familyLines, familyTitle, statusChipKind, statusChipLabel, statusHint } from '../../features/markets/status';
 import type { MarketFamilyOut, Markets } from '../../features/markets/types';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
@@ -13,7 +14,7 @@ import { CiCell, Howto, RoiText } from './parts';
 
 // «Рынки: в экспрессе, на проверке, для сравнения» (freshCard макета, Р28): статус семейства,
 // события (у «для сравнения» — «47 из 150» с полосой), ROI и CLV с 95% ДИ, сколько событий с
-// закрытием (у «для сравнения» — «из 50»). Данные общие для всех участников (GET /api/markets), от
+// закрытием (у «для сравнения» — «из 50»), у рынка, модель которого не прошла проверку, — метка. Данные общие для всех участников (GET /api/markets), от
 // фильтров страницы не зависят; ROI и CLV при малом числе значений сервер не отдает (null — «—»).
 
 function StatusMark({ m, need }: { m: MarketFamilyOut; need: number }) {
@@ -29,6 +30,13 @@ function StatusMark({ m, need }: { m: MarketFamilyOut; need: number }) {
         <Chip kind="good" icon="check">
           {t('analysis.marketChip.ready')}
         </Chip>
+      )}
+      {modelState(m) === 'failed' && (
+        <span title={t('analysis.marketChip.modelFailedHint')}>
+          <Chip kind="warn" icon="alert">
+            {t('analysis.marketChip.modelFailed')}
+          </Chip>
+        </span>
       )}
     </span>
   );
@@ -79,6 +87,8 @@ function Body({ data }: { data: Markets }) {
               <StatusMark m={m} need={data.need} />
             </div>
             <Events m={m} need={data.need} />
+            {/* на телефоне title не виден: почему модель не прошла — текстом */}
+            {modelState(m) === 'failed' && <div className="xsmall muted">{t('analysis.marketChip.modelFailedHint')}</div>}
             <div className="analytics-fresh-nums">
               <span>
                 {t('analytics.marketsCard.roi')} <RoiText value={m.roi} />

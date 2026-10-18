@@ -35,6 +35,9 @@ describe('Администрирование: новые рынки', () => {
     const games = items.find((li) => li.textContent?.includes('Фора по геймам'))!;
     expect(within(games).getByRole('button', { name: 'Перевести в экспресс' })).toBeDisabled();
     expect(within(games).getByText(/оценка модели — скоро/)).toBeInTheDocument();
+    const total = items.find((li) => li.textContent?.includes('Тотал геймов'))!;
+    expect(within(total).getByText(/модель не прошла проверку/)).toBeInTheDocument();
+    expect(within(total).getByRole('button', { name: 'Перевести в экспресс' })).toBeDisabled();
 
     await user.click(within(stot).getByRole('button', { name: 'Перевести в экспресс' }));
     const dialog = screen.getByRole('dialog', { name: '«Тотал сетов» — в экспресс?' });

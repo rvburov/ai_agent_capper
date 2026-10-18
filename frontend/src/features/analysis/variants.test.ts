@@ -18,6 +18,7 @@ function item(over: Partial<SlipItem>): SlipItem {
     name: 'Синнер П1',
     match: 'Синнер — Руне',
     pPush: 0,
+    model: 'ok',
     status: 'express',
     confidence: 'high',
     ...over,
@@ -50,6 +51,19 @@ describe('своя ставка', () => {
     // кэфы при ставке — свои: 1.15 × 1.65 = 1.8975 → 1.898 (половина вверх, без ошибки float)
     expect(slipNumbers(legs, [1.15, 1.65]).total).toBe(1.898);
     expect(slipNumbers([item({ odds: 3.6, p: 0.01 })]).ev).toBeCloseTo(-0.964, 6);
+  });
+
+  it('целая линия: возврат идет с кэфом 1 — валуй Π(pᵢ·кэфᵢ + P(возврат)ᵢ) − 1', () => {
+    const total = item({ predictionId: 3, market: 'GTOT_22', selection: 2, odds: 2.05, p: 0.46, pPush: 0.08 });
+    // ординар: 0.46 × 2.05 + 0.08 − 1
+    expect(slipNumbers([total]).ev).toBeCloseTo(0.46 * 2.05 + 0.08 - 1, 6);
+    // экспресс с П1 Джоковича: (0.46 × 2.05 + 0.08) × (0.904 × 1.45) − 1
+    const legs = [total, item({ predictionId: 7, matchId: 92, odds: 1.45, p: 0.904 })];
+    const nums = slipNumbers(legs);
+    expect(nums.p).toBeCloseTo(0.46 * 0.904, 6);
+    expect(nums.ev).toBeCloseTo((0.46 * 2.05 + 0.08) * (0.904 * 1.45) - 1, 6);
+    // кэфы при ставке — свои
+    expect(slipNumbers(legs, [2.1, 1.4]).ev).toBeCloseTo((0.46 * 2.1 + 0.08) * (0.904 * 1.4) - 1, 6);
   });
 });
 

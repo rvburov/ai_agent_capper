@@ -476,6 +476,11 @@ describe('«Предложить урок»', () => {
     await user.type(within(dialog).getByLabelText('Что вы заметили'), ': аутсайдер с кэфом 2.60+ берет матч чаще');
     // процессный урок предлагает только администратор — выбора типа у участника нет
     expect(within(dialog).queryByRole('group', { name: 'Тип урока' })).toBeNull();
+    // в списке «Рынок» — и новые рынки (Р28), семействами
+    await user.click(within(dialog).getByRole('button', { name: /^Рынок:/ }));
+    expect(screen.getByRole('option', { name: 'Тотал геймов' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Фора по геймам' })).toBeInTheDocument();
+    await user.click(screen.getByRole('option', { name: 'П1 / П2' }));
     await user.click(within(dialog).getByRole('button', { name: /^Что не так с прогнозом:/ }));
     await user.click(screen.getByRole('option', { name: 'Модель занижает вероятность' }));
     await user.click(within(dialog).getByRole('button', { name: /^Покрытие:/ }));

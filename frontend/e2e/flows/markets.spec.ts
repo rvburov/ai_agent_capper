@@ -6,8 +6,10 @@ import { expect, test, type Device } from '../support/test';
 import { expectNoHorizontalScroll, toast } from '../support/ui';
 
 // Р28: новые рынки. Ввод с «Другими рынками» и спорной форой → анализ с группами рынков и
-// статусом «для сравнения» → своя ставка на тотал сетов → расчет по счету по сетам. Ручной
-// расчет тотала геймов по счету по геймам: «ровно» — возврат.
+// статусом «для сравнения» → своя ставка на тотал сетов → расчет по счету по сетам. Тотал геймов
+// (волна 3): вероятность модели, возврат на целой линии и валуй → своя ставка → ручной расчет по
+// счету по геймам: «ровно» — возврат. Если модель геймов не прошла проверку на истории (сервер:
+// model_state = failed), вместо вероятности — «модель не прошла проверку».
 
 const START = 48_000;
 
@@ -18,6 +20,12 @@ const SINNER_RUNE_MARKETS = [
   'Тотал геймов: Б(22) = 1.75, М(22) = 2.05',
 ];
 const DJOKOVIC_RUBLEV_DISPUTED = ['Джокович vs Рублев, Test Open 9, хард, 1/8', 'Кэфы: П1 = 1.45, П2 = 2.80', 'Ф1(-1.5) = 2.05, Ф2(+1.5) = 1.72'];
+
+/** Состояние модели тотала геймов с сервера: ok — вероятность есть, failed — не прошла проверку. */
+async function gamesTotalModel(device: Device): Promise<string> {
+  const markets = (await (await device.api.get('/api/markets')).json()) as { families: { family: string; model_state: string }[] };
+  return markets.families.find((f) => f.family === 'gtot')?.model_state ?? 'none';
+}
 
 async function bankBalance(device: Device): Promise<number> {
   const bank = (await (await device.api.get('/api/me/bank')).json()) as { balance: string };
@@ -34,10 +42,11 @@ async function launch(page: Page): Promise<void> {
 }
 
 /** Своя ставка на один исход таблицы рынков: «В свою ставку» → сумма → «Сохранить ставку» → номер. */
-async function ownBet(page: Page, outcome: string, amount: string): Promise<number> {
+async function ownBet(page: Page, outcome: string, amount: string, legHint?: RegExp): Promise<number> {
   await page.getByRole('button', { name: `В свою ставку: ${outcome}, Синнер — Руне` }).click();
   const dialog = page.getByRole('dialog', { name: 'Своя ставка' });
   await expect(dialog.getByText('рынок для сравнения')).toBeVisible();
+  if (legHint) await expect(dialog.getByText(legHint)).toBeVisible();
   await dialog.getByRole('textbox', { name: /Сумма ставки/ }).fill(amount);
   await dialog.getByRole('button', { name: 'Сохранить ставку' }).click();
   const saved = toast(page, /Ставка №\d+ сохранена · своя/);
@@ -69,7 +78,7 @@ test('другие рынки и спорная фора → анализ с р�
   await expect(page.getByText('Тотал сетов 2.5', { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/^для сравнения · \d+ из 150$/).first()).toBeVisible();
   await expect(page.getByText('Тотал геймов меньше 22').first()).toBeVisible();
-  await expect(page.getByText('оценка модели — скоро').first()).toBeVisible();
+  await expect(page.getByText('оценка модели — скоро')).toHaveCount(0);
   if (isMobile) await expectNoHorizontalScroll(page);
 
   const id = await ownBet(page, 'Тотал сетов меньше 2.5', '500');
@@ -86,13 +95,35 @@ test('другие рынки и спорная фора → анализ с р�
   expect(await bankBalance(m)).toBeCloseTo(START - 500 + 500 * 1.6, 2);
 });
 
-test('тотал геймов: «Счет по геймам» 6:4 7:5 — ровно линия, возврат, сумма вернулась', async ({ device, apiClient, isMobile }) => {
+test('тотал геймов: вероятность модели и валуй с возвратом → своя ставка → «Счет по геймам» 6:4 7:5 — ровно линия, возврат', async ({ device, apiClient, isMobile }) => {
   const m = await memberDevice(device, apiClient, 'Гена Геймов');
   const page = m.page;
+  const model = await gamesTotalModel(m);
   await parseEvents(page, eventsText(SINNER_RUNE_MARKETS), 1);
   await launch(page);
 
-  const id = await ownBet(page, 'Тотал геймов меньше 22', '400');
+  // Строка «Тотал геймов меньше 22»: на телефоне — карточка группы, на компьютере — строка таблицы
+  const group = isMobile ? page.getByRole('region', { name: 'Тотал геймов 22' }) : page.getByRole('row').filter({ hasText: 'Тотал геймов меньше 22' });
+  const under = isMobile ? group.getByRole('listitem').filter({ hasText: 'Тотал геймов меньше 22' }) : group;
+  let legHint: RegExp;
+  if (model === 'failed') {
+    await expect(under.getByText('модель не прошла проверку')).toBeVisible();
+    legHint = /модель этого рынка не прошла проверку/;
+  } else {
+    expect(model).toBe('ok');
+    // целая линия: вероятность возврата; валуй = p·кэф + P(возврат) − 1 — числом со знаком
+    await expect(under.getByText(/^возврат \d+\s?%$/)).toBeVisible();
+    await expect(under.getByText('оценка модели — скоро')).toHaveCount(0);
+    await expect(under.getByText(/^[+−-]\d+,\d\s?%$/).first()).toBeVisible();
+    legHint = /модель \d+\s?% · валуй [+−-]\d+,\d\s?%/;
+  }
+  // шаг модели называет цепь по геймам
+  await page.getByRole('button', { name: 'Показать шаги' }).click();
+  const steps = page.getByRole('list', { name: 'Шаги анализа' });
+  await expect(steps.getByText(model === 'failed' ? /^Базовая модель посчитана: матчей 1$/ : /геймы — цепь очко → гейм → сет → матч/)).toBeVisible();
+  if (isMobile) await expectNoHorizontalScroll(page);
+
+  const id = await ownBet(page, 'Тотал геймов меньше 22', '400', legHint);
   const card = page.getByRole('article', { name: `Открытая ставка №${id}` });
   await card.getByRole('button', { name: 'Внести результат' }).click();
   const settle = page.getByRole('dialog', { name: `Результат ставки №${id}` });

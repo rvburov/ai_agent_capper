@@ -51,6 +51,9 @@ describe('условие из словаря словами', () => {
     expect(conditionText({ feature: 'elo_gap', op: 'lt', value: 120 }, t)).toBe('разница Эло меньше 120');
     expect(conditionText({ feature: 'odds', op: 'ge', value: 2.6 }, t)).toBe('кэф на победу не меньше 2.60');
     expect(conditionText({ feature: 'market', op: 'eq', values: ['HCP_-1.5'] }, t)).toBe('рынок: фора −1.5');
+    // новые рынки (Р28) — семейством, все линии
+    expect(conditionText({ feature: 'market', op: 'eq', values: ['gtot'] }, t)).toBe('рынок: Тотал геймов');
+    expect(conditionText({ feature: 'market', op: 'in', values: ['shcp', 'ghcp'] }, t)).toBe('рынок: Фора по сетам ±2.5, Фора по геймам');
     // незнакомое значение — как есть
     expect(scopeValueText('round', 'Q1', t)).toBe('Q1');
   });

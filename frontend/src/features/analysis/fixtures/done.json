@@ -400,7 +400,8 @@
             "line": null,
             "status": "express",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           },
           {
             "market": "ML",
@@ -420,7 +421,8 @@
             "line": null,
             "status": "express",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           },
           {
             "market": "HCP_-1.5",
@@ -440,7 +442,8 @@
             "line": -1.5,
             "status": "express",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           },
           {
             "market": "HCP_-1.5",
@@ -460,7 +463,8 @@
             "line": -1.5,
             "status": "express",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           },
           {
             "market": "HCP_+1.5",
@@ -480,7 +484,8 @@
             "line": 1.5,
             "status": "suspended",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           },
           {
             "market": "HCP_+1.5",
@@ -500,7 +505,8 @@
             "line": 1.5,
             "status": "suspended",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           }
         ],
         "reused_from": null,
@@ -672,7 +678,8 @@
             "line": null,
             "status": "express",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           },
           {
             "market": "ML",
@@ -692,7 +699,8 @@
             "line": null,
             "status": "express",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           },
           {
             "market": "HCP_-1.5",
@@ -712,7 +720,8 @@
             "line": -1.5,
             "status": "express",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           },
           {
             "market": "HCP_-1.5",
@@ -732,7 +741,8 @@
             "line": -1.5,
             "status": "express",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           },
           {
             "market": "HCP_+1.5",
@@ -752,7 +762,8 @@
             "line": 1.5,
             "status": "suspended",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           },
           {
             "market": "HCP_+1.5",
@@ -772,7 +783,8 @@
             "line": 1.5,
             "status": "suspended",
             "p_push": 0,
-            "has_model": true
+            "has_model": true,
+            "model_state": "ok"
           }
         ],
         "reused_from": null,

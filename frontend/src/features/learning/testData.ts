@@ -188,7 +188,7 @@ export function lessonDictionary(): LessonDictionary {
   });
   return {
     features: [
-      enumOf('market', ['ML', 'HCP_-1.5', 'HCP_+1.5']),
+      enumOf('market', ['ML', 'HCP_-1.5', 'HCP_+1.5', 'shcp', 'stot', 'ghcp', 'gtot']),
       enumOf('surface', ['hard', 'clay', 'grass']),
       enumOf('round', ['R128', 'R64', 'R32', 'R16', 'RR', 'QF', 'SF', 'F']),
       enumOf('best_of', ['3', '5']),

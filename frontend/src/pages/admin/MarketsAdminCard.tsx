@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Button, Card, Chip, Skeleton, useToast } from '../../components';
 import { EXTRA_FAMILIES, type ExtraFamily } from '../../features/analysis/markets';
 import { useMarkets, useSetMarketExpress } from '../../features/markets/api';
-import { familyTitle, statusChipLabel } from '../../features/markets/labels';
+import { familyTitle, modelState, noModelLabel, statusChipLabel } from '../../features/markets/labels';
 import type { MarketFamilyOut } from '../../features/markets/types';
 import { formatPercent } from '../../lib/format';
 import { ConfirmDialog, HowTo } from './parts';
@@ -47,7 +47,7 @@ function Row({ m, need, clvNeed, onAsk }: { m: MarketFamilyOut; need: number; cl
       </div>
       <div className="xsmall muted">
         {t('admin.settings.markets.line', { events: t('analysis.marketChip.of', { n: m.events, need }), clv, n: m.clv_n, clvNeed })}
-        {!m.has_model && ` · ${t('analysis.marketChip.noModel')}`}
+        {!m.has_model && ` · ${noModelLabel(modelState(m))}`}
       </div>
       <div className="row">
         {m.promoted ? (

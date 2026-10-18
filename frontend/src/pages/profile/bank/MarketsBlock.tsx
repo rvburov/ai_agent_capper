@@ -2,11 +2,13 @@ import { useTranslation } from 'react-i18next';
 
 import { Chip, Meter, Skeleton } from '../../../components';
 import { useMarkets } from '../../../features/markets/api';
+import { modelState } from '../../../features/markets/labels';
 import { familyLines, familyTitle, statusChipKind, statusChipLabel, statusHint } from '../../../features/markets/status';
 import { formatPercent } from '../../../lib/format';
 
 // «Рынки» в «Правилах стратегии» (marketsBlock макета, Р28): статус каждого семейства, у «для
-// сравнения» — счетчик «47 из 150» и CLV, у рынка на проверке — почему. Общие для всех участников.
+// сравнения» — счетчик «47 из 150» и CLV, у рынка на проверке и у рынка, модель которого не прошла
+// проверку, — почему. Общие для всех участников.
 
 export function MarketsBlock() {
   const { t } = useTranslation();
@@ -45,6 +47,7 @@ export function MarketsBlock() {
                   </div>
                 )}
                 {m.status === 'suspended' && <div className="xsmall muted">{t('analysis.marketStatus.suspendedHint')}</div>}
+                {modelState(m) === 'failed' && <div className="xsmall muted">{t('analysis.marketChip.modelFailedHint')}</div>}
               </li>
             );
           })}

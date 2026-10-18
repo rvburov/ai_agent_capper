@@ -146,7 +146,7 @@ export function OwnBetModal(props: OwnBetModalProps) {
                   <b>{item.name}</b>
                   <small id={`${id}-hint`}>
                     {item.p === null
-                      ? t('analysis.own.legHintNoModel', { match: item.match })
+                      ? t(item.model === 'failed' ? 'analysis.own.legHintFailed' : 'analysis.own.legHintNoModel', { match: item.match })
                       : t('analysis.own.legHint', {
                           match: item.match,
                           p: formatProb(item.p),
