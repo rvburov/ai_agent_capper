@@ -144,9 +144,12 @@ test('push: включить → тестовый push дошел → настр
   await expect(betPush).toBeEnabled();
   await expectScreenLayout(page);
 
-  // тихие часы выключаем: сценарий не должен зависеть от времени суток (по умолчанию 23:00–08:00)
+  // тихие часы по умолчанию выключены (с 18.10.2026): включить и снова выключить —
+  // сценарий не должен зависеть от времени суток
   const quiet = page.getByRole('switch', { name: 'Тихие часы' });
-  await expect(quiet).toBeChecked();
+  await expect(quiet).not.toBeChecked();
+  await quiet.click();
+  await expect(toast(page, 'Тихие часы включены')).toBeVisible();
   await quiet.click();
   await expect(toast(page, 'Тихие часы выключены: push круглые сутки')).toBeVisible();
 
