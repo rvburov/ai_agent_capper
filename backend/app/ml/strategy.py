@@ -18,7 +18,7 @@ strategy_versions.params (StrategyParams.from_params / to_params), значен�
 ставки при росте банка (up15) и прибыльная неделя (week_win) по умолчанию выключены
 (решение В7, Р24): они опираются на шум.
 
-Рынки на проверке (SUSPENDED_MARKETS, сейчас HCP_+1.5) в экспресс и сумму не идут при
+Рынки на проверке (SUSPENDED_MARKETS, сейчас пусто) в экспресс и сумму не идут при
 любых params.markets: модель сетов их завышает (PLAN.md, Р28).
 
 Ординары и «Экспресс из лучших» (Р29) считаются той же функцией stake с другой таблицей:
@@ -38,7 +38,7 @@ from types import MappingProxyType
 from typing import Any, Literal, Protocol, Self
 
 from app.core.i18n import t
-from app.ml.sets import MARKET_MINUS, MARKET_PLUS, MARKETS, PROBS3_FIELDS, SHOWN_DIGITS, Probs3
+from app.ml.sets import MARKET_MINUS, MARKETS, PROBS3_FIELDS, SHOWN_DIGITS, Probs3
 
 CURRENCIES: tuple[str, ...] = ("RUB", "USD", "EUR")
 # Ключи правил адаптации суммы в params.adapt (карточка «Адаптации ставки» макета)
@@ -53,11 +53,10 @@ ADAPT_DEFAULTS: Mapping[str, bool] = MappingProxyType(
 BLOCKING_FLAGS: tuple[str, ...] = ("injury", "fatigue")
 # Рынки на проверке: их исходы видны в таблице анализа для сравнения, но в экспресс и
 # сумму ставки не идут ни в одной версии стратегии, даже если рынок есть в ее
-# params.markets (строки strategy_versions не меняются). HCP_+1.5: модель сетов
-# (app/ml/sets.py) завышает вероятность взять сет — на тесте 2023–2025 Ф(+1.5) выше факта
-# на 4–9 п.п., решающий сет — на 10 п.п. (проверка фор ±1.5 от 17.10.2026, PLAN.md, Р28):
-# это ложный валуй. Вернуть рынок — решение владельца после приема поправки модели сетов.
-SUSPENDED_MARKETS: frozenset[str] = frozenset({MARKET_PLUS})
+# params.markets (строки strategy_versions не меняются). Сейчас пусто: HCP_+1.5 был на
+# проверке 17–18.10.2026 (модель сетов завышала вероятность взять сет на 4–9 п.п.) и
+# вернулся по решению владельца после поправки модели сетов (PLAN.md, Р28).
+SUSPENDED_MARKETS: frozenset[str] = frozenset()
 # Градации валуя (шаг 3): не меньше порога → уровень; больше 0 — low, иначе none
 VALUE_TIERS: tuple[tuple[str, float], ...] = (("strong", 0.15), ("good", 0.10), ("small", 0.05))
 # Сколько знаков сравнивать у float на стыках (|p_claude − p_base| = 0,08 ровно — не

@@ -6,6 +6,8 @@
 
 from decimal import Decimal
 
+import pytest
+
 from app.ml.sets import MARKET_MINUS, MARKET_ML, MARKET_PLUS
 from app.ml.strategy import (
     BankSignals,
@@ -147,6 +149,7 @@ def test_best_express_one_market_per_match() -> None:
     assert {"p_low", "triple_p", "no_value"} <= set(best.issues)
 
 
+@pytest.mark.usefixtures("suspend_plus")
 def test_blocked_match_and_suspended_market_never_picked() -> None:
     # Травма у игрока 1 матча 1: его исходы в варианты не идут
     injured = leg(1, 0.90, "1.50", blocks=("injury",))

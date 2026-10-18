@@ -87,6 +87,7 @@ async def test_leg_beside_chosen_one_is_not_best(
             assert row["note_key"] != "analysis.leg.not_picked"
 
 
+@pytest.mark.usefixtures("suspend_plus")
 async def test_suspended_market_is_shown_but_not_picked(
     db: AsyncSession,
     engine: AsyncEngine,

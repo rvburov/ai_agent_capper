@@ -99,9 +99,11 @@ test('своя ставка из двух матчей: «В свою ставк
   await expect(dialog.getByText(/^943\s₽$/)).toBeVisible();
   if (isMobile) await expectNoHorizontalScroll(page);
   await dialog.getByRole('button', { name: 'Сохранить ставку' }).click();
-  await expect(toast(page, /Ставка №\d+ сохранена · своя/)).toBeVisible();
-  await expect(page).toHaveURL(/\/bets\?new=\d+$/);
-  const id = Number(/new=(\d+)/.exec(page.url())?.[1]);
+  const savedOwn = toast(page, /Ставка №\d+ сохранена · своя/);
+  await expect(savedOwn).toBeVisible();
+  // номер — из тоста: ?new= в адресе экран убирает, когда подсветил новую ставку
+  const id = Number(/№(\d+)/.exec((await savedOwn.textContent()) ?? '')?.[1]);
+  await expect(page).toHaveURL(/\/bets/);
   const card = page.getByRole('article', { name: `Открытая ставка №${id}` });
   await expect(card).toContainText('Экспресс из 2 событий');
   await expect(card.getByText('Своя', { exact: true })).toBeVisible();

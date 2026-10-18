@@ -239,6 +239,7 @@ async def test_strategy_and_single_must_match_variant(
     assert await db.scalar(select(Bet.id)) is None
 
 
+@pytest.mark.usefixtures("suspend_plus")
 async def test_own_bet_any_market_one_per_match(
     make_client: ClientFactory,
     make_user: UserFactory,

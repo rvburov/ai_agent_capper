@@ -5,10 +5,10 @@ from decimal import Decimal
 
 import pytest
 
+from app.ml import strategy as strategy_module
 from app.ml.backtest import StrategyRules as BacktestRules
 from app.ml.sets import MARKET_MINUS, MARKET_ML, MARKET_PLUS, Probs3
 from app.ml.strategy import (
-    SUSPENDED_MARKETS,
     BankSignals,
     DrawdownLevel,
     Leg,
@@ -295,10 +295,11 @@ def test_parlay_takes_fitting_outcome_of_each_match() -> None:
     assert pick_parlay([*match1, *others], PARAMS, drawdown=ten) == triple
 
 
+@pytest.mark.usefixtures("suspend_plus")
 def test_suspended_market_is_never_picked() -> None:
     # Ф(+1.5) на проверке (SUSPENDED_MARKETS): даже с большим валуем и в списке рынков
     # версии исход не идет ни в кандидаты, ни в экспресс, а экран получает свою причину
-    assert MARKET_PLUS in SUSPENDED_MARKETS
+    assert MARKET_PLUS in strategy_module.SUSPENDED_MARKETS
     plus = leg(1, 0.85, "1.50", market=MARKET_PLUS, selection=2)  # перевес 1,275
     others = [leg(2, 0.75, "1.45"), leg(3, 0.74, "1.45")]
     stored = StrategyParams.from_params({"markets": ["ML", "HCP_-1.5", "HCP_+1.5"]})
