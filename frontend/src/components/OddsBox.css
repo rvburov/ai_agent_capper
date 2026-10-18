@@ -21,4 +21,4 @@
 .odds-cell.invalid { border-color: var(--bad); background: var(--bad-soft); }
 .odds-cell.invalid input, .odds-cell.invalid small { color: var(--bad-ink); }
 /* телефон: шрифт 16 px — iOS не увеличивает страницу при фокусе; зона нажатия не меньше 40 px */
-@media (max-width: 960px) { .odds-cell input { font-size: 16px; min-height: 28px; } .odds-cell { min-height: var(--tap); } }
+@media (max-width: 960px) { .odds-cell input { font-size: 16px; min-height: var(--tap); padding: 0; } .odds-cell { min-height: var(--tap); padding: 4px 8px 0; } }

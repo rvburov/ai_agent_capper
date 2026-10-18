@@ -233,3 +233,14 @@
 .analysis-legodd.has-rm .btn { width: 40px; height: 40px; padding: 0; }
 @media (max-width: 720px) { .analysis-legodd.has-rm { grid-template-columns: minmax(0, 1fr) 88px 44px; } .analysis-legodd.has-rm .btn { width: 44px; height: 44px; } }
 .analysis-legodd-name .warn-text { display: block; font-size: var(--fs-xs); color: var(--warn-ink); }
+
+/* Р28: рынки группами — название с линией и статус, колонка «Линия» */
+.analysis-ptable tr.analysis-group th { padding-top: 10px; padding-bottom: 8px; background: var(--surface-2); text-transform: none; letter-spacing: 0; font-size: var(--fs-sm); color: var(--fg); text-align: left; }
+.analysis-group-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.analysis-group-head b { font-weight: 600; overflow-wrap: anywhere; }
+.analysis-th-line, .analysis-line { white-space: nowrap; color: var(--fg-2); }
+.analysis-pgroups { display: flex; flex-direction: column; gap: 14px; }
+.analysis-pgroup { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.analysis-pgroup > .analysis-group-head { font-size: var(--fs-sm); }
+.analysis-fresh-note { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: var(--r-md); font-size: var(--fs-xs); color: var(--fg-2); }
+.analysis-fresh-note svg { width: 15px; height: 15px; flex: none; margin-top: 1px; color: var(--info-ink); }

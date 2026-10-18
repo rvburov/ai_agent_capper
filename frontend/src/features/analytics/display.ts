@@ -124,11 +124,12 @@ export function capitalize(text: string): string {
 }
 
 /** Ключ рынка в текстах (точка в названии рынка — разделитель ключей i18next). */
-export const MARKET_KEY = { ML: 'ml', 'HCP_-1.5': 'minus', 'HCP_+1.5': 'plus' } as const satisfies Record<Market, string>;
+export const MARKET_KEY: Readonly<Record<string, 'ml' | 'minus' | 'plus'>> = { ML: 'ml', 'HCP_-1.5': 'minus', 'HCP_+1.5': 'plus' };
 
-/** Что значит исход (сводка по рынкам): «игрок 1 — 2:0 (3:0, 3:1)». */
-export function outcomeDescription(t: TFunction, market: Market, selection: number): string {
-  return t(`analytics.markets.desc.${MARKET_KEY[market]}`, { n: selection });
+/** Что значит исход (сводка по рынкам): «игрок 1 — 2:0 (3:0, 3:1)»; рынок с линией (Р28) — null. */
+export function outcomeDescription(t: TFunction, market: Market, selection: number): string | null {
+  const key = MARKET_KEY[market];
+  return key ? t(`analytics.markets.desc.${key}`, { n: selection }) : null;
 }
 
 /** Диапазон кэфа: «1.30–1.49»; без верхней границы — «2.00+»; вне таблицы стратегии — null. */

@@ -52,7 +52,7 @@ test('движение банка: пополнение, вывод больше
 
   // Правила стратегии и адаптации — только просмотр; рост ставки выключен (В7)
   const strategy = page.locator('#profile-strategy');
-  await expect(strategy).toContainText('6 исходов');
+  await expect(strategy).toContainText('П1 и П2, фора ±1.5 по сетам');
   await expect(strategy).toContainText('только экспресс из 3 событий');
   const adapt = page.locator('#profile-adapt');
   await expect(adapt.getByRole('switch', { name: /^Банк \+15% к вложенному/ })).toBeDisabled();

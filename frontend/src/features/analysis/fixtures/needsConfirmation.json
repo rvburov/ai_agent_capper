@@ -92,7 +92,9 @@
           ]
         },
         "bookmaker": "Fonbet",
-        "warnings": []
+        "warnings": [],
+        "extra": [],
+        "disputed": []
       },
       {
         "position": 2,
@@ -166,7 +168,9 @@
           ]
         },
         "bookmaker": "Fonbet",
-        "warnings": []
+        "warnings": [],
+        "extra": [],
+        "disputed": []
       }
     ],
     "unknown_lines": [],

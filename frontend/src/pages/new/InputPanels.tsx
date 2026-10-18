@@ -5,7 +5,7 @@ import { Button, Callout, Chip, Combobox, Field, Spinner } from '../../component
 import type { EditEvent } from '../../features/analysis/draft';
 import type { DraftState } from '../../features/analysis/draftStore';
 import type { PreviewEvent } from '../../features/analysis/types';
-import { keyText } from '../../features/analysis/codes';
+import { hasText, keyText } from '../../features/analysis/codes';
 import { formatDate, formatMoney, formatUsd, type Currency } from '../../lib/format';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 import { EventCard, type EventActions } from './EventCard';
@@ -183,7 +183,10 @@ function ResultSection(props: TextPanelProps) {
               <b>{t('new.result.unknown', { count: parse.unknown.length })}</b>
               <ul className="new-unknown">
                 {parse.unknown.slice(0, 4).map((line) => (
-                  <li key={line.line_no}>{t('new.result.unknownLine', { n: line.line_no, text: line.text })}</li>
+                  <li key={line.line_no}>
+                    {t('new.result.unknownLine', { n: line.line_no, text: line.text })}
+                    {line.reason_key && hasText(line.reason_key) ? ` — ${keyText(line.reason_key)}` : ''}
+                  </li>
                 ))}
               </ul>
               <div className="row new-callout-actions">

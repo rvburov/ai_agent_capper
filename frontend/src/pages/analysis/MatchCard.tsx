@@ -7,11 +7,15 @@ import { paths } from '../../app/paths';
 import { Button, Callout, Card, Chip, FormDots, Icon, Segmented, type ChipKind, type IconName } from '../../components';
 import { inlineDateTime, keyText } from '../../features/analysis/codes';
 import { shortName } from '../../features/analysis/draft';
-import { formatProb, marketDescription, marketLabel, ppDelta, shownMarkets, valueTier } from '../../features/analysis/markets';
+import { formatProb, outcomeLabel, ppDelta, valueTier, type MarketFamily, type SideNames } from '../../features/analysis/markets';
+import { groupTitle, marketDescription, marketGroups } from '../../features/analysis/outcomes';
+import { useMarketStatuses } from '../../features/markets/api';
+import { statusChipKind, statusHint, statusLabel, type MarketStatusMap } from '../../features/markets/status';
+import type { MarketStatusKind } from '../../features/markets/types';
 import { slipEligible } from '../../features/analysis/ownBet';
 import { roundLabel } from '../../features/analysis/rounds';
 import type { ComparisonRow, Factor, MarketRow, MatchResult } from '../../features/analysis/types';
-import { formatDate, formatNumber, formatOdds, formatPercent } from '../../lib/format';
+import { formatDate, formatLine, formatNumber, formatOdds, formatPercent } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { MOBILE_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 
@@ -26,18 +30,26 @@ export interface MatchNames {
   name: (id: number, fallback: string) => string;
 }
 
-export function outcomeName(row: MarketRow, match: MatchResult, names: MatchNames): string {
-  const player = row.selection === 1 ? match.player1 : match.player2;
-  return `${shortName(names.name(player.id, player.name))} ${marketLabel(row.market, row.selection)}`;
+/** Короткие имена игроков матча для подписей исходов. */
+export function sideNames(match: MatchResult, names: MatchNames): SideNames {
+  return {
+    p1: shortName(names.name(match.player1.id, match.player1.name)),
+    p2: shortName(names.name(match.player2.id, match.player2.name)),
+  };
 }
 
-export function outcomeDesc(row: MarketRow, match: MatchResult, names: MatchNames): string {
-  const player = row.selection === 1 ? match.player1 : match.player2;
-  return marketDescription(row.market, shortName(names.name(player.id, player.name)), match.best_of);
+export function outcomeName(row: Pick<MarketRow, 'market' | 'selection'>, match: MatchResult, names: MatchNames): string {
+  return outcomeLabel(row.market, row.selection, sideNames(match, names));
+}
+
+export function outcomeDesc(row: Pick<MarketRow, 'market' | 'selection'>, match: MatchResult, names: MatchNames): string {
+  const sides = sideNames(match, names);
+  return marketDescription(row.market, row.selection, row.selection === 1 ? sides.p1 : sides.p2, match.best_of);
 }
 
 function ValueCell({ row }: { row: MarketRow }) {
   const { t } = useTranslation();
+  if (!row.has_model) return <span className="analysis-val-none">{t('analysis.match.modelSoon')}</span>;
   if (row.value === null) return <span className="analysis-val-none">—</span>;
   const tier = valueTier(row.tier);
   return (
@@ -53,6 +65,27 @@ function ValueCell({ row }: { row: MarketRow }) {
         <span className="analysis-val-none">{row.value < 0 ? t('analysis.value.none') : t('analysis.value.low')}</span>
       )}
     </div>
+  );
+}
+
+/** Линия исхода: у фор со знаком («−1.5», «+4.5»), у тоталов — «22.5», у победы — «—». */
+function lineText(row: Pick<MarketRow, 'line' | 'family'>): string {
+  if (row.line === null) return '—';
+  return formatLine(row.line, { signed: row.family !== 'stot' && row.family !== 'gtot' });
+}
+
+/** Статус рынка у заголовка группы: «идет в экспресс», «на проверке», «для сравнения · 38 из 150». */
+function StatusChip({ status, family, statuses }: { status: MarketStatusKind; family: MarketFamily; statuses?: MarketStatusMap | undefined }) {
+  const { t } = useTranslation();
+  const info = statuses?.get(family);
+  const shown = { status, events: info?.events ?? 0, need: info?.need ?? 0 };
+  const text = status === 'compare' && !info ? t('analysis.marketStatus.compare') : statusLabel(shown);
+  return (
+    <span title={info ? statusHint(shown) : undefined}>
+      <Chip kind={statusChipKind(status)} icon={status === 'express' ? 'ticket' : 'flask'}>
+        {text}
+      </Chip>
+    </span>
   );
 }
 
@@ -88,12 +121,14 @@ function Outcome({ row, match, names, slip }: { row: MarketRow; match: MatchResu
     <div className="analysis-out">
       <b>{outcomeName(row, match, names)}</b>
       <small>{outcomeDesc(row, match, names)}</small>
+      {row.p_push > 0 && <small>{t('analysis.match.push', { p: formatProb(row.p_push) })}</small>}
       {row.in_express ? (
         <Chip kind="accent" icon="ticket">
           {t('analysis.match.inExpress')}
         </Chip>
       ) : (
-        row.note_key && <small>{keyText(row.note_key, {}, '')}</small>
+        // статус рынка — у заголовка группы, «оценка модели — скоро» — в колонке валуя (как в макете)
+        row.note_key && row.status === 'express' && row.has_model && <small>{keyText(row.note_key, {}, '')}</small>
       )}
       {slip && <SlipButton row={row} match={match} names={names} slip={slip} />}
     </div>
@@ -102,18 +137,32 @@ function Outcome({ row, match, names, slip }: { row: MarketRow; match: MatchResu
 
 function ClaudeCell({ row }: { row: MarketRow }) {
   const { t } = useTranslation();
-  const clamped = Math.abs(row.p_claude - row.p_final) > 0.0005;
+  if (row.p_final === null || row.p_base === null) return <span className="analysis-pnum">—</span>;
+  const clamped = row.p_claude !== null && Math.abs(row.p_claude - row.p_final) > 0.0005;
   return (
-    <span className="analysis-pnum" title={clamped ? t('analysis.match.clamped', { p: formatProb(row.p_claude) }) : undefined}>
+    <span className="analysis-pnum" title={clamped && row.p_claude !== null ? t('analysis.match.clamped', { p: formatProb(row.p_claude) }) : undefined}>
       {formatProb(row.p_final)}
       <small>{ppDelta(row.p_final - row.p_base)}</small>
     </span>
   );
 }
 
-function ProbTable({ match, names, bookmaker, slip }: { match: MatchResult; names: MatchNames; bookmaker: string | null; slip?: SlipControl }) {
+function ProbTable({
+  match,
+  names,
+  bookmaker,
+  slip,
+  statuses,
+}: {
+  match: MatchResult;
+  names: MatchNames;
+  bookmaker: string | null;
+  slip?: SlipControl;
+  statuses?: MarketStatusMap | undefined;
+}) {
   const { t } = useTranslation();
-  const rows = shownMarkets(match.markets);
+  const groups = marketGroups(match.markets);
+  const sides = sideNames(match, names);
   const th = (label: string, sub: string | null, cls?: string) => (
     <th scope="col" className={cls}>
       {label}
@@ -127,6 +176,7 @@ function ProbTable({ match, names, bookmaker, slip }: { match: MatchResult; name
         <thead>
           <tr>
             {th(t('analysis.match.colOutcome'), null, 'analysis-th-out')}
+            {th(t('analysis.match.colLine'), null, 'analysis-th-line')}
             {th(t('analysis.match.colModel'), t('analysis.match.colModelSub'), 'r')}
             {th(t('analysis.match.colClaude'), match.news_state === 'failed' || match.news_state === 'limit' || match.news_state === 'off' ? t('analysis.match.colClaudeNoNews') : t('analysis.match.colClaudeSub'), 'r')}
             {th(t('analysis.match.colMarket'), t('analysis.match.colMarketSub'), 'r')}
@@ -134,68 +184,100 @@ function ProbTable({ match, names, bookmaker, slip }: { match: MatchResult; name
             {th(t('analysis.match.colValue'), t('analysis.match.colValueSub'), 'r')}
           </tr>
         </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={`${row.market}-${row.selection}`} className={cx(row.in_express && 'is-pick')}>
-              <td>
-                <Outcome row={row} match={match} names={names} slip={slip} />
-              </td>
-              <td className="r">
-                <span className="analysis-pnum">{formatProb(row.p_base)}</span>
-              </td>
-              <td className="r">
-                <ClaudeCell row={row} />
-              </td>
-              <td className="r">
-                <span className="analysis-pnum">{row.q_market === null ? '—' : formatProb(row.q_market)}</span>
-              </td>
-              <td className="r">
-                <span className="odds">{row.odds === null ? '—' : formatOdds(row.odds)}</span>
-              </td>
-              <td className="r">
-                <ValueCell row={row} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
+        {groups.map((group) => {
+          const first = group.rows[0];
+          return (
+            <tbody key={group.key}>
+              <tr className="analysis-group">
+                <th scope="rowgroup" colSpan={7}>
+                  <span className="analysis-group-head">
+                    <b>{groupTitle(group, sides)}</b>
+                    {first && <StatusChip status={first.status} family={group.family} statuses={statuses} />}
+                  </span>
+                </th>
+              </tr>
+              {group.rows.map((row) => (
+                <tr key={`${row.market}-${row.selection}`} className={cx(row.in_express && 'is-pick')}>
+                  <td>
+                    <Outcome row={row} match={match} names={names} slip={slip} />
+                  </td>
+                  <td className="analysis-line">
+                    <span className="odds">{lineText(row)}</span>
+                  </td>
+                  <td className="r">
+                    <span className="analysis-pnum">{formatProb(row.p_base)}</span>
+                  </td>
+                  <td className="r">
+                    <ClaudeCell row={row} />
+                  </td>
+                  <td className="r">
+                    <span className="analysis-pnum">{row.q_market === null ? '—' : formatProb(row.q_market)}</span>
+                  </td>
+                  <td className="r">
+                    <span className="odds">{row.odds === null ? '—' : formatOdds(row.odds)}</span>
+                  </td>
+                  <td className="r">
+                    <ValueCell row={row} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          );
+        })}
       </table>
     </div>
   );
 }
 
-function ProbList({ match, names, slip }: { match: MatchResult; names: MatchNames; slip?: SlipControl }) {
+function ProbList({ match, names, slip, statuses }: { match: MatchResult; names: MatchNames; slip?: SlipControl; statuses?: MarketStatusMap | undefined }) {
   const { t } = useTranslation();
+  const sides = sideNames(match, names);
   return (
-    <ul className="analysis-plist" aria-label={t('analysis.match.probs')}>
-      {shownMarkets(match.markets).map((row) => (
-        <li key={`${row.market}-${row.selection}`} className={cx('analysis-pitem', row.in_express && 'is-pick')}>
-          <div className="analysis-pitem-top">
-            <Outcome row={row} match={match} names={names} slip={slip} />
-            <ValueCell row={row} />
-          </div>
-          <dl className="analysis-pgrid">
-            <div>
-              <dt>{t('analysis.match.colModel')}</dt>
-              <dd>{formatProb(row.p_base)}</dd>
+    <div className="analysis-pgroups">
+      {marketGroups(match.markets).map((group) => {
+        const first = group.rows[0];
+        const title = groupTitle(group, sides);
+        return (
+          <section key={group.key} className="analysis-pgroup" aria-label={title}>
+            <div className="analysis-group-head">
+              <b>{title}</b>
+              {first && <StatusChip status={first.status} family={group.family} statuses={statuses} />}
             </div>
-            <div>
-              <dt>{t('analysis.match.colClaude')}</dt>
-              <dd>
-                {formatProb(row.p_final)} <small>{ppDelta(row.p_final - row.p_base, { unit: false })}</small>
-              </dd>
-            </div>
-            <div>
-              <dt>{t('analysis.match.colMarket')}</dt>
-              <dd>{row.q_market === null ? '—' : formatProb(row.q_market)}</dd>
-            </div>
-            <div>
-              <dt>{t('analysis.match.colOddsShort')}</dt>
-              <dd className="odds">{row.odds === null ? '—' : formatOdds(row.odds)}</dd>
-            </div>
-          </dl>
-        </li>
-      ))}
-    </ul>
+            <ul className="analysis-plist" aria-label={t('analysis.match.probs')}>
+              {group.rows.map((row) => (
+                <li key={`${row.market}-${row.selection}`} className={cx('analysis-pitem', row.in_express && 'is-pick')}>
+                  <div className="analysis-pitem-top">
+                    <Outcome row={row} match={match} names={names} slip={slip} />
+                    <ValueCell row={row} />
+                  </div>
+                  <dl className="analysis-pgrid">
+                    <div>
+                      <dt>{t('analysis.match.colModel')}</dt>
+                      <dd>{formatProb(row.p_base)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('analysis.match.colClaude')}</dt>
+                      <dd>
+                        {formatProb(row.p_final)}{' '}
+                        {row.p_final !== null && row.p_base !== null && <small>{ppDelta(row.p_final - row.p_base, { unit: false })}</small>}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('analysis.match.colMarket')}</dt>
+                      <dd>{row.q_market === null ? '—' : formatProb(row.q_market)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('analysis.match.colOddsShort')}</dt>
+                      <dd className="odds">{row.odds === null ? '—' : formatOdds(row.odds)}</dd>
+                    </div>
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
@@ -389,6 +471,7 @@ export function MatchCard({
 }) {
   const { t } = useTranslation();
   const mobile = useMediaQuery(MOBILE_QUERY);
+  const statuses = useMarketStatuses();
   const [tab, setTab] = useState<Tab>('probs');
   const pick = match.markets.find((r) => r.in_express) ?? null;
   const pickSide = pick?.selection ?? 1;
@@ -480,7 +563,7 @@ export function MatchCard({
             {tab === 'probs' && (
               <>
                 <p className="analysis-hint">{t('analysis.match.probsMobileHint', { odds: oddsHint })}</p>
-                <ProbList match={match} names={names} slip={slip} />
+                <ProbList match={match} names={names} slip={slip} statuses={statuses} />
                 {probHint}
               </>
             )}
@@ -501,7 +584,7 @@ export function MatchCard({
             t('analysis.match.probsHint', { odds: oddsHint }),
             <>
               <div className="analysis-bleed">
-                <ProbTable match={match} names={names} bookmaker={bookmaker} slip={slip} />
+                <ProbTable match={match} names={names} bookmaker={bookmaker} slip={slip} statuses={statuses} />
               </div>
               {probHint}
             </>,

@@ -8,7 +8,8 @@ import { Button, Callout, useToast } from '../../components';
 import { apiErrorText } from '../../features/analysis/codes';
 import { useBank } from '../../features/analysis/api';
 import { HISTORY_PAGE, OPEN_PAGE, useBet, useBetList, useBetSummary } from '../../features/bets/api';
-import { localDay, MARKET_KEY } from '../../features/bets/display';
+import { localDay } from '../../features/bets/display';
+import { familyTitle } from '../../features/markets/status';
 import {
   anyActive,
   EMPTY_FILTERS,
@@ -61,7 +62,7 @@ function describe(filters: BetFilters, t: TFunction): string {
   else if (filters.to) parts.push(t('bets.filters.until', { date: formatDateRange(filters.to, filters.to) }));
   else parts.push(filters.period === 'all' ? t('bets.describe.all') : t('bets.describe.period', { period: t(`bets.filters.periods.${filters.period}`) }));
   if (filters.status) parts.push(t(`bets.filters.statuses.${filters.status}`).toLowerCase());
-  if (filters.market) parts.push(t(`bets.filters.markets.${MARKET_KEY[filters.market]}`));
+  if (filters.family) parts.push(familyTitle(filters.family));
   if (filters.source) parts.push(t(`bets.filters.sources.${filters.source}`).toLowerCase());
   if (filters.surfaces.length) parts.push(filters.surfaces.map((s) => t(`bets.filters.surfaces.${s}`).toLowerCase()).join(', '));
   const q = filters.q.trim();

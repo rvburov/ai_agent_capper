@@ -121,6 +121,7 @@ export function dashboardOut(over: Partial<Schemas['DashboardOut']> = {}): Schem
       closing_windows: 0,
       closing_better: 0,
       main: 'pred',
+      families: [],
     },
     series: {
       kind: 'bank',

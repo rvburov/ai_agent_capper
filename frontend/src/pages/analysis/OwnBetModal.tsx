@@ -7,7 +7,7 @@ import { parseAmount } from '../../features/analysis/amount';
 import { apiErrorText } from '../../features/analysis/codes';
 import { oddInputText, oddNumber, validOdd } from '../../features/analysis/draft';
 import { formatProb, formatShare } from '../../features/analysis/markets';
-import { slipNumbers, type SlipItem } from '../../features/analysis/ownBet';
+import { slipNumbers, slipProb, type SlipItem } from '../../features/analysis/ownBet';
 import { payout, roundMoney, shareOf, stakeForShare, stakeProblem, type MoneyRules } from '../../features/analysis/stake';
 import { BET_CONFLICTS, newClientRef, usePlaceBet, type Bet } from '../../features/bets/api';
 import { currencySign, formatAmountInput, formatMoney, formatOdds, formatPercent, type Currency } from '../../lib/format';
@@ -58,7 +58,7 @@ export function OwnBetModal(props: OwnBetModalProps) {
   const problem = stakeProblem(amount, bank, rules);
   const ready = slip.length > 0 && numbers !== null && problem === null && amount !== null && choice.bookOk;
   const example = stakeForShare(bank, 0.01, rules);
-  const p = slip.reduce((acc, x) => acc * x.p, 1);
+  const p = slipProb(slip);
 
   async function save() {
     if (!choice.bookOk) {
@@ -93,7 +93,7 @@ export function OwnBetModal(props: OwnBetModalProps) {
 
   const share = amount !== null && problem === null ? shareOf(amount, bank) : null;
   const win = share !== null && amount !== null && nums ? payout(amount, nums.total, rules) : null;
-  const unchecked = slip.filter((x) => x.suspended);
+  const unchecked = slip.filter((x) => x.status !== 'express');
   const unsure = slip.filter((x) => x.confidence !== 'high');
   const low = unsure.some((x) => x.confidence === 'low');
 
@@ -145,14 +145,16 @@ export function OwnBetModal(props: OwnBetModalProps) {
                 <label className="analysis-legodd-name" htmlFor={id}>
                   <b>{item.name}</b>
                   <small id={`${id}-hint`}>
-                    {t('analysis.own.legHint', {
-                      match: item.match,
-                      p: formatProb(item.p),
-                      value: formatPercent(item.p * item.odds - 1, { digits: 1, signed: true }),
-                    })}
+                    {item.p === null
+                      ? t('analysis.own.legHintNoModel', { match: item.match })
+                      : t('analysis.own.legHint', {
+                          match: item.match,
+                          p: formatProb(item.p),
+                          value: formatPercent(item.p * item.odds + item.pPush - 1, { digits: 1, signed: true }),
+                        })}
                     {changed ? ` · ${t('analysis.own.legWas', { odds: formatOdds(item.odds) })}` : ''}
                   </small>
-                  {item.suspended && <small className="warn-text">{t('analysis.own.suspended')}</small>}
+                  {item.status !== 'express' && <small className="warn-text">{t(`analysis.own.status.${item.status}`)}</small>}
                 </label>
                 <input
                   id={id}
@@ -217,12 +219,12 @@ export function OwnBetModal(props: OwnBetModalProps) {
             {
               key: 'p',
               label: t('analysis.own.pModel'),
-              value: `≈ ${formatProb(p)}${slip.length > 1 ? ` (${slip.map((x) => formatProb(x.p)).join(' × ')})` : ''}`,
+              value: p === null ? '—' : `≈ ${formatProb(p)}${slip.length > 1 ? ` (${slip.map((x) => formatProb(x.p)).join(' × ')})` : ''}`,
             },
             {
               key: 'ev',
               label: t('analysis.own.valueModel'),
-              value: nums ? <span className={cx(nums.ev < 0 && 'bad-text')}>{formatPercent(nums.ev, { digits: 1, signed: true })}</span> : '—',
+              value: nums && nums.ev !== null ? <span className={cx(nums.ev < 0 && 'bad-text')}>{formatPercent(nums.ev, { digits: 1, signed: true })}</span> : '—',
             },
           ]}
         />
@@ -233,7 +235,7 @@ export function OwnBetModal(props: OwnBetModalProps) {
         {amount !== null && problem === 'belowMin' && (
           <Callout kind="bad">{t('analysis.stakeModal.belowMin', { min: formatMoney(rules.min, currency) })}</Callout>
         )}
-        {nums && nums.ev < 0 && (
+        {nums && nums.ev !== null && nums.ev < 0 && (
           <Callout kind="bad" icon="alert">
             <b>{t('analysis.variants.noValueTitle')}</b>{' '}
             {t('analysis.own.noValueText', { value: formatPercent(nums.ev, { digits: 1, signed: true }) })}

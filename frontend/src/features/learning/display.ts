@@ -1,7 +1,9 @@
 import type { TFunction } from 'i18next';
 
 import type { ChipKind, IconName } from '../../components';
-import { formatInterval, formatNumber, formatOdds } from '../../lib/format';
+import { formatInterval, formatLine, formatNumber, formatOdds } from '../../lib/format';
+import { isFamily, marketSpec } from '../analysis/markets';
+import { familyTitle } from '../markets/labels';
 import { PUBLIC_CASES_MIN } from './limits';
 import type { Lesson, LessonEstimate, LessonFeature, LessonStatus, ScopeCondition } from './types';
 
@@ -69,8 +71,18 @@ export function lessonTone(status: LessonStatus): 'confirmed' | 'hypothesis' | '
 // Значения рынка — ключи локали без точек и знаков: «HCP_-1.5» → minus
 const MARKET_VALUE: Readonly<Record<string, string>> = { ML: 'ml', 'HCP_-1.5': 'minus', 'HCP_+1.5': 'plus' };
 
+/** Новые рынки (Р28) в условии урока: семейство («Тотал геймов») или рынок с линией («Тотал геймов 22.5»). */
+function newMarketText(value: string): string {
+  if (isFamily(value)) return familyTitle(value);
+  const spec = marketSpec(value);
+  if (!spec || spec.line === null) return value;
+  const hcp = spec.family !== 'stot' && spec.family !== 'gtot';
+  return `${familyTitle(spec.family)} ${formatLine(spec.line, { signed: hcp })}`;
+}
+
 /** Значение перечня словами: «хард», «П1 / П2», «1/4 финала»; незнакомое — как есть. */
 export function scopeValueText(feature: string, value: string, t: TFunction): string {
+  if (feature === 'market' && !MARKET_VALUE[value]) return newMarketText(value);
   const key = feature === 'market' ? MARKET_VALUE[value] : value;
   if (!key) return value;
   // значения приходят из словаря сервера: ключ локали собирается из строки, неизвестный — как есть

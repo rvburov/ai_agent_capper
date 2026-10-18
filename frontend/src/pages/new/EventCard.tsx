@@ -15,6 +15,7 @@ import {
   Segmented,
   SurfaceChip,
   surfaceColor,
+  useToast,
   type Freshness,
   type OddsCell,
   type Surface,
@@ -22,6 +23,7 @@ import {
 import {
   checkEvent,
   displayName,
+  hasOtherMarkets,
   normalizeOdd,
   ODD_KEYS,
   resolvedPlayer,
@@ -33,13 +35,17 @@ import {
   type PickedPlayer,
   type PlayerSlot,
 } from '../../features/analysis/draft';
-import { formatProb } from '../../features/analysis/markets';
+import { formatProb, marketLabel } from '../../features/analysis/markets';
 import { inlineDateTime, keyText } from '../../features/analysis/codes';
 import { categoryLabel, ROUND_CODES, roundLabel } from '../../features/analysis/rounds';
 import type { PreviewEvent, PreviewPlayer } from '../../features/analysis/types';
 import { usePlayerSearch, type PlayerHit } from '../../features/players/api';
 import { formatOdds, formatPercent } from '../../lib/format';
 import { cx } from '../../lib/cx';
+import { useMarketStatuses } from '../../features/markets/api';
+import { expressListText, type MarketStatusMap } from '../../features/markets/status';
+import { AmbigCallout, ExtraBlock } from './ExtraMarkets';
+import { issueLabel } from './summary';
 
 // Карточка события «Что распознано» и блок правки (reviewCard и editorBlock в
 // mockup/js/screens/new-analysis.js).
@@ -221,8 +227,22 @@ function Warnings({
 }
 
 /** Подвал события: маржа, рынок без маржи, коридор стратегии (по «Перед запуском»). */
-function Foot({ event, preview, corridor }: { event: EditEvent; preview: PreviewEvent | undefined; corridor: [string, string] | null }) {
+function Foot({
+  event,
+  preview,
+  corridor,
+  statuses,
+}: {
+  event: EditEvent;
+  preview: PreviewEvent | undefined;
+  corridor: [string, string] | null;
+  statuses: MarketStatusMap | undefined;
+}) {
   const { t } = useTranslation();
+  const list = statuses ? expressListText(statuses) : '';
+  const others = hasOtherMarkets(event) && (
+    <div className="new-corr">{list ? t('new.foot.others', { list }) : t('new.foot.othersNoList')}</div>
+  );
   const ml1 = preview?.market_p.find((m) => m.market === 'ML' && m.selection === 1);
   if (!validOdd(event.odds.ml1) || !validOdd(event.odds.ml2) || !preview || preview.margin_ml === null || !ml1) {
     return (
@@ -243,11 +263,7 @@ function Foot({ event, preview, corridor }: { event: EditEvent; preview: Preview
   const name2 = shortName(slotName(event.p2, t('new.odds.ml2')));
   const inCorridor = preview.in_corridor;
   const range = corridor ? `${formatOdds(corridor[0])}–${formatOdds(corridor[1])}` : '';
-  const labelOf = (market: string, selection: number) => {
-    const key: OddKey =
-      market === 'ML' ? (selection === 1 ? 'ml1' : 'ml2') : market === 'HCP_-1.5' ? (selection === 1 ? 'h1m' : 'h2m') : selection === 1 ? 'h1p' : 'h2p';
-    return t(`new.odds.${key}`);
-  };
+  const labelOf = (market: string, selection: number) => marketLabel(market, selection);
   return (
     <div className="new-ev-foot">
       <div className="new-foot-row">
@@ -274,16 +290,13 @@ function Foot({ event, preview, corridor }: { event: EditEvent; preview: Preview
       ) : (
         <div className="new-corr out">{t('new.foot.outCorridor', { range })}</div>
       )}
+      {others}
     </div>
   );
 }
 
 function issueText(event: EditEvent, t: TFunction): string[] {
-  return checkEvent(event).issues.map((issue) => {
-    if (issue.kind === 'oddsRange')
-      return t('new.check.oddsRange', { list: issue.keys.map((key) => t(`new.odds.${key}`)).join(', ') });
-    return t(`new.check.${issue.kind}`);
-  });
+  return checkEvent(event).issues.map((issue) => issueLabel(issue, t));
 }
 
 /** Ошибки проверки события текстом: «Нужны кэфы П1 и П2» (для «Событие N: …»). */
@@ -291,8 +304,22 @@ export function eventIssueTexts(event: EditEvent, t: TFunction): string[] {
   return issueText(event, t);
 }
 
-function Odds({ event, onChange, corridor, all }: { event: EditEvent; onChange: (next: EditEvent) => void; corridor: [string, string] | null; all: boolean }) {
+function Odds({
+  event,
+  onChange,
+  corridor,
+  all,
+  statuses,
+}: {
+  event: EditEvent;
+  onChange: (next: EditEvent) => void;
+  corridor: [string, string] | null;
+  all: boolean;
+  statuses: MarketStatusMap | undefined;
+}) {
   const { t } = useTranslation();
+  // Галочка «в коридоре стратегии» — только у рынков, которые идут в экспресс (Р28)
+  const hcpInExpress = statuses?.get('h15')?.status === 'express';
   const check = checkEvent(event);
   const low = corridor ? Number(corridor[0]) : Number.NaN;
   const high = corridor ? Number(corridor[1]) : Number.NaN;
@@ -307,7 +334,7 @@ function Odds({ event, onChange, corridor, all }: { event: EditEvent; onChange: 
       value,
       ariaLabel: main ? t('new.odds.aria', { label: t(`new.odds.${key}`) }) : t('new.odds.ariaOptional', { label: t(`new.odds.${key}`) }),
       invalid: check.bad.has(key),
-      inCorridor: validOdd(value) && n >= low && n <= high,
+      inCorridor: (main || hcpInExpress) && validOdd(value) && n >= low && n <= high,
       title: main ? undefined : t('new.odds.hcpTitle'),
     };
   });
@@ -498,6 +525,8 @@ export function EventCard({ event, index, preview, corridor, mode, onChange, onR
   const serverProblems = (preview?.problems ?? []).filter((p) => !CLIENT_CHECKED.has(p.key)).map((p) => keyText(p.key, p.params, p.key));
   const editing = mode !== 'review';
   const msgId = `${event.key}-msg`;
+  const statuses = useMarketStatuses();
+  const toast = useToast();
   return (
     <article className={cx('new-ev', mode === 'inline' && 'editing')} aria-labelledby={titleId}>
       <div className="new-ev-head">
@@ -529,6 +558,20 @@ export function EventCard({ event, index, preview, corridor, mode, onChange, onR
           <PlayerBox slot={event.p2} number={2} preview={preview} />
         </div>
       )}
+      {event.ambig.length > 0 && (
+        <div className="new-ev-warn">
+          {event.ambig.map((ambig, i) => (
+            <AmbigCallout
+              key={`${ambig.line}-${ambig.o1}-${ambig.o2}`}
+              event={event}
+              index={i}
+              ambig={ambig}
+              onChange={onChange}
+              onAnswered={(text) => toast.show(text, { icon: 'check' })}
+            />
+          ))}
+        </div>
+      )}
       <Warnings event={event} preview={preview} editing={editing} onChange={onChange} onEdit={onEdit} />
       {editing ? (
         <div className="field">
@@ -536,12 +579,13 @@ export function EventCard({ event, index, preview, corridor, mode, onChange, onR
             <span>{t('new.odds.label')}</span>
             <span className="new-odds-hint">{t('new.odds.hint')}</span>
           </span>
-          <Odds event={event} onChange={onChange} corridor={corridor} all />
+          <Odds event={event} onChange={onChange} corridor={corridor} all statuses={statuses} />
         </div>
       ) : (
-        <Odds event={event} onChange={onChange} corridor={corridor} all={false} />
+        <Odds event={event} onChange={onChange} corridor={corridor} all={false} statuses={statuses} />
       )}
-      <Foot event={event} preview={preview} corridor={corridor} />
+      <ExtraBlock event={event} editable={editing} statuses={statuses} onChange={onChange} />
+      <Foot event={event} preview={preview} corridor={corridor} statuses={statuses} />
       <div className="new-ev-msg" id={msgId} aria-live="polite">
         {errors.length > 0 && <div className="field-error">{errors.join('. ')}.</div>}
         {errors.length === 0 && serverProblems.length > 0 && <div className="field-error">{serverProblems.join('. ')}.</div>}

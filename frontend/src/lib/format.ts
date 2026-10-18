@@ -173,6 +173,18 @@ export function formatOdds(value: Amount | null | undefined): string {
 }
 
 /**
+ * Линия рынка (Р28), как кэф — с точкой: «22.5», «22», «−3.5». signed — у фор знак всегда:
+ * «+3.5», «−1.5», ноль — «0».
+ */
+export function formatLine(value: Amount | null | undefined, { signed = false }: { signed?: boolean } = {}): string {
+  const n = toNumber(value);
+  if (!Number.isFinite(n)) return DASH;
+  const text = String(Math.abs(Math.round(n * 100) / 100));
+  if (n < 0) return MINUS + text;
+  return signed && n > 0 ? `+${text}` : text;
+}
+
+/**
  * Кэф, посчитанный сервером до 0.001 (кэф расчета экспресса с возвратом ноги): третий знак,
  * если он не ноль, — «1.335», иначе как на табло — «1.30». По нему сходится выплата.
  */

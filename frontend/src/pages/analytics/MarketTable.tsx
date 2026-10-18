@@ -2,7 +2,9 @@ import type { KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Card, Chip, EmptyState } from '../../components';
-import { marketLabel } from '../../features/analysis/markets';
+import { EXTRA_FAMILIES, familyOf, marketLabel, type MarketFamily } from '../../features/analysis/markets';
+import { useMarketStatuses } from '../../features/markets/api';
+import { familyLines, familyTitle } from '../../features/markets/status';
 import { outcomeDescription } from '../../features/analytics/display';
 import { sameOutcome, type AnalyticsFilters } from '../../features/analytics/filters';
 import { filterLabel } from '../../features/analytics/insights';
@@ -19,6 +21,10 @@ interface Row {
   key: string;
   market: Market | null;
   selection: number | null;
+  /** Строка семейства новых рынков (Р28): фильтр family. */
+  family: MarketFamily | null;
+  /** Рынок «для сравнения» — метка у строки. */
+  compare: boolean;
   label: string;
   desc: string | null;
   n: number;
@@ -34,14 +40,26 @@ interface MarketTableProps {
   filters: AnalyticsFilters;
   /** Выбрать исход (null — все рынки). */
   onPick: (market: Market | null, selection: number | null) => void;
+  /** Выбрать семейство новых рынков (Р28). */
+  onPickFamily: (family: MarketFamily) => void;
 }
 
-export function MarketTable({ data, filters, onPick }: MarketTableProps) {
+// Новые рынки (Р28) — строкой на семейство: линий много, ROI по отдельной линии ничего не скажет
+const NEW_FAMILIES: ReadonlySet<MarketFamily> = new Set(EXTRA_FAMILIES);
+
+export function MarketTable({ data, filters, onPick, onPickFamily }: MarketTableProps) {
   const { t } = useTranslation();
-  const rows: Row[] = data.slices.markets.map((g) => ({
+  const statuses = useMarketStatuses();
+  const outcomes = data.slices.markets.filter((g) => {
+    const family = familyOf(g.market);
+    return family !== null && !NEW_FAMILIES.has(family);
+  });
+  const rows: Row[] = outcomes.map((g) => ({
     key: `${g.market}:${g.selection}`,
     market: g.market,
     selection: g.selection,
+    family: null,
+    compare: false,
     label: marketLabel(g.market, g.selection),
     desc: outcomeDescription(t, g.market, g.selection),
     n: g.n,
@@ -51,6 +69,24 @@ export function MarketTable({ data, filters, onPick }: MarketTableProps) {
     small: g.small,
     total: false,
   }));
+  for (const g of data.slices.families) {
+    if (!NEW_FAMILIES.has(g.family)) continue;
+    rows.push({
+      key: `f:${g.family}`,
+      market: null,
+      selection: null,
+      family: g.family,
+      compare: statuses?.get(g.family)?.status === 'compare',
+      label: familyTitle(g.family),
+      desc: familyLines(g.family),
+      n: g.n,
+      winrate: g.winrate,
+      roi: g.roi,
+      avgOdds: g.avg_odds,
+      small: g.small,
+      total: false,
+    });
+  }
   if (!rows.length) {
     return (
       <Card className="analytics-card" title={t('analytics.marketTable.title')}>
@@ -64,6 +100,8 @@ export function MarketTable({ data, filters, onPick }: MarketTableProps) {
       key: 'all',
       market: null,
       selection: null,
+      family: null,
+      compare: false,
       label: t('analytics.marketTable.all'),
       desc: null,
       n: total.n,
@@ -74,9 +112,16 @@ export function MarketTable({ data, filters, onPick }: MarketTableProps) {
       total: true,
     });
   }
-  const isActive = (row: Row) => row.market !== null && row.selection !== null && sameOutcome(filters, row.market, row.selection) && filters.selection !== null;
+  const isActive = (row: Row) =>
+    row.family !== null
+      ? filters.family === row.family
+      : row.market !== null && row.selection !== null && sameOutcome(filters, row.market, row.selection) && filters.selection !== null;
   // повторное нажатие на выбранный исход и строка «Все рынки» снимают фильтр
-  const pick = (row: Row) => (row.total || isActive(row) ? onPick(null, null) : onPick(row.market, row.selection));
+  const pick = (row: Row) => {
+    if (row.total || isActive(row)) onPick(null, null);
+    else if (row.family) onPickFamily(row.family);
+    else onPick(row.market, row.selection);
+  };
   const hint = (row: Row) =>
     row.total
       ? t('analytics.marketTable.rowAll', { label: row.label })
@@ -88,7 +133,13 @@ export function MarketTable({ data, filters, onPick }: MarketTableProps) {
     event.preventDefault();
     pick(row);
   }
-  const selectedName = filters.market ? (filters.selection ? marketLabel(filters.market, filters.selection) : filterLabel(t, { market: filters.market })) : null;
+  const selectedName = filters.market
+    ? filters.selection
+      ? marketLabel(filters.market, filters.selection)
+      : filterLabel(t, { market: filters.market })
+    : filters.family
+      ? familyTitle(filters.family)
+      : null;
   return (
     <Card
       className="analytics-card analytics-mkt-card"
@@ -140,6 +191,7 @@ export function MarketTable({ data, filters, onPick }: MarketTableProps) {
                       <div className="analytics-mname">
                         {row.label}
                         {row.small && <SmallMark n={data.thresholds.small_sample} />}
+                        {row.compare && <Chip kind="info">{t('analysis.marketStatus.compare')}</Chip>}
                       </div>
                       {row.desc && <div className="analytics-mdesc">{row.desc}</div>}
                     </div>
@@ -166,10 +218,11 @@ export function MarketTable({ data, filters, onPick }: MarketTableProps) {
                 <span className="analytics-mname">
                   {row.label}
                   {row.small && <SmallMark n={data.thresholds.small_sample} />}
+                  {row.compare && <Chip kind="info">{t('analysis.marketStatus.compare')}</Chip>}
                 </span>
                 <span className="analytics-mrow-sub">
                   {t('analytics.marketTable.listSub', {
-                    desc: row.total ? (filters.market ? t('analytics.marketTable.dropFilter') : t('analytics.marketTable.noFilter')) : row.desc,
+                    desc: row.total ? (filters.market || filters.family ? t('analytics.marketTable.dropFilter') : t('analytics.marketTable.noFilter')) : row.desc,
                     events: t('analytics.count.events', { count: row.n }),
                   })}
                 </span>

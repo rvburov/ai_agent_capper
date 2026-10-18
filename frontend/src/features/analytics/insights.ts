@@ -52,11 +52,15 @@ export function countText(t: TFunction, unit: 'bets' | 'events', count: number):
 export function filterLabel(t: TFunction, filter: InsightFilter | null | undefined): string | null {
   if (!filter) return null;
   if (filter.surface) return t(`analytics.surfaces.${filter.surface}`);
-  if (filter.market) return filter.selection ? marketLabel(filter.market, filter.selection) : t(`analytics.markets.group.${MARKET_GROUP[filter.market]}`);
+  if (filter.market) {
+    if (filter.selection) return marketLabel(filter.market, filter.selection);
+    const group = MARKET_GROUP[filter.market];
+    return group ? t(`analytics.markets.group.${group}`) : marketLabel(filter.market, 1);
+  }
   return null;
 }
 
-const MARKET_GROUP = { ML: 'ml', 'HCP_-1.5': 'minus', 'HCP_+1.5': 'plus' } as const satisfies Record<Market, string>;
+const MARKET_GROUP: Readonly<Record<string, 'ml' | 'minus' | 'plus'>> = { ML: 'ml', 'HCP_-1.5': 'minus', 'HCP_+1.5': 'plus' };
 
 function sliceName(t: TFunction, params: Record<string, unknown>): string {
   if (params.dimension === 'surface') {

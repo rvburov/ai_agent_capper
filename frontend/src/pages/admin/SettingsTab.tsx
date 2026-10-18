@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { errorMessage } from '../../api/errors';
@@ -40,6 +40,9 @@ import { currencySign, formatDateLong, formatMoney, type Currency } from '../../
 import { ConfirmDialog, HowTo, LoadError } from './parts';
 import './SettingsTab.css';
 
+// Новые рынки (Р28) — отдельным файлом: экран «Администрирование» близок к бюджету JS
+const MarketsAdminCard = lazy(() => import('./MarketsAdminCard'));
+
 /**
  * «Администрирование → Настройки» (PANELS.settings макета admin.js): валюта программы со сменой
  * по курсу (Р17, Т30), часовой пояс по умолчанию для новых участников и сведения о сервере.
@@ -74,6 +77,15 @@ export function SettingsTab() {
       </div>
       <div className="adm-col">
         <TzCard settings={settings.data} />
+        <Suspense
+          fallback={
+            <Card>
+              <Skeleton lines={4} />
+            </Card>
+          }
+        >
+          <MarketsAdminCard />
+        </Suspense>
         <ServerCard />
       </div>
     </div>

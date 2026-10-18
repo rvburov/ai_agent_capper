@@ -63,6 +63,7 @@ export function brierOut(over: Partial<Brier> = {}): Brier {
     closing_windows: 0,
     closing_better: 0,
     main: 'pred',
+    families: [],
     ...over,
   };
 }
@@ -143,6 +144,10 @@ export function slicesOut(over: Partial<Slices> = {}): Slices {
       { market: 'HCP_+1.5', selection: 2, n: 20, wins: 14, winrate: 0.7, roi: -0.021, roi_ci: { low: -0.2, high: 0.15 }, avg_odds: 1.4, small: false },
     ],
     markets_total: { n: 60, winrate: 0.7, roi: 0.027, avg_odds: 1.47 },
+    families: [
+      { family: 'ml', n: 40, wins: 28, winrate: 0.7, roi: 0.051, roi_ci: { low: -0.04, high: 0.15 }, avg_odds: 1.5, small: false },
+      { family: 'h15', n: 20, wins: 14, winrate: 0.7, roi: -0.021, roi_ci: { low: -0.2, high: 0.15 }, avg_odds: 1.4, small: false },
+    ],
     odds: [
       { low: '1.30', high: '1.49', n: 30, wins: 23, winrate: 0.767, roi: 0.031, roi_ci: { low: -0.05, high: 0.11 }, avg_odds: 1.41, small: false },
       { low: '2.00', high: null, n: 4, wins: 2, winrate: 0.5, roi: 0.1, roi_ci: null, avg_odds: 2.2, small: true },

@@ -4,11 +4,11 @@ import { useTranslation } from 'react-i18next';
 
 import { Button, Chip, Dropdown, FieldShell, Icon, Modal, Segmented, surfaceColor, type DropdownOption } from '../../components';
 import { useBetSummary } from '../../features/bets/api';
-import { MARKET_KEY } from '../../features/bets/display';
+import { FAMILIES, type MarketFamily } from '../../features/analysis/markets';
+import { familyTitle } from '../../features/markets/status';
 import {
   filtersQuery,
   KINDS,
-  MARKETS,
   PERIODS,
   SEARCH_MAX,
   sheetActiveCount,
@@ -17,7 +17,7 @@ import {
   SURFACES,
   type BetFilters,
 } from '../../features/bets/filters';
-import type { KindFilter, Market, Period, SourceFilter, StatusFilter, SurfaceFilter } from '../../features/bets/types';
+import type { KindFilter, Period, SourceFilter, StatusFilter, SurfaceFilter } from '../../features/bets/types';
 import { formatDateRange } from '../../lib/format';
 import { cx } from '../../lib/cx';
 
@@ -110,8 +110,8 @@ function statusOptions(t: TFunction): DropdownOption<StatusFilter | All>[] {
   return [{ value: 'all', label: t('bets.filters.statusAll') }, ...STATUSES.map((s) => ({ value: s, label: t(`bets.filters.statuses.${s}`) }))];
 }
 
-function marketOptions(t: TFunction): DropdownOption<Market | All>[] {
-  return [{ value: 'all', label: t('bets.filters.marketAll') }, ...MARKETS.map((m) => ({ value: m, label: t(`bets.filters.markets.${MARKET_KEY[m]}`) }))];
+function marketOptions(t: TFunction): DropdownOption<MarketFamily | All>[] {
+  return [{ value: 'all', label: t('bets.filters.marketAll') }, ...FAMILIES.map((f) => ({ value: f, label: familyTitle(f) }))];
 }
 
 function sourceOptions(t: TFunction): DropdownOption<SourceFilter | All>[] {
@@ -167,8 +167,8 @@ export function DesktopFilters({ filters, onChange }: { filters: BetFilters; onC
         className="bets-select"
         label={t('bets.filters.market')}
         options={marketOptions(t)}
-        value={filters.market ?? 'all'}
-        onChange={(value) => onChange({ ...filters, market: none(value) })}
+        value={filters.family ?? 'all'}
+        onChange={(value) => onChange({ ...filters, family: none(value) })}
       />
       <Dropdown
         className="bets-select"
@@ -204,7 +204,7 @@ export function MobileFilters({ filters, onChange, onReset }: { filters: BetFilt
   const count = sheetActiveCount(filters);
   const active: { key: string; label: string; drop: () => BetFilters }[] = [];
   if (filters.status) active.push({ key: 'status', label: t(`bets.filters.statuses.${filters.status}`), drop: () => ({ ...filters, status: null }) });
-  if (filters.market) active.push({ key: 'market', label: t(`bets.filters.markets.${MARKET_KEY[filters.market]}`), drop: () => ({ ...filters, market: null }) });
+  if (filters.family) active.push({ key: 'market', label: familyTitle(filters.family), drop: () => ({ ...filters, family: null }) });
   if (filters.source) active.push({ key: 'source', label: t(`bets.filters.sources.${filters.source}`), drop: () => ({ ...filters, source: null }) });
   if (filters.kind) active.push({ key: 'kind', label: t(`bets.filters.kinds.${filters.kind}`), drop: () => ({ ...filters, kind: null }) });
   for (const surface of filters.surfaces) {
@@ -287,7 +287,7 @@ function FilterSheet({ filters, onClose, onApply }: { filters: BetFilters; onClo
       className="bets-sheet"
       footer={
         <>
-          <Button onClick={() => onApply({ ...filters, status: null, market: null, source: null, kind: null, surfaces: [] })}>{t('bets.filters.sheetReset')}</Button>
+          <Button onClick={() => onApply({ ...filters, status: null, family: null, source: null, kind: null, surfaces: [] })}>{t('bets.filters.sheetReset')}</Button>
           <Button kind="primary" disabled={found === 0} loading={summary.isFetching && found === null} onClick={() => onApply(draft)}>
             {found === null ? t('bets.filters.sheetApply') : found === 0 ? t('bets.filters.sheetNothing') : t('bets.filters.sheetShow', { count: found })}
           </Button>
@@ -308,9 +308,9 @@ function FilterSheet({ filters, onClose, onApply }: { filters: BetFilters; onClo
           id={marketId}
           label={t('bets.filters.market')}
           options={marketOptions(t)}
-          value={draft.market ?? 'all'}
+          value={draft.family ?? 'all'}
           describedBy={`${marketId}-hint`}
-          onChange={(value) => setDraft({ ...draft, market: none(value) })}
+          onChange={(value) => setDraft({ ...draft, family: none(value) })}
         />
       </FieldShell>
       <div className="field">

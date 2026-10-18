@@ -3,7 +3,8 @@ import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button, Dropdown, FieldShell, Icon, Segmented, type DropdownOption } from '../../components';
-import { marketLabel } from '../../features/analysis/markets';
+import { FAMILIES, marketLabel } from '../../features/analysis/markets';
+import { familyTitle } from '../../features/markets/status';
 import { filterLabel } from '../../features/analytics/insights';
 import {
   isDefault,
@@ -29,15 +30,15 @@ function marketOptions(t: TFunction, filters: AnalyticsFilters): DropdownOption[
   const options: DropdownOption[] = [
     { value: 'all', label: t('analytics.filters.marketAll') },
     ...OUTCOMES.map(([market, selection]) => ({ value: outcomeValue(market, selection), label: marketLabel(market, selection) })),
+    // Р28: семейства — все исходы и линии рынка
+    ...FAMILIES.map((family) => ({ value: outcomeValue(null, null, family), label: t('analytics.filters.family', { name: familyTitle(family) }) })),
   ];
   // Рынок без стороны (пришел ссылкой): своя строка, чтобы список показал выбор
   if (filters.market && !filters.selection) {
-    options.push({ value: filters.market, label: t(`analytics.markets.group.${MARKET_GROUP[filters.market]}`) });
+    options.push({ value: filters.market, label: filterLabel(t, { market: filters.market }) ?? filters.market });
   }
   return options;
 }
-
-const MARKET_GROUP = { ML: 'ml', 'HCP_-1.5': 'minus', 'HCP_+1.5': 'plus' } as const;
 
 function surfaceOptions(t: TFunction): DropdownOption<SurfaceFilter | All>[] {
   return [{ value: 'all', label: t('analytics.filters.surfaceAll') }, ...SURFACES.map((s) => ({ value: s, label: t(`analytics.surfaces.${s}`) }))];
@@ -80,6 +81,8 @@ function Scope({ data, filters, onChange }: { data: Analytics | undefined; filte
   if (filters.market) {
     const name = filters.selection ? marketLabel(filters.market, filters.selection) : filterLabel(t, { market: filters.market });
     chips.push({ key: 'market', label: t('analytics.filters.chipMarket', { name }), drop: { ...filters, market: null, selection: null } });
+  } else if (filters.family) {
+    chips.push({ key: 'market', label: t('analytics.filters.chipMarket', { name: familyTitle(filters.family) }), drop: { ...filters, family: null } });
   }
   if (filters.surface) {
     chips.push({ key: 'surface', label: t('analytics.filters.chipSurface', { name: t(`analytics.surfaces.${filters.surface}`) }), drop: { ...filters, surface: null } });
@@ -163,7 +166,7 @@ export function Filters({ filters, data, onChange, onReset }: FiltersProps) {
           id={`${id}-market`}
           label={t('analytics.filters.market')}
           options={marketOptions(t, filters)}
-          value={outcomeValue(filters.market, filters.selection)}
+          value={outcomeValue(filters.market, filters.selection, filters.family)}
           onChange={(value) => onChange({ ...filters, ...parseOutcome(value) })}
         />
       </FieldShell>

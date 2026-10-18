@@ -165,3 +165,14 @@
 
 /* ---------- окно «Brier и CLV простыми словами» ---------- */
 .analytics-explain { display: flex; flex-direction: column; gap: 6px; }
+
+/* Р28: рынки — в экспрессе, на проверке, для сравнения (freshCard макета) */
+.analytics-fresh-st { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.analytics-fresh-prog { display: flex; flex-direction: column; gap: 4px; min-width: 110px; }
+.analytics-fresh-val { display: inline-flex; flex-direction: column; align-items: flex-end; }
+.analytics-fresh-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.analytics-fresh-list li { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); }
+.analytics-fresh-list li:first-child { border-top: 0; padding-top: 0; }
+.analytics-fresh-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.analytics-fresh-head .analytics-mname { white-space: normal; }
+.analytics-fresh-nums { display: flex; gap: 16px; font-size: var(--fs-sm); }

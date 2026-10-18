@@ -7,12 +7,14 @@ import { keyText } from '../../features/analysis/codes';
 import { formatProb, formatShare } from '../../features/analysis/markets';
 import { slipNumbers, type SlipItem } from '../../features/analysis/ownBet';
 import { payout, totalOdds, type MoneyRules } from '../../features/analysis/stake';
-import type { AnalysisBet, Bank, Variant } from '../../features/analysis/types';
+import type { AnalysisBet, Bank, MarketRow, MatchResult, Result, Variant } from '../../features/analysis/types';
+import { useMarketStatuses } from '../../features/markets/api';
 import { variantNoValue, variantTitle, variantWhy } from '../../features/analysis/variants';
 import { cx } from '../../lib/cx';
 import { formatMoney, formatOdds, formatPercent, type Currency } from '../../lib/format';
 import type { LegView } from './BetModals';
 import { Adaptations, calcRows } from './ExpressCard';
+import { matchTitle, outcomeName, type MatchNames } from './MatchCard';
 
 // «Варианты ставки» итога (variantsBlock, variantCard, slipCard в mockup/js/screens/analysis.js,
 // Р29): экспресс стратегии — основной, ординары «надежнее» и «лучший валуй», экспресс из лучших,
@@ -274,5 +276,37 @@ export function SlipCard({ slip, onOpen, onClear }: { slip: readonly SlipItem[];
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Лучший валуй среди рынков «для сравнения» (Р28) и почему он не в вариантах: модель по рынку
+ * не проверена. Поставить его можно своей ставкой — «В свою ставку» в таблице матча.
+ */
+export function CompareNote({ result, names }: { result: Result; names: MatchNames }) {
+  const { t } = useTranslation();
+  const statuses = useMarketStatuses();
+  let best: { row: MarketRow; match: MatchResult } | null = null;
+  for (const match of result.matches) {
+    for (const row of match.markets) {
+      if (row.status !== 'compare' || row.value === null || row.value <= 0 || row.odds === null) continue;
+      if (!best || row.value > (best.row.value ?? 0)) best = { row, match };
+    }
+  }
+  if (!best) return null;
+  const info = statuses?.get(best.row.family);
+  return (
+    <p className="analysis-fresh-note">
+      <Icon name="flask" />
+      <span>
+        {t('analysis.variants.compareBest', {
+          name: outcomeName(best.row, best.match, names),
+          match: matchTitle(best.match, names, t),
+          odds: formatOdds(best.row.odds),
+          value: formatPercent(best.row.value, { digits: 1, signed: true }),
+        })}{' '}
+        {info ? t('analysis.variants.compareWhyN', { n: info.events, need: info.need }) : t('analysis.variants.compareWhy')}
+      </span>
+    </p>
   );
 }

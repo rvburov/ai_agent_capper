@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 
 import { Button, Card, Icon, Skeleton } from '../../../components';
 import { formatShare } from '../../../features/analysis/markets';
+import { useMarketStatuses } from '../../../features/markets/api';
+import { expressListText } from '../../../features/markets/status';
 import { singleRows, stakeRows, valueRows } from '../../../features/bank/display';
 import { singleRangeText } from '../../../features/analysis/variants';
 import type { Bank, Strategy } from '../../../features/bank/types';
@@ -11,6 +13,7 @@ import { formatMoney, formatOdds, formatPercent } from '../../../lib/format';
 import { LoadError } from '../LoadError';
 import { findActive } from '../../../features/learning/versionList';
 import { useStrategyVersions } from '../../../features/learning/versions';
+import { MarketsBlock } from './MarketsBlock';
 import { RuleVersionsBlock } from './RuleVersions';
 
 // «Правила стратегии» (strategyCard макета, Т20): параметры действующей версии стратегии
@@ -48,6 +51,7 @@ export function StrategyCard({ strategy, error, onRetry, bank, onPropose }: Stra
   const { t } = useTranslation();
   // инструкции анализа — общая линия версий (ведет администратор), правила суммы — свои
   const instructions = findActive(useStrategyVersions().data?.instructions ?? []);
+  const statuses = useMarketStatuses();
   const head = {
     id: 'profile-strategy',
     className: 'profile-anchor',
@@ -78,7 +82,11 @@ export function StrategyCard({ strategy, error, onRetry, bank, onPropose }: Stra
       <div className="stack profile-tight">
         <h4>{t('profile.bank.strategy.pick')}</h4>
         <dl className="profile-srules">
-          <Rule title={t('profile.bank.strategy.markets')} note={t('profile.bank.strategy.marketsNote')} value={t('profile.bank.strategy.marketsValue', { count: p.markets.length * 2 })} />
+          <Rule
+            title={t('profile.bank.strategy.markets')}
+            note={t('profile.bank.strategy.marketsNote')}
+            value={statuses ? expressListText(statuses) : t('profile.bank.strategy.marketsValue', { count: p.markets.length * 2 })}
+          />
           <Rule
             title={t('profile.bank.strategy.prob')}
             note={t('profile.bank.strategy.probNote', { p: pct(p.triple_min_p) })}
@@ -109,6 +117,7 @@ export function StrategyCard({ strategy, error, onRetry, bank, onPropose }: Stra
           <Rule title={t('profile.bank.strategy.triple')} value={t('profile.bank.strategy.total', { from: formatOdds(p.triple_total[0]), to: formatOdds(p.triple_total[1]) })} />
         </dl>
       </div>
+      <MarketsBlock />
       <hr className="divider" />
       <div className="stack profile-tight">
         <div className="profile-section-title">

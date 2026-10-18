@@ -13,7 +13,8 @@ import { apiErrorText } from '../../features/analysis/codes';
 import { displayName, oddInputText, shortName } from '../../features/analysis/draft';
 import { analysisKeys } from '../../features/analysis/keys';
 import { keyText } from '../../features/analysis/codes';
-import { formatShare, marketDescription, marketLabel } from '../../features/analysis/markets';
+import { formatShare, outcomeLabel } from '../../features/analysis/markets';
+import { marketDescription } from '../../features/analysis/outcomes';
 import { analysisNumber } from '../../features/analysis/number';
 import { moneyRules } from '../../features/analysis/stake';
 import { addToSlip, removeFromSlip, slipItem, type SlipItem } from '../../features/analysis/ownBet';
@@ -30,7 +31,7 @@ import { SaveBetModal, SINGLE_PRESETS, StakeModal, type BetContext, type LegView
 import { ExpressCard, type ExpressState } from './ExpressCard';
 import { MatchCard, matchTitle, outcomeName, type MatchNames, type SlipControl } from './MatchCard';
 import { OwnBetModal } from './OwnBetModal';
-import { SlipCard, VariantCard, type VariantState } from './Variants';
+import { CompareNote, SlipCard, VariantCard, type VariantState } from './Variants';
 import { DoneCard, ResultSkeleton, RunningCard, StopBanner, StoppedCard } from './Progress';
 import { stopInfo } from './stopInfo';
 import { matchNames, newsMissing, type StepContext } from './stepsView';
@@ -82,8 +83,11 @@ function legsOf(express: Pick<Express, 'legs'>, analysis: Analysis, names: Match
           p2: shortName(names.name(match.player2.id, match.player2.name)),
         })
       : '';
-    legs.push({ predictionId: leg.prediction_id, name: `${short} ${marketLabel(leg.market, leg.selection)}`.trim(), match: title, odds: Number(leg.odds) });
-    meta.push({ match: title, desc: marketDescription(leg.market, short, match?.best_of ?? 3) });
+    const sides = match
+      ? { p1: shortName(names.name(match.player1.id, match.player1.name)), p2: shortName(names.name(match.player2.id, match.player2.name)) }
+      : { p1: '', p2: '' };
+    legs.push({ predictionId: leg.prediction_id, name: outcomeLabel(leg.market, leg.selection, sides), match: title, odds: Number(leg.odds) });
+    meta.push({ match: title, desc: marketDescription(leg.market, leg.selection, short, match?.best_of ?? 3) });
   }
   return { legs, meta };
 }
@@ -511,6 +515,7 @@ export function AnalysisPage() {
         )}
         {expressBlock}
         {cards}
+        <CompareNote result={result} names={playerNames} />
         {slip.length > 0 && !readOnly && <SlipCard slip={slip} onOpen={() => setSlipOpen({ hint: null })} onClear={() => setSlip([])} />}
       </section>
     ) : null;

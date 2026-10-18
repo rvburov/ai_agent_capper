@@ -2,6 +2,8 @@ import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
+import { useMarketStatuses } from '../../features/markets/api';
+import { expressListText } from '../../features/markets/status';
 import { paths } from '../../app/paths';
 import { Button, Callout, Card, Chip, Icon, KeyValue, Skeleton, type ChipKind, type IconName } from '../../components';
 import { useRecentAnalyses, useStrategy } from '../../features/analysis/api';
@@ -80,6 +82,7 @@ export function RulesCard({ n }: { n: number }) {
   const { t } = useTranslation();
   const strategy = useStrategy();
   const params = strategy.data?.params;
+  const statuses = useMarketStatuses();
   return (
     <Card
       className="new-rules"
@@ -102,6 +105,7 @@ export function RulesCard({ n }: { n: number }) {
             },
             { key: 'legs', label: t('new.rules.legs'), value: t('new.rules.legsValue') },
             { key: 'total', label: t('new.rules.total'), value: `≤ ${totalMax(params)}` },
+            ...(statuses ? [{ key: 'markets', label: t('new.rules.markets'), value: t('new.rules.marketsValue', { list: expressListText(statuses) }) }] : []),
           ]}
         />
       ) : (

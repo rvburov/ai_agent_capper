@@ -7,6 +7,8 @@ import { paths } from '../../app/paths';
 import { Chip, Icon } from '../../components';
 import { displayName, shortName } from '../../features/analysis/draft';
 import { marketLabel } from '../../features/analysis/markets';
+import { newsScoreText } from '../../features/bets/review';
+import { gamesOutcome, parseGamesScore, type GamesOutcome } from '../../features/bets/settle';
 import {
   closingBookmaker,
   currencyOf,
@@ -18,7 +20,7 @@ import {
   type LegShown,
 } from '../../features/bets/display';
 import type { BetItem, BetLeg, BetStatus, Closing, Verdict } from '../../features/bets/types';
-import { formatMoney, formatPercent } from '../../lib/format';
+import { formatLine, formatMoney, formatPercent } from '../../lib/format';
 import { cx } from '../../lib/cx';
 
 // Мелкие части экрана «Ставки» (mockup/js/screens/bets.js): метки, исходы, имена игроков, CLV.
@@ -99,9 +101,34 @@ export function matchText(leg: Pick<BetLeg, 'match'>): string {
   return `${shortName(displayName(player1))} — ${shortName(displayName(player2))}`;
 }
 
-/** Исход ставки на матч: П1, Ф2(+1.5). */
-export function legMarket(leg: Pick<BetLeg, 'market' | 'selection'>): string {
-  return marketLabel(leg.market, leg.selection);
+/** Исход ставки на матч: П1, Ф2(+1.5), «Фора по геймам Синнер −3.5», «Тотал сетов меньше 2.5». */
+export function legMarket(leg: Pick<BetLeg, 'market' | 'selection' | 'match'>): string {
+  const { player1, player2 } = leg.match;
+  return marketLabel(leg.market, leg.selection, { p1: shortName(displayName(player1)), p2: shortName(displayName(player2)) });
+}
+
+/** Пояснение исхода по геймам: «23 гейма — ровно линия 23: возврат, кэф 1,00», «Синнер +5 геймов с форой −3.5». */
+export function gamesOutcomeText(leg: BetLeg, outcome: GamesOutcome, t: TFunction): string {
+  const push = outcome.result === 'void';
+  if (leg.market.startsWith('GTOT')) {
+    return t(push ? 'bets.gamesOutcome.totalPush' : 'bets.gamesOutcome.total', { count: outcome.value, line: formatLine(outcome.line) });
+  }
+  const who = shortName(displayName(leg.selection === 1 ? leg.match.player1 : leg.match.player2));
+  return t(push ? 'bets.gamesOutcome.hcpPush' : 'bets.gamesOutcome.hcp', {
+    name: who,
+    count: Math.abs(outcome.value),
+    diff: formatLine(outcome.value, { signed: true }),
+    line: formatLine(outcome.line, { signed: true }),
+  });
+}
+
+/** Исход ноги по геймам по записанному счету (авторасчет по архиву): «Фора по геймам Синнер −3.5 — 6:4 6:3, …». */
+export function gamesLegNote(leg: BetLeg, t: TFunction): string | null {
+  if (leg.score_kind !== 'games' || !leg.score) return null;
+  const parsed = parseGamesScore(leg.score, leg.match.best_of);
+  const outcome = parsed.kind === 'ok' ? gamesOutcome(leg.market, leg.selection, parsed.score) : null;
+  const score = newsScoreText(leg.score);
+  return outcome ? `${legMarket(leg)} — ${score}, ${gamesOutcomeText(leg, outcome, t)}` : `${legMarket(leg)} — ${score}`;
 }
 
 /** Деньги ставки в ее валюте. */

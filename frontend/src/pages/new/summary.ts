@@ -4,10 +4,11 @@ import type { Freshness } from '../../components';
 import { isApiError } from '../../api/errors';
 import { adminFixes, adminReasonText } from '../../features/ai/reasons';
 import { apiErrorText, inlineDateTime, keyText, reasonText } from '../../features/analysis/codes';
-import { checkEvent, displayName, resolvedPlayer, shortName, type EditEvent } from '../../features/analysis/draft';
+import { checkEvent, displayName, resolvedPlayer, shortName, type EditEvent, type EventIssue } from '../../features/analysis/draft';
+import { familyName } from '../../features/analysis/markets';
 import type { DraftState } from '../../features/analysis/draftStore';
 import type { AiBudget, Preview, PreviewPlayer } from '../../features/analysis/types';
-import { formatDate } from '../../lib/format';
+import { formatDate, formatLine } from '../../lib/format';
 
 // Сводка «Перед запуском» (summary в mockup/js/screens/new-analysis.js): игроки и свежесть их
 // новостей, оценка цены и причина, по которой запускать нельзя. Числа — из ответа сервера.
@@ -168,13 +169,31 @@ export function summarize(
   };
 }
 
+/** Текст проблемы события: «Нужны кэфы П1 и П2», «Уточните «Ф1(−1.5)»: …». */
+export function issueLabel(issue: EventIssue, t: TFunction): string {
+  switch (issue.kind) {
+    case 'oddsRange':
+      return t('new.check.oddsRange', { list: issue.keys.map((key) => t(`new.odds.${key}`)).join(', ') });
+    case 'extraOdds':
+      return t('new.check.extraOdds', { list: issue.families.map(familyName).join(', ') });
+    case 'extraLine':
+    case 'extraSame':
+      return t(`new.check.${issue.kind}`, { family: familyName(issue.family) });
+    case 'setsTotal':
+      return t(issue.bestOf === 5 ? 'new.check.setsTotal5' : 'new.check.setsTotal3');
+    case 'gamesTotalLow':
+      return t('new.check.gamesTotalLow', { line: formatLine(issue.line) });
+    case 'ambig':
+      return t('new.check.ambig', { abs: formatLine(issue.abs) });
+    default:
+      return t(`new.check.${issue.kind}`);
+  }
+}
+
 function firstIssue(event: EditEvent, t: TFunction): string {
   const issue = checkEvent(event).issues[0];
   if (!issue) return '';
-  const text =
-    issue.kind === 'oddsRange'
-      ? t('new.check.oddsRange', { list: issue.keys.map((key) => t(`new.odds.${key}`)).join(', ') })
-      : t(`new.check.${issue.kind}`);
+  const text = issueLabel(issue, t);
   return text.charAt(0).toLowerCase() + text.slice(1);
 }
 

@@ -7,6 +7,7 @@ import { brierView, mainRef, type BrierRef, type BrierView } from '../../feature
 import { brierDiff, brierText, ciDec3 } from '../../features/analytics/display';
 import type { Analytics, BrierPoint } from '../../features/analytics/types';
 import { formatDate } from '../../lib/format';
+import { familyTitle } from '../../features/markets/status';
 import { Howto, TableBox } from './parts';
 
 // Brier модели против рынка (В2, brierCard макета): скользящее окно; «точнее рынка X из Y» —
@@ -82,6 +83,33 @@ function RefStrip({ b, main }: { b: BrierView; main: BrierRef }) {
         );
       })}
     </dl>
+  );
+}
+
+/** Brier по семействам рынков (Р28): модель и, где есть, рынок при прогнозе. */
+function FamilyStrip({ families }: { families: Analytics['brier']['families'] }) {
+  const { t } = useTranslation();
+  if (!families || families.length < 2) return null;
+  return (
+    <div className="stack analytics-fam-brier">
+      <div className="xsmall muted">{t('analytics.brier.families')}</div>
+      <dl className="analytics-strip">
+        {families.map((f) => (
+          <div key={f.family}>
+            <dt>{familyTitle(f.family)}</dt>
+            <dd>
+              {brierText(f.model)}
+              <small>
+                {t('analytics.brier.familySub', {
+                  events: t('analytics.count.events', { count: f.n }),
+                  market: f.market === null ? '—' : brierText(f.market),
+                })}
+              </small>
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 
@@ -182,6 +210,7 @@ export function BrierCard({ data, mobile, pending, onExplain }: { data: Analytic
       </ChartWithTable>
       <Verdict b={brier} />
       <RefStrip b={brier} main={mainRef(data.brier)} />
+      <FamilyStrip families={data.brier.families} />
       <Howto>{t('analytics.brier.howto', { window: thresholds.rolling_window })}</Howto>
       <Button kind="ghost" size="sm" icon="book" className="chart-table-toggle" onClick={onExplain}>
         {t('analytics.explain.open')}

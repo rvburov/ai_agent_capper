@@ -83,3 +83,13 @@
 /* версии правил суммы (этап 5): что изменилось, «Вернуть» */
 .profile-changes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); color: var(--fg-2); }
 .profile-self-start { align-self: flex-start; }
+
+/* Р28: рынки в «Правилах стратегии» (marketsBlock макета) */
+.profile-mk { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.profile-mk li { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
+.profile-mk li:first-child { border-top: 0; padding-top: 0; }
+.profile-mk-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.profile-mk-name { display: flex; flex-direction: column; min-width: 0; }
+.profile-mk-name small { font-size: var(--fs-xs); color: var(--fg-3); }
+.profile-mk-prog { display: flex; flex-direction: column; gap: 4px; }
+.profile-mk-note { margin: 0; }

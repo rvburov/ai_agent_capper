@@ -35,3 +35,9 @@
   font-size: var(--fs-lg); flex-wrap: wrap;
 }
 .adm-swap svg { width: 18px; height: 18px; color: var(--fg-3); }
+
+/* Р28: новые рынки — перевод в экспресс */
+.adm-mk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.adm-mk { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.adm-mk:first-child { border-top: 0; padding-top: 0; }
+.adm-mk-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }

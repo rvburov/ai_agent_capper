@@ -1,5 +1,6 @@
 import { isSurface, type Surface } from '../../components/SurfaceChip';
-import type { ConfirmedEvent, Draft, DraftEvent, EventIn, PlayerPick } from './types';
+import { EXTRA_FAMILIES, GAME_HCP_MAX, GAME_TOTAL_MAX, GAME_TOTAL_MIN, isHalfOrWhole, marketCode, marketSpec, type ExtraFamily } from './markets';
+import type { ConfirmedEvent, Draft, DraftEvent, EventIn, PlayerPick, TextKey } from './types';
 
 /*
  * Черновик «Нового анализа»: события, которые участник проверяет и правит до запуска.
@@ -54,9 +55,40 @@ export interface EditEvent {
   bestOf: 3 | 5 | null;
   round: string;
   odds: Record<OddKey, string>;
+  /** Другие рынки (Р28): форы ±2.5 и по геймам, тоталы сетов и геймов. */
+  extra: ExtraMarket[];
+  /** Спорные форы из текста: «Ф1(−1.5)» без «сет» и «гейм» — по сетам или по геймам? */
+  ambig: AmbigHcp[];
   bookmaker: string | null;
   /** Новое пустое событие: ошибки проверки еще не показываем. */
   blank: boolean;
+}
+
+export type { ExtraFamily } from './markets';
+
+/**
+ * Строка «Другие рынки»: семейство, линия и кэфы двух исходов. У фор line — фора игрока 1
+ * (o1 — Ф1, o2 — Ф2), у тоталов o1 — больше, o2 — меньше. Линия — текстом поля («-3.5»).
+ */
+export interface ExtraMarket {
+  key: string;
+  family: ExtraFamily;
+  line: string;
+  o1: string;
+  o2: string;
+}
+
+/**
+ * Спорная фора из разбора («Ф1(-1.5) = 2.05, Ф2(+1.5) = 1.72» без «сет» и «гейм»): line —
+ * фора игрока 1, o1 и o2 — кэфы Ф1 и Ф2. hint — подсказка сервера по кэфу победы
+ * (analysis.draft.hcp_hint.sets или .games); setsOk — по сетам такая линия возможна.
+ */
+export interface AmbigHcp {
+  line: number;
+  o1: string;
+  o2: string;
+  hint: TextKey | null;
+  setsOk: boolean;
 }
 
 let seq = 0;
@@ -86,6 +118,8 @@ export function blankEvent(): EditEvent {
     bestOf: null,
     round: '',
     odds: emptyOdds(),
+    extra: [],
+    ambig: [],
     bookmaker: null,
     blank: true,
   };
@@ -171,6 +205,8 @@ export function fromDraftEvent(event: DraftEvent): EditEvent {
       h2m: oddText(h2m),
       h2p: oddText(h2p),
     },
+    extra: extrasFrom(event),
+    ambig: ambigFrom(event),
     bookmaker: event.bookmaker,
     blank: false,
   };
@@ -205,9 +241,44 @@ export function fromConfirmedEvent(event: ConfirmedEvent): EditEvent {
       h2m: oddText(h2m),
       h2p: oddText(h2p),
     },
+    extra: extrasFrom(event),
+    ambig: [],
     bookmaker: event.bookmaker,
     blank: false,
   };
+}
+
+// Другие рынки из ответа сервера: код рынка с линией (GTOT_22.5) или семейство и линия
+interface ExtraOut {
+  market: string;
+  line?: string | number | null;
+  o1?: string | number | null;
+  o2?: string | number | null;
+}
+
+function extrasFrom(event: object): ExtraMarket[] {
+  const list = (event as { extra?: readonly ExtraOut[] | null }).extra ?? [];
+  const out: ExtraMarket[] = [];
+  for (const item of list) {
+    const spec = marketSpec(item.market);
+    const family = (spec ? spec.family : item.market) as ExtraFamily;
+    if (!EXTRA_FAMILIES.includes(family)) continue;
+    const line = spec?.line ?? Number(item.line);
+    if (!Number.isFinite(line)) continue;
+    out.push(newExtra(family, null, { line: lineInputText(line), o1: oddText(item.o1 === null || item.o1 === undefined ? null : String(item.o1)), o2: oddText(item.o2 === null || item.o2 === undefined ? null : String(item.o2)) }));
+  }
+  return out;
+}
+
+// Спорные форы разбора: без слов «сет» и «гейм» (ответ — кнопкой в карточке события)
+function ambigFrom(event: DraftEvent): AmbigHcp[] {
+  return event.disputed.map((d) => ({
+    line: d.line,
+    o1: oddText(d.o1),
+    o2: oddText(d.o2),
+    hint: d.hint,
+    setsOk: d.sets_ok,
+  }));
 }
 
 export function eventsFromDraft(draft: Draft | null | undefined): EditEvent[] {
@@ -265,18 +336,28 @@ export type EventIssue =
   | { kind: 'players' }
   | { kind: 'same' }
   | { kind: 'oddsRange'; keys: OddKey[] }
-  | { kind: 'ml' };
+  | { kind: 'ml' }
+  | { kind: 'extraOdds'; families: ExtraFamily[] }
+  | { kind: 'extraLine'; family: ExtraFamily }
+  | { kind: 'hcp25' }
+  | { kind: 'setsTotal'; bestOf: 3 | 5 }
+  | { kind: 'gamesTotalLow'; line: number }
+  | { kind: 'extraSame'; family: ExtraFamily }
+  | { kind: 'ambig'; abs: number };
 
 export interface EventCheck {
   issues: EventIssue[];
-  /** Поля кэфов с неверным значением. */
-  bad: Set<OddKey>;
+  /** Поля кэфов с неверным значением: ключи П1…Ф2 и «ключ строки-o1/o2» других рынков. */
+  bad: Set<string>;
+  /** Строки других рынков с неверной линией. */
+  badLines: Set<string>;
 }
 
-/** Проверки события до запуска (check в mockup/js/screens/new-analysis.js). */
+/** Проверки события до запуска (check и checkExtra в mockup/js/screens/new-analysis.js). */
 export function checkEvent(event: EditEvent): EventCheck {
   const issues: EventIssue[] = [];
-  const bad = new Set<OddKey>();
+  const bad = new Set<string>();
+  const badLines = new Set<string>();
   const filled = (slot: PlayerSlot) => slot.status !== 'empty' && (slot.player !== null || slot.text.trim() !== '' || slot.raw !== '');
   if (!filled(event.p1) || !filled(event.p2)) issues.push({ kind: 'players' });
   else if (event.p1.player && event.p2.player && event.p1.player.id === event.p2.player.id) issues.push({ kind: 'same' });
@@ -286,7 +367,139 @@ export function checkEvent(event: EditEvent): EventCheck {
   }
   if (bad.size) issues.push({ kind: 'oddsRange', keys: ODD_KEYS.filter((key) => bad.has(key)) });
   if (!event.odds.ml1.trim() || !event.odds.ml2.trim()) issues.push({ kind: 'ml' });
-  return { issues, bad };
+  for (const ambig of event.ambig) issues.push({ kind: 'ambig', abs: Math.abs(ambig.line) });
+  issues.push(...checkExtra(event, bad, badLines));
+  return { issues, bad, badLines };
+}
+
+function checkExtra(event: EditEvent, bad: Set<string>, badLines: Set<string>): EventIssue[] {
+  const issues: EventIssue[] = [];
+  const oddsBad = new Set<ExtraFamily>();
+  const seen = new Set<string>();
+  for (const x of event.extra) {
+    for (const side of ['o1', 'o2'] as const) {
+      if (x[side].trim() !== '' && !validOdd(x[side])) {
+        bad.add(`${x.key}-${side}`);
+        oddsBad.add(x.family);
+      }
+    }
+    const line = extraLine(x);
+    const lineIssue = extraLineIssue(x.family, line, event.bestOf);
+    if (lineIssue) {
+      badLines.add(x.key);
+      if (!issues.some((i) => JSON.stringify(i) === JSON.stringify(lineIssue))) issues.push(lineIssue);
+      continue;
+    }
+    const code = marketCode(x.family, line);
+    if (seen.has(code) && !issues.some((i) => i.kind === 'extraSame' && i.family === x.family)) issues.push({ kind: 'extraSame', family: x.family });
+    seen.add(code);
+  }
+  if (oddsBad.size) issues.unshift({ kind: 'extraOdds', families: [...oddsBad] });
+  return issues;
+}
+
+/** Что не так с линией строки других рынков (null — все в порядке). */
+export function extraLineIssue(family: ExtraFamily, line: number, bestOf: 3 | 5 | null): EventIssue | null {
+  if (!isHalfOrWhole(line)) return { kind: 'extraLine', family };
+  if (family === 'shcp' || family === 'stot') {
+    if (setLines(family, bestOf).includes(line)) return null;
+    if (family === 'shcp') return { kind: 'hcp25' };
+    return bestOf ? { kind: 'setsTotal', bestOf } : { kind: 'extraLine', family };
+  }
+  if (family === 'gtot') {
+    if (line > 0 && line < GAME_TOTAL_MIN) return { kind: 'gamesTotalLow', line };
+    return line > GAME_TOTAL_MAX || line <= 0 ? { kind: 'extraLine', family } : null;
+  }
+  return line === 0 || Math.abs(line) > GAME_HCP_MAX ? { kind: 'extraLine', family } : null;
+}
+
+// ---------- другие рынки (Р28) ----------
+
+let extraSeq = 0;
+
+/**
+ * Линии рынков по сетам: фора ±2.5 — только в матчах до 3 побед; тотал сетов — 2.5, а до 3
+ * побед — 3.5 и 4.5. Формат еще не известен (сервер узнает его по турниру) — все варианты.
+ */
+export function setLines(family: 'shcp' | 'stot', bestOf: 3 | 5 | null): number[] {
+  if (family === 'shcp') return bestOf === 3 ? [] : [-2.5, 2.5];
+  if (bestOf === 5) return [3.5, 4.5];
+  if (bestOf === 3) return [2.5];
+  return [2.5, 3.5, 4.5];
+}
+
+export function defaultLine(family: ExtraFamily, bestOf: 3 | 5 | null): number {
+  if (family === 'shcp') return -2.5;
+  if (family === 'stot') return setLines('stot', bestOf)[0] ?? 2.5;
+  return family === 'ghcp' ? -3.5 : 22.5;
+}
+
+/** Линия из поля: «-3.5», «−3,5», «+4»; не число — NaN. */
+export function extraLine(x: Pick<ExtraMarket, 'line'>): number {
+  const text = x.line.trim().replace(',', '.').replace(/[\u2212\u2013]/, '-');
+  if (!/^[+-]?\d+(\.\d+)?$/.test(text)) return Number.NaN;
+  return Number(text);
+}
+
+/** Линия в поле: −3.5 → «-3.5», 22 → «22». */
+export function lineInputText(line: number): string {
+  return String(line);
+}
+
+export function newExtra(family: ExtraFamily, bestOf: 3 | 5 | null, over: Partial<ExtraMarket> = {}): ExtraMarket {
+  extraSeq += 1;
+  return { key: `x${Date.now().toString(36)}${extraSeq}`, family, line: lineInputText(defaultLine(family, bestOf)), o1: '', o2: '', ...over };
+}
+
+/** Рынок для «Добавить рынок»: первый еще не введенный (фора ±2.5 — только до 3 побед), иначе тотал геймов. */
+export function nextExtraFamily(event: Pick<EditEvent, 'extra' | 'bestOf'>): ExtraFamily {
+  const used = new Set(event.extra.map((x) => x.family));
+  return EXTRA_FAMILIES.find((f) => !used.has(f) && (f !== 'shcp' || event.bestOf === 5)) ?? 'gtot';
+}
+
+/** Поставить кэф стороны в строку рынка с этой линией игрока 1 (строки нет — новая). */
+function putExtra(extra: readonly ExtraMarket[], family: ExtraFamily, line: number, side: 1 | 2, odds: string, bestOf: 3 | 5 | null): ExtraMarket[] {
+  const i = extra.findIndex((x) => x.family === family && extraLine(x) === line);
+  const field = side === 1 ? 'o1' : 'o2';
+  if (i >= 0) return extra.map((x, k) => (k === i ? { ...x, [field]: odds } : x));
+  return [...extra, newExtra(family, bestOf, { line: lineInputText(line), [field]: odds })];
+}
+
+export type HcpUnit = 'sets' | 'games';
+
+/** Ответ на спорную фору: кэфы уходят в фору ±1.5 по сетам, в фору ±2.5 или в фору по геймам. */
+export function answerAmbig(event: EditEvent, index: number, unit: HcpUnit): EditEvent {
+  const ambig = event.ambig[index];
+  if (!ambig) return event;
+  let odds = event.odds;
+  let extra = event.extra;
+  if (unit === 'sets' && Math.abs(ambig.line) === 1.5) {
+    const minus1 = ambig.line < 0;
+    // Ф1(−1.5) и Ф2(+1.5) или Ф1(+1.5) и Ф2(−1.5)
+    const put = (key: OddKey, value: string) => {
+      if (value) odds = { ...odds, [key]: value };
+    };
+    put(minus1 ? 'h1m' : 'h1p', ambig.o1);
+    put(minus1 ? 'h2p' : 'h2m', ambig.o2);
+  } else {
+    const family = unit === 'sets' ? 'shcp' : 'ghcp';
+    if (ambig.o1) extra = putExtra(extra, family, ambig.line, 1, ambig.o1, event.bestOf);
+    if (ambig.o2) extra = putExtra(extra, family, ambig.line, 2, ambig.o2, event.bestOf);
+  }
+  return { ...event, odds, extra, ambig: event.ambig.filter((_, k) => k !== index), blank: false };
+}
+
+/** Подсказка сервера к спорной форе: «похоже на сеты» или «похоже на геймы»; нет — null. */
+export function ambigGuess(ambig: AmbigHcp): HcpUnit | null {
+  const key = ambig.hint?.key ?? '';
+  if (key.endsWith('.sets')) return 'sets';
+  if (key.endsWith('.games')) return 'games';
+  return null;
+}
+
+/** Есть кэфы вне победы: фора ±1.5 или другие рынки (строка «в экспресс сейчас идут только…»). */
+export function hasOtherMarkets(event: EditEvent): boolean {
+  return (['h1m', 'h1p', 'h2m', 'h2p'] as const).some((k) => validOdd(event.odds[k])) || event.extra.some((x) => validOdd(x.o1) || validOdd(x.o2));
 }
 
 // ---------- в API ----------
@@ -312,7 +525,25 @@ export function toEventIn(event: EditEvent, { forRun = false }: { forRun?: boole
     best_of: event.bestOf,
     round: event.round.slice(0, 16),
     odds: oddsPairs(event.odds),
+    extra: extraForApi(event.extra),
+    disputed: event.ambig.map((d) => ({ line: d.line, o1: oddForApi(d.o1), o2: oddForApi(d.o2) })),
     bookmaker: event.bookmaker ? event.bookmaker.slice(0, 64) : null,
     line_no: event.lineNo,
   };
+}
+
+/**
+ * Другие рынки для API: строки с верной линией и хотя бы одним кэфом (пустые строки формы не
+ * уходят). Неверную линию отправляем как есть — о ней скажет проверка формы и сервер.
+ */
+function extraForApi(extra: readonly ExtraMarket[]): EventIn['extra'] {
+  const out: NonNullable<EventIn['extra']> = [];
+  for (const x of extra) {
+    const o1 = oddForApi(x.o1);
+    const o2 = oddForApi(x.o2);
+    const line = extraLine(x);
+    if ((o1 === null && o2 === null) || !Number.isFinite(line)) continue;
+    out.push({ market: x.family, line, o1, o2 });
+  }
+  return out;
 }

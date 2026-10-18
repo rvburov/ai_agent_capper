@@ -17,7 +17,8 @@ function item(over: Partial<SlipItem>): SlipItem {
     p: 0.99,
     name: 'Синнер П1',
     match: 'Синнер — Руне',
-    suspended: false,
+    pPush: 0,
+    status: 'express',
     confidence: 'high',
     ...over,
   };

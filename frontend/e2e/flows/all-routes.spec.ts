@@ -2,7 +2,8 @@ import type { Locator, Page } from '@playwright/test';
 
 import { LEARNING_TABS, paths } from '../../src/app/paths';
 
-import { memberDevice } from '../support/analysis';
+import { eventsText, expectReadyToLaunch, memberDevice, parseEvents } from '../support/analysis';
+import { withFakeClaude } from '../support/fakeClaude';
 import { expectScreenLayout } from '../support/layout';
 import { appUrls, routePatterns, type AppUrl } from '../support/routes';
 import { expect, registeredMember, signedInAdmin, test, uniqueName, type Device } from '../support/test';
@@ -109,7 +110,7 @@ test('список маршрутов — из router.tsx, каждый опис
 
 test('все экраны на телефоне: без прокрутки вбок, зоны нажатия, обе темы', { tag: '@360' }, async ({ device, apiClient, isMobile }) => {
   test.skip(!isMobile, 'раскладка телефона: 375 px и 360 px');
-  test.setTimeout(240_000);
+  test.setTimeout(330_000);
 
   // администратор, участник по его приглашению и гость без входа
   const admin = await device();
@@ -165,7 +166,36 @@ test('все экраны на телефоне: без прокрутки вб�
   );
   // этап 6: окно установки на телефон (из карточки «Приложение на телефоне»)
   await checkWindow(m, '/profile', (page) => page.locator('#profile-install').getByRole('button', { name: 'Установить на телефон' }), 'Установить на телефон');
+  // Р28: «Другие рынки» и спорная фора в разборе, рынки группами в анализе, окно своей ставки на тотал геймов
+  await checkMarkets(m);
 });
+
+/** Р28: черновик с другими рынками и спорной форой, анализ с группами рынков, своя ставка на тотал геймов. */
+async function checkMarkets(device: Device): Promise<void> {
+  const page = device.page;
+  await parseEvents(page, eventsText(MARKETS_EVENT), 1);
+  const draftUrl = new URL(page.url()).pathname + new URL(page.url()).search;
+  await checkUrls(device, [{ url: draftUrl, who: 'member', pattern: 'другие рынки и спорная фора' }]);
+  await expect(page.getByText(/фора по сетам или по геймам\?/)).toBeVisible();
+  await page.getByRole('button', { name: 'По геймам' }).click();
+  await expectReadyToLaunch(page);
+  await withFakeClaude(async () => {
+    await page.getByRole('button', { name: /^Запустить/ }).last().click();
+    await expect(page).toHaveURL(/\/analysis\/\d+$/);
+    await expect(page.getByRole('heading', { level: 3, name: 'Варианты ставки' })).toBeVisible({ timeout: 30_000 });
+  });
+  const analysisUrl = new URL(page.url()).pathname;
+  await checkUrls(device, [{ url: analysisUrl, who: 'member', pattern: 'рынки группами (Р28)' }]);
+  await checkWindow(device, analysisUrl, (p) => p.getByRole('button', { name: 'В свою ставку: Тотал геймов меньше 22, Синнер — Руне' }), 'Своя ставка');
+}
+
+const MARKETS_EVENT = [
+  'Синнер vs Руне, Test Open 9, хард, 1/8',
+  'Кэфы: П1 = 1.30, П2 = 3.60',
+  'Ф1(-1.5) = 1.40, Ф2(+1.5) = 2.80',
+  'Тотал сетов: Б(2.5) = 2.30, М(2.5) = 1.60',
+  'Тотал геймов: Б(22) = 1.75, М(22) = 2.05',
+];
 
 test('гостю закрыты экраны приложения: адрес из списка маршрутов ведет на вход', async ({ device, isMobile }) => {
   test.skip(isMobile, 'не зависит от ширины');

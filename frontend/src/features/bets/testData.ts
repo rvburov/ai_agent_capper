@@ -31,6 +31,10 @@ export function betLeg(over: Partial<BetLeg> = {}): BetLeg {
       best_of: 3,
     },
     market: 'ML',
+    family: 'ml',
+    line: null,
+    score_kind: 'sets',
+    void_hint: false,
     selection: 1,
     odds_taken: '1.300',
     prediction_id: 501,
@@ -231,7 +235,7 @@ export function betAuto(over: Partial<BetItem> = {}): BetItem {
     archive_to: '2026-10-11',
     legs: [
       betLeg({ id: 91, result: 'win', score: '2:0', settled_at: '2026-10-12T08:14:00Z', result_source: 'auto', closing: archiveClosing(), clv: 0.0156, clv_fair: -0.0212, score_outcomes: null, match: { ...betLeg().match, id: 191, day: '2026-10-09' } }),
-      betLeg2({ id: 92, market: 'HCP_-1.5', result: 'win', score: '2:0', settled_at: '2026-10-12T08:14:00Z', result_source: 'auto', score_outcomes: null, match: { ...betLeg2().match, id: 192, day: '2026-10-09' } }),
+      betLeg2({ id: 92, market: 'HCP_-1.5', family: 'h15', line: -1.5, result: 'win', score: '2:0', settled_at: '2026-10-12T08:14:00Z', result_source: 'auto', score_outcomes: null, match: { ...betLeg2().match, id: 192, day: '2026-10-09' } }),
     ],
     ...over,
   });
@@ -258,6 +262,7 @@ export function newsResult(over: Partial<NewsResult> = {}): NewsResult {
   return {
     winner: 1,
     sets: '2:0',
+    games: '6:3 6:4',
     score: '6:3 6:4',
     retired: false,
     source_name: 'atptour.com',

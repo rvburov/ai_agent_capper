@@ -1,4 +1,5 @@
-import type { BetFiltersQuery, KindFilter, Market, Period, SourceFilter, StatusFilter, SurfaceFilter } from './types';
+import { FAMILIES, familyOf, type MarketFamily } from '../analysis/markets';
+import type { BetFiltersQuery, KindFilter, Period, SourceFilter, StatusFilter, SurfaceFilter } from './types';
 
 /*
  * Фильтры «Ставок» живут в адресе (/bets?period=30d&status=won&surface=clay&q=синнер): ссылку
@@ -12,7 +13,8 @@ export interface BetFilters {
   from: string | null;
   to: string | null;
   status: StatusFilter | null;
-  market: Market | null;
+  /** Семейство рынков (Р28): ml, h15, shcp, stot, ghcp, gtot. */
+  family: MarketFamily | null;
   surfaces: SurfaceFilter[];
   source: SourceFilter | null;
   /** Вид ставки (Р29): стратегия, ординары, свои; null — все. */
@@ -24,7 +26,6 @@ export const PERIODS: readonly Period[] = ['7d', '30d', '90d', 'all'];
 // «Рассчитанные» (settled) — выигрыш, проигрыш и возврат вместе: так ссылка «Все N ставок за
 // период» с главной открывает ровно те ставки, что посчитаны в показателях периода
 export const STATUSES: readonly StatusFilter[] = ['open', 'settled', 'won', 'lost', 'void'];
-export const MARKETS: readonly Market[] = ['ML', 'HCP_-1.5', 'HCP_+1.5'];
 export const SURFACES: readonly SurfaceFilter[] = ['hard', 'clay', 'grass', 'carpet', 'unknown'];
 export const SOURCES: readonly SourceFilter[] = ['app', 'legacy'];
 export const KINDS: readonly KindFilter[] = ['strategy', 'single', 'own'];
@@ -40,7 +41,7 @@ export const EMPTY_FILTERS: BetFilters = {
   from: null,
   to: null,
   status: null,
-  market: null,
+  family: null,
   surfaces: [],
   source: null,
   kind: null,
@@ -68,7 +69,8 @@ export function filtersFromSearch(params: URLSearchParams): BetFilters {
     from,
     to,
     status: pick(params.get('status'), STATUSES),
-    market: pick(params.get('market'), MARKETS),
+    // старые ссылки ?market=ML — семейство этого рынка
+    family: pick(params.get('family'), FAMILIES) ?? familyOf(params.get('market') ?? ''),
     surfaces,
     source: pick(params.get('source'), SOURCES),
     kind: pick(params.get('kind'), KINDS),
@@ -76,7 +78,7 @@ export function filtersFromSearch(params: URLSearchParams): BetFilters {
   };
 }
 
-const FILTER_PARAMS = ['period', 'from', 'to', 'status', 'market', 'surface', 'source', 'kind', 'q'];
+const FILTER_PARAMS = ['period', 'from', 'to', 'status', 'market', 'family', 'surface', 'source', 'kind', 'q'];
 
 /** Адрес с фильтрами: прочие параметры (bet) остаются; значения по умолчанию не пишутся. */
 export function searchWithFilters(filters: BetFilters, base: URLSearchParams = new URLSearchParams()): URLSearchParams {
@@ -86,7 +88,7 @@ export function searchWithFilters(filters: BetFilters, base: URLSearchParams = n
   if (filters.from) params.set('from', filters.from);
   if (filters.to) params.set('to', filters.to);
   if (filters.status) params.set('status', filters.status);
-  if (filters.market) params.set('market', filters.market);
+  if (filters.family) params.set('family', filters.family);
   for (const surface of SURFACES) if (filters.surfaces.includes(surface)) params.append('surface', surface);
   if (filters.source) params.set('source', filters.source);
   if (filters.kind) params.set('kind', filters.kind);
@@ -105,7 +107,7 @@ export function filtersQuery(filters: BetFilters): BetFiltersQuery {
     query.period = filters.period;
   }
   if (filters.status) query.status = filters.status;
-  if (filters.market) query.market = filters.market;
+  if (filters.family) query.family = filters.family;
   const surfaces = SURFACES.filter((s) => filters.surfaces.includes(s));
   if (surfaces.length) query.surface = surfaces;
   if (filters.source) query.source = filters.source;
@@ -117,7 +119,7 @@ export function filtersQuery(filters: BetFilters): BetFiltersQuery {
 
 /** Сколько фильтров выбрано в шторке (статус, рынок, источник, вид, покрытия) — число на кнопке «Фильтры». */
 export function sheetActiveCount(filters: BetFilters): number {
-  return (filters.status ? 1 : 0) + (filters.market ? 1 : 0) + (filters.source ? 1 : 0) + (filters.kind ? 1 : 0) + filters.surfaces.length;
+  return (filters.status ? 1 : 0) + (filters.family ? 1 : 0) + (filters.source ? 1 : 0) + (filters.kind ? 1 : 0) + filters.surfaces.length;
 }
 
 /** Выбран хоть один фильтр (вместе с периодом, датами и поиском). */

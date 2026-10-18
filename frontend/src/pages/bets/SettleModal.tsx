@@ -11,13 +11,13 @@ import { closingDraft, closingPayload, type ClosingDraft } from '../../features/
 import { isLegacy, lastMatchDay, legProb, missingInArchive } from '../../features/bets/display';
 import { legNewsResult, newsResultOutcome, newsScoreText, safeSourceUrl, type NewsResult } from '../../features/bets/review';
 import { toMilli } from '../../features/bets/money';
-import { bankAfter, checkScore, scoreExamples, settlePreview, type SettlePreview } from '../../features/bets/settle';
+import { bankAfter, checkGamesScore, checkScore, scoreExamples, settlePreview, type GamesCheck, type ScoreCheck, type SettlePreview } from '../../features/bets/settle';
 import type { BetItem, BetLeg, Closing, LegResult, LegSettleIn } from '../../features/bets/types';
 import { formatDate, formatOdds, formatOddsExact, formatProb } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { ClosingFields } from './ClosingFields';
 import { OpenStatusChip } from './marks';
-import { betKindLong, KindChip, legMarket, matchText, money, Signed, StatusChip } from './parts';
+import { betKindLong, gamesOutcomeText, KindChip, legMarket, matchText, money, Signed, StatusChip } from './parts';
 
 // «Результат ставки» (settleModal макета): исход каждого события, счет (по нему исход отмечается
 // сам по таблице сервера score_outcomes), закрывающий кэф и сводка «выплата / прибыль / банк
@@ -48,6 +48,21 @@ const RESULTS: readonly { value: LegResult; icon: 'check' | 'x' | 'refresh' }[] 
   { value: 'loss', icon: 'x' },
   { value: 'void', icon: 'refresh' },
 ];
+
+/**
+ * Счет ноги: у рынков по геймам — счет по геймам, исход считает код по линии (Р28); у
+ * остальных — счет по сетам, исход по таблице сервера score_outcomes.
+ */
+type LegScoreCheck = ScoreCheck | GamesCheck;
+
+function legScore(leg: BetLeg, text: string): LegScoreCheck {
+  return leg.score_kind === 'games' ? checkGamesScore(text, leg.market, leg.selection, leg.match.best_of) : checkScore(text, leg.score_outcomes);
+}
+
+function scoreResult(check: LegScoreCheck): LegResult | null {
+  if (check.kind !== 'ok') return null;
+  return 'outcome' in check ? check.outcome.result : check.result;
+}
 
 function initialState(bet: BetItem, prefill: readonly LegPrefill[] | undefined): LegState[] {
   return bet.legs.map((_, i) => ({
@@ -119,9 +134,10 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
   function typeScore(index: number, leg: BetLeg, text: string) {
     const state = legs[index];
     if (!state) return;
-    const check = checkScore(text, leg.score_outcomes);
-    if (check.kind === 'ok' && (state.result === null || state.auto)) {
-      update(index, { score: text, result: check.result, auto: true });
+    const check = legScore(leg, text);
+    const result = scoreResult(check);
+    if (result && (state.result === null || state.auto)) {
+      update(index, { score: text, result, auto: true });
     } else if (check.kind === 'empty' && state.auto) {
       update(index, { score: text, result: null, auto: false });
     } else {
@@ -132,10 +148,11 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
   /** «Подставить 2:0»: счет и исход из новостей — в форму; сохраняет только участник (В1-Г). */
   function applyHint(index: number, leg: BetLeg, news: NewsResult) {
     const outcome = newsResultOutcome(leg, news);
-    if (news.sets && !news.retired) {
-      const check = checkScore(news.sets, leg.score_outcomes);
-      if (check.kind === 'ok') update(index, { score: news.sets, result: check.result, auto: true });
-      else update(index, { score: news.sets, ...(outcome ? { result: outcome, auto: false } : {}) });
+    const text = newsScoreFor(leg, news);
+    if (text && !news.retired) {
+      const result = scoreResult(legScore(leg, text));
+      if (result) update(index, { score: text, result, auto: true });
+      else update(index, { score: text, ...(outcome ? { result: outcome, auto: false } : {}) });
     } else if (outcome && !news.retired) {
       update(index, { result: outcome, auto: false });
     }
@@ -155,7 +172,7 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
       const leg = bet.legs[i];
       const state = legs[i];
       if (!leg || !state?.result) return;
-      const score = checkScore(state.score, leg.score_outcomes);
+      const score = legScore(leg, state.score);
       if (score.kind === 'invalid' || score.kind === 'typing') return;
       // закрытие отправляем, только если участник его менял, и сравниваем с тем, что он видел
       const closing = state.closing === null ? undefined : closingPayload(state.closing, state.closingBase);
@@ -256,6 +273,7 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
         <SettleSummary bet={bet} preview={preview} complete={complete} results={results} equity={notOpen ? null : equity} />
         <Callout kind="info">
           <b>{t('bets.settle.withdrawTitle')}</b> {t('bets.settle.withdrawText')}
+          {bet.legs.some((leg) => leg.void_hint) && ` ${t('bets.settle.withdrawGames')}`}
         </Callout>
         {errorText !== null && (
           <Callout kind="bad" role="alert">
@@ -265,6 +283,14 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
       </form>
     </Modal>
   );
+}
+
+/**
+ * Что подставить из новостей: счет по сетам («2:1») или, у рынков по геймам, по геймам («6:4 7:6»).
+ * Оба — первым игрок 1 (сервер разворачивает счет новости): у фор по геймам от этого зависит исход.
+ */
+function newsScoreFor(leg: BetLeg, news: NewsResult): string | null {
+  return (leg.score_kind === 'games' ? news.games : news.sets) ?? null;
 }
 
 function awaitedTitle(bet: BetItem, t: TFunction): string {
@@ -303,7 +329,8 @@ function NewsHintBox({ leg, news, onApply }: { leg: BetLeg; news: NewsResult; on
   const url = safeSourceUrl(news.source_url);
   const source = news.source_name ?? (url ? hostOf(url) : null);
   let label: string | null = null;
-  if (!news.retired && news.sets) label = t('bets.news.apply', { score: news.sets });
+  const apply = newsScoreFor(leg, news);
+  if (!news.retired && apply) label = t('bets.news.apply', { score: apply });
   else if (!news.retired && newsResultOutcome(leg, news)) label = t('bets.news.applyResult');
   return (
     <div className="bets-news" role="note">
@@ -369,12 +396,19 @@ function LegBlock({ bet, leg, index, state, closing, submitted, serverBadScore, 
     p !== null ? t('bets.open.model', { p: formatProb(p) }) : null,
     format ? t('bets.settle.matchFormat', { format }) : null,
   ];
-  const check = checkScore(state.score, leg.score_outcomes);
+  const games = leg.score_kind === 'games';
+  const check = legScore(leg, state.score);
   const examples = scoreExamples(leg.score_outcomes);
   const scoreBad = serverBadScore || check.kind === 'invalid' || (submitted && check.kind === 'typing');
-  const fromScore = check.kind === 'ok' ? check.result : null;
+  const fromScore = scoreResult(check);
   const firstName = shortName(displayName(leg.match.player1));
-  const scoreHint = t('bets.settle.scoreHint', { first: firstName, format: bestOf5 ? t('bets.settle.upTo3') : t('bets.settle.upTo2') });
+  const gamesExample = bestOf5 ? '6:4 3:6 7:6 6:3' : '6:4 7:6';
+  let scoreHint = t('bets.settle.scoreHint', { first: firstName, format: bestOf5 ? t('bets.settle.upTo3') : t('bets.settle.upTo2') });
+  if (games) scoreHint = check.kind === 'ok' && 'outcome' in check ? gamesOutcomeText(leg, check.outcome, t) : check.kind === 'unfinished' ? t('bets.settle.gamesUnfinished') : t('bets.settle.gamesHint', { first: firstName });
+  let scoreError: string;
+  if (games) scoreError = t('bets.settle.gamesBad', { example: gamesExample });
+  else if (format) scoreError = t('bets.settle.scoreBad', { format, examples: listText(examples, t('bets.settle.or')) });
+  else scoreError = t('bets.settle.scoreBadAny', { examples: listText(examples, t('bets.settle.or')) });
   let note: { text: string; warn: boolean } | null = null;
   if (state.auto && state.result) note = { text: t('bets.settle.autoNote'), warn: false };
   else if (fromScore && state.result && fromScore !== state.result) {
@@ -420,15 +454,15 @@ function LegBlock({ bet, leg, index, state, closing, submitted, serverBadScore, 
         </div>
         <div className="field">
           <label className="field-label" htmlFor={scoreId}>
-            <span>{t('bets.settle.score')}</span>
+            <span>{games ? t('bets.settle.scoreGames') : t('bets.settle.score')}</span>
           </label>
           <input
             id={scoreId}
             className={cx('input mono', scoreBad && 'invalid')}
             autoComplete="off"
-            maxLength={7}
-            inputMode="numeric"
-            placeholder={bestOf5 ? '3:1' : '2:0'}
+            maxLength={games ? 40 : 7}
+            inputMode={games ? 'text' : 'numeric'}
+            placeholder={games ? gamesExample : bestOf5 ? '3:1' : '2:0'}
             value={state.score}
             aria-invalid={scoreBad || undefined}
             aria-describedby={`${scoreId}-hint`}
@@ -436,9 +470,7 @@ function LegBlock({ bet, leg, index, state, closing, submitted, serverBadScore, 
           />
           {scoreBad ? (
             <div className="field-error" id={`${scoreId}-hint`} role="alert">
-              {format
-                ? t('bets.settle.scoreBad', { format, examples: listText(examples, t('bets.settle.or')) })
-                : t('bets.settle.scoreBadAny', { examples: listText(examples, t('bets.settle.or')) })}
+              {scoreError}
             </div>
           ) : (
             <div className="field-hint" id={`${scoreId}-hint`}>

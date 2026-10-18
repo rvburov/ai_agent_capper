@@ -1,3 +1,4 @@
+import { FAMILIES, type MarketFamily } from '../analysis/markets';
 import type { AnalyticsQuery, ExportPart, KindFilter, Market, Period, SourceFilter, SurfaceFilter } from './types';
 
 /*
@@ -16,6 +17,8 @@ export interface AnalyticsFilters {
   market: Market | null;
   /** Сторона исхода (1 или 2) — только вместе с market. */
   selection: 1 | 2 | null;
+  /** Семейство рынков (Р28): все исходы и линии; вместе с market не выбирается. */
+  family: MarketFamily | null;
   surface: SurfaceFilter | null;
   source: SourceFilter | null;
   /** Вид ставки (Р29): null — все ставки. */
@@ -45,6 +48,7 @@ export const EMPTY_FILTERS: AnalyticsFilters = {
   to: null,
   market: null,
   selection: null,
+  family: null,
   surface: null,
   source: null,
   kind: null,
@@ -72,19 +76,21 @@ export function filtersFromSearch(params: URLSearchParams): AnalyticsFilters {
   const market = pick(params.get('market'), MARKETS);
   const side = params.get('selection');
   const selection = market && (side === '1' || side === '2') ? (Number(side) as 1 | 2) : null;
+  const family = market ? null : pick(params.get('family'), FAMILIES);
   return {
     period: pick(params.get('period'), PERIODS) ?? 'all',
     from,
     to,
     market,
     selection,
+    family,
     surface: pick(params.get('surface'), SURFACES),
     source: pick(params.get('source'), SOURCES),
     kind: pick(params.get('kind'), KINDS),
   };
 }
 
-const FILTER_PARAMS = ['period', 'from', 'to', 'market', 'selection', 'surface', 'source', 'kind'];
+const FILTER_PARAMS = ['period', 'from', 'to', 'market', 'selection', 'family', 'surface', 'source', 'kind'];
 
 /** Адрес с фильтрами: прочие параметры остаются; значения по умолчанию не пишутся. */
 export function searchWithFilters(
@@ -99,7 +105,7 @@ export function searchWithFilters(
   if (filters.market) {
     params.set('market', filters.market);
     if (filters.selection) params.set('selection', String(filters.selection));
-  }
+  } else if (filters.family) params.set('family', filters.family);
   if (filters.surface) params.set('surface', filters.surface);
   if (filters.source) params.set('source', filters.source);
   if (filters.kind) params.set('kind', filters.kind);
@@ -118,7 +124,7 @@ export function filtersQuery(filters: AnalyticsFilters): AnalyticsQuery {
   if (filters.market) {
     query.market = filters.market;
     if (filters.selection) query.selection = filters.selection;
-  }
+  } else if (filters.family) query.family = filters.family;
   if (filters.surface) query.surface = [filters.surface];
   if (filters.source) query.source = filters.source;
   if (filters.kind) query.kind = filters.kind;
@@ -127,7 +133,7 @@ export function filtersQuery(filters: AnalyticsFilters): AnalyticsQuery {
 
 /** Выбран рынок, покрытие, источник или вид ставки (период и даты фильтром выборки не считаются). */
 export function hasSliceFilter(filters: AnalyticsFilters): boolean {
-  return filters.market !== null || filters.surface !== null || filters.source !== null || filters.kind !== null;
+  return filters.market !== null || filters.family !== null || filters.surface !== null || filters.source !== null || filters.kind !== null;
 }
 
 /** Хоть что-то отличается от «все время без фильтров» — видна кнопка «Сбросить фильтры». */
@@ -137,21 +143,25 @@ export function isDefault(filters: AnalyticsFilters): boolean {
 
 /** Без рынка, покрытия, источника и вида (действие вывода «Снять фильтры»): период остается. */
 export function withoutSlices(filters: AnalyticsFilters): AnalyticsFilters {
-  return { ...filters, market: null, selection: null, surface: null, source: null, kind: null };
+  return { ...filters, market: null, selection: null, family: null, surface: null, source: null, kind: null };
 }
 
-/** Значение исхода в выпадающем списке: «ML:1»; рынок без стороны (пришел ссылкой) — «ML». */
-export function outcomeValue(market: Market | null, selection: 1 | 2 | null): string {
-  if (!market) return 'all';
+/**
+ * Значение в выпадающем списке «Рынок»: исход «ML:1»; рынок без стороны (пришел ссылкой) —
+ * «ML»; семейство (Р28) — «f:gtot».
+ */
+export function outcomeValue(market: Market | null, selection: 1 | 2 | null, family: MarketFamily | null = null): string {
+  if (!market) return family ? `f:${family}` : 'all';
   return selection ? `${market}:${selection}` : market;
 }
 
-/** Обратно: «HCP_-1.5:2» → рынок и сторона. */
-export function parseOutcome(value: string): { market: Market | null; selection: 1 | 2 | null } {
+/** Обратно: «HCP_-1.5:2» → рынок и сторона, «f:gtot» → семейство. */
+export function parseOutcome(value: string): { market: Market | null; selection: 1 | 2 | null; family: MarketFamily | null } {
+  if (value.startsWith('f:')) return { market: null, selection: null, family: pick(value.slice(2), FAMILIES) };
   const [market, side] = value.split(':');
   const found = pick(market ?? null, MARKETS);
-  if (!found) return { market: null, selection: null };
-  return { market: found, selection: side === '1' || side === '2' ? (Number(side) as 1 | 2) : null };
+  if (!found) return { market: null, selection: null, family: null };
+  return { market: found, selection: side === '1' || side === '2' ? (Number(side) as 1 | 2) : null, family: null };
 }
 
 /** Тот же исход, что выбран в фильтре. */

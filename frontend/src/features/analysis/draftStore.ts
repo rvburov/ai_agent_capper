@@ -18,7 +18,7 @@ export interface ParseInfo {
   /** Почему банк из текста не взят или расходится с учетом (analysis.draft.*). */
   bankNoteKey: string | null;
   bookmaker: string | null;
-  unknown: { line_no: number; text: string }[];
+  unknown: { line_no: number; text: string; reason_key?: string | null }[];
   costUsd: number;
   warnings: TextKey[];
 }

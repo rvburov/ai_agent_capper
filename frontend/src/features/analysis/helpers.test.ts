@@ -18,7 +18,8 @@ import {
   toEventIn,
   validOdd,
 } from './draft';
-import { formatShare, marketDescription, marketLabel, modelName, ppDelta, shownMarkets, usdSmall } from './markets';
+import { formatShare, marketLabel, modelName, ppDelta, usdSmall } from './markets';
+import { marketDescription, shownMarkets } from './outcomes';
 import { analysisNumber } from './number';
 import { categoryLabel, roundLabel } from './rounds';
 import { moneyRules, payout, shareOf, stakeForShare, stakeProblem, totalOdds } from './stake';
@@ -188,16 +189,16 @@ describe('исходы и подписи', () => {
     expect(marketLabel('ML', 1)).toBe('П1');
     expect(marketLabel('HCP_-1.5', 2)).toBe('Ф2(−1.5)');
     expect(marketLabel('HCP_+1.5', 1)).toBe('Ф1(+1.5)');
-    expect(marketDescription('HCP_-1.5', 'Синнер', 3)).toBe('Синнер выигрывает 2:0');
-    expect(marketDescription('HCP_-1.5', 'Синнер', 5)).toBe('Синнер выигрывает 3:0 или 3:1');
-    expect(marketDescription('HCP_+1.5', 'Руне', 5)).toBe('Руне берет хотя бы 2 сета');
+    expect(marketDescription('HCP_-1.5', 1, 'Синнер', 3)).toBe('Синнер выигрывает 2:0');
+    expect(marketDescription('HCP_-1.5', 1, 'Синнер', 5)).toBe('Синнер выигрывает 3:0 или 3:1');
+    expect(marketDescription('HCP_+1.5', 2, 'Руне', 5)).toBe('Руне берет хотя бы 2 сета');
   });
 
-  it('в таблице — П1 и П2 всегда, форы только с кэфом', () => {
+  it('в таблице — П1 и П2 всегда, форы только с кэфом; группы по рынкам', () => {
     const rows = analysisDone().result!.matches[0]!.markets;
     expect(shownMarkets(rows).map((r) => `${r.market}/${r.selection}`)).toEqual(['ML/1', 'ML/2']);
     const withHcp = rows.map((r) => (r.market === 'HCP_+1.5' && r.selection === 2 ? { ...r, odds: '1.40' } : r));
-    expect(shownMarkets(withHcp).map((r) => `${r.market}/${r.selection}`)).toEqual(['ML/1', 'HCP_+1.5/2', 'ML/2']);
+    expect(shownMarkets(withHcp).map((r) => `${r.market}/${r.selection}`)).toEqual(['ML/1', 'ML/2', 'HCP_+1.5/2']);
   });
 
   it('проценты, пункты, модели, доллары', () => {

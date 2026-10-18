@@ -26,7 +26,7 @@ describe('Ставки: фильтры в адресе', () => {
       from: null,
       to: null,
       status: 'won',
-      market: 'HCP_-1.5',
+      family: 'h15',
       surfaces: ['hard', 'clay'],
       source: 'legacy',
       kind: 'single',
@@ -59,11 +59,18 @@ describe('Ставки: фильтры в адресе', () => {
   it('для API: свой диапазон дат важнее периода, пустое не передается', () => {
     expect(filtersQuery(EMPTY_FILTERS)).toEqual({});
     expect(filtersQuery({ ...EMPTY_FILTERS, period: '30d', from: '2026-10-01', to: null, q: ' №12 ' })).toEqual({ from: '2026-10-01', q: '№12' });
-    expect(filtersQuery({ ...EMPTY_FILTERS, period: '90d', surfaces: ['unknown', 'clay'], market: 'ML' })).toEqual({
+    expect(filtersQuery({ ...EMPTY_FILTERS, period: '90d', surfaces: ['unknown', 'clay'], family: 'gtot' })).toEqual({
       period: '90d',
-      market: 'ML',
+      family: 'gtot',
       surface: ['clay', 'unknown'],
     });
+  });
+
+  it('рынок — семейство (Р28); старая ссылка ?market=HCP_-1.5 — фора ±1.5', () => {
+    expect(filtersFromSearch(new URLSearchParams('family=ghcp')).family).toBe('ghcp');
+    expect(filtersFromSearch(new URLSearchParams('market=HCP_-1.5')).family).toBe('h15');
+    expect(filtersFromSearch(new URLSearchParams('family=xx')).family).toBeNull();
+    expect(searchWithFilters({ ...EMPTY_FILTERS, family: 'stot' }).toString()).toBe('family=stot');
   });
 
   it('счетчик фильтров шторки и «выбран хоть один»', () => {

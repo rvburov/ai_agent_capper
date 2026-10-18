@@ -1,3 +1,4 @@
+import { marketSpec } from '../analysis/markets';
 import { addMoney, fromCents, payoutOf, productOdds, toCents, toMilli } from './money';
 import type { BetItem, BetStatus, LegResult } from './types';
 
@@ -77,6 +78,128 @@ export function checkScore(text: string, outcomes: Readonly<Record<string, LegRe
 /** Полные счета формата для подсказки: «2:0, 2:1, 1:2, 0:2». */
 export function scoreExamples(outcomes: Readonly<Record<string, LegResult>> | null): string[] {
   return outcomes ? Object.keys(outcomes) : [];
+}
+
+// ---------- счет по геймам (Р28) ----------
+
+/*
+ * Рынки по геймам (фора и тотал) рассчитываются по счету по геймам: «6:4 7:6(5) 6:3», первым —
+ * игрок 1, тай-брейк — один гейм. Так же, как parse_sets и исход по геймам на сервере
+ * (backend/app/ml/markets.py): при «ровно» на целой линии — возврат (кэф 1,00).
+ */
+
+export interface GamesScore {
+  /** Сеты: геймы игрока 1 и 2; супер-тай-брейк [10-8] — сет из одного гейма (1:0). */
+  sets: { a: number; b: number }[];
+  /** Сумма геймов игрока 1 и 2. */
+  games: [number, number];
+  /** Счет для сервера: «6:4 7:6(5) [10-8]». */
+  text: string;
+}
+
+const SET_GAMES = /^(\[)?(\d{1,2})[:\-\u2013](\d{1,2})(?:\((\d{1,2})\))?(\])?$/;
+
+// Сет доигран: 6:0–6:4, 7:5, 7:6 или затяжной (разница 2 после 6:6)
+function finishedSet(a: number, b: number): boolean {
+  const hi = Math.max(a, b);
+  const lo = Math.min(a, b);
+  if (hi === 6) return lo <= 4;
+  if (hi === 7) return lo === 5 || lo === 6;
+  return hi > 7 && hi - lo === 2;
+}
+
+export type GamesParse = { kind: 'ok'; score: GamesScore } | { kind: 'unfinished' } | { kind: 'invalid' };
+
+/**
+ * Счет по геймам из поля (как parse_games сервера, но строже: каждый сет доигран). bestOf —
+ * формат матча; не известен — по счету. unfinished — последний сет не доигран или победителя
+ * нет (снятие): исход по правилам букмекера.
+ */
+export function parseGamesScore(text: string, bestOf: number | null | undefined): GamesParse {
+  const tokens = text.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
+  if (!tokens.length || tokens.length > 5) return { kind: 'invalid' };
+  const sets: GamesScore['sets'] = [];
+  const shown: string[] = [];
+  let open = false;
+  for (const [i, token] of tokens.entries()) {
+    const found = SET_GAMES.exec(token);
+    if (!found || Boolean(found[1]) !== Boolean(found[5])) return { kind: 'invalid' };
+    const a = Number(found[2]);
+    const b = Number(found[3]);
+    if (a === b) return { kind: 'invalid' };
+    if (found[1]) {
+      // супер-тай-брейк — последний сет, один гейм
+      if (i !== tokens.length - 1 || found[4] !== undefined) return { kind: 'invalid' };
+      sets.push(a > b ? { a: 1, b: 0 } : { a: 0, b: 1 });
+      shown.push(`[${a}-${b}]`);
+      continue;
+    }
+    if (!finishedSet(a, b)) {
+      if (i !== tokens.length - 1 || Math.max(a, b) > 6) return { kind: 'invalid' };
+      open = true;
+    }
+    sets.push({ a, b });
+    shown.push(`${a}:${b}${found[4] === undefined ? '' : `(${found[4]})`}`);
+  }
+  const done = open ? sets.slice(0, -1) : sets;
+  const wins = [done.filter((x) => x.a > x.b).length, done.filter((x) => x.b > x.a).length];
+  const leader = Math.max(wins[0] ?? 0, wins[1] ?? 0);
+  const need = bestOf === 5 ? 3 : bestOf === 3 ? 2 : leader >= 3 || sets.length > 3 ? 3 : 2;
+  if (leader > need || sets.length > need * 2 - 1) return { kind: 'invalid' };
+  // сеты после того, как кто-то уже выиграл матч
+  let w1 = 0;
+  let w2 = 0;
+  for (const [i, x] of done.entries()) {
+    if (x.a > x.b) w1 += 1;
+    else w2 += 1;
+    if ((w1 === need || w2 === need) && i < sets.length - 1) return { kind: 'invalid' };
+  }
+  if (open || leader < need) return { kind: 'unfinished' };
+  const games: [number, number] = [sets.reduce((n, x) => n + x.a, 0), sets.reduce((n, x) => n + x.b, 0)];
+  return { kind: 'ok', score: { sets, games, text: shown.join(' ') } };
+}
+
+export interface GamesOutcome {
+  result: LegResult;
+  /** Тотал: всего геймов; фора: разница геймов выбранной стороны. */
+  value: number;
+  line: number;
+}
+
+/** Исход ноги рынка по геймам по счету; не рынок по геймам — null. */
+export function gamesOutcome(market: string, selection: number, score: GamesScore): GamesOutcome | null {
+  const spec = marketSpec(market);
+  if (!spec || spec.line === null || (spec.family !== 'gtot' && spec.family !== 'ghcp')) return null;
+  const [a, b] = score.games;
+  const cmp = (v: number): LegResult => (v > 0 ? 'win' : v < 0 ? 'loss' : 'void');
+  if (spec.family === 'gtot') {
+    const total = a + b;
+    return { result: cmp(selection === 1 ? total - spec.line : spec.line - total), value: total, line: spec.line };
+  }
+  const diff = selection === 1 ? a - b : b - a;
+  return { result: cmp(diff + spec.line), value: diff, line: spec.line };
+}
+
+export type GamesCheck =
+  | { kind: 'empty' }
+  | { kind: 'typing' }
+  | { kind: 'invalid' }
+  | { kind: 'unfinished' }
+  | { kind: 'ok'; key: string; outcome: GamesOutcome };
+
+/** Проверка счета по геймам в окне расчета: как checkScore, но исход считает код по линии. */
+export function checkGamesScore(text: string, market: string, selection: number, bestOf: number | null | undefined): GamesCheck {
+  const value = text.trim();
+  if (!value) return { kind: 'empty' };
+  const parsed = parseGamesScore(value, bestOf);
+  if (parsed.kind === 'ok') {
+    const outcome = gamesOutcome(market, selection, parsed.score);
+    if (outcome) return { kind: 'ok', key: parsed.score.text, outcome };
+    return { kind: 'invalid' };
+  }
+  if (parsed.kind === 'unfinished') return { kind: 'unfinished' };
+  // меньше двух сетов цифрами — еще вводят
+  return value.replace(/\D/g, '').length >= 4 ? { kind: 'invalid' } : { kind: 'typing' };
 }
 
 // ---------- закрывающий кэф и CLV ----------

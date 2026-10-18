@@ -9,6 +9,7 @@ import { aiKeys } from '../ai/keys';
 import { analysisKeys } from '../analysis/keys';
 import { MONEY_QUERIES } from '../bank/currency';
 import { learningKeys } from '../learning/keys';
+import { marketKeys } from '../markets/keys';
 import { ANALYTICS_PREFIX, betKeys, DASHBOARD_PREFIX } from '../bets/keys';
 
 // Центр уведомлений (колокольчик, Р3): вид уведомления, ссылки и отметка прочитанного в кэше.
@@ -73,6 +74,9 @@ export function notificationLook(kind: string, outcome: NotificationOutcome | nu
       return { icon: 'calendar', tone: 'info' };
     case 'learning':
       return { icon: 'brain', tone: 'info' };
+    // Р28: рынок «для сравнения» прошел порог — администратор решает, переводить ли в экспресс
+    case 'market_ready':
+      return { icon: 'flask', tone: 'good' };
     default:
       return { icon: 'bell', tone: null };
   }
@@ -118,6 +122,8 @@ export function staleQueriesFor(kind: string): readonly QueryKey[] {
     case 'weekly_report':
     case 'learning':
       return [learningKeys.all, DASHBOARD_PREFIX];
+    case 'market_ready':
+      return [marketKeys.all];
     default:
       return [];
   }
@@ -167,6 +173,9 @@ export function notificationLink(item: Pick<NotificationItem, 'kind' | 'link'>):
       return paths.learning('reports');
     case 'learning':
       return paths.learning();
+    // кнопка «Перевести в экспресс» — в «Администрирование → Настройки»
+    case 'market_ready':
+      return paths.admin('settings');
     default:
       return null;
   }

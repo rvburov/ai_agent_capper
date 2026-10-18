@@ -4,7 +4,8 @@ import { useSearchParams } from 'react-router';
 
 import { paths } from '../../app/paths';
 import { Button, Callout, Card, EmptyState, Skeleton, useToast } from '../../components';
-import { marketLabel } from '../../features/analysis/markets';
+import { marketLabel, type MarketFamily } from '../../features/analysis/markets';
+import { familyTitle } from '../../features/markets/status';
 import { apiErrorText } from '../../features/analysis/codes';
 import { readSample, saveSample, type CalibrationSample } from '../../features/analytics/accuracy';
 import { useAnalytics, useAnalyticsEver } from '../../features/analytics/api';
@@ -28,6 +29,7 @@ import { Filters } from './Filters';
 import { Insights } from './Insights';
 import { Kpis } from './Kpis';
 import { MarketTable } from './MarketTable';
+import { MarketsCard } from './MarketsCard';
 import { ExplainModal, ExportModal } from './Modals';
 import { ParlaysCard } from './ParlaysCard';
 import { Section } from './parts';
@@ -149,9 +151,15 @@ export function AnalyticsPage() {
 
   function pickMarket(market: Market | null, selection: number | null) {
     const side = selection === 1 || selection === 2 ? selection : null;
-    setFilters({ ...filters, market, selection: market ? side : null });
+    setFilters({ ...filters, market, selection: market ? side : null, family: null });
     scrollToFilters();
     toast.show(market && side ? t('analytics.toast.market', { label: marketLabel(market, side) }) : t('analytics.toast.allMarkets'), { icon: 'filter' });
+  }
+
+  function pickFamily(family: MarketFamily) {
+    setFilters({ ...filters, market: null, selection: null, family });
+    scrollToFilters();
+    toast.show(t('analytics.toast.market', { label: familyTitle(family) }), { icon: 'filter' });
   }
 
   const data = analytics.data;
@@ -204,8 +212,9 @@ export function AnalyticsPage() {
         <Section title={t('analytics.sections.price.title')} text={t('analytics.sections.price.text')} />
         <div className="analytics-grid">
           <ClvCard data={data} mobile={mobile} pending={pending} />
-          <MarketTable data={data} filters={filters} onPick={pickMarket} />
+          <MarketTable data={data} filters={filters} onPick={pickMarket} onPickFamily={pickFamily} />
         </div>
+        <MarketsCard />
       </>
     );
   }

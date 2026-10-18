@@ -4,9 +4,10 @@ import { useTranslation } from 'react-i18next';
 
 import { Card, Chip, EmptyState, SurfaceChip, isSurface, surfaceColor, type DataColumn } from '../../components';
 import { ChartWithTable, HBars, type HBarItem } from '../../components/charts';
-import { formatShare, marketLabel } from '../../features/analysis/markets';
+import { familyOf, formatShare } from '../../features/analysis/markets';
+import { familyTitle } from '../../features/markets/status';
 import { oddsRange, signClass, signedPct } from '../../features/analytics/display';
-import { sameOutcome, type AnalyticsFilters } from '../../features/analytics/filters';
+import type { AnalyticsFilters } from '../../features/analytics/filters';
 import type { Analytics, OddsSlice, SurfaceSlice, SurfaceFilter, TotalSlice } from '../../features/analytics/types';
 import { currencyOf } from '../../features/bets/display';
 import { formatMoney, formatNumber, formatOdds, formatPercent } from '../../lib/format';
@@ -165,16 +166,18 @@ export function SurfaceCard({ data, filters, pending }: SliceProps) {
 
 export function MarketCard({ data, filters, pending }: SliceProps) {
   const { t } = useTranslation();
-  const groups = data.slices.markets;
+  // Р28: ROI по рынкам — по семействам (все исходы и линии рынка)
+  const groups = data.slices.families;
   const total = groups.reduce((sum, g) => sum + g.n, 0);
+  const picked = filters.family ?? (filters.market ? familyOf(filters.market) : null);
   const items = groups.map((g) =>
     sliceItem(
-      `${g.market}:${g.selection}`,
-      marketLabel(g.market, g.selection),
+      g.family,
+      familyTitle(g.family),
       g,
       'var(--s1)',
-      sameOutcome(filters, g.market, g.selection),
-      filters.market !== null && !sameOutcome(filters, g.market, g.selection),
+      picked === g.family,
+      picked !== null && picked !== g.family,
       t('analytics.count.events', { count: g.n }),
       data.thresholds.small_sample,
     ),

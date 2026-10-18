@@ -7,7 +7,8 @@ import { archiveConflicts, impliedProb, isImported, isLegacy, legProb, legShown,
 import type { BetItem, BetLeg } from '../../features/bets/types';
 import { formatDate, formatDateLong, formatDateTime, formatOdds, formatOddsExact, formatPp, formatProb } from '../../lib/format';
 import { ClosingCell, OpenStatusChip } from './marks';
-import { betKind, ClvValue, KindChip, legMarket, LegChip, MatchName, matchText, money, ResultIcon, Signed } from './parts';
+import { betKind, ClvValue, gamesLegNote, KindChip, legMarket, LegChip, MatchName, matchText, money, ResultIcon, Signed } from './parts';
+import { useMarketStatuses } from '../../features/markets/api';
 import { ReviewBlock } from './ReviewBlock';
 
 // Детали ставки (detailBlock и detailModal макета): события с исходом, закрытием и CLV, расчет
@@ -20,9 +21,12 @@ export function settledNote(bet: BetItem, t: TFunction): string | null {
   const by = settledBy(bet);
   if (by === 'auto') {
     const at = bet.settled_at ? formatDateTime(bet.settled_at, { calendar: false }) : '';
-    return bet.archive_to
+    const note = bet.archive_to
       ? t('bets.settledNote.auto', { at, date: formatDate(bet.archive_to) })
       : t('bets.settledNote.autoNoDate', { at });
+    // Р28: рынки по геймам — по счету по геймам из архива, закрытия в архиве нет
+    const games = bet.legs.map((leg) => gamesLegNote(leg, t)).filter((x): x is string => x !== null);
+    return games.length ? `${note} ${t('bets.settledNote.games', { list: games.join('; ') })}` : note;
   }
   if (by === 'manual') {
     return bet.settled_at ? t('bets.settledNote.manual', { at: formatDate(bet.settled_at) }) : t('bets.settledNote.manualNoDate');
@@ -106,6 +110,7 @@ function settleFacts(bet: BetItem, t: TFunction): { key: string; label: string; 
 function LegsTable({ bet }: { bet: BetItem }) {
   const { t } = useTranslation();
   const legacy = isLegacy(bet);
+  const statuses = useMarketStatuses();
   return (
     <div className="table-wrap">
       <table className="table bets-legtable">
@@ -127,7 +132,9 @@ function LegsTable({ bet }: { bet: BetItem }) {
           {bet.legs.map((leg) => {
             const p = legProb(leg);
             const implied = impliedProb(leg.odds_taken);
-            const meta = [legMarket(leg), leg.match.surface ? t(`bets.filters.surfaces.${leg.match.surface}`).toLowerCase() : null, leg.match.best_of === 5 ? t('bets.detail.bestOf5') : null];
+            // Р28: рынок «для сравнения» — пометка у ноги
+            const compare = statuses?.get(leg.family)?.status === 'compare' ? t('bets.leg.compare') : null;
+            const meta = [legMarket(leg), compare, leg.match.surface ? t(`bets.filters.surfaces.${leg.match.surface}`).toLowerCase() : null, leg.match.best_of === 5 ? t('bets.detail.bestOf5') : null];
             return (
               <tr key={leg.id}>
                 <td>

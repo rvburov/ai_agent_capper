@@ -44,6 +44,10 @@ export function FormatModal({
         <li>
           <b>{t('new.format.oddsTitle')}</b> {t('new.format.odds')}
         </li>
+        <li>
+          <b>{t('new.format.othersTitle')}</b> {t('new.format.others')}
+        </li>
+        <li>{t('new.format.unit')}</li>
         <li>{t('new.format.decimal')}</li>
         <li>{t('new.format.bank')}</li>
         <li>{t('new.format.currency')}</li>

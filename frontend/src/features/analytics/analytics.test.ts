@@ -71,8 +71,9 @@ describe('Аналитика: фильтры в адресе', () => {
     expect(outcomeValue('HCP_+1.5', 2)).toBe('HCP_+1.5:2');
     expect(outcomeValue('ML', null)).toBe('ML');
     expect(outcomeValue(null, null)).toBe('all');
-    expect(parseOutcome('HCP_-1.5:1')).toEqual({ market: 'HCP_-1.5', selection: 1 });
-    expect(parseOutcome('all')).toEqual({ market: null, selection: null });
+    expect(parseOutcome('HCP_-1.5:1')).toEqual({ market: 'HCP_-1.5', selection: 1, family: null });
+    expect(parseOutcome('f:gtot')).toEqual({ market: null, selection: null, family: 'gtot' });
+    expect(parseOutcome('all')).toEqual({ market: null, selection: null, family: null });
     expect(sameOutcome({ ...EMPTY_FILTERS, market: 'ML', selection: null }, 'ML', 2)).toBe(true);
     expect(sameOutcome({ ...EMPTY_FILTERS, market: 'ML', selection: 1 }, 'ML', 2)).toBe(false);
   });

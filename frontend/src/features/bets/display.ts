@@ -1,6 +1,6 @@
 import type { ChipKind, IconName } from '../../components';
 import { getDisplayTimeZone, type Currency } from '../../lib/format';
-import type { BetItem, BetLeg, BetStatus, Closing, Market, Verdict } from './types';
+import type { BetItem, BetLeg, BetStatus, Closing, Verdict } from './types';
 
 /*
  * Как показывать ставку: метки статуса и исхода, вердикт по CLV, чей закрывающий кэф, имена
@@ -64,9 +64,6 @@ export const LEG_CHIP: Record<LegShown, ChipMeta> = {
   unknown: { kind: 'outline', icon: 'info' },
   none: { kind: 'outline', icon: 'ban' },
 };
-
-/** Ключ рынка в текстах (в названии рынка есть точка — разделитель ключей i18next). */
-export const MARKET_KEY = { ML: 'ml', 'HCP_-1.5': 'minus', 'HCP_+1.5': 'plus' } as const satisfies Record<Market, string>;
 
 /** Ставка старого бота (В5): без CLV и вердикта. */
 export function isLegacy(bet: Pick<BetItem, 'source'>): boolean {

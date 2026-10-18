@@ -50,6 +50,8 @@ describe('центр уведомлений', () => {
     expect(notificationLook('budget_100')).toEqual(notificationLook('limit_100'));
     expect(notificationLook('ai_key_failed')).toEqual({ icon: 'key', tone: 'bad' });
     expect(notificationLook('ai_mode_request')).toEqual({ icon: 'key', tone: 'info' });
+    // Р28: рынок «для сравнения» прошел порог
+    expect(notificationLook('market_ready')).toEqual({ icon: 'flask', tone: 'good' });
     expect(notificationLook('ai_mode_decision')).toEqual({ icon: 'key', tone: 'info' });
     // ссылки уведомлений этапа 3: ключ и бюджет с прокруткой к лимитам, ключ Claude участника
     expect(internalLink('/admin/key#adm-limits')).toBe('/admin/key#adm-limits');
