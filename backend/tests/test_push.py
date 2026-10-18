@@ -14,6 +14,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import http_ece
 import httpx
@@ -30,11 +31,11 @@ from app.core.config import Settings
 from app.core.i18n import _load, has_key
 from app.core.vapid import b64url_decode, b64url_encode, generate_keys, keys_match, public_bytes
 from app.db.models import Notification, PushSubscription, User
-from app.db.models.auth import NOTIFICATION_KINDS
+from app.db.models.auth import DEFAULT_TZ, NOTIFICATION_KINDS
 from app.services import push as push_service
 from app.services.notification_prefs import default_push, push_allowed
 from app.services.notifications import notify
-from app.services.sessions import create_session
+from app.services.sessions import create_session, utcnow
 from app.workers import jobs
 from tests.helpers_admin import admin_signed_in, error_code, signed_in
 from tests.support import ClientFactory, LoginFn, SettingsOverride, UserFactory
@@ -114,6 +115,21 @@ def vapid(override_settings: SettingsOverride) -> Settings:
         vapid_subject=SUBJECT,
         push_allow_http=False,
     )
+
+
+@pytest.fixture(autouse=True)
+def daytime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Часы отправки — дневные по поясу участника по умолчанию: иначе тесты без явного now,
+    запущенные ночью, попадают в тихие часы 23:00–08:00 (CI в 00:01 UTC). Сдвиг только
+    вперед, не больше 11 часов: сеансы живут 14 дней, истекший сеанс остается истекшим."""
+
+    def shifted() -> datetime:
+        now = utcnow()
+        while not 9 <= now.astimezone(ZoneInfo(DEFAULT_TZ)).hour < 22:
+            now += timedelta(hours=1)
+        return now
+
+    monkeypatch.setattr(push_service, "utcnow", shifted)
 
 
 @pytest.fixture
