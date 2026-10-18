@@ -40,10 +40,15 @@ CSV_FILENAME = "bets.csv"
 async def place_bet(
     body: BetIn, user: CurrentUser, db: DbSession, background: BackgroundTasks
 ) -> BetOut:
-    """Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не
-    меняется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref
-    возвращает ту же ставку. Пауза и лимиты дня ответственной игры — 409 play.paused,
-    play.bets_limit, play.stake_limit (until — до какого момента)."""
+    """Ставка по своему завершенному анализу (Р29), вид kind: strategy — экспресс
+    стратегии, single — ординар из вариантов (ноги — ровно ноги варианта, иначе 422
+    bet.bad_legs; кэфы — фактические), own — своя ставка: любые исходы анализа (чужой — 422
+    bet.not_in_analysis), один рынок на матч (иначе 422 bet.same_match). Сумма — не больше
+    банка. По анализу можно несколько ставок, та же ставка второй раз — 409 bet.duplicate;
+    повтор с тем же client_ref возвращает ту же ставку. Анализ без итога (старый бот) — 409
+    bet.no_result; матч ноги начался или сыгран — 422 bet.match_started. Пауза и лимиты дня
+    ответственной игры — 409 play.paused, play.bets_limit, play.stake_limit (until — до
+    какого момента)."""
     placed = await bets_service.place_bet(db, user, body)
     background.add_task(analytics_cache.request_warm, user.id)
     return bets_service.bet_out(placed)

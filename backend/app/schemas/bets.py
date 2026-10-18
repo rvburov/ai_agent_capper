@@ -7,7 +7,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     AwareDatetime,
@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.schemas.analyses import DecimalOut, FormCurrency, Market, Surface
+from app.schemas.analyses import BetKind, BetKindIn, DecimalOut, FormCurrency, Market, Surface
 from app.schemas.common import without_as_user
 
 OddsTakenIn = Annotated[Decimal, Field(gt=0, max_digits=6, decimal_places=3)]
@@ -36,21 +36,41 @@ ClientRef = Annotated[
 ]
 
 
-class BetLegIn(BaseModel):
-    """Нога ставки: прогноз анализа и кэф, по которому участник поставил."""
+# Событий в ставке не больше, чем в анализе (app/services/analysis_input.py, MAX_EVENTS)
+MAX_BET_LEGS = 5
 
-    prediction_id: int = Field(ge=1, le=2**63 - 1)
+
+class BetLegIn(BaseModel):
+    """Нога ставки: исход анализа и кэф, по которому участник поставил. Исход — прогноз
+    анализа (prediction_id) или матч анализа, рынок и сторона (match_id, market,
+    selection): одно из двух."""
+
+    prediction_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
+    match_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
+    market: Market | None = None
+    selection: Literal[1, 2] | None = None
     odds_taken: OddsTakenIn
+
+    @model_validator(mode="after")
+    def _one_way(self) -> Self:
+        by_outcome = (self.match_id, self.market, self.selection)
+        if self.prediction_id is None and None in by_outcome:
+            raise ValueError("prediction_id или match_id, market и selection")
+        return self
 
 
 class BetIn(BaseModel):
-    """currency — валюта суммы в форме (FormCurrency): сменили валюту, пока форма была
+    """Ставка по анализу (Р29). kind: strategy — экспресс стратегии, single — ординар из
+    вариантов анализа (ноги должны совпасть с вариантом, кэфы — фактические); own — своя
+    ставка: любые исходы этого анализа, один рынок на матч, сумма — от участника.
+    currency — валюта суммы в форме (FormCurrency): сменили валюту, пока форма была
     открыта, — 409 common.currency_changed, сумма в старой валюте не запишется."""
 
     analysis_id: int = Field(ge=1, le=2**63 - 1)
+    kind: BetKindIn = "strategy"
     stake: StakeIn
     bookmaker: BookmakerIn
-    legs: list[BetLegIn] = Field(min_length=1, max_length=3)
+    legs: list[BetLegIn] = Field(min_length=1, max_length=MAX_BET_LEGS)
     client_ref: ClientRef
     currency: FormCurrency | None = None
 
@@ -67,12 +87,16 @@ class BetLegOut(BaseModel):
 BetStatus = Literal["open", "won", "lost", "void"]
 
 
+# Фильтр вида ставки (Р29): all — все, strategy — экспрессы стратегии, single — ординары
+# из вариантов анализа, own — свои ставки (ставки бота — фильтр источника legacy)
+BetKindFilter = Literal["all", "strategy", "single", "own"]
 # Фильтр статуса: settled — все рассчитанные (выигрыш, проигрыш, возврат)
 BetStatusFilter = Literal["open", "won", "lost", "void", "settled"]
 
 
 class BetOut(BaseModel):
     id: int
+    kind: BetKind
     analysis_id: int | None
     placed_at: datetime
     bookmaker: str
@@ -154,7 +178,8 @@ class BetFiltersIn(BaseModel):
     """Фильтры «Ставок»: период (или даты from–to по поясу участника, включительно, в
     пределах 2000–2100 годов), статус (settled — все рассчитанные: выигрыш, проигрыш,
     возврат), рынок (есть нога этого рынка), покрытия (есть нога на одном из них),
-    источник и поиск по игрокам, турниру, букмекеру и номеру ставки (№12)."""
+    источник, вид ставки (Р29) и поиск по игрокам, турниру, букмекеру и номеру ставки
+    (№12)."""
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -165,6 +190,7 @@ class BetFiltersIn(BaseModel):
     market: Market | None = None
     surface: list[SurfaceFilter] = Field(default_factory=list, max_length=5)
     source: BetSource | None = None
+    kind: BetKindFilter = "all"
     q: SearchText | None = None
 
     @model_validator(mode="before")
@@ -280,9 +306,10 @@ class BetItemOut(BaseModel):
     участника): ждет результата из архива или от участника; у такой ставки
     archive_matches_to — последний день матчей в архиве сейчас, next_upload — когда ждать
     следующий файл tennis-data (понедельник после последней загрузки; null — файл еще не
-    загружали)."""
+    загружали). kind — вид ставки (Р29)."""
 
     id: int
+    kind: BetKind
     analysis_id: int | None
     placed_at: datetime
     bookmaker: str

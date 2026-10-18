@@ -7,6 +7,7 @@
 
 - summary — итоги «Ставок»: рассчитано, выигрыш · проигрыш · возврат, оборот и прибыль без
   возвратов, ROI = прибыль / оборот, винрейт = выигрыш / (выигрыш + проигрыш), открытые;
+  по желанию — только ставки одного вида (Р29: strategy, single, own);
 - clv — средний CLV рассчитанных ставок приложения: по ногам без возвратов, только если
   закрытие внесено у всех, Π кэфов / Π закрытий − 1 (дробями, без плавающей точки);
 - equity_by_day — капитал на конец дня по поясу участника: пополнения, выводы и
@@ -54,6 +55,7 @@ async def summary(
     *,
     source: str | None = None,
     since: datetime | None = None,
+    kind: str | None = None,
 ) -> Summary:
     row = (
         await db.execute(
@@ -73,9 +75,10 @@ async def summary(
                 WHERE user_id = :user_id
                   AND (CAST(:source AS text) IS NULL OR source = :source)
                   AND (CAST(:since AS timestamptz) IS NULL OR placed_at >= :since)
+                  AND (CAST(:kind AS text) IS NULL OR kind = :kind)
                 """
             ),
-            {"user_id": user_id, "source": source, "since": since},
+            {"user_id": user_id, "source": source, "since": since, "kind": kind},
         )
     ).one()
     return Summary(
@@ -98,7 +101,9 @@ class ClvSummary:
     positive: int
 
 
-async def clv(db: AsyncSession, user_id: int, *, since: datetime | None = None) -> ClvSummary:
+async def clv(
+    db: AsyncSession, user_id: int, *, since: datetime | None = None, kind: str | None = None
+) -> ClvSummary:
     rows = (
         await db.execute(
             text(
@@ -107,10 +112,11 @@ async def clv(db: AsyncSession, user_id: int, *, since: datetime | None = None) 
                 FROM bets b JOIN bet_legs l ON l.bet_id = b.id
                 WHERE b.user_id = :user_id AND b.source = 'app' AND b.status <> 'open'
                   AND (CAST(:since AS timestamptz) IS NULL OR b.placed_at >= :since)
+                  AND (CAST(:kind AS text) IS NULL OR b.kind = :kind)
                 ORDER BY b.id, l.id
                 """
             ),
-            {"user_id": user_id, "since": since},
+            {"user_id": user_id, "since": since, "kind": kind},
         )
     ).all()
     legs: dict[int, list[tuple[Decimal, Decimal | None]]] = {}
@@ -187,11 +193,17 @@ LEFT JOIN tournaments t ON t.id = m.tournament_id
 WHERE b.user_id = :user_id AND b.status <> 'open' AND l.result IN ('win', 'loss')
   AND NOT (b.source = 'legacy' AND (SELECT count(*) FROM bet_legs x WHERE x.bet_id = b.id) > 1)
   AND (CAST(:source AS text) IS NULL OR b.source = :source)
+  AND (CAST(:kind AS text) IS NULL OR b.kind = :kind)
 """
 
 
 async def roi_by(
-    db: AsyncSession, user_id: int, dimension: str, *, source: str | None = None
+    db: AsyncSession,
+    user_id: int,
+    dimension: str,
+    *,
+    source: str | None = None,
+    kind: str | None = None,
 ) -> dict[Any, tuple[int, float]]:
     """ROI событий как ординаров: покрытие (surface), исход (outcome — рынок и сторона)
     или нижняя граница кэфа события (odds). Ключ → (событий, ROI)."""
@@ -209,15 +221,17 @@ async def roi_by(
             f"SELECT {key} AS k, count(*) AS n, avg(ret) AS roi"
             f" FROM ({_DECIDED_LEGS}) AS legs GROUP BY 1"
         ),
-        {"user_id": user_id, "source": source},
+        {"user_id": user_id, "source": source, "kind": kind},
     )
     return {row.k: (int(row.n), float(row.roi)) for row in rows}
 
 
-async def events_count(db: AsyncSession, user_id: int, *, source: str | None = None) -> int:
+async def events_count(
+    db: AsyncSession, user_id: int, *, source: str | None = None, kind: str | None = None
+) -> int:
     value = await db.scalar(
         text(f"SELECT count(*) FROM ({_DECIDED_LEGS}) AS legs"),
-        {"user_id": user_id, "source": source},
+        {"user_id": user_id, "source": source, "kind": kind},
     )
     return int(value or 0)
 
@@ -291,7 +305,7 @@ async def brier(db: AsyncSession, user_id: int) -> BrierRef:
                 FROM events
                 """
             ),
-            {"user_id": user_id, "source": "app"},
+            {"user_id": user_id, "source": "app", "kind": None},
         )
     ).one()
     return BrierRef(
@@ -316,7 +330,7 @@ class CalibrationRef:
 
 async def calibration(db: AsyncSession, user_id: int) -> tuple[int, list[CalibrationRef]]:
     """Событий всего и корзины 5 п.п. от 50 до 95% (width_bucket)."""
-    params = {"user_id": user_id, "source": "app"}
+    params = {"user_id": user_id, "source": "app", "kind": None}
     total = await db.scalar(text(_FORECAST_EVENTS + "SELECT count(*) FROM events"), params)
     rows = await db.execute(
         text(

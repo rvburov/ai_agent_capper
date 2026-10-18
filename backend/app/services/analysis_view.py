@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AgentRun, Analysis, Bet, BetLeg, Player, StrategyVersion
+from app.ml.strategy import SUSPENDED_MARKETS
 from app.schemas.analyses import (
     AccessOut,
     AnalysisOut,
@@ -52,8 +53,10 @@ from app.services.analysis_input import (
     resolve_tournament,
     short_odds,
 )
+from app.services.analysis_result import stored_variants
 from app.services.app_settings import get_app_settings
 from app.services.bank import bank_state
+from app.services.strategy_versions import params_of
 
 ZERO = Decimal(0)
 
@@ -332,25 +335,71 @@ async def confirmed_events(db: AsyncSession, analysis: Analysis) -> list[Confirm
     ]
 
 
-async def bet_brief(db: AsyncSession, analysis_id: int) -> BetBrief | None:
-    """Ставка по анализу (одна на анализ): сумма и кэфы, которые участник сохранил."""
-    bet = await db.scalar(
-        select(Bet).where(Bet.analysis_id == analysis_id).order_by(Bet.id).limit(1)
+async def bet_briefs(db: AsyncSession, analysis_id: int) -> list[BetBrief]:
+    """Ставки по анализу по порядку (Р29: их может быть несколько — экспресс, ординар,
+    своя): сумма, вид и кэфы, которые участник сохранил."""
+    bets = list(
+        await db.scalars(select(Bet).where(Bet.analysis_id == analysis_id).order_by(Bet.id))
     )
-    if bet is None:
+    if not bets:
+        return []
+    legs: dict[int, list[BetLeg]] = {}
+    for leg in await db.scalars(
+        select(BetLeg).where(BetLeg.bet_id.in_([bet.id for bet in bets])).order_by(BetLeg.id)
+    ):
+        legs.setdefault(leg.bet_id, []).append(leg)
+    return [
+        BetBrief(
+            id=bet.id,
+            kind=bet.kind,  # type: ignore[arg-type]
+            stake=bet.stake,
+            currency=bet.currency,
+            total_odds=short_odds(bet.total_odds),
+            bookmaker=bet.bookmaker,
+            legs=[
+                BetLegBrief(
+                    prediction_id=leg.prediction_id,
+                    match_id=leg.match_id,
+                    market=leg.market,  # type: ignore[arg-type]
+                    selection=leg.selection,
+                    odds_taken=short_odds(leg.odds_taken),
+                )
+                for leg in legs.get(bet.id, [])
+            ],
+        )
+        for bet in bets
+    ]
+
+
+async def result_of(
+    db: AsyncSession, analysis: Analysis, version: StrategyVersion | None
+) -> ResultOut | None:
+    """Итог анализа; у анализа до Р29 варианты ставки пересчитываются из сохраненного
+    итога (analysis_result.stored_variants), в базу ничего не пишется."""
+    if not analysis.result:
         return None
-    legs = await db.scalars(select(BetLeg).where(BetLeg.bet_id == bet.id).order_by(BetLeg.id))
-    return BetBrief(
-        id=bet.id,
-        stake=bet.stake,
-        currency=bet.currency,
-        total_odds=short_odds(bet.total_odds),
-        bookmaker=bet.bookmaker,
-        legs=[
-            BetLegBrief(prediction_id=leg.prediction_id, odds_taken=short_odds(leg.odds_taken))
-            for leg in legs
-        ],
-    )
+    data = dict(analysis.result)
+    # Рынок на проверке — по списку сейчас (Р28): список меняет решение владельца
+    data["matches"] = [
+        {
+            **match,
+            "markets": [
+                {**row, "suspended": row.get("market") in SUSPENDED_MARKETS}
+                for row in match.get("markets") or []
+            ],
+        }
+        for match in data.get("matches") or []
+    ]
+    if "variants" not in data:
+        settings = await get_app_settings(db)
+        data["variants"] = stored_variants(
+            data,
+            params=params_of(version),
+            state=await bank_state(db, analysis.user_id),
+            bank_input=analysis.bank_input,
+            currency=settings.currency,
+        )
+    return ResultOut.model_validate(data)
 
 
 async def analysis_out(
@@ -369,13 +418,15 @@ async def analysis_out(
     ):
         draft = await build_draft(db, analysis, today=day)
     steps = steps_of(analysis)
-    bet = await bet_brief(db, analysis.id)
-    version_code: str | None = None
-    if analysis.strategy_version_id is not None:
-        version_code = await db.scalar(
-            select(StrategyVersion.code).where(StrategyVersion.id == analysis.strategy_version_id)
-        )
-    result = ResultOut.model_validate(analysis.result) if analysis.result else None
+    bets = await bet_briefs(db, analysis.id)
+    bet = bets[0] if bets else None
+    version = (
+        await db.get(StrategyVersion, analysis.strategy_version_id)
+        if analysis.strategy_version_id is not None
+        else None
+    )
+    version_code = version.code if version is not None else None
+    result = await result_of(db, analysis, version)
     return AnalysisOut(
         id=analysis.id,
         status=analysis.status,  # type: ignore[arg-type]
@@ -394,6 +445,7 @@ async def analysis_out(
         decision=analysis.decision,  # type: ignore[arg-type]
         bet_id=bet.id if bet is not None else None,
         bet=bet,
+        bets=bets,
         key_source=analysis.key_source,  # type: ignore[arg-type]
         estimate_usd=analysis.estimate_usd,
         cost_usd=analysis.cost_usd,

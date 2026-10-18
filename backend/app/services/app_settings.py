@@ -12,8 +12,9 @@
 
 Пересчитываются по курсу все суммы всех участников: ставки (stake, profit), журнал банка,
 лимиты ответственной игры (и ждущая сумма), банк из ввода анализа (bank_input и
-confirmed.bank — его берет воркер), рекомендация готового анализа (result.express.stake:
-банк по курсу, сумма — заново по округлению стратегии в новой валюте) и суммы
+confirmed.bank — его берет воркер), рекомендация готового анализа (result.express.stake
+и суммы вариантов ставки result.variants[].stake_calc, Р29: банк по курсу, сумма — заново
+по округлению стратегии в новой валюте) и суммы
 предупреждения «банк из ввода не равен учету». Каждая сумма округляется до копеек
 отдельно, половина — от нуля (как ROUND_HALF_UP в Decimal и round в PostgreSQL). Сумма,
 которая округлилась бы до нуля, становится ±0,01: журнал и ставки нулевых сумм не
@@ -269,6 +270,13 @@ def _stake_currency() -> ColumnElement[Any]:
     return path
 
 
+def _variants_currency() -> ColumnElement[Any]:
+    """Валюта сумм вариантов ставки (result.variants[0].stake_calc.currency, Р29): у всех
+    вариантов анализа она одна."""
+    path: ColumnElement[Any] = Analysis.result[("variants", "0", "stake_calc", "currency")].astext
+    return path
+
+
 def _has_bank_warning() -> ColumnElement[bool]:
     return Analysis.result["warnings"].contains([{"key": BANK_DIFFERS}])
 
@@ -280,6 +288,7 @@ def _analyses_to_convert(rate: Rate) -> ColumnElement[bool]:
         Analysis.bank_input.is_not(None),
         Analysis.confirmed["bank"].astext.is_not(None),
         _stake_currency() == rate.old,
+        _variants_currency() == rate.old,
         _has_bank_warning(),
     )
 
@@ -448,6 +457,22 @@ def converted_stake(stake: Mapping[str, Any], rate: Rate, params: StrategyParams
     return out
 
 
+def converted_variants(variants: list[Any], rate: Rate, params: StrategyParams) -> list[Any] | None:
+    """Суммы вариантов ставки (Р29) в новой валюте — как рекомендация экспресса
+    (converted_stake): stake_calc заново, stake — его сумма. None — пересчитывать нечего."""
+    out: list[Any] = []
+    changed = False
+    for item in variants:
+        calc = item.get("stake_calc") if isinstance(item, Mapping) else None
+        if isinstance(calc, Mapping) and calc.get("currency") == rate.old:
+            new_calc = converted_stake(calc, rate, params)
+            out.append({**item, "stake_calc": new_calc, "stake": new_calc.get("amount")})
+            changed = True
+        else:
+            out.append(item)
+    return out if changed else None
+
+
 def _converted_warnings(warnings: list[Any], rate: Rate) -> list[Any] | None:
     """Суммы предупреждения «банк из ввода не равен учету» в новой валюте. None — таких
     предупреждений нет."""
@@ -483,27 +508,39 @@ async def _convert_results(db: AsyncSession, rate: Rate) -> None:
                 Analysis.strategy_version_id,
                 Analysis.result[("express", "stake")],
                 Analysis.result["warnings"],
+                Analysis.result["variants"],
             )
-            .where(or_(_stake_currency() == rate.old, _has_bank_warning()))
+            .where(
+                or_(
+                    _stake_currency() == rate.old,
+                    _variants_currency() == rate.old,
+                    _has_bank_warning(),
+                )
+            )
             .order_by(Analysis.id)
             .with_for_update(of=Analysis)
         )
     ).all()
     params: dict[int | None, StrategyParams] = {}
-    for analysis_id, version_id, stake, warnings in rows:
+    for analysis_id, version_id, stake, warnings, variants in rows:
         value: Any = Analysis.result
         changed = False
+        if version_id not in params:
+            version = await db.get(StrategyVersion, version_id) if version_id is not None else None
+            params[version_id] = params_of(version)
         if isinstance(stake, Mapping) and stake.get("currency") == rate.old:
-            if version_id not in params:
-                version = (
-                    await db.get(StrategyVersion, version_id) if version_id is not None else None
-                )
-                params[version_id] = params_of(version)
             new_stake = converted_stake(stake, rate, params[version_id])
             value = func.jsonb_set(
                 value, _path("express", "stake"), bindparam(None, new_stake, type_=JSONB)
             )
             changed = True
+        if isinstance(variants, list):
+            new_variants = converted_variants(variants, rate, params[version_id])
+            if new_variants is not None:
+                value = func.jsonb_set(
+                    value, _path("variants"), bindparam(None, new_variants, type_=JSONB)
+                )
+                changed = True
         if isinstance(warnings, list):
             new_warnings = _converted_warnings(warnings, rate)
             if new_warnings is not None:

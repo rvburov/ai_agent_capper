@@ -83,6 +83,17 @@ def test_default_params_match_brief() -> None:
         "week": {"loss": "-0.05", "loss_max_pct": "0.02", "win": "0.10", "win_add": "0.005"},
         # Рост ставки и прибыльная неделя выключены по умолчанию (В7, Р24)
         "adapt": {"dd10": True, "dd20": True, "up15": False, "week_loss": True, "week_win": False},
+        # Р29: ординар — своя таблица, в защитном режиме не больше 1%; «Экспресс из лучших» —
+        # не больше 1,5%; «надежнее» — кэф от 1.30, «лучший валуй» — вероятность от 50%
+        "single_bands": [
+            ["1.01", "1.60", "0.015"],
+            ["1.61", "2.20", "0.0125"],
+            ["2.21", "50", "0.01"],
+        ],
+        "single_protect_pct": "0.01",
+        "best_express_max_pct": "0.015",
+        "safer_min_odds": "1.30",
+        "value_min_p": 0.5,
     }
     # Поля правил — те же, что у бэктеста (класс один)
     assert BacktestRules is StrategyRules

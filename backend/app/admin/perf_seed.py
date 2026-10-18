@@ -649,7 +649,7 @@ FROM perf_leg GROUP BY bid;
 
 _BETS_SQL = """
 INSERT INTO bets (id, user_id, analysis_id, placed_at, bookmaker, stake, currency, total_odds,
-    status, profit, settled_at, settled_by, source, source_ref, created_at, updated_at)
+    status, profit, settled_at, settled_by, source, source_ref, kind, created_at, updated_at)
 SELECT p.bid, p.user_id, NULL, p.placed_at, p.bookmaker, p.stake, 'RUB',
     least(999.999, o.total_odds),
     CASE WHEN o.open THEN 'open' WHEN o.lost THEN 'lost' WHEN o.void THEN 'void'
@@ -662,6 +662,9 @@ SELECT p.bid, p.user_id, NULL, p.placed_at, p.bookmaker, p.stake, 'RUB',
     CASE WHEN o.open THEN NULL WHEN p.source = 'legacy' THEN 'legacy' ELSE 'manual' END,
     p.source,
     CASE WHEN p.source = 'legacy' THEN 'perf-' || p.bid END,
+    -- Вид ставки (Р29) — как в миграции 0012
+    CASE WHEN p.source = 'legacy' THEN 'legacy' WHEN o.legs = 1 THEN 'single'
+         ELSE 'strategy' END,
     p.placed_at, p.placed_at
 FROM perf_bet AS p JOIN perf_outcome AS o ON o.bid = p.bid
 """

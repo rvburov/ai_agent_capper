@@ -62,15 +62,13 @@ from app.ml.sets import (
     set_count_from_score,
 )
 from app.services.bank import bank_state, local_today, lock_member_money, user_zone
-from app.services.bets import leg_contexts, score_to_own
+from app.services.bets import PLAYED_STATUSES, leg_contexts, score_to_own
 from app.services.notifications import notify
 from app.services.sessions import utcnow
 from app.services.settlement import LegSettlement, apply_settlement
 
 ARCHIVE_SOURCES = ("sackmann", "tennis_data")
 SETTLED_AUTO = "auto"
-# Исход есть: сыгран, снятие, неявка
-PLAYED_STATUSES = ("finished", "retired", "walkover")
 # Через сколько дней после матча без исхода — напоминание «внесите результат» (В1)
 REMINDER_DAYS = 3
 # Ставки, рассчитанные за столько дней, сверяются с архивом (расхождение, Т3)

@@ -124,6 +124,8 @@ def _bets(uid: int) -> _Query:
             # Этап 5: «Исправить результат» после авторасчета
             Bet.reversed_at,
             Bet.source,
+            # Р29: вид ставки — экспресс стратегии, ординар, своя, старый бот
+            Bet.kind,
             Bet.source_ref,
             Bet.created_at,
         )

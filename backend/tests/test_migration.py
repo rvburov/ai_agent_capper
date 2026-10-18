@@ -1290,3 +1290,65 @@ async def test_member_view_audit_migration(settings: Settings) -> None:
                 await conn.run_sync(run_alembic_upgrade, "head")
         finally:
             await engine.dispose()
+
+
+async def test_bet_kind_migration(settings: Settings) -> None:
+    """0011 → 0012 (Р29): вид ставки по данным — у ставок бота legacy, у ставок приложения с
+    одним событием single, у экспрессов strategy; CHECK пускает только четыре вида. Откат
+    до 0011 убирает колонку, ставки остаются; повторный upgrade проходит."""
+    async with _temp_database(settings, "betkind") as url:
+        engine = create_engine(url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "0011")
+                await conn.execute(text("INSERT INTO users (email) VALUES ('m@example.com')"))
+                await conn.execute(
+                    text("INSERT INTO players (name) VALUES ('Sinner J.'), ('Alcaraz C.')")
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO matches (player1_id, player2_id, source, source_ref)"
+                        " VALUES (1, 2, 'user', 'm1'), (2, 1, 'user', 'm2')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO bets (user_id, placed_at, bookmaker, stake, currency,"
+                        " total_odds, status, source, source_ref) VALUES"
+                        " (1, '2026-05-01', 'Fonbet', 100, 'RUB', 1.8, 'open', 'legacy', 'r1'),"
+                        " (1, '2026-10-01', 'Fonbet', 100, 'RUB', 1.8, 'open', 'app', 'c1'),"
+                        " (1, '2026-10-02', 'Fonbet', 100, 'RUB', 3.2, 'open', 'app', 'c2'),"
+                        " (1, '2026-05-02', 'Fonbet', 100, 'RUB', 3.2, 'open', 'legacy', 'r2')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO bet_legs (bet_id, match_id, market, selection, odds_taken)"
+                        " VALUES (1, 1, 'ML', 1, 1.8), (2, 1, 'ML', 1, 1.8),"
+                        " (3, 1, 'ML', 1, 1.8), (3, 2, 'ML', 2, 1.78),"
+                        " (4, 1, 'ML', 1, 1.8), (4, 2, 'ML', 2, 1.78)"
+                    )
+                )
+            async with engine.begin() as conn:
+                await conn.run_sync(run_alembic_upgrade, "head")
+            async with engine.begin() as conn:
+                rows = await conn.execute(text("SELECT id, kind FROM bets ORDER BY id"))
+                assert [tuple(row) for row in rows] == [
+                    (1, "legacy"),
+                    (2, "single"),
+                    (3, "strategy"),
+                    (4, "legacy"),
+                ]
+                assert await _refused(conn, "UPDATE bets SET kind = 'bot' WHERE id = 1")
+                await conn.execute(text("UPDATE bets SET kind = 'own' WHERE id = 3"))
+            async with engine.begin() as conn:
+                await conn.run_sync(_alembic_downgrade, "0011")
+            async with engine.begin() as conn:
+                columns = await conn.run_sync(
+                    lambda sync: {item["name"] for item in inspect(sync).get_columns("bets")}
+                )
+                assert "kind" not in columns
+                assert await conn.scalar(text("SELECT count(*) FROM bets")) == 4
+                await conn.run_sync(run_alembic_upgrade, "head")
+        finally:
+            await engine.dispose()

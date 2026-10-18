@@ -62,6 +62,13 @@ class StrategyParamsOut(BaseModel):
     growth: GrowthOut
     week: WeekOut
     adapt: dict[str, bool]
+    # Р29: таблица суммы ординара, его потолок в защитном режиме, потолок «Экспресса из
+    # лучших», порог кэфа «надежнее» и вероятности «лучшего валуя»
+    single_bands: list[StakeBandOut]
+    single_protect_pct: str
+    best_express_max_pct: str
+    safer_min_odds: str
+    value_min_p: float
 
 
 class StrategyOut(BaseModel):

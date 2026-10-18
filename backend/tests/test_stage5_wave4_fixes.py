@@ -317,14 +317,17 @@ async def test_rule_check_keeps_first_bet_of_new_member(
     member = (await make_user(tz="Europe/Helsinki")).user
     maker = BetMaker(db)
     first_at = datetime(2026, 10, 4, 22, 30, tzinfo=UTC)
-    first = await maker.bet(member, [LegSpec()], placed_at=first_at, deposit=None)
+    # Проверка правил — по экспрессам стратегии (Р29): одиночные ставки помечены strategy
+    first = await maker.bet(member, [LegSpec()], placed_at=first_at, deposit=None, kind="strategy")
     db.add(
         BankrollLedger(
             user_id=member.id, at=first_at, kind="deposit", amount=D("10000"), currency="RUB"
         )
     )
     await db.commit()
-    second = await maker.bet(member, [LegSpec()], placed_at=datetime(2026, 10, 6, 12, tzinfo=UTC))
+    second = await maker.bet(
+        member, [LegSpec()], placed_at=datetime(2026, 10, 6, 12, tzinfo=UTC), kind="strategy"
+    )
     await _settle(db, first, when=datetime(2026, 10, 5, 20, tzinfo=UTC), status="won")
     await _settle(db, second, when=datetime(2026, 10, 7, 20, tzinfo=UTC), status="lost")
 

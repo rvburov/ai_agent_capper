@@ -65,12 +65,20 @@ ANALYSIS_INPUT_KINDS = ("text", "form")
 ANALYSIS_DECISIONS = ("bet", "skip")
 BET_STATUSES = ("open", "won", "lost", "void")
 BET_SOURCES = ("app", "legacy")
+# Вид ставки (Р29): экспресс стратегии, ординар из вариантов анализа, своя ставка («В свою
+# ставку», «Собрать свою», «Экспресс из лучших»), история старого бота
+BET_KINDS = ("strategy", "single", "own", "legacy")
 LEG_RESULTS = ("win", "loss", "void")
 # Кто рассчитал ставку и ногу: участник вручную, авторасчет (этап 5), импорт старого бота
 SETTLED_BY = ("manual", "auto", "legacy")
 # Откуда закрывающий кэф ноги: ввел участник или архив tennis-data (этап 5)
 CLOSING_SOURCES = ("user", "archive")
 LEDGER_KINDS = ("deposit", "withdrawal", "stake", "payout", "refund", "reversal", "correction")
+
+
+def _default_kind(context: Any) -> str:
+    """Вид ставки по умолчанию: у ставки старого бота — legacy, иначе strategy."""
+    return "legacy" if context.get_current_parameters().get("source") == "legacy" else "strategy"
 
 
 def _user_fk(ondelete: str = "CASCADE") -> ForeignKey:
@@ -311,6 +319,7 @@ class Bet(CreatedAtMixin, UpdatedAtMixin, Base):
         ),
         check_in("status", BET_STATUSES, "status"),
         check_in("source", BET_SOURCES, "source"),
+        check_in("kind", BET_KINDS, "kind"),
         check_in("settled_by", SETTLED_BY, "settled_by"),
         check_in("currency", CURRENCIES, "currency"),
         CheckConstraint("stake > 0", name="stake_positive"),
@@ -333,6 +342,8 @@ class Bet(CreatedAtMixin, UpdatedAtMixin, Base):
     settled_by: Mapped[str | None] = mapped_column(String(8))
     source: Mapped[str] = mapped_column(String(8), server_default="app")
     source_ref: Mapped[str | None] = mapped_column(String(64))
+    # Вид ставки (Р29); не задан — legacy у ставки бота, иначе strategy
+    kind: Mapped[str] = mapped_column(String(8), default=_default_kind, server_default="strategy")
     settle_run_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("ingestion_runs.id", ondelete="SET NULL")
     )

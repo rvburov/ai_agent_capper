@@ -122,23 +122,32 @@ async def test_bet_with_initial_bank_and_repeat(
     view = (await member.client.get(f"/api/analyses/{analysis['id']}")).json()
     assert view["bet_id"] == bet["id"] and view["decision"] == "bet"
     # Экран анализа после перезагрузки показывает сохраненную ставку, а не рекомендацию
+    assert bet["kind"] == "strategy"
     assert view["bet"] == {
         "id": bet["id"],
+        "kind": "strategy",
         "stake": "250.00",
         "currency": "RUB",
         "total_odds": bet["total_odds"],
         "bookmaker": "Fonbet",
         "legs": [
-            {"prediction_id": leg["prediction_id"], "odds_taken": leg["odds_taken"]}
+            {
+                "prediction_id": leg["prediction_id"],
+                "match_id": leg["match_id"],
+                "market": leg["market"],
+                "selection": leg["selection"],
+                "odds_taken": leg["odds_taken"],
+            }
             for leg in bet["legs"]
         ],
     }
+    assert view["bets"] == [view["bet"]]
     assert view["bet"]["legs"][0]["odds_taken"] == "1.28"
     # Повтор с тем же client_ref — та же ставка, журнал не растет
     again = await member.client.post("/api/bets", json=body)
     assert again.status_code == 201 and again.json()["id"] == bet["id"]
     assert len(await _ledger(db, member.id)) == 2
-    # Другая ставка по тому же анализу — нельзя
+    # Та же ставка по тому же анализу с новым ключом (двойное нажатие) — нельзя
     other = await member.client.post("/api/bets", json=_bet(analysis, ref="ref-0002"))
     assert other.status_code == 409 and error_code(other) == "bet.duplicate"
     # Банк: учет, в игре, адаптации; букмекеры

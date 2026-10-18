@@ -136,6 +136,7 @@ def build_core(core: _CoreInputs) -> DashboardCoreOut:
                 stake=bet.stake,
                 profit=bet.profit,
                 source=bet.source,  # type: ignore[arg-type]
+                kind=bet.kind,  # type: ignore[arg-type]
                 equity_after=core.equity_after.get(bet.id),
             )
             for bet in recent

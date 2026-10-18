@@ -18,12 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Bet, BetLeg, Match
 from app.services.auto_settlement import (
     ARCHIVE_SOURCES,
-    PLAYED_STATUSES,
     SETTLED_AUTO,
     archive_matches,
     leg_verdict,
 )
 from app.services.bet_versions import touch
+from app.services.bets import PLAYED_STATUSES
 from app.services.sessions import utcnow
 
 

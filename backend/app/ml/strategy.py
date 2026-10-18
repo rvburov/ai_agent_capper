@@ -20,13 +20,22 @@ strategy_versions.params (StrategyParams.from_params / to_params), значен�
 
 Рынки на проверке (SUSPENDED_MARKETS, сейчас HCP_+1.5) в экспресс и сумму не идут при
 любых params.markets: модель сетов их завышает (PLAN.md, Р28).
+
+Ординары и «Экспресс из лучших» (Р29) считаются той же функцией stake с другой таблицей:
+ординар — своя таблица single_bands (кэф до 1.60 — 1,5% банка, 1.61–2.20 — 1,25%, от
+2.21 — 1%), в защитном режиме просадки не больше single_protect_pct (1%); «Экспресс из
+лучших» — таблица экспрессов, но не больше best_express_max_pct (1,5%). Адаптации
+(просадка, неделя, рост банка) — те же, что у экспресса. Поправка на валуй — только у
+экспрессов: ординар не выходит за долю своей полосы (решение владельца); валуй варианта
+ниже нуля — суммы нет.
+Варианты выбирает app/ml/variants.py.
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from types import MappingProxyType
-from typing import Any, Protocol, Self
+from typing import Any, Literal, Protocol, Self
 
 from app.core.i18n import t
 from app.ml.sets import MARKET_MINUS, MARKET_PLUS, MARKETS, PROBS3_FIELDS, SHOWN_DIGITS, Probs3
@@ -187,6 +196,11 @@ def _default_value_adjust() -> tuple[ValueAdjust, ...]:
     )
 
 
+def _default_single_bands() -> tuple[StakeBand, ...]:
+    rows = (("1.01", "1.60", "0.015"), ("1.61", "2.20", "0.0125"), ("2.21", "50", "0.01"))
+    return tuple(StakeBand(Decimal(lo), Decimal(hi), Decimal(pct)) for lo, hi, pct in rows)
+
+
 def _default_drawdown() -> tuple[DrawdownLevel, ...]:
     return (
         DrawdownLevel(Decimal("0.10"), Decimal("0.025")),
@@ -230,6 +244,15 @@ class StrategyParams:
     growth: GrowthRule = field(default_factory=GrowthRule)
     week: WeekRule = field(default_factory=WeekRule)
     adapt: Mapping[str, bool] = field(default_factory=lambda: dict(ADAPT_DEFAULTS))
+    # Р29: доли банка ординара по его кэфу, потолок ординара в защитном режиме просадки
+    # (уровень с max_legs), потолок «Экспресса из лучших» (вне правил стратегии)
+    single_bands: tuple[StakeBand, ...] = field(default_factory=_default_single_bands)
+    single_protect_pct: Decimal = Decimal("0.01")
+    best_express_max_pct: Decimal = Decimal("0.015")
+    # Р29: «Ординар · надежнее» — наибольшая вероятность при кэфе от safer_min_odds;
+    # «Ординар · лучший валуй» и ноги «Экспресса из лучших» — при вероятности от value_min_p
+    safer_min_odds: Decimal = Decimal("1.30")
+    value_min_p: float = 0.50
 
     @property
     def rules(self) -> StrategyRules:
@@ -293,6 +316,13 @@ class StrategyParams:
                 "win_add": str(self.week.win_add),
             },
             "adapt": dict(self.adapt),
+            "single_bands": [
+                [str(band.low), str(band.high), str(band.pct)] for band in self.single_bands
+            ],
+            "single_protect_pct": str(self.single_protect_pct),
+            "best_express_max_pct": str(self.best_express_max_pct),
+            "safer_min_odds": str(self.safer_min_odds),
+            "value_min_p": self.value_min_p,
         }
 
     @classmethod
@@ -334,6 +364,11 @@ class StrategyParams:
             ("growth", 0 < self.growth.max_pct < 1),
             ("week", self.week.loss < 0 < self.week.win),
             ("adapt", set(self.adapt) <= set(ADAPT_KEYS)),
+            ("single_bands", _bands_ok(self.single_bands)),
+            ("single_protect_pct", 0 < self.single_protect_pct < 1),
+            ("best_express_max_pct", 0 < self.best_express_max_pct < 1),
+            ("safer_min_odds", self.safer_min_odds >= 1),
+            ("value_min_p", 0 <= self.value_min_p < 1),
         ]
         for key, ok in checks:
             if not ok:
@@ -484,6 +519,11 @@ _PARSERS: dict[str, Callable[[Any], Any]] = {
     "growth": _to_growth,
     "week": _to_week,
     "adapt": _to_adapt,
+    "single_bands": _to_bands,
+    "single_protect_pct": _to_dec,
+    "best_express_max_pct": _to_dec,
+    "safer_min_odds": _to_dec,
+    "value_min_p": _to_float,
 }
 
 
@@ -871,11 +911,17 @@ class BankSignals:
     week_change: Decimal | None = None
 
 
+# Вид суммы (Р29): экспресс стратегии, ординар, «Экспресс из лучших»
+StakeMode = Literal["strategy", "single", "best_express"]
+
+
 @dataclass(frozen=True)
 class StakeStep:
-    """Шаг расчета суммы для экрана «Как посчитана сумма». kind: band, value, week_win,
-    limit, growth, drawdown, week_loss, cap, round, below_min. pct — доля банка после
-    шага; params — числа шага строками (Decimal без потери точности)."""
+    """Шаг расчета суммы для экрана «Как посчитана сумма». kind: band, value, no_value,
+    week_win, limit, growth, drawdown, week_loss, outside, cap, round, below_min. pct —
+    доля банка после шага; params — числа шага строками (Decimal без потери точности).
+    У ординара в шаге band есть table = single, у «Экспресса из лучших» — table =
+    best_express; в шаге drawdown защитного режима у ординара max_pct — его потолок."""
 
     kind: str
     pct: Decimal
@@ -886,7 +932,8 @@ class StakeStep:
 class StakeCalc:
     """Сумма ставки и как она получена. amount None — суммы нет, reason: no_legs,
     no_bank, currency, total_range (итоговый кэф вне полос, а не у экспресса из 3 — выше
-    double_total), below_min (после округления меньше минимума)."""
+    double_total), no_value (валуй варианта ниже нуля, Р29), below_min (после округления
+    меньше минимума)."""
 
     amount: Decimal | None
     currency: str
@@ -906,6 +953,28 @@ def _band(total: Decimal, bands: Sequence[StakeBand]) -> StakeBand | None:
     return next((band for band in bands if total <= band.high), None)
 
 
+def _mode_band(
+    total: Decimal, legs: int, params: StrategyParams, mode: StakeMode
+) -> StakeBand | None:
+    """Полоса доли банка для вида суммы. Экспресс стратегии: полосы выше double_total —
+    только для экспресса из 3 (шаг 5: «для экспресса из 3 до 4.10»), двойник с итогом
+    3.30 (кэфы поправлены при «Поставил») суммы не получает. Ординар — single_bands.
+    «Экспресс из лучших» — полосы экспресса, вне их — ближайшая (потолок все равно
+    best_express_max_pct)."""
+    if mode == "single":
+        return _band(total, params.single_bands)
+    bands = params.stake_bands
+    if mode == "best_express":
+        if not bands:
+            return None
+        if total < bands[0].low:
+            return bands[0]
+        return _band(total, bands) or bands[-1]
+    if legs != 3 and total > params.double_total[1]:
+        return None
+    return _band(total, bands)
+
+
 def _value_add(avg: Decimal, rows: Sequence[ValueAdjust]) -> ValueAdjust:
     """Поправка по среднему валую avg (уже округленному, как на экране)."""
     for row in rows:
@@ -921,10 +990,18 @@ def stake(
     params: StrategyParams,
     signals: BankSignals,
     currency: str,
+    *,
+    mode: StakeMode = "strategy",
+    ev: float | None = None,
 ) -> StakeCalc:
     """Сумма ставки на экспресс по шагу 5 стратегии с Р21/Р22 (порядок — в docstring
     модуля). Правила отбора ног здесь не проверяются (для этого parlay_issues): сумма
-    считается и для экспресса с фактическими кэфами участника."""
+    считается и для экспресса с фактическими кэфами участника.
+
+    mode (Р29): single — ординар по single_bands без поправки на валуй, в защитном режиме
+    не больше single_protect_pct; best_express — таблица экспрессов (итоговый кэф вне полос — по
+    ближайшей полосе), не больше best_express_max_pct. ev — валуй варианта (p·кэф − 1):
+    ниже нуля — суммы нет (no_value)."""
     steps: list[StakeStep] = []
     level = params.drawdown_level(signals.drawdown)
 
@@ -947,30 +1024,33 @@ def stake(
         return result(None, zero, "currency")
     if bank <= 0:
         return result(None, zero, "no_bank")
-    band = _band(total_odds, params.stake_bands)
-    # Полосы выше double_total — только для экспресса из 3 (шаг 5: «для экспресса из 3 до
-    # 4.10»); двойник с итогом 3.30 (кэфы поправлены при «Поставил») суммы не получает
-    if len(legs) != 3 and total_odds > params.double_total[1]:
-        band = None
+    band = _mode_band(total_odds, len(legs), params, mode)
     if band is None:
         return result(None, zero, "total_range")
     pct = band.pct
-    steps.append(
-        StakeStep("band", pct, {"low": str(band.low), "high": str(band.high), "pct": str(pct)})
-    )
+    band_params = {"low": str(band.low), "high": str(band.high), "pct": str(pct)}
+    if mode != "strategy":
+        band_params["table"] = mode
+    steps.append(StakeStep("band", pct, band_params))
 
-    # Средний валуй округляется до 0,01 п.п. один раз: по нему и уровень, и поправка, и
-    # число на экране (0,09999999999999987 — это 10%, а не «меньше 10%»)
-    avg = (sum((_dec(leg.value) for leg in legs), Decimal(0)) / len(legs)).quantize(_VALUE_STEP)
-    adjust = _value_add(avg, params.value_adjust)
-    pct += adjust.add
-    steps.append(
-        StakeStep(
-            "value",
-            pct,
-            {"avg_value": str(avg), "tier": value_tier(float(avg)), "add": str(adjust.add)},
+    # Поправка на валуй — только у экспрессов: сумма ординара — доля его полосы (решение
+    # владельца, Р29), выше нее ординар поднимает только прибыльная неделя
+    if mode != "single":
+        # Средний валуй округляется до 0,01 п.п. один раз: по нему и уровень, и поправка,
+        # и число на экране (0,09999999999999987 — это 10%, а не «меньше 10%»)
+        avg = (sum((_dec(leg.value) for leg in legs), Decimal(0)) / len(legs)).quantize(_VALUE_STEP)
+        adjust = _value_add(avg, params.value_adjust)
+        pct += adjust.add
+        steps.append(
+            StakeStep(
+                "value",
+                pct,
+                {"avg_value": str(avg), "tier": value_tier(float(avg)), "add": str(adjust.add)},
+            )
         )
-    )
+    if ev is not None and round(ev, _FLOAT_DIGITS) < 0:
+        steps.append(StakeStep("no_value", pct, {"value": str(_dec(ev).quantize(_VALUE_STEP))}))
+        return result(None, pct, "no_value")
 
     week = params.week
     change = signals.week_change
@@ -1001,7 +1081,11 @@ def stake(
             )
         )
     if level is not None:
-        limit = min(limit, level.max_pct)
+        level_max = level.max_pct
+        # Защитный режим (уровень с max_legs): ординар — не больше single_protect_pct
+        if mode == "single" and level.max_legs is not None:
+            level_max = min(level_max, params.single_protect_pct)
+        limit = min(limit, level_max)
         steps.append(
             StakeStep(
                 "drawdown",
@@ -1009,7 +1093,7 @@ def stake(
                 {
                     "drawdown": str(signals.drawdown),
                     "from": str(level.start),
-                    "max_pct": str(level.max_pct),
+                    "max_pct": str(level_max),
                 },
             )
         )
@@ -1018,6 +1102,9 @@ def stake(
         steps.append(
             StakeStep("week_loss", pct, {"change": str(change), "max_pct": str(week.loss_max_pct)})
         )
+    if mode == "best_express":
+        limit = min(limit, params.best_express_max_pct)
+        steps.append(StakeStep("outside", pct, {"max_pct": str(params.best_express_max_pct)}))
     if pct > limit:
         steps.append(StakeStep("cap", limit, {"before": str(pct), "max_pct": str(limit)}))
         pct = limit

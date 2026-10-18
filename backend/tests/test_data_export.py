@@ -165,6 +165,8 @@ async def test_json_export_is_own_and_without_secrets(
     assert legs[0]["p_final"] == 0.62 and legs[0]["odds_taken"] == "1.800"
     # Поля этапа 5 о ставке участника: исправление после авторасчета и исход архива
     assert "reversed_at" in tables["bets"][0]
+    # Р29: вид ставки (у «mine» два события — экспресс стратегии)
+    assert tables["bets"][0]["kind"] == "strategy"
     assert {"archive_result", "archive_score"} <= set(legs[0])
     assert {row["kind"] for row in tables["bank_ledger"]} == {"deposit", "stake"}
     assert [row["name"] for row in tables["bookmakers"]] == ["Book-mine"]
@@ -218,6 +220,8 @@ async def test_csv_zip_export(
     bets = archive.read("bets.csv").decode("utf-8-sig").splitlines()
     assert bets[0].startswith("id,analysis_id,placed_at,bookmaker,stake")
     assert len(bets) == 2 and "123.45" in bets[1] and "Book-mine" in bets[1]
+    header = bets[0].split(",")
+    assert bets[1].split(",")[header.index("kind")] == "strategy"
     # Пустая таблица — только заголовок
     lessons = archive.read("lessons.csv").decode("utf-8-sig").splitlines()
     assert len(lessons) == 1

@@ -15,7 +15,14 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from app.schemas.analyses import DecimalOut, Market, TextKey
-from app.schemas.bets import DATE_MAX, DATE_MIN, BetSource, Period, SurfaceFilter
+from app.schemas.bets import (
+    DATE_MAX,
+    DATE_MIN,
+    BetKindFilter,
+    BetSource,
+    Period,
+    SurfaceFilter,
+)
 from app.schemas.common import without_as_user
 
 # Часть выгрузки CSV (В13): ставки, события, калибровка, скользящий Brier
@@ -41,8 +48,9 @@ class AnalyticsFiltersIn(BaseModel):
     """Фильтры «Аналитики»: период (последние 7, 30, 90 дней с сегодняшним по поясу
     участника или все время) или даты from–to (включительно, по поясу участника);
     рынок (и по желанию сторона selection — один из шести исходов: П1, П2, Ф1(−1.5)…);
-    покрытия; источник ставок (приложение или старый бот, В5). Ставка попадает в выборку,
-    если поставлена в периоде и у нее есть нога под фильтр рынка и покрытия — как на
+    покрытия; источник ставок (приложение или старый бот, В5); вид ставки (Р29: все,
+    экспрессы стратегии, ординары, свои). Ставка попадает в выборку, если поставлена в
+    периоде, подходит по виду и у нее есть нога под фильтр рынка и покрытия — как на
     «Ставках»."""
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
@@ -54,6 +62,7 @@ class AnalyticsFiltersIn(BaseModel):
     selection: int | None = Field(default=None, ge=1, le=2)
     surface: list[SurfaceFilter] = Field(default_factory=list, max_length=5)
     source: BetSource | None = None
+    kind: BetKindFilter = "all"
 
     @model_validator(mode="before")
     @classmethod
@@ -68,8 +77,13 @@ class AnalyticsFiltersIn(BaseModel):
 
     @property
     def filtered(self) -> bool:
-        """Выбран рынок, покрытие или источник (период фильтром не считается)."""
-        return self.market is not None or bool(self.surface) or self.source is not None
+        """Выбран рынок, покрытие, источник или вид ставки (период фильтром не считается)."""
+        return (
+            self.market is not None
+            or bool(self.surface)
+            or self.source is not None
+            or self.kind != "all"
+        )
 
 
 class AnalyticsExportIn(AnalyticsFiltersIn):

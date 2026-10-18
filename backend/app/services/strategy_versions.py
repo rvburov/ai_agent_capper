@@ -183,6 +183,10 @@ def params_out(strategy: StrategyParams) -> StrategyParamsOut:
                 StakeBandOut(low=low, high=high, pct=pct)
                 for low, high, pct in params["stake_bands"]
             ],
+            "single_bands": [
+                StakeBandOut(low=low, high=high, pct=pct)
+                for low, high, pct in params["single_bands"]
+            ],
             "value_adjust": [
                 ValueAdjustOut(min_value=min_value, add=add)
                 for min_value, add in params["value_adjust"]

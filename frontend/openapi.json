@@ -4721,7 +4721,7 @@
           "bets"
         ],
         "summary": "Place Bet",
-        "description": "Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не\nменяется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref\nвозвращает ту же ставку. Пауза и лимиты дня ответственной игры — 409 play.paused,\nplay.bets_limit, play.stake_limit (until — до какого момента).",
+        "description": "Ставка по своему завершенному анализу (Р29), вид kind: strategy — экспресс\nстратегии, single — ординар из вариантов (ноги — ровно ноги варианта, иначе 422\nbet.bad_legs; кэфы — фактические), own — своя ставка: любые исходы анализа (чужой — 422\nbet.not_in_analysis), один рынок на матч (иначе 422 bet.same_match). Сумма — не больше\nбанка. По анализу можно несколько ставок, та же ставка второй раз — 409 bet.duplicate;\nповтор с тем же client_ref возвращает ту же ставку. Анализ без итога (старый бот) — 409\nbet.no_result; матч ноги начался или сыгран — 422 bet.match_started. Пауза и лимиты дня\nответственной игры — 409 play.paused, play.bets_limit, play.stake_limit (until — до\nкакого момента).",
         "operationId": "place_bet_api_bets_post",
         "requestBody": {
           "required": true,
@@ -4896,6 +4896,22 @@
                 }
               ],
               "title": "Source"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "strategy",
+                "single",
+                "own"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Kind"
             }
           },
           {
@@ -5131,6 +5147,22 @@
                 }
               ],
               "title": "Source"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "strategy",
+                "single",
+                "own"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Kind"
             }
           },
           {
@@ -5389,6 +5421,22 @@
                 }
               ],
               "title": "Source"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "strategy",
+                "single",
+                "own"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Kind"
             }
           },
           {
@@ -6147,6 +6195,22 @@
             }
           },
           {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "strategy",
+                "single",
+                "own"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Kind"
+            }
+          },
+          {
             "name": "as_user",
             "in": "query",
             "required": false,
@@ -6326,6 +6390,22 @@
                 }
               ],
               "title": "Source"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "strategy",
+                "single",
+                "own"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Kind"
             }
           },
           {
@@ -6520,6 +6600,22 @@
                 }
               ],
               "title": "Source"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "strategy",
+                "single",
+                "own"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Kind"
             }
           },
           {
@@ -10349,7 +10445,16 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Первая ставка по анализу (до Р29 — единственная); все ставки — bets"
+          },
+          "bets": {
+            "items": {
+              "$ref": "#/components/schemas/BetBrief"
+            },
+            "type": "array",
+            "title": "Bets",
+            "description": "Все ставки по анализу, по порядку (Р29)"
           },
           "key_source": {
             "anyOf": [
@@ -10445,6 +10550,7 @@
           "decision",
           "bet_id",
           "bet",
+          "bets",
           "key_source",
           "estimate_usd",
           "cost_usd",
@@ -11440,6 +11546,16 @@
             "type": "integer",
             "title": "Id"
           },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "strategy",
+              "single",
+              "own",
+              "legacy"
+            ],
+            "title": "Kind"
+          },
           "stake": {
             "type": "string",
             "title": "Stake"
@@ -11467,6 +11583,7 @@
         "type": "object",
         "required": [
           "id",
+          "kind",
           "stake",
           "currency",
           "total_odds",
@@ -11474,7 +11591,7 @@
           "legs"
         ],
         "title": "BetBrief",
-        "description": "Сохраненная ставка по анализу: после перезагрузки экран показывает ее сумму и кэфы,\nа не рекомендацию анализа."
+        "description": "Сохраненная ставка по анализу: после перезагрузки экран показывает ее сумму и кэфы,\nа не рекомендацию анализа. kind — вид ставки (Р29)."
       },
       "BetCountsOut": {
         "properties": {
@@ -11503,6 +11620,16 @@
             "minimum": 1.0,
             "title": "Analysis Id"
           },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "strategy",
+              "single",
+              "own"
+            ],
+            "title": "Kind",
+            "default": "strategy"
+          },
           "stake": {
             "anyOf": [
               {
@@ -11528,7 +11655,7 @@
               "$ref": "#/components/schemas/BetLegIn"
             },
             "type": "array",
-            "maxItems": 3,
+            "maxItems": 5,
             "minItems": 1,
             "title": "Legs"
           },
@@ -11563,13 +11690,23 @@
           "client_ref"
         ],
         "title": "BetIn",
-        "description": "currency — валюта суммы в форме (FormCurrency): сменили валюту, пока форма была\nоткрыта, — 409 common.currency_changed, сумма в старой валюте не запишется."
+        "description": "Ставка по анализу (Р29). kind: strategy — экспресс стратегии, single — ординар из\nвариантов анализа (ноги должны совпасть с вариантом, кэфы — фактические); own — своя\nставка: любые исходы этого анализа, один рынок на матч, сумма — от участника.\ncurrency — валюта суммы в форме (FormCurrency): сменили валюту, пока форма была\nоткрыта, — 409 common.currency_changed, сумма в старой валюте не запишется."
       },
       "BetItemOut": {
         "properties": {
           "id": {
             "type": "integer",
             "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "strategy",
+              "single",
+              "own",
+              "legacy"
+            ],
+            "title": "Kind"
           },
           "analysis_id": {
             "anyOf": [
@@ -11791,6 +11928,7 @@
         "type": "object",
         "required": [
           "id",
+          "kind",
           "analysis_id",
           "placed_at",
           "bookmaker",
@@ -11814,7 +11952,7 @@
           "awaiting_result"
         ],
         "title": "BetItemOut",
-        "description": "Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если\nзакрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги\nсчитается с кэфом 1.00), payout — выплата (у открытой — возможная). bank_after —\nкапитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у\nоткрытой), то же число, что equity_after в последних ставках главной. updated_at —\nверсия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,\napp/services/bet_versions.py). Этап 5: archive_to — у рассчитанной по архиву\n(settled_by = auto) последний день матчей в архиве на момент расчета («авто · архив\n‹дата›»); awaiting_result — открытая ставка, все матчи которой уже прошли (по поясу\nучастника): ждет результата из архива или от участника; у такой ставки\narchive_matches_to — последний день матчей в архиве сейчас, next_upload — когда ждать\nследующий файл tennis-data (понедельник после последней загрузки; null — файл еще не\nзагружали)."
+        "description": "Ставка для «Ставок»: деньги, исход, CLV экспресса (по ногам без возвратов, если\nзакрытие внесено у всех), вердикт по CLV. effective_odds — кэф расчета (возврат ноги\nсчитается с кэфом 1.00), payout — выплата (у открытой — возможная). bank_after —\nкапитал сразу после расчета ставки (у выигранной, проигранной и возврата; null у\nоткрытой), то же число, что equity_after в последних ставках главной. updated_at —\nверсия ставки: ее присылают расчет и сторно (хватает точности до миллисекунды,\napp/services/bet_versions.py). Этап 5: archive_to — у рассчитанной по архиву\n(settled_by = auto) последний день матчей в архиве на момент расчета («авто · архив\n‹дата›»); awaiting_result — открытая ставка, все матчи которой уже прошли (по поясу\nучастника): ждет результата из архива или от участника; у такой ставки\narchive_matches_to — последний день матчей в архиве сейчас, next_upload — когда ждать\nследующий файл tennis-data (понедельник после последней загрузки; null — файл еще не\nзагружали). kind — вид ставки (Р29)."
       },
       "BetLegBrief": {
         "properties": {
@@ -11829,6 +11967,23 @@
             ],
             "title": "Prediction Id"
           },
+          "match_id": {
+            "type": "integer",
+            "title": "Match Id"
+          },
+          "market": {
+            "type": "string",
+            "enum": [
+              "ML",
+              "HCP_-1.5",
+              "HCP_+1.5"
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "type": "integer",
+            "title": "Selection"
+          },
           "odds_taken": {
             "type": "string",
             "title": "Odds Taken"
@@ -11837,6 +11992,9 @@
         "type": "object",
         "required": [
           "prediction_id",
+          "match_id",
+          "market",
+          "selection",
           "odds_taken"
         ],
         "title": "BetLegBrief"
@@ -11844,10 +12002,61 @@
       "BetLegIn": {
         "properties": {
           "prediction_id": {
-            "type": "integer",
-            "maximum": 9.223372036854776e+18,
-            "minimum": 1.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Prediction Id"
+          },
+          "match_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Id"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ML",
+                  "HCP_-1.5",
+                  "HCP_+1.5"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection"
           },
           "odds_taken": {
             "anyOf": [
@@ -11865,11 +12074,10 @@
         },
         "type": "object",
         "required": [
-          "prediction_id",
           "odds_taken"
         ],
         "title": "BetLegIn",
-        "description": "Нога ставки: прогноз анализа и кэф, по которому участник поставил."
+        "description": "Нога ставки: исход анализа и кэф, по которому участник поставил. Исход — прогноз\nанализа (prediction_id) или матч анализа, рынок и сторона (match_id, market,\nselection): одно из двух."
       },
       "BetLegItemOut": {
         "properties": {
@@ -12178,6 +12386,16 @@
             "type": "integer",
             "title": "Id"
           },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "strategy",
+              "single",
+              "own",
+              "legacy"
+            ],
+            "title": "Kind"
+          },
           "analysis_id": {
             "anyOf": [
               {
@@ -12242,6 +12460,7 @@
         "type": "object",
         "required": [
           "id",
+          "kind",
           "analysis_id",
           "placed_at",
           "bookmaker",
@@ -19710,6 +19929,10 @@
               }
             ],
             "title": "Note Key"
+          },
+          "suspended": {
+            "type": "boolean",
+            "title": "Suspended"
           }
         },
         "type": "object",
@@ -19725,10 +19948,11 @@
           "value",
           "tier",
           "in_express",
-          "note_key"
+          "note_key",
+          "suspended"
         ],
         "title": "MarketRow",
-        "description": "Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф\nучастника, валуй p_final·кэф − 1 и уровень, попал ли в экспресс, почему нет\n(note_key — ключ analysis.leg.*)."
+        "description": "Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф\nучастника, валуй p_final·кэф − 1 и уровень, попал ли в экспресс, почему нет\n(note_key — ключ analysis.leg.*). suspended — рынок на проверке (SUSPENDED_MARKETS,\nР28): в экспресс и варианты не идет, своей ставкой поставить можно; признак — по\nсписку сейчас, и у старых анализов тоже."
       },
       "MarketSliceOut": {
         "properties": {
@@ -21734,6 +21958,16 @@
             "type": "integer",
             "title": "Id"
           },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "strategy",
+              "single",
+              "own",
+              "legacy"
+            ],
+            "title": "Kind"
+          },
           "analysis_id": {
             "anyOf": [
               {
@@ -21961,6 +22195,7 @@
         "type": "object",
         "required": [
           "id",
+          "kind",
           "analysis_id",
           "placed_at",
           "bookmaker",
@@ -24871,6 +25106,16 @@
             ],
             "title": "Source"
           },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "strategy",
+              "single",
+              "own",
+              "legacy"
+            ],
+            "title": "Kind"
+          },
           "equity_after": {
             "anyOf": [
               {
@@ -24894,6 +25139,7 @@
           "stake",
           "profit",
           "source",
+          "kind",
           "equity_after"
         ],
         "title": "RecentBetOut",
@@ -25662,6 +25908,13 @@
           },
           "costs": {
             "$ref": "#/components/schemas/CostsOut"
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/VariantOut"
+            },
+            "type": "array",
+            "title": "Variants"
           }
         },
         "type": "object",
@@ -25670,9 +25923,11 @@
           "express",
           "no_express_key",
           "warnings",
-          "costs"
+          "costs",
+          "variants"
         ],
-        "title": "ResultOut"
+        "title": "ResultOut",
+        "description": "Итог анализа. variants — варианты ставки (Р29), первым — экспресс стратегии, если\nсобран; у анализов до Р29 они пересчитываются при чтении из сохраненных прогнозов\n(сумма — от банка сейчас)."
       },
       "ResultsOut": {
         "properties": {
@@ -27502,6 +27757,29 @@
             },
             "type": "object",
             "title": "Adapt"
+          },
+          "single_bands": {
+            "items": {
+              "$ref": "#/components/schemas/StakeBandOut"
+            },
+            "type": "array",
+            "title": "Single Bands"
+          },
+          "single_protect_pct": {
+            "type": "string",
+            "title": "Single Protect Pct"
+          },
+          "best_express_max_pct": {
+            "type": "string",
+            "title": "Best Express Max Pct"
+          },
+          "safer_min_odds": {
+            "type": "string",
+            "title": "Safer Min Odds"
+          },
+          "value_min_p": {
+            "type": "number",
+            "title": "Value Min P"
           }
         },
         "type": "object",
@@ -27526,7 +27804,12 @@
           "max_pct",
           "growth",
           "week",
-          "adapt"
+          "adapt",
+          "single_bands",
+          "single_protect_pct",
+          "best_express_max_pct",
+          "safer_min_odds",
+          "value_min_p"
         ],
         "title": "StrategyParamsOut"
       },
@@ -29488,6 +29771,127 @@
           "add"
         ],
         "title": "ValueAdjustOut"
+      },
+      "VariantOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "strategy",
+              "safer",
+              "value",
+              "best_express"
+            ],
+            "title": "Code"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "strategy",
+              "single",
+              "own"
+            ],
+            "title": "Kind"
+          },
+          "also": {
+            "items": {
+              "type": "string",
+              "const": "value"
+            },
+            "type": "array",
+            "title": "Also"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/ExpressLeg"
+            },
+            "type": "array",
+            "title": "Legs"
+          },
+          "total_odds": {
+            "type": "string",
+            "title": "Total Odds"
+          },
+          "p": {
+            "type": "number",
+            "title": "P"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "value_tier": {
+            "type": "string",
+            "title": "Value Tier"
+          },
+          "stake": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stake"
+          },
+          "stake_calc": {
+            "$ref": "#/components/schemas/StakeOut"
+          },
+          "why_key": {
+            "type": "string",
+            "title": "Why Key"
+          },
+          "why_params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Why Params"
+          },
+          "outside_strategy": {
+            "type": "boolean",
+            "title": "Outside Strategy"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          },
+          "warnings": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "no_value",
+                "low_confidence"
+              ]
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "kind",
+          "also",
+          "legs",
+          "total_odds",
+          "p",
+          "value",
+          "value_tier",
+          "stake",
+          "stake_calc",
+          "why_key",
+          "why_params",
+          "outside_strategy",
+          "issues",
+          "warnings"
+        ],
+        "title": "VariantOut",
+        "description": "Вариант ставки (Р29, app/ml/variants.py): strategy — экспресс стратегии, safer —\nординар «надежнее», value — ординар «лучший валуй», best_express — «Экспресс из\nлучших» (вне правил стратегии). kind — вид ставки при сохранении. also: [\"value\"] —\nsafer совпал с лучшим валуем (одна карточка). p — произведение итоговых вероятностей\nног, value — p·кэф − 1, value_tier — его уровень. stake — рекомендованная сумма (null —\nсуммы нет, почему — stake_calc.reason: no_value, total_range, below_min…), stake_calc —\nрасчет для «Как посчитана сумма». why_key — ключ локали причины выбора\n(analysis.variants.why.*) и why_params. issues — правила экспресса, которые не прошел\nbest_express (ключи analysis.rules.*). warnings: no_value — валуй ниже нуля, модель не\nсоветует ставить; low_confidence — уверенность анализа по матчу ноги средняя или\nнизкая."
       },
       "VersionBriefOut": {
         "properties": {

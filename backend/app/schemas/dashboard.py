@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from app.schemas.admin import UsdOut
-from app.schemas.analyses import DecimalOut, Market
+from app.schemas.analyses import BetKind, DecimalOut, Market
 from app.schemas.analytics import (
     BrierOut,
     ChangeOut,
@@ -42,6 +42,7 @@ class RecentBetOut(BaseModel):
     stake: DecimalOut
     profit: DecimalOut | None
     source: BetSource
+    kind: BetKind
     equity_after: DecimalOut | None
 
 

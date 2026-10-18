@@ -3,8 +3,11 @@
 Видит сам участник и администратор (только просмотр, Р27). «Мои букмекеры» —
 app/services/bookmakers.py.
 
-Ставка — рекомендованный экспресс анализа: состав ног менять нельзя, кэфы — можно
-(фактические кэфы при ставке). Итоговый кэф — произведение кэфов ног. Сумма — больше
+Ставка — по анализу (Р29), вид kind: экспресс стратегии или ординар из вариантов
+анализа (состав ног менять нельзя, кэфы — можно: фактические кэфы при ставке) или своя
+ставка — любые исходы анализа, один рынок на матч; ставок без анализа нет (решение
+владельца). По одному анализу можно несколько ставок, но не одну и ту же дважды. Итоговый
+кэф — произведение кэфов ног. Сумма — больше
 нуля и не больше банка (по учету; пустой журнал — банк из ввода анализа). Все
 считается под блокировкой денег участника (bank.lock_member_money): две ставки не
 списываются с одного банка параллельно. Пустой журнал и банк из ввода — сначала запись
@@ -69,9 +72,11 @@ from app.db.models import (
     Match,
     Player,
     Prediction,
+    StrategyVersion,
     Tournament,
     User,
 )
+from app.ingest.match_link import archive_days, played_before
 from app.ml.market import REFERENCE_ORDER
 from app.ml.metrics import clv, clv_fair, clv_fair_parlay, clv_parlay
 from app.ml.sets import SetCount, parse_set_count, score_outcomes
@@ -97,6 +102,7 @@ from app.schemas.bets import (
 from app.services import bookmakers as bookmakers_service
 from app.services import play_limits
 from app.services.analysis_input import short_odds
+from app.services.analysis_result import stored_variants
 from app.services.app_settings import check_currency, get_app_settings
 from app.services.bank import (
     MONEY_MAX,
@@ -122,6 +128,8 @@ ODDS_STEP = Decimal("0.001")
 CENT = Decimal("0.01")
 # Рассчитанная ставка: фильтр «Ставок» status=settled
 SETTLED_STATUSES = ("won", "lost", "void")
+# У матча есть исход: сыгран, снятие, неявка (как в авторасчете)
+PLAYED_STATUSES = ("finished", "retired", "walkover")
 
 
 @dataclass(frozen=True)
@@ -139,6 +147,7 @@ def bet_out(placed: PlacedBet) -> BetOut:
     bet = placed.bet
     return BetOut(
         id=bet.id,
+        kind=bet.kind,  # type: ignore[arg-type]
         analysis_id=bet.analysis_id,
         placed_at=bet.placed_at,
         bookmaker=bet.bookmaker,
@@ -161,13 +170,131 @@ def bet_out(placed: PlacedBet) -> BetOut:
     )
 
 
-def _express_ids(analysis: Analysis) -> list[int]:
-    express = (analysis.result or {}).get("express") or {}
-    return [int(leg["prediction_id"]) for leg in express.get("legs") or []]
+def _variant_legs(result: Mapping[str, Any], kind: str) -> list[frozenset[int]]:
+    """Наборы прогнозов вариантов анализа, которые сохраняются ставкой вида kind:
+    strategy — экспресс стратегии, single — ординары «надежнее» и «лучший валуй». У
+    анализа до Р29 вариантов в итоге нет — ординары пересчитываются (stored_variants
+    зовет вызывающий), экспресс — из итога."""
+    found: list[frozenset[int]] = []
+    if kind == "strategy":
+        express = result.get("express") or {}
+        legs = [int(leg["prediction_id"]) for leg in express.get("legs") or []]
+        if legs:
+            found.append(frozenset(legs))
+        return found
+    for variant in result.get("variants") or []:
+        if variant.get("kind") == kind:
+            found.append(frozenset(int(leg["prediction_id"]) for leg in variant["legs"]))
+    return found
+
+
+async def _bet_predictions(db: AsyncSession, analysis: Analysis, body: BetIn) -> list[Prediction]:
+    """Прогнозы ног ставки в порядке body.legs: только прогнозы этого анализа (по id или
+    по матчу, рынку и стороне; замены — supersedes — не исходы анализа). Чужой исход —
+    422 bet.not_in_analysis."""
+    rows = list(
+        await db.scalars(
+            select(Prediction).where(
+                Prediction.analysis_id == analysis.id, Prediction.supersedes.is_(None)
+            )
+        )
+    )
+    by_id = {row.id: row for row in rows}
+    by_outcome: dict[tuple[int | None, str | None, int | None], Prediction] = {
+        (row.match_id, row.market, row.selection): row for row in rows
+    }
+    found: list[Prediction] = []
+    for leg in body.legs:
+        if leg.prediction_id is not None:
+            row = by_id.get(leg.prediction_id)
+        else:
+            row = by_outcome.get((leg.match_id, leg.market, leg.selection))
+        if row is None:
+            raise AppError(422, "bet.not_in_analysis")
+        found.append(row)
+    return found
+
+
+async def _check_legs(
+    db: AsyncSession, analysis: Analysis, body: BetIn, predictions: Sequence[Prediction]
+) -> None:
+    """Состав ног по виду ставки (Р29): один рынок на матч у любой ставки; strategy и
+    single — ровно ноги варианта анализа (иначе 422 bet.bad_legs); own — любые исходы
+    анализа. Та же ставка (тот же набор исходов) по анализу второй раз — 409
+    bet.duplicate: защита от двойного нажатия с новым ключом."""
+    ids = [row.id for row in predictions]
+    if len(set(ids)) != len(ids):
+        raise AppError(422, "bet.bad_legs")
+    if len({row.match_id for row in predictions}) != len(predictions):
+        raise AppError(422, "bet.same_match")
+    if body.kind != "own":
+        result: Mapping[str, Any] = analysis.result or {}
+        if body.kind == "single" and "variants" not in result:
+            settings = await get_app_settings(db)
+            version = (
+                await db.get(StrategyVersion, analysis.strategy_version_id)
+                if analysis.strategy_version_id is not None
+                else None
+            )
+            result = {
+                **result,
+                "variants": stored_variants(
+                    result,
+                    params=params_of(version),
+                    state=await bank_state(db, analysis.user_id),
+                    bank_input=analysis.bank_input,
+                    currency=settings.currency,
+                ),
+            }
+        if frozenset(ids) not in _variant_legs(result, body.kind):
+            raise AppError(422, "bet.bad_legs")
+    taken = await db.execute(
+        select(BetLeg.bet_id, BetLeg.prediction_id)
+        .join(Bet, Bet.id == BetLeg.bet_id)
+        .where(Bet.analysis_id == analysis.id)
+    )
+    sets: dict[int, set[int | None]] = {}
+    for bet_id, prediction_id in taken:
+        sets.setdefault(bet_id, set()).add(prediction_id)
+    if any(found == set(ids) for found in sets.values()):
+        raise AppError(409, "bet.duplicate")
+
+
+async def _check_not_started(
+    db: AsyncSession, analysis: Analysis, predictions: Sequence[Prediction]
+) -> None:
+    """Ставка только на матчи, которые еще не начались, — одно правило для всех видов
+    (экспресс стратегии, ординар, своя): иначе 422 bet.match_started.
+
+    Признаки, от надежного к слабому:
+    - у матча есть исход: победитель или статус «сыгран, снятие, неявка». Исход приходит из
+      архива (привязка матча из ввода сливает его с матчем архива, ноги и прогнозы
+      переходят к нему) или из ввода — это факт, а не оценка;
+    - известное время начала scheduled_at не позже текущего момента. У матчей из ввода и
+      архива оно обычно пустое: матч без исхода и без времени разрешен.
+
+    Исключение — прошлая встреча пары: матч архива, сыгранный раньше анализа больше чем на
+    сутки (played_before). Анализ привязал к нему событие (find_match ищет пару в окне
+    ±3 дня), о настоящем матче он ничего не говорит, нога разрешена, как и раньше
+    (авторасчет такую ставку сам не считает, причина early)."""
+    match_ids = sorted({row.match_id for row in predictions if row.match_id is not None})
+    if not match_ids:
+        return
+    matches = list(await db.scalars(select(Match).where(Match.id.in_(match_ids))))
+    days = await archive_days(db, match_ids)
+    now = utcnow()
+    for match in matches:
+        if played_before(days.get(match.id), analysis.created_at):
+            continue
+        has_result = match.winner_id is not None or match.status in PLAYED_STATUSES
+        started = match.scheduled_at is not None and match.scheduled_at <= now
+        if has_result or started:
+            raise AppError(422, "bet.match_started")
 
 
 async def place_bet(db: AsyncSession, user: User, body: BetIn) -> PlacedBet:
-    """«Поставил»: ставка по экспрессу анализа с фактическими кэфами. Делает commit."""
+    """«Сохранить ставку» по анализу (Р29): экспресс стратегии, ординар из вариантов или
+    своя ставка с фактическими кэфами. Делает commit."""
     await lock_member_money(db, user.id)
     existing = await db.scalar(
         select(Bet).where(
@@ -189,22 +316,12 @@ async def place_bet(db: AsyncSession, user: User, body: BetIn) -> PlacedBet:
         raise AppError(404, "analysis.not_found")
     if analysis.status != "done":
         raise AppError(409, "bet.analysis_state")
-    if await db.scalar(select(Bet.id).where(Bet.analysis_id == analysis.id).limit(1)) is not None:
-        raise AppError(409, "bet.duplicate")
-    expected = _express_ids(analysis)
-    given = [leg.prediction_id for leg in body.legs]
-    if not expected or sorted(given) != sorted(expected) or len(set(given)) != len(given):
-        raise AppError(422, "bet.bad_legs")
-    predictions = {
-        row.id: row
-        for row in await db.scalars(
-            select(Prediction).where(
-                Prediction.id.in_(given), Prediction.analysis_id == analysis.id
-            )
-        )
-    }
-    if set(predictions) != set(given):
-        raise AppError(422, "bet.bad_legs")
+    # Анализ старого бота (импорт без итога): ни вариантов, ни таблицы рынков у него нет
+    if analysis.result is None:
+        raise AppError(409, "bet.no_result")
+    predictions = await _bet_predictions(db, analysis, body)
+    await _check_legs(db, analysis, body, predictions)
+    await _check_not_started(db, analysis, predictions)
     settings = await get_app_settings(db)
     # Сумма из формы, открытой до смены валюты, в новой валюте не записывается
     check_currency(settings, body.currency)
@@ -249,6 +366,7 @@ async def place_bet(db: AsyncSession, user: User, body: BetIn) -> PlacedBet:
     bet = Bet(
         user_id=user.id,
         analysis_id=analysis.id,
+        kind=body.kind,
         placed_at=now,
         bookmaker=body.bookmaker,
         stake=stake_sum,
@@ -263,13 +381,13 @@ async def place_bet(db: AsyncSession, user: User, body: BetIn) -> PlacedBet:
     legs = [
         BetLeg(
             bet_id=bet.id,
-            match_id=predictions[leg.prediction_id].match_id,
-            market=predictions[leg.prediction_id].market,
-            selection=predictions[leg.prediction_id].selection,
+            match_id=prediction.match_id,
+            market=prediction.market,
+            selection=prediction.selection,
             odds_taken=leg.odds_taken.quantize(ODDS_STEP),
-            prediction_id=leg.prediction_id,
+            prediction_id=prediction.id,
         )
-        for leg in body.legs
+        for leg, prediction in zip(body.legs, predictions, strict=True)
     ]
     db.add_all(legs)
     db.add(
@@ -532,6 +650,8 @@ def bet_conditions(
         conds.append(Bet.status == filters.status)
     if filters.source is not None:
         conds.append(Bet.source == filters.source)
+    if filters.kind != "all":
+        conds.append(Bet.kind == filters.kind)
     if filters.market is not None:
         market = filters.market
         conds.append(_any_leg(user, page, lambda legs: legs.leg.market == market))
@@ -870,6 +990,7 @@ def bet_item(
     bet_fair = clv_fair_parlay([(leg.odds_taken, leg.q_close) for leg in live])
     return BetItemOut(
         id=bet.id,
+        kind=bet.kind,  # type: ignore[arg-type]
         analysis_id=bet.analysis_id,
         placed_at=bet.placed_at,
         bookmaker=bet.bookmaker,
@@ -1139,6 +1260,7 @@ CSV_COLUMNS: tuple[str, ...] = (
     "bet_id",
     "placed_at",
     "source",
+    "kind",
     "bookmaker",
     "status",
     "stake",
@@ -1187,6 +1309,7 @@ def _csv_rows(item: BetItemOut, zone: Any) -> Iterable[list[str]]:
             item.id,
             _local(item.placed_at, zone),
             item.source,
+            item.kind,
             item.bookmaker,
             item.status,
             item.stake,

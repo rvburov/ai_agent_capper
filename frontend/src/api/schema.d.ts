@@ -1914,10 +1914,15 @@ export interface paths {
         put?: never;
         /**
          * Place Bet
-         * @description Ставка по экспрессу своего завершенного анализа: ноги — его прогнозы (состав не
-         *     меняется, кэфы — фактические), сумма — не больше банка. Повтор с тем же client_ref
-         *     возвращает ту же ставку. Пауза и лимиты дня ответственной игры — 409 play.paused,
-         *     play.bets_limit, play.stake_limit (until — до какого момента).
+         * @description Ставка по своему завершенному анализу (Р29), вид kind: strategy — экспресс
+         *     стратегии, single — ординар из вариантов (ноги — ровно ноги варианта, иначе 422
+         *     bet.bad_legs; кэфы — фактические), own — своя ставка: любые исходы анализа (чужой — 422
+         *     bet.not_in_analysis), один рынок на матч (иначе 422 bet.same_match). Сумма — не больше
+         *     банка. По анализу можно несколько ставок, та же ставка второй раз — 409 bet.duplicate;
+         *     повтор с тем же client_ref возвращает ту же ставку. Анализ без итога (старый бот) — 409
+         *     bet.no_result; матч ноги начался или сыгран — 422 bet.match_started. Пауза и лимиты дня
+         *     ответственной игры — 409 play.paused, play.bets_limit, play.stake_limit (until — до
+         *     какого момента).
          */
         post: operations["place_bet_api_bets_post"];
         delete?: never;
@@ -3628,7 +3633,13 @@ export interface components {
             decision: ("bet" | "skip") | null;
             /** Bet Id */
             bet_id: number | null;
+            /** @description Первая ставка по анализу (до Р29 — единственная); все ставки — bets */
             bet: components["schemas"]["BetBrief"] | null;
+            /**
+             * Bets
+             * @description Все ставки по анализу, по порядку (Р29)
+             */
+            bets: components["schemas"]["BetBrief"][];
             /** Key Source */
             key_source: ("admin" | "own") | null;
             /** Estimate Usd */
@@ -3983,11 +3994,16 @@ export interface components {
         /**
          * BetBrief
          * @description Сохраненная ставка по анализу: после перезагрузки экран показывает ее сумму и кэфы,
-         *     а не рекомендацию анализа.
+         *     а не рекомендацию анализа. kind — вид ставки (Р29).
          */
         BetBrief: {
             /** Id */
             id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "strategy" | "single" | "own" | "legacy";
             /** Stake */
             stake: string;
             /** Currency */
@@ -4012,12 +4028,21 @@ export interface components {
         };
         /**
          * BetIn
-         * @description currency — валюта суммы в форме (FormCurrency): сменили валюту, пока форма была
+         * @description Ставка по анализу (Р29). kind: strategy — экспресс стратегии, single — ординар из
+         *     вариантов анализа (ноги должны совпасть с вариантом, кэфы — фактические); own — своя
+         *     ставка: любые исходы этого анализа, один рынок на матч, сумма — от участника.
+         *     currency — валюта суммы в форме (FormCurrency): сменили валюту, пока форма была
          *     открыта, — 409 common.currency_changed, сумма в старой валюте не запишется.
          */
         BetIn: {
             /** Analysis Id */
             analysis_id: number;
+            /**
+             * Kind
+             * @default strategy
+             * @enum {string}
+             */
+            kind: "strategy" | "single" | "own";
             /** Stake */
             stake: number | string;
             /** Bookmaker */
@@ -4043,11 +4068,16 @@ export interface components {
          *     участника): ждет результата из архива или от участника; у такой ставки
          *     archive_matches_to — последний день матчей в архиве сейчас, next_upload — когда ждать
          *     следующий файл tennis-data (понедельник после последней загрузки; null — файл еще не
-         *     загружали).
+         *     загружали). kind — вид ставки (Р29).
          */
         BetItemOut: {
             /** Id */
             id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "strategy" | "single" | "own" | "legacy";
             /** Analysis Id */
             analysis_id: number | null;
             /**
@@ -4111,16 +4141,33 @@ export interface components {
         BetLegBrief: {
             /** Prediction Id */
             prediction_id: number | null;
+            /** Match Id */
+            match_id: number;
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "ML" | "HCP_-1.5" | "HCP_+1.5";
+            /** Selection */
+            selection: number;
             /** Odds Taken */
             odds_taken: string;
         };
         /**
          * BetLegIn
-         * @description Нога ставки: прогноз анализа и кэф, по которому участник поставил.
+         * @description Нога ставки: исход анализа и кэф, по которому участник поставил. Исход — прогноз
+         *     анализа (prediction_id) или матч анализа, рынок и сторона (match_id, market,
+         *     selection): одно из двух.
          */
         BetLegIn: {
             /** Prediction Id */
-            prediction_id: number;
+            prediction_id?: number | null;
+            /** Match Id */
+            match_id?: number | null;
+            /** Market */
+            market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
+            /** Selection */
+            selection?: (1 | 2) | null;
             /** Odds Taken */
             odds_taken: number | string;
         };
@@ -4204,6 +4251,11 @@ export interface components {
         BetOut: {
             /** Id */
             id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "strategy" | "single" | "own" | "legacy";
             /** Analysis Id */
             analysis_id: number | null;
             /**
@@ -6807,7 +6859,9 @@ export interface components {
          * MarketRow
          * @description Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф
          *     участника, валуй p_final·кэф − 1 и уровень, попал ли в экспресс, почему нет
-         *     (note_key — ключ analysis.leg.*).
+         *     (note_key — ключ analysis.leg.*). suspended — рынок на проверке (SUSPENDED_MARKETS,
+         *     Р28): в экспресс и варианты не идет, своей ставкой поставить можно; признак — по
+         *     списку сейчас, и у старых анализов тоже.
          */
         MarketRow: {
             /**
@@ -6837,6 +6891,8 @@ export interface components {
             in_express: boolean;
             /** Note Key */
             note_key: string | null;
+            /** Suspended */
+            suspended: boolean;
         };
         /**
          * MarketSliceOut
@@ -7571,6 +7627,11 @@ export interface components {
         OpenBetOut: {
             /** Id */
             id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "strategy" | "single" | "own" | "legacy";
             /** Analysis Id */
             analysis_id: number | null;
             /**
@@ -8595,6 +8656,11 @@ export interface components {
              * @enum {string}
              */
             source: "app" | "legacy";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "strategy" | "single" | "own" | "legacy";
             /** Equity After */
             equity_after: string | null;
         };
@@ -8888,7 +8954,12 @@ export interface components {
             /** Retry At */
             retry_at: string | null;
         };
-        /** ResultOut */
+        /**
+         * ResultOut
+         * @description Итог анализа. variants — варианты ставки (Р29), первым — экспресс стратегии, если
+         *     собран; у анализов до Р29 они пересчитываются при чтении из сохраненных прогнозов
+         *     (сумма — от банка сейчас).
+         */
         ResultOut: {
             /** Matches */
             matches: components["schemas"]["MatchResult"][];
@@ -8898,6 +8969,8 @@ export interface components {
             /** Warnings */
             warnings: components["schemas"]["TextKey"][];
             costs: components["schemas"]["CostsOut"];
+            /** Variants */
+            variants: components["schemas"]["VariantOut"][];
         };
         /**
          * ResultsOut
@@ -9603,6 +9676,16 @@ export interface components {
             adapt: {
                 [key: string]: boolean;
             };
+            /** Single Bands */
+            single_bands: components["schemas"]["StakeBandOut"][];
+            /** Single Protect Pct */
+            single_protect_pct: string;
+            /** Best Express Max Pct */
+            best_express_max_pct: string;
+            /** Safer Min Odds */
+            safer_min_odds: string;
+            /** Value Min P */
+            value_min_p: number;
         };
         /**
          * StrategyVersionOut
@@ -10318,6 +10401,59 @@ export interface components {
             min_value: string | null;
             /** Add */
             add: string;
+        };
+        /**
+         * VariantOut
+         * @description Вариант ставки (Р29, app/ml/variants.py): strategy — экспресс стратегии, safer —
+         *     ординар «надежнее», value — ординар «лучший валуй», best_express — «Экспресс из
+         *     лучших» (вне правил стратегии). kind — вид ставки при сохранении. also: ["value"] —
+         *     safer совпал с лучшим валуем (одна карточка). p — произведение итоговых вероятностей
+         *     ног, value — p·кэф − 1, value_tier — его уровень. stake — рекомендованная сумма (null —
+         *     суммы нет, почему — stake_calc.reason: no_value, total_range, below_min…), stake_calc —
+         *     расчет для «Как посчитана сумма». why_key — ключ локали причины выбора
+         *     (analysis.variants.why.*) и why_params. issues — правила экспресса, которые не прошел
+         *     best_express (ключи analysis.rules.*). warnings: no_value — валуй ниже нуля, модель не
+         *     советует ставить; low_confidence — уверенность анализа по матчу ноги средняя или
+         *     низкая.
+         */
+        VariantOut: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "strategy" | "safer" | "value" | "best_express";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "strategy" | "single" | "own";
+            /** Also */
+            also: "value"[];
+            /** Legs */
+            legs: components["schemas"]["ExpressLeg"][];
+            /** Total Odds */
+            total_odds: string;
+            /** P */
+            p: number;
+            /** Value */
+            value: number;
+            /** Value Tier */
+            value_tier: string;
+            /** Stake */
+            stake: string | null;
+            stake_calc: components["schemas"]["StakeOut"];
+            /** Why Key */
+            why_key: string;
+            /** Why Params */
+            why_params: {
+                [key: string]: string;
+            };
+            /** Outside Strategy */
+            outside_strategy: boolean;
+            /** Issues */
+            issues: string[];
+            /** Warnings */
+            warnings: ("no_value" | "low_confidence")[];
         };
         /**
          * VersionBriefOut
@@ -13994,6 +14130,7 @@ export interface operations {
                 market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
+                kind?: "all" | "strategy" | "single" | "own";
                 q?: string | null;
                 before?: number | null;
                 limit?: number;
@@ -14069,6 +14206,7 @@ export interface operations {
                 market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
+                kind?: "all" | "strategy" | "single" | "own";
                 q?: string | null;
                 /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
                 as_user?: number | null;
@@ -14141,6 +14279,7 @@ export interface operations {
                 market?: ("ML" | "HCP_-1.5" | "HCP_+1.5") | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
+                kind?: "all" | "strategy" | "single" | "own";
                 q?: string | null;
                 /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
                 as_user?: number | null;
@@ -14488,6 +14627,7 @@ export interface operations {
                 selection?: number | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
+                kind?: "all" | "strategy" | "single" | "own";
                 /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
                 as_user?: number | null;
             };
@@ -14527,6 +14667,7 @@ export interface operations {
                 selection?: number | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
+                kind?: "all" | "strategy" | "single" | "own";
                 part?: "bets" | "events" | "calibration" | "brier";
                 /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
                 as_user?: number | null;
@@ -14567,6 +14708,7 @@ export interface operations {
                 selection?: number | null;
                 surface?: ("hard" | "clay" | "grass" | "carpet" | "unknown")[];
                 source?: ("app" | "legacy") | null;
+                kind?: "all" | "strategy" | "single" | "own";
                 part?: ("bets" | "events" | "calibration" | "brier")[];
                 /** @description Только администратор: id участника, чьи данные показать (только просмотр, запись в журнал администратора). Не задан или свой id — свои данные */
                 as_user?: number | null;

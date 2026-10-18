@@ -199,8 +199,18 @@ async def test_done_analysis_recommendation_in_new_currency(
     # 30 € × 2,75% = 0,83 → 0 € (шаг 1 €) — меньше минимальной ставки 0,50 €
     assert before["amount"] is None and before["reason"] == "below_min"
     await _change(admin, totp_code, currency="RUB")
-    view = (await member.client.get(f"/api/analyses/{big}")).json()["result"]["express"]
+    result = (await member.client.get(f"/api/analyses/{big}")).json()["result"]
+    view = result["express"]
     stake = view["stake"]
+    # Варианты ставки (Р29) — тоже в рублях: банк по курсу, сумма заново по округлению
+    variants = result["variants"]
+    assert variants and all(item["stake_calc"]["currency"] == "RUB" for item in variants)
+    assert all(item["stake_calc"]["bank"] == "950000.00" for item in variants)
+    assert variants[0]["code"] == "strategy" and variants[0]["stake_calc"] == stake
+    for item in variants:
+        assert item["stake"] == item["stake_calc"]["amount"]
+        if item["stake"] is not None:
+            assert D(item["stake"]) % 10 == 0
     # 10 000 € × 95 = 950 000 ₽; 950 000 × 2,75% = 26 125 → 26 120 ₽ (шаг 10 ₽)
     assert (stake["currency"], stake["bank"], stake["amount"]) == ("RUB", "950000.00", "26120.00")
     assert stake["steps"][-1]["kind"] == "round"

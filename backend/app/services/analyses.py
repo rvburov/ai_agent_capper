@@ -23,7 +23,7 @@ from typing import Any, cast
 
 import structlog
 from redis.asyncio import Redis
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.agent.calls import CallInfo
@@ -39,6 +39,7 @@ from app.db.models import (
     ANALYSIS_ACTIVE_STATUSES,
     AgentRun,
     Analysis,
+    Bet,
     Dossier,
     MatchAssessment,
     ModelPrice,
@@ -998,9 +999,12 @@ async def set_decision(
     db: AsyncSession, user: User, analysis_id: int, decision: str | None
 ) -> Analysis:
     """«Не ставить» (skip) или снять это решение (None). Решение «поставил» пишет только
-    сохранение ставки (POST /bets)."""
+    сохранение ставки (POST /bets). Есть ставка любого вида (Р29: ординар, своя) — решение
+    уже «поставил», «Не ставить» — 409, как у анализа не в том состоянии."""
     analysis = await get_owned(db, user, analysis_id, lock=True)
     if analysis.status != "done" or analysis.decision == "bet":
+        raise AppError(409, "analysis.bad_state", status=analysis.status)
+    if await db.scalar(select(exists().where(Bet.analysis_id == analysis.id))):
         raise AppError(409, "analysis.bad_state", status=analysis.status)
     if decision not in (None, "skip"):
         raise AppError(409, "analysis.bad_state", status=analysis.status)

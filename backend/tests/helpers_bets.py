@@ -124,8 +124,10 @@ class BetMaker:
         source: str = "app",
         deposit: str | None = "10000",
         total_odds: str | None = None,
+        kind: str | None = None,
     ) -> Bet:
-        """Открытая ставка с журналом, как после «Сохранить ставку». commit."""
+        """Открытая ставка с журналом, как после «Сохранить ставку». commit. kind не задан
+        — как в миграции 0012: у бота legacy, одно событие — single, иначе strategy."""
         row = user.user if isinstance(user, MadeUser) else user
         when = placed_at or datetime.now(UTC) - timedelta(hours=1)
         matches = [await self._match(spec) for spec in legs]
@@ -171,6 +173,8 @@ class BetMaker:
             status="open",
             source=source,
             source_ref=f"ref-{self._next():06d}",
+            kind=kind
+            or ("legacy" if source == "legacy" else "single" if len(legs) == 1 else "strategy"),
         )
         self.db.add(bet)
         await self.db.flush()

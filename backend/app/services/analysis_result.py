@@ -5,10 +5,16 @@
 p_base и согласована; исходы с кэфами участника; экспресс по правилам v3 с лимитом
 просадки; сумма — от банка по учету, а если журнал пуст или банк из ввода другой — от
 банка из ввода (с предупреждением). В predictions.p_claude — исходное число Claude.
+
+Варианты ставки (Р29, app/ml/variants.py) — в result.variants: экспресс стратегии,
+ординары «надежнее» и «лучший валуй», «Экспресс из лучших». У анализов до Р29 их нет в
+сохраненном итоге: они пересчитываются при чтении (stored_variants) из строк таблицы
+рынков (итоговая вероятность, кэф, id прогноза), флагов Claude и формы — это дешево, без
+Claude и без записи; сумма — от банка сейчас.
 """
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -30,14 +36,18 @@ from app.ml.market import devig_pair
 from app.ml.model_versions import active_model_id
 from app.ml.sets import MARKET_MINUS, MARKETS, Probs3
 from app.ml.strategy import (
+    SUSPENDED_MARKETS,
+    BankSignals,
     DrawdownLevel,
     Final3,
     Leg,
+    StakeCalc,
     StrategyParams,
     apply_claude,
     candidates,
     leg_issues,
     legs_for_match,
+    make_leg,
     parlay_issues,
     parlay_total,
     pick_parlay,
@@ -46,6 +56,7 @@ from app.ml.strategy import (
     value,
     value_tier,
 )
+from app.ml.variants import Variant, pick_variants
 from app.services.analysis_input import ConfirmedEvent, PlayerFacts, player_facts, short_odds
 from app.services.app_settings import get_app_settings
 from app.services.bank import BankState, bank_state, drawdown_level
@@ -73,6 +84,8 @@ RULE_KEYS = (
     "drawdown_legs",
     "drawdown_odds",
 )
+# Уверенность анализа по матчу, при которой вариант получает предупреждение
+LOW_CONFIDENCE = ("low", "medium")
 
 
 @dataclass(frozen=True)
@@ -406,6 +419,7 @@ def _market_rows(
                     "tier": value_tier(gain) if gain is not None else "none",
                     "in_express": key in in_express,
                     "note_key": note,
+                    "suspended": market in SUSPENDED_MARKETS,
                 }
             )
     return rows
@@ -468,9 +482,46 @@ def _match_view(
     }
 
 
+def _total_text(total: Decimal) -> str:
+    return str(total.quantize(ODDS_STEP, rounding=ROUND_HALF_UP))
+
+
+def _stake_view(calc: StakeCalc, bank_source: str, total_text: str) -> dict[str, Any]:
+    """Сумма и шаги расчета для экрана (StakeOut)."""
+    return {
+        "amount": str(calc.amount) if calc.amount is not None else None,
+        "currency": calc.currency,
+        "bank": str(calc.bank),
+        "bank_source": bank_source,
+        "total_odds": total_text,
+        "pct": str(calc.pct),
+        "steps": [
+            {"kind": step.kind, "pct": str(step.pct), "params": step.params} for step in calc.steps
+        ],
+        "reason": calc.reason,
+        "drawdown_level": calc.drawdown_level.key if calc.drawdown_level else None,
+    }
+
+
+def _legs_view(
+    legs: Sequence[Leg], prediction_ids: Mapping[tuple[int, str, int], int]
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "prediction_id": prediction_ids[(leg.match_id, leg.market, leg.selection)],
+            "match_id": leg.match_id,
+            "market": leg.market,
+            "selection": leg.selection,
+            "p": round(leg.p, P_DIGITS),
+            "odds": str(short_odds(leg.odds)),
+        }
+        for leg in legs
+    ]
+
+
 def _express_view(
     express: Sequence[Leg],
-    predictions: dict[tuple[int, str, int], Prediction],
+    prediction_ids: Mapping[tuple[int, str, int], int],
     *,
     bank: Decimal,
     bank_source: str,
@@ -482,38 +533,168 @@ def _express_view(
     total = parlay_total(express)
     calc = stake(bank, total, list(express), params, state.signals(), currency)
     p_express = math.prod(leg.p for leg in express)
-    total_text = str(total.quantize(ODDS_STEP, rounding=ROUND_HALF_UP))
+    total_text = _total_text(total)
     return {
-        "legs": [
-            {
-                "prediction_id": predictions[(leg.match_id, leg.market, leg.selection)].id,
-                "match_id": leg.match_id,
-                "market": leg.market,
-                "selection": leg.selection,
-                "p": round(leg.p, P_DIGITS),
-                "odds": str(short_odds(leg.odds)),
-            }
-            for leg in express
-        ],
+        "legs": _legs_view(express, prediction_ids),
         "total_odds": total_text,
         "p_express": round(p_express, P_DIGITS),
         "ev": round(p_express * float(total) - 1.0, P_DIGITS),
-        "stake": {
-            "amount": str(calc.amount) if calc.amount is not None else None,
-            "currency": calc.currency,
-            "bank": str(calc.bank),
-            "bank_source": bank_source,
-            "total_odds": total_text,
-            "pct": str(calc.pct),
-            "steps": [
-                {"kind": step.kind, "pct": str(step.pct), "params": step.params}
-                for step in calc.steps
-            ],
-            "reason": calc.reason,
-            "drawdown_level": calc.drawdown_level.key if calc.drawdown_level else None,
-        },
+        "stake": _stake_view(calc, bank_source, total_text),
         "rules": rule_checks(express, params, level),
     }
+
+
+@dataclass(frozen=True)
+class VariantContext:
+    """Что нужно сумме и предупреждениям вариантов: банк и откуда он, сигналы
+    адаптаций, параметры стратегии, валюта, id прогнозов исходов и уверенность анализа
+    по матчам."""
+
+    bank: Decimal
+    bank_source: str
+    signals: BankSignals
+    params: StrategyParams
+    currency: str
+    prediction_ids: Mapping[tuple[int, str, int], int]
+    confidence: Mapping[int, str]
+
+
+def variant_view(variant: Variant, ctx: VariantContext) -> dict[str, Any]:
+    """Вариант ставки для экрана (VariantOut): ноги, кэф, вероятность, валуй, сумма по
+    своей таблице (валуй ниже нуля — суммы нет), почему выбран и предупреждения."""
+    total = variant.total_odds
+    total_text = _total_text(total)
+    gain = variant.value
+    calc = stake(
+        ctx.bank,
+        total,
+        list(variant.legs),
+        ctx.params,
+        ctx.signals,
+        ctx.currency,
+        mode=variant.stake_mode,
+        ev=None if variant.code == "strategy" else gain,
+    )
+    warnings: list[str] = []
+    if variant.no_value:
+        warnings.append("no_value")
+    if any(ctx.confidence.get(leg.match_id) in LOW_CONFIDENCE for leg in variant.legs):
+        warnings.append("low_confidence")
+    return {
+        "code": variant.code,
+        "kind": variant.kind,
+        "also": list(variant.also),
+        "legs": _legs_view(variant.legs, ctx.prediction_ids),
+        "total_odds": total_text,
+        "p": round(variant.p, P_DIGITS),
+        "value": round(gain, P_DIGITS),
+        "value_tier": value_tier(gain),
+        "stake": str(calc.amount) if calc.amount is not None else None,
+        "stake_calc": _stake_view(calc, ctx.bank_source, total_text),
+        "why_key": f"analysis.variants.why.{variant.why}",
+        "why_params": dict(variant.why_params),
+        "outside_strategy": variant.outside_strategy,
+        "issues": list(variant.issues),
+        "warnings": warnings,
+    }
+
+
+def variants_view(
+    legs: Sequence[Leg],
+    matches: Sequence[int],
+    express: Sequence[Leg] | None,
+    level: DrawdownLevel | None,
+    ctx: VariantContext,
+) -> list[dict[str, Any]]:
+    """Варианты ставки по исходам анализа (app/ml/variants.py) в виде для экрана."""
+    found = pick_variants(legs, matches, express, ctx.params, level)
+    return [variant_view(item, ctx) for item in found]
+
+
+def stored_variants(
+    result: Mapping[str, Any],
+    *,
+    params: StrategyParams,
+    state: BankState,
+    bank_input: Decimal | None,
+    currency: str,
+) -> list[dict[str, Any]]:
+    """Варианты анализа до Р29 по сохраненному итогу: исходы — строки таблицы рынков с
+    кэфом (итоговая вероятность, кэф, id прогноза), причины blocks — по флагам Claude и
+    форме из итога, экспресс — сохраненный. Сумма — от банка сейчас."""
+    legs: list[Leg] = []
+    matches: list[int] = []
+    prediction_ids: dict[tuple[int, str, int], int] = {}
+    confidence: dict[int, str] = {}
+    for match in result.get("matches") or []:
+        match_id = int(match["match_id"])
+        matches.append(match_id)
+        confidence[match_id] = str(match.get("confidence") or "")
+        flags = match.get("flags") or {}
+        form = match.get("form") or {}
+        blocks = {
+            side: selection_blocks(
+                [item == "W" for item in (form.get(f"p{side}") or [])[:5]],
+                flags.get(f"p{side}") or [],
+                params,
+            )
+            for side in (1, 2)
+        }
+        for row in match.get("markets") or []:
+            market, selection = str(row["market"]), int(row["selection"])
+            if row.get("prediction_id") is not None:
+                prediction_ids[(match_id, market, selection)] = int(row["prediction_id"])
+            odds = row.get("odds")
+            if odds is None or market not in params.markets or row.get("prediction_id") is None:
+                continue
+            price = Decimal(str(odds))
+            if price <= 1:
+                continue
+            legs.append(
+                make_leg(
+                    match_id,
+                    market,
+                    selection,
+                    float(row["p_final"]),
+                    price,
+                    blocks=blocks[selection],
+                )
+            )
+    by_key = {(leg.match_id, leg.market, leg.selection): leg for leg in legs}
+    express_legs = ((result.get("express") or {}).get("legs")) or []
+    # Экспресс был — значит, он есть, даже если ногу не найти в таблице (рынок убрали из
+    # params.markets, у строки нет кэфа): нога берется из сохраненного экспресса, иначе
+    # рядом с карточкой настоящего экспресса появился бы «Экспресс из лучших»
+    express: list[Leg] = []
+    for item in express_legs:
+        key = (int(item["match_id"]), str(item["market"]), int(item["selection"]))
+        leg = by_key.get(key)
+        if leg is None and item.get("odds") is not None and item.get("p") is not None:
+            price = Decimal(str(item["odds"]))
+            if price > 1:
+                leg = make_leg(*key, float(item["p"]), price)
+        if leg is None:
+            express = []
+            break
+        if item.get("prediction_id") is not None:
+            prediction_ids.setdefault(key, int(item["prediction_id"]))
+        express.append(leg)
+    bank, bank_source, _ = _bank(state, bank_input)
+    ctx = VariantContext(
+        bank=bank,
+        bank_source=bank_source,
+        signals=state.signals(),
+        params=params,
+        currency=currency,
+        prediction_ids=prediction_ids,
+        confidence=confidence,
+    )
+    variants = variants_view(legs, matches, express or None, drawdown_level(state, params), ctx)
+    if express_legs and not express:
+        # Ногу экспресса не восстановить совсем: варианта strategy нет, но и «Экспресса из
+        # лучших» рядом с настоящим экспрессом быть не должно
+        variants = [item for item in variants if item["code"] != "best_express"]
+    return variants
 
 
 async def compose(db: AsyncSession, data: ComposeInput) -> dict[str, Any]:
@@ -557,10 +738,11 @@ async def compose(db: AsyncSession, data: ComposeInput) -> dict[str, Any]:
         warnings.append(bank_warning)
     express_out: dict[str, Any] | None = None
     no_express: str | None = None
+    prediction_ids = {key: row.id for key, row in predictions.items()}
     if express is not None:
         express_out = _express_view(
             express,
-            predictions,
+            prediction_ids,
             bank=bank,
             bank_source=bank_source,
             state=state,
@@ -590,10 +772,23 @@ async def compose(db: AsyncSession, data: ComposeInput) -> dict[str, Any]:
         )
         for item in items
     ]
+    ctx = VariantContext(
+        bank=bank,
+        bank_source=bank_source,
+        signals=state.signals(),
+        params=params,
+        currency=settings.currency,
+        prediction_ids=prediction_ids,
+        confidence={int(item.event.match_id or 0): item.out.confidence for item in items},
+    )
+    variants = variants_view(
+        all_legs, [int(item.event.match_id or 0) for item in items], express, level, ctx
+    )
     return {
         "matches": matches,
         "express": express_out,
         "no_express_key": no_express,
         "warnings": warnings,
         "costs": await run_costs(db, data.analysis),
+        "variants": variants,
     }

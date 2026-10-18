@@ -157,7 +157,8 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 | `services/players.py` | поиск, слияние и правка игроков, слияние матчей |
 | `ml/elo.py`, `ml/market.py`, `ml/metrics.py` | Эло по покрытиям, снятие маржи, лог-лосс, Brier, ECE, бутстрэп |
 | `ml/backtest.py`, `ml/report.py` | бэктест и отчет Markdown |
-| `ml/sets.py`, `ml/strategy.py` | модель сетов (форы ±1.5), разбор счета по сетам и исход ноги по счету; правила стратегии v3: валуй, экспресс, сумма ставки, поправка Claude (Р22) |
+| `ml/sets.py`, `ml/strategy.py` | модель сетов (форы ±1.5), разбор счета по сетам и исход ноги по счету; правила стратегии v3: валуй, экспресс, сумма ставки (экспресса, ординара и «Экспресса из лучших», Р29), поправка Claude (Р22) |
+| `ml/variants.py` | варианты ставки в итоге анализа (Р29): экспресс стратегии, ординары «надежнее» и «лучший валуй», «Экспресс из лучших» |
 | `services/dossier.py`, `services/bank.py` | досье матча для Claude (0 токенов), банк, пик и просадка по журналу |
 
 ## Агент Claude (этап 3, в работе)
@@ -186,7 +187,7 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 | `agent/parse.py`, `agent/news.py`, `agent/analysis.py` | шаги Claude: разбор текста, новости (`web_search` + `record_news`), оценка матча до 3 итераций в одном разговоре |
 | `services/analyses.py`, `services/analysis_input.py`, `services/analysis_view.py` | анализ для API: разбор, черновик, «Перед запуском», запуск и резерв, перезапуск, отмена; матчи и кэфы из ввода; вид анализа и события прогресса |
 | `services/analysis_run.py`, `services/analysis_result.py`, `services/progress.py` | выполнение в воркере с чекпойнтами (предел 840 с), прогнозы и экспресс, уборщик зависших анализов; прогресс (Redis Streams, SSE) |
-| `services/bets.py`, `services/strategy_versions.py` | ставка по экспрессу, банк и букмекеры участника; активная версия стратегии v3 |
+| `services/bets.py`, `services/strategy_versions.py` | ставка по анализу (экспресс стратегии, ординар из вариантов, своя ставка — `kind`, Р29), банк и букмекеры участника; активная версия стратегии v3 |
 | `services/agent_smoke.py` | команда `agent-smoke`: проверка конвейера на живом ключе; `--only news` — новости одного игрока с вариантами шага для сравнения |
 | `admin/acceptance.py`, `services/acceptance_runs.py`, `services/smoke_eval.py`, `services/parse_eval.py`, `services/check_runs.py` | команды приемки этапа 3: `acceptance-runs` (20 анализов шагами воркера), `smoke-eval` (оценка матча через Batch API), `parse-eval` (эталон разбора и его черновик из Telegram); администратор для вызовов и бюджет проверок |
 
@@ -206,7 +207,7 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 
 | Модуль | Что делает |
 |---|---|
-| `services/bets.py` | ставка по экспрессу; список «Ставок» с фильтрами и курсором, итоги, карточка (ноги, закрытие, CLV, вердикт, исход по каждому полному счету), выгрузка CSV частями |
+| `services/bets.py` | ставка по анализу трех видов (Р29); список «Ставок» с фильтрами и курсором, итоги, карточка (ноги, закрытие, CLV, вердикт, исход по каждому полному счету), выгрузка CSV частями |
 | `services/settlement.py` | ручной расчет ставки и исправление результата (сторно): выплата и возврат в журнал до копеек, повтор того же действия — 200 |
 | `services/closing.py` | закрывающий кэф ноги: свой исход, обратный по желанию, чей кэф; `q_close` степенным методом, CLV |
 | `services/bet_versions.py` | версия ставки `updated_at`: допуск меньше 1 мс (браузер хранит миллисекунды), новая версия позже прежней хотя бы на 2 мс |
@@ -223,7 +224,7 @@ python -m app.ml.backtest --report backtest.md         # бэктест; --repor
 | `services/ai_usage.py` | свой расход на Claude за месяц по дням UTC, видам, моделям, шагам, журнал вызовов с разбором цены по `model_prices`; у администратора — расход ключа по людям и задачам, проверки отдельно (Р14) |
 | `services/admin_activity.py` | входы и запущенные анализы по людям за период (Р14) |
 
-Маршруты: `GET /api/bets` (фильтры `period`, `from`, `to`, `status`, `market`, `surface` — можно несколько, `source`, `q`; курсор `before`, `limit` до 100), `GET /api/bets/summary`, `GET /api/bets/export.csv` (те же фильтры без курсора), `GET /api/bets/{id}`, `PUT /api/bets/{id}/result`, `POST /api/bets/{id}/reverse`, `PUT /api/bets/{id}/legs/{leg_id}/closing`, `GET /api/me/bank/history?period=`, `GET /api/me/bank/entries`, `POST /api/me/bank/entries`, `GET /api/analytics` (фильтры `period`, `from`, `to`, `market`, `selection`, `surface`, `source`), `GET /api/analytics/export.csv?part=`, `GET /api/analytics/export.zip?part=…`, `GET /api/dashboard?period=`, `GET /api/players/ranking`, `GET /api/players/{id}` (и `/matches`, `/news`, `/h2h/{opponent_id}`), `GET /api/ai/usage?month=`, `GET /api/ai/runs`, `GET /api/admin/ai/usage?month=`, `GET /api/admin/activity?period=`. Фильтр `status=settled` — все рассчитанные ставки. Чужая ставка — 404, как несуществующая. Результат, перенесенный импортом старого бота, не пересчитывается (409 `bet.legacy`); открытую ставку бота участник рассчитывает сам.
+Маршруты: `GET /api/bets` (фильтры `period`, `from`, `to`, `status`, `market`, `surface` — можно несколько, `source`, `kind` — вид ставки, Р29, `q`; курсор `before`, `limit` до 100), `GET /api/bets/summary`, `GET /api/bets/export.csv` (те же фильтры без курсора), `GET /api/bets/{id}`, `PUT /api/bets/{id}/result`, `POST /api/bets/{id}/reverse`, `PUT /api/bets/{id}/legs/{leg_id}/closing`, `GET /api/me/bank/history?period=`, `GET /api/me/bank/entries`, `POST /api/me/bank/entries`, `GET /api/analytics` (фильтры `period`, `from`, `to`, `market`, `selection`, `surface`, `source`, `kind`), `GET /api/analytics/export.csv?part=`, `GET /api/analytics/export.zip?part=…`, `GET /api/dashboard?period=`, `GET /api/players/ranking`, `GET /api/players/{id}` (и `/matches`, `/news`, `/h2h/{opponent_id}`), `GET /api/ai/usage?month=`, `GET /api/ai/runs`, `GET /api/admin/ai/usage?month=`, `GET /api/admin/activity?period=`. Фильтр `status=settled` — все рассчитанные ставки. Чужая ставка — 404, как несуществующая. Результат, перенесенный импортом старого бота, не пересчитывается (409 `bet.legacy`); открытую ставку бота участник рассчитывает сам.
 
 ## Кабинет и администрирование (этап 4)
 

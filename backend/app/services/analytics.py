@@ -227,12 +227,17 @@ def window_of(filters: AnalyticsFiltersIn, today: date) -> Window:
 
 
 def _base_filters(filters: AnalyticsFiltersIn, window: Window) -> BetFiltersIn:
-    """Фильтры «Ставок» периода и источника (без рынка и покрытия): все рассчитанные
-    ставки, из которых берутся события."""
+    """Фильтры «Ставок» периода, источника и вида ставки (без рынка и покрытия): все
+    рассчитанные ставки, из которых берутся события."""
     if window.period is not None:
-        return BetFiltersIn(period=window.period, source=filters.source)
+        return BetFiltersIn(period=window.period, source=filters.source, kind=filters.kind)
     return BetFiltersIn.model_validate(
-        {"from": filters.date_from, "to": filters.date_to, "source": filters.source}
+        {
+            "from": filters.date_from,
+            "to": filters.date_to,
+            "source": filters.source,
+            "kind": filters.kind,
+        }
     )
 
 
@@ -271,7 +276,12 @@ def prev_conditions(
     if window.prev is None:
         return None
     base = BetFiltersIn.model_validate(
-        {"from": window.prev[0], "to": window.prev[1], "source": filters.source}
+        {
+            "from": window.prev[0],
+            "to": window.prev[1],
+            "source": filters.source,
+            "kind": filters.kind,
+        }
     )
     return bet_conditions(_bet_filters(filters, base), user, now) + _selection_condition(
         filters, user
@@ -313,6 +323,7 @@ class BetRow:
     total_odds: Decimal
     source: str
     bookmaker: str
+    kind: str = "strategy"
     legs: list[LegRow] = field(default_factory=list)
 
     @property
@@ -388,6 +399,7 @@ async def settled_rows(
             Bet.total_odds,
             Bet.source,
             Bet.bookmaker,
+            Bet.kind,
             BetLeg.id.label("leg_id"),
             BetLeg.match_id,
             BetLeg.market,
@@ -440,6 +452,7 @@ def _add_row(bets: dict[int, BetRow], row: Any, by_parent: dict[int, Any]) -> No
             total_odds=Decimal(row.total_odds),
             source=row.source,
             bookmaker=row.bookmaker,
+            kind=row.kind,
         )
     forecast = row.prediction_id is not None and not row.is_eval
     values = _Forecast(row.p_final, row.p_base, row.p_claude, row.q_market_at_pred)
@@ -1793,8 +1806,8 @@ async def analytics_json(
 
 CSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "bets": (
-        "bet_id", "placed_at", "settled_at", "source", "bookmaker", "status", "legs", "stake",
-        "currency", "total_odds", "profit", "clv",
+        "bet_id", "placed_at", "settled_at", "source", "kind", "bookmaker", "status", "legs",
+        "stake", "currency", "total_odds", "profit", "clv",
     ),
     "events": (
         "bet_id", "leg_id", "placed_at", "source", "market", "selection", "odds", "surface",
@@ -1819,7 +1832,7 @@ def _part_rows(part: ExportPart, inputs: Inputs, parts: Parts) -> list[list[Any]
         return [
             [
                 bet.id, _csv_time(bet.placed_at, zone), _csv_time(bet.settled_at, zone),
-                bet.source, bet.bookmaker, bet.status, len(bet.legs), bet.stake,
+                bet.source, bet.kind, bet.bookmaker, bet.status, len(bet.legs), bet.stake,
                 inputs.currency, bet.total_odds, bet.profit, clv_by_bet.get(bet.id),
             ]
             for bet in parts.chosen

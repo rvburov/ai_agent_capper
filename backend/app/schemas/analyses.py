@@ -382,7 +382,9 @@ class FlagsOut(BaseModel):
 class MarketRow(BaseModel):
     """Исход: вероятности модели, Claude и итоговая (Р22), рынок без маржи, кэф
     участника, валуй p_final·кэф − 1 и уровень, попал ли в экспресс, почему нет
-    (note_key — ключ analysis.leg.*)."""
+    (note_key — ключ analysis.leg.*). suspended — рынок на проверке (SUSPENDED_MARKETS,
+    Р28): в экспресс и варианты не идет, своей ставкой поставить можно; признак — по
+    списку сейчас, и у старых анализов тоже."""
 
     market: Market
     selection: int
@@ -396,6 +398,7 @@ class MarketRow(BaseModel):
     tier: str
     in_express: bool
     note_key: str | None
+    suspended: bool
 
 
 class MatchResult(BaseModel):
@@ -465,6 +468,43 @@ class ExpressOut(BaseModel):
     rules: list[RuleCheck]
 
 
+VariantCode = Literal["strategy", "safer", "value", "best_express"]
+BetKind = Literal["strategy", "single", "own", "legacy"]
+# Вид ставки, которой сохраняется вариант или своя ставка (legacy — только у бота)
+BetKindIn = Literal["strategy", "single", "own"]
+VariantWarning = Literal["no_value", "low_confidence"]
+
+
+class VariantOut(BaseModel):
+    """Вариант ставки (Р29, app/ml/variants.py): strategy — экспресс стратегии, safer —
+    ординар «надежнее», value — ординар «лучший валуй», best_express — «Экспресс из
+    лучших» (вне правил стратегии). kind — вид ставки при сохранении. also: ["value"] —
+    safer совпал с лучшим валуем (одна карточка). p — произведение итоговых вероятностей
+    ног, value — p·кэф − 1, value_tier — его уровень. stake — рекомендованная сумма (null —
+    суммы нет, почему — stake_calc.reason: no_value, total_range, below_min…), stake_calc —
+    расчет для «Как посчитана сумма». why_key — ключ локали причины выбора
+    (analysis.variants.why.*) и why_params. issues — правила экспресса, которые не прошел
+    best_express (ключи analysis.rules.*). warnings: no_value — валуй ниже нуля, модель не
+    советует ставить; low_confidence — уверенность анализа по матчу ноги средняя или
+    низкая."""
+
+    code: VariantCode
+    kind: BetKindIn
+    also: list[Literal["value"]]
+    legs: list[ExpressLeg]
+    total_odds: DecimalOut
+    p: float
+    value: float
+    value_tier: str
+    stake: DecimalOut | None
+    stake_calc: StakeOut
+    why_key: str
+    why_params: dict[str, str]
+    outside_strategy: bool
+    issues: list[str]
+    warnings: list[VariantWarning]
+
+
 class CostsOut(BaseModel):
     tokens: int
     cache_share: float
@@ -476,11 +516,16 @@ class CostsOut(BaseModel):
 
 
 class ResultOut(BaseModel):
+    """Итог анализа. variants — варианты ставки (Р29), первым — экспресс стратегии, если
+    собран; у анализов до Р29 они пересчитываются при чтении из сохраненных прогнозов
+    (сумма — от банка сейчас)."""
+
     matches: list[MatchResult]
     express: ExpressOut | None
     no_express_key: str | None
     warnings: list[TextKey]
     costs: CostsOut
+    variants: list[VariantOut]
 
 
 # --- анализ целиком ---
@@ -512,14 +557,18 @@ class ConfirmedEventOut(BaseModel):
 
 class BetLegBrief(BaseModel):
     prediction_id: int | None
+    match_id: int
+    market: Market
+    selection: int
     odds_taken: DecimalOut
 
 
 class BetBrief(BaseModel):
     """Сохраненная ставка по анализу: после перезагрузки экран показывает ее сумму и кэфы,
-    а не рекомендацию анализа."""
+    а не рекомендацию анализа. kind — вид ставки (Р29)."""
 
     id: int
+    kind: BetKind
     stake: DecimalOut
     currency: str
     total_odds: DecimalOut
@@ -556,7 +605,10 @@ class AnalysisOut(BaseModel):
     result: ResultOut | None
     decision: Decision | None
     bet_id: int | None
-    bet: BetBrief | None
+    bet: BetBrief | None = Field(
+        description="Первая ставка по анализу (до Р29 — единственная); все ставки — bets"
+    )
+    bets: list[BetBrief] = Field(description="Все ставки по анализу, по порядку (Р29)")
     key_source: KeySource | None
     estimate_usd: UsdOut | None
     cost_usd: UsdOut
