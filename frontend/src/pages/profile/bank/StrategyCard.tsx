@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next';
 
 import { Button, Card, Icon, Skeleton } from '../../../components';
 import { formatShare } from '../../../features/analysis/markets';
-import { stakeRows, valueRows } from '../../../features/bank/display';
+import { singleRows, stakeRows, valueRows } from '../../../features/bank/display';
+import { singleRangeText } from '../../../features/analysis/variants';
 import type { Bank, Strategy } from '../../../features/bank/types';
 import { currencyOf } from '../../../features/bets/display';
 import { formatMoney, formatOdds, formatPercent } from '../../../lib/format';
@@ -66,6 +67,7 @@ export function StrategyCard({ strategy, error, onRetry, bank, onPropose }: Stra
   const money = (amount: number | string | null) => formatMoney(amount, currency);
   const rows = stakeRows(p, Number.isFinite(equity) ? equity : null, currency);
   const values = valueRows(p);
+  const singles = singleRows(p, Number.isFinite(equity) ? equity : null, currency);
   const pct = (value: number) => formatPercent(value, { digits: 0 });
   const rounding = p.rounding[currency] ?? '1';
   const minStake = p.min_stake[currency] ?? '0';
@@ -152,6 +154,32 @@ export function StrategyCard({ strategy, error, onRetry, bank, onPropose }: Stra
         </dl>
         <p className="xsmall muted">
           {t('profile.bank.strategy.howStake', { max: formatShare(p.max_pct), step: money(rounding), min: money(minStake) })}
+        </p>
+      </div>
+      <div className="stack profile-tight" id="profile-singles">
+        <div className="profile-section-title">
+          <h4>{t('profile.bank.singles.title')}</h4>
+          <span className="xsmall muted">{t('profile.bank.singles.sub')}</span>
+        </div>
+        <dl className="profile-srules">
+          {singles.map((row) => (
+            <Rule
+              key={`${row.low}-${row.high}`}
+              title={t('profile.bank.singles.row', { range: singleRangeText(row.low, row.high) })}
+              note={row.stake !== null ? t('profile.bank.strategy.stakeNow', { stake: money(row.stake) }) : undefined}
+              value={formatShare(row.pct)}
+            />
+          ))}
+          <Rule title={t('profile.bank.singles.own')} note={t('profile.bank.singles.ownNote')} value={t('profile.bank.singles.ownValue')} />
+        </dl>
+        <p className="xsmall muted">
+          {t('profile.bank.singles.text', {
+            odds: formatOdds(p.safer_min_odds),
+            p: pct(p.value_min_p),
+            protect: formatShare(p.single_protect_pct),
+            best: formatShare(p.best_express_max_pct),
+          })}{' '}
+          <b>{t('profile.bank.singles.whereTitle')}</b> {t('profile.bank.singles.where')}
         </p>
       </div>
       <p className="profile-note">

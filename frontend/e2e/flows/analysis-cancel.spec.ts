@@ -42,7 +42,7 @@ test('отмена анализа и продолжение с того же ш�
     const resume = banner.getByRole('button', { name: /^Продолжить с шага \d+$/ });
     await expect(resume).toBeEnabled({ timeout: 30_000 });
     await resume.click();
-    await expect(page.getByRole('heading', { level: 2, name: /^Экспресс из \d событий|^Анализ 3 матчей готов$/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('heading', { level: 2, name: /^Экспресс из \d событий|^Экспресса стратегии нет · |^Анализ 3 матчей готов$/ })).toBeVisible({ timeout: 30_000 });
   });
 
   // «Изменить события» ведет в «Новый анализ» с теми же событиями

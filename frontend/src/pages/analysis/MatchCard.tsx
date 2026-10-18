@@ -4,10 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { paths } from '../../app/paths';
-import { Callout, Card, Chip, FormDots, Icon, Segmented, type ChipKind, type IconName } from '../../components';
+import { Button, Callout, Card, Chip, FormDots, Icon, Segmented, type ChipKind, type IconName } from '../../components';
 import { inlineDateTime, keyText } from '../../features/analysis/codes';
 import { shortName } from '../../features/analysis/draft';
 import { formatProb, marketDescription, marketLabel, ppDelta, shownMarkets, valueTier } from '../../features/analysis/markets';
+import { slipEligible } from '../../features/analysis/ownBet';
 import { roundLabel } from '../../features/analysis/rounds';
 import type { ComparisonRow, Factor, MarketRow, MatchResult } from '../../features/analysis/types';
 import { formatDate, formatNumber, formatOdds, formatPercent } from '../../lib/format';
@@ -55,7 +56,33 @@ function ValueCell({ row }: { row: MarketRow }) {
   );
 }
 
-function Outcome({ row, match, names }: { row: MarketRow; match: MatchResult; names: MatchNames }) {
+/** «В свою ставку» у исхода таблицы (Р29); в режиме просмотра — неактивна с подсказкой. */
+export interface SlipControl {
+  inSlip: ReadonlySet<number>;
+  onAdd: (row: MarketRow, match: MatchResult) => void;
+}
+
+function SlipButton({ row, match, names, slip }: { row: MarketRow; match: MatchResult; names: MatchNames; slip: SlipControl }) {
+  const { t } = useTranslation();
+  if (!slipEligible(row) || row.prediction_id === null) return null;
+  const inSlip = slip.inSlip.has(row.prediction_id);
+  const what = `${outcomeName(row, match, names)}, ${matchTitle(match, names, t)}`;
+  return (
+    <Button
+      kind="ghost"
+      size="sm"
+      icon={inSlip ? 'check' : 'plus'}
+      className={cx('analysis-slip-btn', inSlip && 'is-in')}
+      aria-label={inSlip ? t('analysis.own.inSlipAria', { what }) : t('analysis.own.addAria', { what })}
+      onClick={() => slip.onAdd(row, match)}
+      ro={t('analysis.own.roHint')}
+    >
+      {inSlip ? t('analysis.own.inSlip') : t('analysis.own.add')}
+    </Button>
+  );
+}
+
+function Outcome({ row, match, names, slip }: { row: MarketRow; match: MatchResult; names: MatchNames; slip?: SlipControl }) {
   const { t } = useTranslation();
   return (
     <div className="analysis-out">
@@ -68,6 +95,7 @@ function Outcome({ row, match, names }: { row: MarketRow; match: MatchResult; na
       ) : (
         row.note_key && <small>{keyText(row.note_key, {}, '')}</small>
       )}
+      {slip && <SlipButton row={row} match={match} names={names} slip={slip} />}
     </div>
   );
 }
@@ -83,7 +111,7 @@ function ClaudeCell({ row }: { row: MarketRow }) {
   );
 }
 
-function ProbTable({ match, names, bookmaker }: { match: MatchResult; names: MatchNames; bookmaker: string | null }) {
+function ProbTable({ match, names, bookmaker, slip }: { match: MatchResult; names: MatchNames; bookmaker: string | null; slip?: SlipControl }) {
   const { t } = useTranslation();
   const rows = shownMarkets(match.markets);
   const th = (label: string, sub: string | null, cls?: string) => (
@@ -110,7 +138,7 @@ function ProbTable({ match, names, bookmaker }: { match: MatchResult; names: Mat
           {rows.map((row) => (
             <tr key={`${row.market}-${row.selection}`} className={cx(row.in_express && 'is-pick')}>
               <td>
-                <Outcome row={row} match={match} names={names} />
+                <Outcome row={row} match={match} names={names} slip={slip} />
               </td>
               <td className="r">
                 <span className="analysis-pnum">{formatProb(row.p_base)}</span>
@@ -135,14 +163,14 @@ function ProbTable({ match, names, bookmaker }: { match: MatchResult; names: Mat
   );
 }
 
-function ProbList({ match, names }: { match: MatchResult; names: MatchNames }) {
+function ProbList({ match, names, slip }: { match: MatchResult; names: MatchNames; slip?: SlipControl }) {
   const { t } = useTranslation();
   return (
     <ul className="analysis-plist" aria-label={t('analysis.match.probs')}>
       {shownMarkets(match.markets).map((row) => (
         <li key={`${row.market}-${row.selection}`} className={cx('analysis-pitem', row.in_express && 'is-pick')}>
           <div className="analysis-pitem-top">
-            <Outcome row={row} match={match} names={names} />
+            <Outcome row={row} match={match} names={names} slip={slip} />
             <ValueCell row={row} />
           </div>
           <dl className="analysis-pgrid">
@@ -346,7 +374,19 @@ function newsState(state: string | null, t: T): string {
 
 type Tab = 'probs' | 'cmp' | 'factors';
 
-export function MatchCard({ match, names, bookmaker, oddsHint }: { match: MatchResult; names: MatchNames; bookmaker: string | null; oddsHint: string }) {
+export function MatchCard({
+  match,
+  names,
+  bookmaker,
+  oddsHint,
+  slip,
+}: {
+  match: MatchResult;
+  names: MatchNames;
+  bookmaker: string | null;
+  oddsHint: string;
+  slip?: SlipControl;
+}) {
   const { t } = useTranslation();
   const mobile = useMediaQuery(MOBILE_QUERY);
   const [tab, setTab] = useState<Tab>('probs');
@@ -440,7 +480,7 @@ export function MatchCard({ match, names, bookmaker, oddsHint }: { match: MatchR
             {tab === 'probs' && (
               <>
                 <p className="analysis-hint">{t('analysis.match.probsMobileHint', { odds: oddsHint })}</p>
-                <ProbList match={match} names={names} />
+                <ProbList match={match} names={names} slip={slip} />
                 {probHint}
               </>
             )}
@@ -461,7 +501,7 @@ export function MatchCard({ match, names, bookmaker, oddsHint }: { match: MatchR
             t('analysis.match.probsHint', { odds: oddsHint }),
             <>
               <div className="analysis-bleed">
-                <ProbTable match={match} names={names} bookmaker={bookmaker} />
+                <ProbTable match={match} names={names} bookmaker={bookmaker} slip={slip} />
               </div>
               {probHint}
             </>,

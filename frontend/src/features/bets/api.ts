@@ -30,8 +30,8 @@ export function newClientRef(): string {
 
 export const CLIENT_REF = /^[A-Za-z0-9_-]{8,64}$/;
 
-/** Ставку по анализу сохранить нельзя: она уже есть или анализ не готов. */
-export const BET_CONFLICTS: ReadonlySet<string> = new Set(['bet.duplicate', 'bet.analysis_state']);
+/** Ставку по анализу сохранить нельзя: она уже есть, анализ не готов или у него нет итога. */
+export const BET_CONFLICTS: ReadonlySet<string> = new Set(['bet.duplicate', 'bet.analysis_state', 'bet.no_result']);
 
 /**
  * «Сохранить ставку» (POST /api/bets): повтор с тем же client_ref вернет ту же ставку, поэтому

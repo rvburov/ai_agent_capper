@@ -10,12 +10,13 @@ import {
   outcomeValue,
   OUTCOMES,
   parseOutcome,
+  KINDS,
   PERIODS,
   SOURCES,
   SURFACES,
   type AnalyticsFilters,
 } from '../../features/analytics/filters';
-import type { Analytics, Period, SourceFilter, SurfaceFilter } from '../../features/analytics/types';
+import type { Analytics, KindFilter, Period, SourceFilter, SurfaceFilter } from '../../features/analytics/types';
 import { formatDateRange } from '../../lib/format';
 
 // Фильтры «Аналитики» (filterBar макета): период, исход, покрытие, источник; строка «в выборке
@@ -44,6 +45,10 @@ function surfaceOptions(t: TFunction): DropdownOption<SurfaceFilter | All>[] {
 
 function sourceOptions(t: TFunction): DropdownOption<SourceFilter | All>[] {
   return [{ value: 'all', label: t('analytics.filters.sourceAll') }, ...SOURCES.map((s) => ({ value: s, label: t(`analytics.sources.${s}`) }))];
+}
+
+function kindOptions(t: TFunction): DropdownOption<KindFilter | All>[] {
+  return [{ value: 'all', label: t('analytics.filters.kindAll') }, ...KINDS.map((k) => ({ value: k, label: t(`analytics.kinds.${k}`) }))];
 }
 
 function DatesChip({ filters, onChange }: { filters: AnalyticsFilters; onChange: Change }) {
@@ -78,6 +83,9 @@ function Scope({ data, filters, onChange }: { data: Analytics | undefined; filte
   }
   if (filters.surface) {
     chips.push({ key: 'surface', label: t('analytics.filters.chipSurface', { name: t(`analytics.surfaces.${filters.surface}`) }), drop: { ...filters, surface: null } });
+  }
+  if (filters.kind) {
+    chips.push({ key: 'kind', label: t('analytics.filters.chipKind', { name: t(`analytics.kinds.${filters.kind}`) }), drop: { ...filters, kind: null } });
   }
   if (filters.source) {
     chips.push({ key: 'source', label: t('analytics.filters.chipSource', { name: t(`analytics.sources.${filters.source}`) }), drop: { ...filters, source: null } });
@@ -118,6 +126,7 @@ function Scope({ data, filters, onChange }: { data: Analytics | undefined; filte
       {sample && sample.legacy_parlay_events > 0 && (
         <span className="muted xsmall">{t('analytics.scope.legacyParlays', { count: sample.legacy_parlay_events })}</span>
       )}
+      {!filters.kind && <span className="muted xsmall">{t('analytics.scope.kinds')}</span>}
       {sample && sample.open_bets > 0 && <span className="muted xsmall">{t('analytics.scope.open', { count: sample.open_bets })}</span>}
     </div>
   );
@@ -174,6 +183,15 @@ export function Filters({ filters, data, onChange, onReset }: FiltersProps) {
           options={sourceOptions(t)}
           value={filters.source ?? 'all'}
           onChange={(value) => onChange({ ...filters, source: value === 'all' ? null : value })}
+        />
+      </FieldShell>
+      <FieldShell id={`${id}-kind`} label={t('analytics.filters.kind')} className="analytics-filter">
+        <Dropdown
+          id={`${id}-kind`}
+          label={t('analytics.filters.kind')}
+          options={kindOptions(t)}
+          value={filters.kind ?? 'all'}
+          onChange={(value) => onChange({ ...filters, kind: value === 'all' ? null : value })}
         />
       </FieldShell>
       {!isDefault(filters) && (

@@ -51,7 +51,7 @@ test('пауза: ставка по готовому анализу и новы�
 
   // ставка по готовому анализу — понятный текст в окне ставки
   await page.goto(analysisUrl);
-  await page.getByRole('region', { name: 'Экспресс' }).getByRole('button', { name: 'Сохранить ставку' }).click();
+  await page.getByRole('region', { name: 'Экспресс стратегии' }).getByRole('button', { name: 'Сохранить ставку' }).click();
   const dialog = page.getByRole('dialog', { name: 'Сохранить ставку' });
   await dialog.getByRole('button', { name: 'Сохранить ставку' }).click();
   await expect(dialog.getByText(`Вы взяли паузу до ${lastDay} включительно: новые ставки и анализы недоступны. Досрочно пауза не снимается`)).toBeVisible();

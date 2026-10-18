@@ -112,6 +112,27 @@
       "up15": true,
       "week_loss": true,
       "week_win": true
-    }
+    },
+    "single_bands": [
+      {
+        "low": "1.01",
+        "high": "1.60",
+        "pct": "0.015"
+      },
+      {
+        "low": "1.61",
+        "high": "2.20",
+        "pct": "0.0125"
+      },
+      {
+        "low": "2.21",
+        "high": "50",
+        "pct": "0.01"
+      }
+    ],
+    "single_protect_pct": "0.01",
+    "best_express_max_pct": "0.015",
+    "safer_min_odds": "1.30",
+    "value_min_p": 0.5
   }
 }

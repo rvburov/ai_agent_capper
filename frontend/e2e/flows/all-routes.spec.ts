@@ -155,6 +155,14 @@ test('все экраны на телефоне: без прокрутки вб�
   await checkWindow(m, '/bets', (page) => page.getByRole('region', { name: 'История ставок' }).getByRole('button', { name: new RegExp(`^Ставка №${id},`) }), `Ставка №${id}`);
   await checkWindow(m, '/profile/bank', (page) => page.getByRole('button', { name: 'Предложить изменение' }).first(), 'Предложить изменение правил');
   await checkWindow(admin, '/learning', (page) => page.getByRole('button', { name: 'Предложить урок' }).first(), 'Предложить урок');
+  // Р29: окно своей ставки («В свою ставку» у исхода) и окно сохранения ординара варианта
+  await checkWindow(m, paths.analysis(analysisId), (page) => page.getByRole('button', { name: 'В свою ставку: Синнер П1, Синнер — Руне' }), 'Своя ставка');
+  await checkWindow(
+    m,
+    paths.analysis(analysisId),
+    (page) => page.getByRole('region', { name: /^Ординар · / }).first().getByRole('button', { name: 'Сохранить ставку' }),
+    'Сохранить ставку',
+  );
   // этап 6: окно установки на телефон (из карточки «Приложение на телефоне»)
   await checkWindow(m, '/profile', (page) => page.locator('#profile-install').getByRole('button', { name: 'Установить на телефон' }), 'Установить на телефон');
 });

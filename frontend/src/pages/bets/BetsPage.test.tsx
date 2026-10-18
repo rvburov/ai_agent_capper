@@ -103,6 +103,28 @@ describe('Ставки: экран', () => {
     expect(screen.getByText('за все время · выигрыш')).toBeInTheDocument();
   });
 
+  it('вид ставки (Р29): метки «Своя» и «Ординар», фильтр «Вид ставки» — в адресе и в запросах', async () => {
+    const api = betsApi({
+      'GET /api/bets': (request) => {
+        if (query(request).get('status') === 'open') return json(betPage([betOpen({ kind: 'own' })]));
+        return json(betPage([betOpen({ kind: 'own' }), betWon(), betLost({ kind: 'single' })]));
+      },
+      'GET /api/bets/7': () => json(betOpen({ kind: 'own' })),
+    });
+    const { user, router, calls } = renderBets('/bets', api);
+    const open = await screen.findByRole('article', { name: 'Открытая ставка №7' });
+    expect(within(open).getByText('Своя')).toBeInTheDocument();
+    const row = (await screen.findByRole('table', { name: 'Рассчитанные ставки по месяцам' })).querySelector('tr[data-bet="4"]') as HTMLElement;
+    expect(within(row).getByText('Ординар')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Рассчитанные ставки по месяцам' }).querySelector('tr[data-bet="5"] .bets-kind')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Вид ставки: Все ставки' }));
+    await user.click(within(screen.getByRole('listbox', { name: 'Вид ставки' })).getByRole('option', { name: 'Свои' }));
+    await waitFor(() => expect(router.state.location.search).toBe('?kind=own'));
+    expect(calls.some((r) => r.url.includes('/api/bets/summary') && query(r).get('kind') === 'own')).toBe(true);
+    expect(screen.getByRole('link', { name: 'Экспорт CSV' })).toHaveAttribute('href', '/api/bets/export.csv?kind=own');
+  });
+
   it('поиск уходит в адрес после паузы ввода', async () => {
     const { user, router } = renderBets();
     await screen.findByRole('article', { name: 'Открытая ставка №7' });

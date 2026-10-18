@@ -392,7 +392,8 @@
             "value": 0.287,
             "tier": "strong",
             "in_express": true,
-            "note_key": null
+            "note_key": null,
+            "suspended": false
           },
           {
             "market": "ML",
@@ -406,7 +407,8 @@
             "value": -0.964,
             "tier": "none",
             "in_express": false,
-            "note_key": "analysis.leg.form"
+            "note_key": "analysis.leg.form",
+            "suspended": false
           },
           {
             "market": "HCP_-1.5",
@@ -420,7 +422,8 @@
             "value": null,
             "tier": "none",
             "in_express": false,
-            "note_key": "analysis.leg.no_odds"
+            "note_key": "analysis.leg.no_odds",
+            "suspended": false
           },
           {
             "market": "HCP_-1.5",
@@ -434,7 +437,8 @@
             "value": null,
             "tier": "none",
             "in_express": false,
-            "note_key": "analysis.leg.no_odds"
+            "note_key": "analysis.leg.no_odds",
+            "suspended": false
           },
           {
             "market": "HCP_+1.5",
@@ -448,7 +452,8 @@
             "value": null,
             "tier": "none",
             "in_express": false,
-            "note_key": "analysis.leg.no_odds"
+            "note_key": "analysis.leg.no_odds",
+            "suspended": true
           },
           {
             "market": "HCP_+1.5",
@@ -462,7 +467,8 @@
             "value": null,
             "tier": "none",
             "in_express": false,
-            "note_key": "analysis.leg.no_odds"
+            "note_key": "analysis.leg.no_odds",
+            "suspended": true
           }
         ],
         "reused_from": null,
@@ -628,7 +634,8 @@
             "value": 0.3108,
             "tier": "strong",
             "in_express": true,
-            "note_key": null
+            "note_key": null,
+            "suspended": false
           },
           {
             "market": "ML",
@@ -642,7 +649,8 @@
             "value": -0.7312,
             "tier": "none",
             "in_express": false,
-            "note_key": "analysis.leg.form"
+            "note_key": "analysis.leg.form",
+            "suspended": false
           },
           {
             "market": "HCP_-1.5",
@@ -656,7 +664,8 @@
             "value": null,
             "tier": "none",
             "in_express": false,
-            "note_key": "analysis.leg.no_odds"
+            "note_key": "analysis.leg.no_odds",
+            "suspended": false
           },
           {
             "market": "HCP_-1.5",
@@ -670,7 +679,8 @@
             "value": null,
             "tier": "none",
             "in_express": false,
-            "note_key": "analysis.leg.no_odds"
+            "note_key": "analysis.leg.no_odds",
+            "suspended": false
           },
           {
             "market": "HCP_+1.5",
@@ -684,7 +694,8 @@
             "value": null,
             "tier": "none",
             "in_express": false,
-            "note_key": "analysis.leg.no_odds"
+            "note_key": "analysis.leg.no_odds",
+            "suspended": true
           },
           {
             "market": "HCP_+1.5",
@@ -698,7 +709,8 @@
             "value": null,
             "tier": "none",
             "in_express": false,
-            "note_key": "analysis.leg.no_odds"
+            "note_key": "analysis.leg.no_odds",
+            "suspended": true
           }
         ],
         "reused_from": null,

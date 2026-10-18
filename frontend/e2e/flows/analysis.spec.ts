@@ -70,7 +70,7 @@ test('текст из двух матчей → разбор → анализ �
   const table = page.getByRole('table', { name: 'Вероятности и валуй по рынкам: Синнер — Руне' });
   await expect(table.getByRole('columnheader', { name: /ML-модель/ })).toBeVisible();
   await expect(table.getByRole('row', { name: /Синнер П1/ })).toContainText('1.30');
-  const express = page.getByRole('region', { name: 'Экспресс' });
+  const express = page.getByRole('region', { name: 'Экспресс стратегии' });
   await expect(express.getByText('Ждет решения')).toBeVisible();
   await express.getByRole('button', { name: 'Как посчитана сумма' }).click();
   await expect(express.getByText('Банк из вашего ввода')).toBeVisible();

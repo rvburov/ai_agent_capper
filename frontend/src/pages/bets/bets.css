@@ -138,6 +138,8 @@
 .bets-exp svg { transition: transform .15s; }
 .bets-exp[aria-expanded="true"] svg { transform: rotate(180deg); }
 .chip.bets-src { height: 20px; padding: 0 7px; margin-top: 4px; font-size: 11px; }
+.chip.bets-kind { height: 20px; padding: 0 7px; font-size: var(--fs-xs); vertical-align: middle; }
+td > .chip.bets-kind { margin-top: 4px; }
 .bets-month > td { padding-top: 14px; padding-bottom: 8px; background: var(--surface); }
 .bets-month-in { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .bets-month-name { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-sm); }

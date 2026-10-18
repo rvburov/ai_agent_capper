@@ -52,6 +52,17 @@ describe('Аналитика: фильтры в адресе', () => {
     });
   });
 
+  it('вид ставки (Р29): из адреса, в адрес и в запрос; «все» не пишется; снимается с остальными', () => {
+    const f = filtersFromSearch(new URLSearchParams('kind=single'));
+    expect(f).toEqual({ ...EMPTY_FILTERS, kind: 'single' });
+    expect(filtersFromSearch(new URLSearchParams('kind=all'))).toEqual(EMPTY_FILTERS);
+    expect(filtersFromSearch(new URLSearchParams('kind=legacy'))).toEqual(EMPTY_FILTERS);
+    expect(searchWithFilters(f).toString()).toBe('kind=single');
+    expect(filtersQuery(f)).toEqual({ kind: 'single' });
+    expect(isDefault(f)).toBe(false);
+    expect(withoutSlices({ ...f, period: '30d' })).toEqual({ ...EMPTY_FILTERS, period: '30d' });
+  });
+
   it('сброс, «снять фильтры» и исход в выпадающем списке', () => {
     expect(isDefault(EMPTY_FILTERS)).toBe(true);
     expect(isDefault({ ...EMPTY_FILTERS, from: '2026-10-01' })).toBe(false);

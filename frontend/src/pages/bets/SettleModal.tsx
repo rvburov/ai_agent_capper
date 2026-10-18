@@ -17,7 +17,7 @@ import { formatDate, formatOdds, formatOddsExact, formatProb } from '../../lib/f
 import { cx } from '../../lib/cx';
 import { ClosingFields } from './ClosingFields';
 import { OpenStatusChip } from './marks';
-import { betKindLong, legMarket, matchText, money, Signed, StatusChip } from './parts';
+import { betKindLong, KindChip, legMarket, matchText, money, Signed, StatusChip } from './parts';
 
 // «Результат ставки» (settleModal макета): исход каждого события, счет (по нему исход отмечается
 // сам по таблице сервера score_outcomes), закрывающий кэф и сводка «выплата / прибыль / банк
@@ -211,6 +211,7 @@ export function SettleModal({ bet: initial, prefill, correctedFrom, equity, onCl
       >
         <div className="bets-settle-intro">
           <OpenStatusChip bet={bet} />
+          <KindChip kind={bet.kind} />
           <span>
             {t('bets.settle.intro', { kind: betKindLong(bet, t), bookmaker: bet.bookmaker, stake: money(bet, bet.stake) })}{' '}
             <span className="odds">{formatOdds(bet.total_odds)}</span>

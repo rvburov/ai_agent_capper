@@ -1,31 +1,36 @@
 import type { TFunction } from 'i18next';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, useParams } from 'react-router';
+import { Navigate, useNavigate, useParams } from 'react-router';
 
 import { useMe } from '../../api/hooks/useMe';
 import { isApiError } from '../../api/errors';
 import { paths } from '../../app/paths';
-import { Button, Callout, Card, Chip, EmptyState, Skeleton, SurfaceChip, useToast } from '../../components';
+import { Button, Callout, Card, Chip, EmptyState, Skeleton, SurfaceChip, useReadOnly, useToast } from '../../components';
 import { useAiAccess, useAnalysis, useBank, useBookmakers, useCancelAnalysis, useDecision, useRunAnalysis, useStrategy } from '../../features/analysis/api';
 import { apiErrorText } from '../../features/analysis/codes';
 import { displayName, oddInputText, shortName } from '../../features/analysis/draft';
 import { analysisKeys } from '../../features/analysis/keys';
-import { marketDescription, marketLabel } from '../../features/analysis/markets';
+import { keyText } from '../../features/analysis/codes';
+import { formatShare, marketDescription, marketLabel } from '../../features/analysis/markets';
 import { analysisNumber } from '../../features/analysis/number';
 import { moneyRules } from '../../features/analysis/stake';
-import type { Analysis, Express, Step } from '../../features/analysis/types';
+import { addToSlip, removeFromSlip, slipItem, type SlipItem } from '../../features/analysis/ownBet';
+import type { Analysis, AnalysisBet, Express, ExpressLeg, MarketRow, MatchResult, Step, Variant, VariantCode } from '../../features/analysis/types';
 import { isActive, isParseFailed } from '../../features/analysis/types';
+import { savedBetOf, variantNoValue } from '../../features/analysis/variants';
 import { useAnalysisEvents } from '../../features/analysis/useAnalysisEvents';
 import type { Bet } from '../../features/bets/api';
 import { useViewAs } from '../../features/view/context';
 import { usePublicSettings } from '../../features/profile/usePublicSettings';
 import { formatDateLong, formatMoney, formatOdds, type Currency } from '../../lib/format';
 import { cx } from '../../lib/cx';
-import { SaveBetModal, StakeModal, type BetContext, type LegView } from './BetModals';
-import { ExpressCard, NoExpressCard, type ExpressState } from './ExpressCard';
-import { MatchCard, type MatchNames } from './MatchCard';
+import { SaveBetModal, SINGLE_PRESETS, StakeModal, type BetContext, type LegView } from './BetModals';
+import { ExpressCard, type ExpressState } from './ExpressCard';
+import { MatchCard, matchTitle, outcomeName, type MatchNames, type SlipControl } from './MatchCard';
+import { OwnBetModal } from './OwnBetModal';
+import { SlipCard, VariantCard, type VariantState } from './Variants';
 import { DoneCard, ResultSkeleton, RunningCard, StopBanner, StoppedCard } from './Progress';
 import { stopInfo } from './stopInfo';
 import { matchNames, newsMissing, type StepContext } from './stepsView';
@@ -52,7 +57,18 @@ function useNow(active: boolean): number {
   return now;
 }
 
-function legsOf(express: Express, analysis: Analysis, names: MatchNames, t: TFunction) {
+/** Фраза с точкой в конце: причина с сервера приходит без нее, а за ней идет следующая фраза. */
+function sentence(text: string): string {
+  return /[.!?…]$/.test(text.trim()) ? text : `${text.trim()}.`;
+}
+
+interface ModalTarget {
+  ctx: BetContext;
+  state: { stake: number | null; taken: string[] };
+  apply: (stake: number | null, taken: string[]) => void;
+}
+
+function legsOf(express: Pick<Express, 'legs'>, analysis: Analysis, names: MatchNames, t: TFunction) {
   const byMatch = new Map((analysis.result?.matches ?? []).map((m) => [m.match_id, m]));
   const legs: LegView[] = [];
   const meta: { match: string; desc: string }[] = [];
@@ -127,8 +143,18 @@ export function AnalysisPage() {
 
   const [express, setExpress] = useState<ExpressState | null>(null);
   const [calcOpen, setCalcOpen] = useState(false);
-  const [stakeOpen, setStakeOpen] = useState(false);
-  const [saveOpen, setSaveOpen] = useState(false);
+  // Окно ставки варианта (Р29): «Сохранить ставку» или «Изменить сумму» — у экспресса
+  // стратегии (code strategy) или у ординара и экспресса из лучших
+  const [modal, setModal] = useState<{ mode: 'save' | 'stake'; code: VariantCode } | null>(null);
+  const [variantState, setVariantState] = useState<Partial<Record<VariantCode, VariantState>>>({});
+  // Сохраненные сейчас ставки — до того, как анализ перечитан (повторное «Сохранить» не
+  // запишет вторую такую же ставку)
+  const [savedNow, setSavedNow] = useState<AnalysisBet[]>([]);
+  // Своя ставка (Р29): исходы из таблиц матчей, один рынок на матч
+  const [slip, setSlip] = useState<SlipItem[]>([]);
+  const [slipOpen, setSlipOpen] = useState<{ hint: string | null } | null>(null);
+  const readOnly = useReadOnly();
+  const navigate = useNavigate();
 
   const expressData = analysis?.result?.express ?? null;
   useEffect(() => {
@@ -205,6 +231,9 @@ export function AnalysisPage() {
   if (done && expressData) {
     title = t('analysis.head.express', { count: expressData.legs.length, total: formatOdds(expressData.total_odds) });
     lead = t(leadDone, { code: strategyCode });
+  } else if (done && result && result.variants.length > 0) {
+    title = t('analysis.head.noExpressVariants', { count: result.variants.length });
+    lead = t(leadDone, { code: strategyCode });
   } else if (done) {
     title = t('analysis.head.doneNoExpress', { count: matchesCount });
     lead = t(leadDone, { code: strategyCode });
@@ -262,49 +291,134 @@ export function AnalysisPage() {
     }
   }
 
-  function onSaved(bet: Bet, taken: string[]) {
-    if (!analysis) return;
-    setSaveOpen(false);
-    setExpress((s) => (s ? { ...s, taken } : s));
-    // Сохраненная ставка — сразу в анализе: экран показывает ее сумму и кэфы, как после перезагрузки
-    const brief = {
+  const bookmaker = analysis.bookmaker ?? analysis.events[0]?.bookmaker ?? null;
+  const variants = result?.variants ?? [];
+  const serverBets = analysis.bets;
+  const bets = [...serverBets, ...savedNow.filter((b) => !serverBets.some((x) => x.id === b.id))];
+  const growthOn = Boolean(bank.data?.adaptations.some((a) => a.key === 'up15' && a.enabled && a.active));
+  const rules = moneyRules(currency, strategy.data?.params);
+
+  function remember(bet: Bet, kind: AnalysisBet['kind']): AnalysisBet {
+    const brief: AnalysisBet = {
       id: bet.id,
+      kind,
       stake: bet.stake,
       currency: bet.currency,
       total_odds: bet.total_odds,
       bookmaker: bet.bookmaker,
-      legs: bet.legs.map((leg) => ({ prediction_id: leg.prediction_id, odds_taken: leg.odds_taken })),
+      legs: bet.legs.map((leg) => ({
+        prediction_id: leg.prediction_id,
+        match_id: leg.match_id,
+        market: leg.market,
+        selection: leg.selection,
+        odds_taken: leg.odds_taken,
+      })),
     };
-    client.setQueryData<Analysis>(analysisKeys.one(analysis.id), (old) => (old ? { ...old, bet_id: bet.id, bet: brief, decision: 'bet' } : old));
-    toast.show(
-      t('analysis.toast.saved', { id: bet.id, amount: formatMoney(bet.stake, currency), total: formatOdds(bet.total_odds) }),
-      { icon: 'check' },
-    );
+    setSavedNow((list) => [...list, brief]);
+    return brief;
   }
 
-  let expressBlock = null;
-  let betCtx: BetContext | null = null;
+  function onSaved(code: VariantCode, kind: AnalysisBet['kind'], bet: Bet, taken: string[]) {
+    if (!analysis) return;
+    setModal(null);
+    const brief = remember(bet, kind);
+    if (code === 'strategy') {
+      setExpress((s) => (s ? { ...s, taken } : s));
+      // Сохраненная ставка — сразу в анализе: экран показывает ее сумму и кэфы, как после перезагрузки
+      client.setQueryData<Analysis>(analysisKeys.one(analysis.id), (old) =>
+        old ? { ...old, bet_id: old.bet_id ?? bet.id, bet: old.bet ?? brief, bets: [...old.bets, brief], decision: 'bet' } : old,
+      );
+    } else {
+      setVariantState((all) => ({ ...all, [code]: { stake: null, taken } }));
+    }
+    const toastKey = kind === 'strategy' ? 'analysis.toast.saved' : kind === 'single' ? 'analysis.toast.savedSingle' : 'analysis.toast.savedOwn';
+    toast.show(t(toastKey, { id: bet.id, amount: formatMoney(bet.stake, currency), total: formatOdds(bet.total_odds) }), { icon: 'check' });
+  }
+
+  /** Исходы в свою ставку по ногам (экспресс стратегии → «Собрать свою»). */
+  function slipFromLegs(legs: readonly Pick<ExpressLeg, 'match_id' | 'market' | 'selection'>[]): SlipItem[] {
+    const items: SlipItem[] = [];
+    for (const leg of legs) {
+      const match = result?.matches.find((m) => m.match_id === leg.match_id);
+      const row = match?.markets.find((r) => r.market === leg.market && r.selection === leg.selection);
+      const item = match && row ? slipItem(row, match, outcomeName(row, match, playerNames), matchTitle(match, playerNames, t)) : null;
+      if (item) items.push(item);
+    }
+    return items;
+  }
+
+  const slipControl: SlipControl = {
+    inSlip: new Set(slip.map((x) => x.predictionId)),
+    onAdd: (row: MarketRow, match: MatchResult) => {
+      if (readOnly) return;
+      const item = slipItem(row, match, outcomeName(row, match, playerNames), matchTitle(match, playerNames, t));
+      if (!item) return;
+      const change = addToSlip(slip, item);
+      setSlip(change.slip);
+      setSlipOpen({ hint: change.replaced ? t('analysis.own.replaced', { was: change.replaced.name, now: item.name }) : null });
+    },
+  };
+
+  function variantCtx(variant: Variant, legs: LegView[], analysisId: number): BetContext {
+    const recommended = variant.stake === null ? null : Number(variant.stake);
+    const single = variant.kind === 'single';
+    const share = recommended !== null ? Number(variant.stake_calc.pct) : null;
+    return {
+      analysisId,
+      legs,
+      bank: Number(variant.stake_calc.bank),
+      currency,
+      rules,
+      recommendedShare: share,
+      recommended,
+      pExpress: variant.p,
+      totalMax: Number.POSITIVE_INFINITY,
+      growthOn,
+      strategyCode,
+      kind: variant.kind,
+      presets: SINGLE_PRESETS,
+      stakeHint:
+        recommended !== null && share !== null
+          ? t(single ? 'analysis.variants.hintSingle' : 'analysis.variants.hintBest', {
+              amount: formatMoney(recommended, currency),
+              share: formatShare(share),
+              max: formatShare(strategy.data?.params.best_express_max_pct ?? '0.015'),
+            })
+          : variantNoValue(variant)
+            ? t('analysis.variants.hintNoValue')
+            : t('analysis.variants.hintNone'),
+      kindNote: single ? t('analysis.variants.noteSingle') : t('analysis.variants.noteBest'),
+    };
+  }
+
+  const targets = new Map<VariantCode, ModalTarget>();
+  const cards: ReactNode[] = [];
+  let expressBlock: ReactNode = null;
   if (done && result) {
     if (expressData && express) {
       const { legs, meta } = legsOf(expressData, analysis, playerNames, t);
-      const rules = moneyRules(currency, strategy.data?.params);
       const recommended = expressData.stake.amount === null ? null : Number(expressData.stake.amount);
       const totalMax = Number(
         legs.length === 3 ? (strategy.data?.params.triple_total[1] ?? '4.10') : (strategy.data?.params.double_total[1] ?? '3.24'),
       );
-      betCtx = {
-        analysisId: analysis.id,
-        legs,
-        bank: Number(expressData.stake.bank),
-        currency,
-        rules,
-        recommendedShare: recommended !== null ? Number(expressData.stake.pct) : null,
-        recommended,
-        pExpress: expressData.p_express,
-        totalMax,
-        growthOn: Boolean(bank.data?.adaptations.some((a) => a.key === 'up15' && a.enabled && a.active)),
-        strategyCode,
-      };
+      targets.set('strategy', {
+        ctx: {
+          analysisId: analysis.id,
+          legs,
+          bank: Number(expressData.stake.bank),
+          currency,
+          rules,
+          recommendedShare: recommended !== null ? Number(expressData.stake.pct) : null,
+          recommended,
+          pExpress: expressData.p_express,
+          totalMax,
+          growthOn,
+          strategyCode,
+          kind: 'strategy',
+        },
+        state: express,
+        apply: (stake, taken) => setExpress({ stake, taken }),
+      });
       expressBlock = (
         <ExpressCard
           analysis={analysis}
@@ -318,23 +432,92 @@ export function AnalysisPage() {
           strategyCode={strategyCode}
           calcOpen={calcOpen}
           onCalcToggle={setCalcOpen}
-          onSave={() => (express.stake ?? recommended) === null ? setStakeOpen(true) : setSaveOpen(true)}
-          onEditStake={() => setStakeOpen(true)}
+          saved={savedBetOf(
+            expressData.legs.map((l) => l.prediction_id),
+            'strategy',
+            bets,
+          )}
+          hasBets={bets.length > 0 || analysis.decision === 'bet'}
+          onSave={() => setModal({ mode: (express.stake ?? recommended) === null ? 'stake' : 'save', code: 'strategy' })}
+          onEditStake={() => setModal({ mode: 'stake', code: 'strategy' })}
           onResetStake={() => {
             setExpress({ ...express, stake: null });
             if (recommended !== null) toast.show(t('analysis.toast.stakeReset', { amount: formatMoney(recommended, currency) }), { icon: 'refresh' });
+          }}
+          onCollect={() => {
+            if (readOnly) return;
+            setSlip(slipFromLegs(expressData.legs));
+            setSlipOpen({ hint: t('analysis.own.fromExpress') });
           }}
           onSkip={() => void decide('skip')}
           onUnskip={() => void decide(null)}
           deciding={decision.isPending}
         />
       );
-    } else if (!expressData) {
-      expressBlock = <NoExpressCard reasonKey={result.no_express_key} />;
+    }
+    let n = expressBlock ? 1 : 0;
+    for (const variant of variants) {
+      if (variant.code === 'strategy') continue;
+      n += 1;
+      const { legs, meta } = legsOf(variant, analysis, playerNames, t);
+      const state = variantState[variant.code] ?? { stake: null, taken: variant.legs.map((leg) => oddInputText(Number(leg.odds))) };
+      const ctx = variantCtx(variant, legs, analysis.id);
+      const code = variant.code;
+      targets.set(code, { ctx, state, apply: (stake, taken) => setVariantState((all) => ({ ...all, [code]: { stake, taken } })) });
+      cards.push(
+        <VariantCard
+          key={code}
+          variant={variant}
+          n={n}
+          legs={legs}
+          legMeta={meta}
+          currency={currency}
+          rules={rules}
+          state={state}
+          saved={savedBetOf(
+            variant.legs.map((l) => l.prediction_id),
+            variant.kind,
+            bets,
+          )}
+          bank={bank.data}
+          primary={!expressBlock && n === 1}
+          onSave={() => setModal({ mode: (state.stake ?? ctx.recommended) === null ? 'stake' : 'save', code })}
+          onEditStake={() => setModal({ mode: 'stake', code })}
+        />,
+      );
     }
   }
 
-  const bookmaker = analysis.bookmaker ?? analysis.events[0]?.bookmaker ?? null;
+  const others = variants.filter((v) => v.code !== 'strategy');
+  const allNoValue = variants.length > 0 && variants.every(variantNoValue);
+  const sideBlock =
+    done && result ? (
+      <section className="analysis-vars" aria-labelledby="analysis-vars-title">
+        <div className="analysis-vars-head">
+          <div className="eyebrow">{t('analysis.express.eyebrow')}</div>
+          <h3 id="analysis-vars-title">{t('analysis.variants.heading')}</h3>
+          <p className="small muted">{`${expressBlock ? `${t('analysis.variants.leadMain')} ` : ''}${t('analysis.variants.lead')}`}</p>
+        </div>
+        {allNoValue && (
+          <Callout kind="bad" icon="alert">
+            <b>{t('analysis.variants.noValueAllTitle')}</b> {t('analysis.variants.noValueAllText')}
+          </Callout>
+        )}
+        {!expressBlock && (
+          <Callout kind="warn" icon="alert">
+            <b>{t('analysis.variants.noExpressTitle')}</b> {sentence(keyText(result.no_express_key, {}, t('analysis.express.noneDefault')))}{' '}
+            {others.length ? t('analysis.variants.noExpressMore') : t('analysis.variants.noVariants')}
+          </Callout>
+        )}
+        {expressBlock}
+        {cards}
+        {slip.length > 0 && !readOnly && <SlipCard slip={slip} onOpen={() => setSlipOpen({ hint: null })} onClear={() => setSlip([])} />}
+      </section>
+    ) : null;
+  const target = modal ? (targets.get(modal.code) ?? null) : null;
+  // Банк своей ставки — тот же, от которого анализ считал суммы (ввод или учет), как у вариантов
+  const slipBank = Number(expressData?.stake.bank ?? variants[0]?.stake_calc.bank ?? analysis.bank ?? bank.data?.equity ?? 0);
+
   const oddsHint = bookmaker ? t('analysis.match.oddsOf', { bookmaker }) : t('analysis.match.oddsYours');
 
   return (
@@ -390,11 +573,11 @@ export function AnalysisPage() {
               <div className="analysis-result">
                 <div className="analysis-col analysis-main">
                   {result.matches.map((match) => (
-                    <MatchCard key={match.match_id} match={match} names={playerNames} bookmaker={bookmaker} oddsHint={oddsHint} />
+                    <MatchCard key={match.match_id} match={match} names={playerNames} bookmaker={bookmaker} oddsHint={oddsHint} slip={slipControl} />
                   ))}
                   <WhyCard result={result} names={playerNames} strategyCode={strategyCode} />
                 </div>
-                <div className={cx('analysis-col', 'analysis-side', calcOpen && 'is-calc-open')}>{expressBlock}</div>
+                <div className={cx('analysis-col', 'analysis-side', calcOpen && 'is-calc-open')}>{sideBlock}</div>
               </div>
               <MetaLine analysis={analysis} />
             </>
@@ -407,32 +590,67 @@ export function AnalysisPage() {
         </>
       )}
 
-      {betCtx && express && stakeOpen && (
+      {target && modal?.mode === 'stake' && (
         <StakeModal
           open
-          ctx={betCtx}
-          stake={express.stake ?? betCtx.recommended}
-          taken={express.taken}
-          onClose={() => setStakeOpen(false)}
+          ctx={target.ctx}
+          stake={target.state.stake ?? target.ctx.recommended}
+          taken={target.state.taken}
+          onClose={() => setModal(null)}
           onApply={(stake, taken) => {
-            setStakeOpen(false);
-            setExpress({ stake: stake === betCtx?.recommended ? null : stake, taken });
+            setModal(null);
+            target.apply(stake === target.ctx.recommended ? null : stake, taken);
             toast.show(t('analysis.toast.stakeChanged', { amount: formatMoney(stake, currency) }), { icon: 'edit' });
           }}
         />
       )}
-      {betCtx && express && saveOpen && (express.stake ?? betCtx.recommended) !== null && (
+      {target && modal?.mode === 'save' && (target.state.stake ?? target.ctx.recommended) !== null && (
         <SaveBetModal
           open
-          ctx={betCtx}
-          stake={(express.stake ?? betCtx.recommended) as number}
-          taken={express.taken}
+          ctx={target.ctx}
+          stake={(target.state.stake ?? target.ctx.recommended) as number}
+          taken={target.state.taken}
           bookmaker={bookmaker}
           bookmakers={bookmakers.data ?? []}
-          onClose={() => setSaveOpen(false)}
-          onSaved={onSaved}
+          onClose={() => setModal(null)}
+          onSaved={(bet, taken) => onSaved(modal.code, target.ctx.kind, bet, taken)}
           onConflict={(message) => {
-            setSaveOpen(false);
+            setModal(null);
+            toast.show(message, { icon: 'alert', duration: 6000 });
+          }}
+        />
+      )}
+      {slipOpen && slip.length > 0 && !readOnly && (
+        <OwnBetModal
+          analysisId={analysis.id}
+          slip={slip}
+          bank={slipBank}
+          currency={currency}
+          rules={rules}
+          growthOn={growthOn}
+          bookmaker={bookmaker}
+          bookmakers={bookmakers.data ?? []}
+          hint={slipOpen.hint}
+          onRemove={(predictionId) => {
+            const next = removeFromSlip(slip, predictionId);
+            setSlip(next);
+            if (!next.length) {
+              setSlipOpen(null);
+              toast.show(t('analysis.own.empty'), { icon: 'x' });
+            }
+          }}
+          onClose={() => setSlipOpen(null)}
+          onSaved={(bet) => {
+            setSlipOpen(null);
+            setSlip([]);
+            remember(bet, 'own');
+            toast.show(t('analysis.toast.savedOwn', { id: bet.id, amount: formatMoney(bet.stake, currency), total: formatOdds(bet.total_odds) }), {
+              icon: 'check',
+            });
+            void navigate(`${paths.bets}?new=${bet.id}`);
+          }}
+          onConflict={(message) => {
+            setSlipOpen(null);
             toast.show(message, { icon: 'alert', duration: 6000 });
           }}
         />

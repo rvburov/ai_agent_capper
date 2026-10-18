@@ -44,3 +44,5 @@ export type Period = NonNullable<AnalyticsQuery['period']>;
 export type Market = NonNullable<AnalyticsQuery['market']>;
 export type SurfaceFilter = NonNullable<AnalyticsQuery['surface']>[number];
 export type SourceFilter = NonNullable<AnalyticsQuery['source']>;
+/** Вид ставки (Р29): стратегия, ординары, свои; «все» — значение по умолчанию, в адрес не пишется. */
+export type KindFilter = Exclude<NonNullable<AnalyticsQuery['kind']>, 'all'>;

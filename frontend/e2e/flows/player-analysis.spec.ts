@@ -28,7 +28,7 @@ test('игроки → поиск → карточка → матч → анал
   await withFakeClaude(async () => {
     await page.getByRole('button', { name: /^Запустить/ }).last().click();
     await expect(page).toHaveURL(/\/analysis\/\d+$/);
-    await expect(page.getByRole('heading', { level: 2, name: /^Анализ 1 матча готов/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('heading', { level: 2, name: /^Экспресса стратегии нет · \d варианта? ставки$|^Анализ 1 матча готов/ })).toBeVisible({ timeout: 30_000 });
   });
   const analysisId = Number(/\/analysis\/(\d+)/.exec(page.url())?.[1]);
 
@@ -63,5 +63,5 @@ test('игроки → поиск → карточка → матч → анал
   // матч → анализ: ссылка шапки ведет в тот самый анализ
   await hero.getByRole('link', { name: 'Открыть анализ' }).click();
   await expect(page).toHaveURL(new RegExp(`/analysis/${analysisId}$`));
-  await expect(page.getByRole('heading', { level: 2, name: /^Анализ 1 матча готов/ })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: /^Экспресса стратегии нет · \d варианта? ставки$|^Анализ 1 матча готов/ })).toBeVisible();
 });

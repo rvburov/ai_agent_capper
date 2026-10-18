@@ -88,7 +88,7 @@ async function runAnalysis(page: Page, events: string[][]): Promise<number> {
 
 /** «Сохранить ставку» экспресса анализа: номер ставки. */
 async function saveBet(page: Page): Promise<number> {
-  const express = page.getByRole('region', { name: 'Экспресс' });
+  const express = page.getByRole('region', { name: 'Экспресс стратегии' });
   await express.getByRole('button', { name: 'Сохранить ставку' }).click();
   const dialog = page.getByRole('dialog', { name: 'Сохранить ставку' });
   await dialog.getByRole('button', { name: 'Сохранить ставку' }).click();

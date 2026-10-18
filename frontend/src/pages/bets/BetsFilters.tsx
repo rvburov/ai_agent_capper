@@ -7,6 +7,7 @@ import { useBetSummary } from '../../features/bets/api';
 import { MARKET_KEY } from '../../features/bets/display';
 import {
   filtersQuery,
+  KINDS,
   MARKETS,
   PERIODS,
   SEARCH_MAX,
@@ -16,7 +17,7 @@ import {
   SURFACES,
   type BetFilters,
 } from '../../features/bets/filters';
-import type { Market, Period, SourceFilter, StatusFilter, SurfaceFilter } from '../../features/bets/types';
+import type { KindFilter, Market, Period, SourceFilter, StatusFilter, SurfaceFilter } from '../../features/bets/types';
 import { formatDateRange } from '../../lib/format';
 import { cx } from '../../lib/cx';
 
@@ -117,6 +118,10 @@ function sourceOptions(t: TFunction): DropdownOption<SourceFilter | All>[] {
   return [{ value: 'all', label: t('bets.filters.sourceAll') }, ...SOURCES.map((s) => ({ value: s, label: t(`bets.filters.sources.${s}`) }))];
 }
 
+function kindOptions(t: TFunction): DropdownOption<KindFilter | All>[] {
+  return [{ value: 'all', label: t('bets.filters.kindAll') }, ...KINDS.map((k) => ({ value: k, label: t(`bets.filters.kinds.${k}`) }))];
+}
+
 function none<T extends string>(value: T | All): T | null {
   return value === 'all' ? null : value;
 }
@@ -172,6 +177,13 @@ export function DesktopFilters({ filters, onChange }: { filters: BetFilters; onC
         value={filters.source ?? 'all'}
         onChange={(value) => onChange({ ...filters, source: none(value) })}
       />
+      <Dropdown
+        className="bets-select"
+        label={t('bets.filters.kind')}
+        options={kindOptions(t)}
+        value={filters.kind ?? 'all'}
+        onChange={(value) => onChange({ ...filters, kind: none(value) })}
+      />
       <div className="bets-chips" role="group" aria-label={t('bets.filters.surface')}>
         {SURFACES.map((surface) => (
           <SurfaceToggle
@@ -194,6 +206,7 @@ export function MobileFilters({ filters, onChange, onReset }: { filters: BetFilt
   if (filters.status) active.push({ key: 'status', label: t(`bets.filters.statuses.${filters.status}`), drop: () => ({ ...filters, status: null }) });
   if (filters.market) active.push({ key: 'market', label: t(`bets.filters.markets.${MARKET_KEY[filters.market]}`), drop: () => ({ ...filters, market: null }) });
   if (filters.source) active.push({ key: 'source', label: t(`bets.filters.sources.${filters.source}`), drop: () => ({ ...filters, source: null }) });
+  if (filters.kind) active.push({ key: 'kind', label: t(`bets.filters.kinds.${filters.kind}`), drop: () => ({ ...filters, kind: null }) });
   for (const surface of filters.surfaces) {
     active.push({
       key: `surface-${surface}`,
@@ -274,7 +287,7 @@ function FilterSheet({ filters, onClose, onApply }: { filters: BetFilters; onClo
       className="bets-sheet"
       footer={
         <>
-          <Button onClick={() => onApply({ ...filters, status: null, market: null, source: null, surfaces: [] })}>{t('bets.filters.sheetReset')}</Button>
+          <Button onClick={() => onApply({ ...filters, status: null, market: null, source: null, kind: null, surfaces: [] })}>{t('bets.filters.sheetReset')}</Button>
           <Button kind="primary" disabled={found === 0} loading={summary.isFetching && found === null} onClick={() => onApply(draft)}>
             {found === null ? t('bets.filters.sheetApply') : found === 0 ? t('bets.filters.sheetNothing') : t('bets.filters.sheetShow', { count: found })}
           </Button>
@@ -323,6 +336,15 @@ function FilterSheet({ filters, onClose, onApply }: { filters: BetFilters; onClo
           onChange={(value) => setDraft({ ...draft, source: none(value) })}
         />
         <div className="field-hint">{t('bets.filters.sourceHint')}</div>
+      </div>
+      <div className="field">
+        <div className="field-label">{t('bets.filters.kind')}</div>
+        <ChipGroup<KindFilter | All>
+          label={t('bets.filters.kind')}
+          options={[{ value: 'all', label: all }, ...KINDS.map((k) => ({ value: k, label: t(`bets.filters.kinds.${k}`) }))]}
+          value={draft.kind ?? 'all'}
+          onChange={(value) => setDraft({ ...draft, kind: none(value) })}
+        />
       </div>
     </Modal>
   );

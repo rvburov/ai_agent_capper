@@ -32,6 +32,7 @@ export function recentBet(over: Partial<RecentBet> = {}): RecentBet {
     stake: '1320.00',
     profit: '1168.20',
     source: 'app',
+    kind: 'strategy',
     equity_after: '50860.00',
     ...over,
   };

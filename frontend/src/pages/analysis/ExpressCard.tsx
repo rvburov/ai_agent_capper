@@ -4,9 +4,10 @@ import { useTranslation } from 'react-i18next';
 import { paths } from '../../app/paths';
 import { Button, Callout, Chip, Disclosure, Icon, OddsBox, ReadOnlyNote, useReadOnly } from '../../components';
 import { keyText } from '../../features/analysis/codes';
+import { singleRangeText } from '../../features/analysis/variants';
 import { formatProb, formatShare } from '../../features/analysis/markets';
 import { payout, totalOdds, type MoneyRules } from '../../features/analysis/stake';
-import type { Analysis, Bank, Express, StakeStep } from '../../features/analysis/types';
+import type { Analysis, AnalysisBet, Bank, Express, Stake, StakeStep } from '../../features/analysis/types';
 import { cx } from '../../lib/cx';
 import { formatMoney, formatNumber, formatOdds, formatPercent, type Currency } from '../../lib/format';
 import type { LegView } from './BetModals';
@@ -37,9 +38,11 @@ function money(value: string | number, currency: Currency) {
   return formatMoney(value, currency);
 }
 
-/** Строки «Как посчитана сумма» по шагам расчета сервера (StakeOut.steps). */
-function calcRows(express: Express, currency: Currency, t: T): Array<[string, string]> {
-  const stake = express.stake;
+/**
+ * Строки «Как посчитана сумма» по шагам расчета сервера (StakeOut.steps): у экспресса, у
+ * ординара (своя таблица, Р29) и у экспресса из лучших (не больше 1,5% банка).
+ */
+export function calcRows(stake: Stake, totalOdds: string, currency: Currency, t: T): Array<[string, string]> {
   const rows: Array<[string, string]> = [
     [stake.bank_source === 'input' ? t('analysis.calc.bankInput') : t('analysis.calc.bankLedger'), money(stake.bank, currency)],
   ];
@@ -48,7 +51,13 @@ function calcRows(express: Express, currency: Currency, t: T): Array<[string, st
     const p = step.params;
     switch (step.kind) {
       case 'band':
-        rows.push([t('analysis.calc.band', { total: formatOdds(express.total_odds), low: formatOdds(p.low), high: formatOdds(p.high) }), pct(step.pct)]);
+        rows.push([bandText(totalOdds, p, t), pct(step.pct)]);
+        break;
+      case 'no_value':
+        rows.push([t('analysis.calc.noValue', { value: formatPercent(Number(p.value ?? 0), { digits: 1, signed: true }) }), t('analysis.calc.noStake')]);
+        break;
+      case 'outside':
+        rows.push([t('analysis.calc.outside'), pct(p.max_pct)]);
         break;
       case 'value': {
         const add = Number(p.add);
@@ -87,14 +96,26 @@ function calcRows(express: Express, currency: Currency, t: T): Array<[string, st
         rows.push([t('analysis.calc.belowMin', { min: money(p.min ?? 0, currency) }), t('analysis.calc.noStake')]);
         break;
       default:
-        rows.push([step.kind, pct(step.pct)]);
+        rows.push([keyText(`analysis.calc.step.${step.kind}`, p, step.kind), pct(step.pct)]);
     }
   }
   return rows;
 }
 
+/**
+ * Строка диапазона кэфа: у экспресса — «Кэф 1.89 → диапазон 1.71–2.20», у ординара (Р29) —
+ * «Ординар, кэф 1.45 → диапазон до 1.60», у экспресса из лучших — с потолком вне правил.
+ */
+function bandText(total: string, p: Record<string, string>, t: T): string {
+  if (p.table === 'single') {
+    return t('analysis.calc.singleBand', { total: formatOdds(total), range: singleRangeText(p.low ?? 0, p.high ?? 50) });
+  }
+  const band = t('analysis.calc.band', { total: formatOdds(total), low: formatOdds(p.low), high: formatOdds(p.high) });
+  return p.table === 'best_express' ? t('analysis.calc.bestBand', { band }) : band;
+}
+
 /** Адаптации суммы из «Банк и стратегия» (Р22): что сейчас с банком и что действует. */
-function Adaptations({ bank, t }: { bank: Bank | undefined; t: T }) {
+export function Adaptations({ bank, t }: { bank: Bank | undefined; t: T }) {
   if (!bank || bank.empty) return <Callout kind="accent" icon="history">{t('analysis.adapt.empty')}</Callout>;
   const now = [
     t('analysis.adapt.drawdown', { value: formatPercent(-Number(bank.drawdown), { signed: true }) }),
@@ -129,7 +150,16 @@ interface ExpressCardProps {
   onResetStake: () => void;
   onSkip: () => void;
   onUnskip: () => void;
+  /** «Собрать свою» (Р29): события экспресса — в свою ставку. */
+  onCollect: () => void;
   deciding: boolean;
+  /** Сохраненная ставка этого экспресса (вид strategy), если есть. */
+  saved: AnalysisBet | null;
+  /**
+   * У анализа есть ставка любого вида (ординар, своя — Р29): решение анализа уже «поставил»,
+   * «Не ставить» сервер не примет (409), кнопки нет.
+   */
+  hasBets: boolean;
 }
 
 export function ExpressCard(props: ExpressCardProps) {
@@ -137,7 +167,7 @@ export function ExpressCard(props: ExpressCardProps) {
   const readOnly = useReadOnly();
   const { analysis, express, legs, currency, rules, state } = props;
   // Ставка сохранена — показываем ее сумму и кэфы (с сервера), а не рекомендацию анализа
-  const saved = analysis.bet;
+  const saved = props.saved;
   const recommended = express.stake.amount === null ? null : Number(express.stake.amount);
   const amount = saved ? Number(saved.stake) : (state.stake ?? recommended);
   const custom = saved ? amount !== recommended : state.stake !== null && state.stake !== recommended;
@@ -147,7 +177,9 @@ export function ExpressCard(props: ExpressCardProps) {
   const changed = taken.some((x, i) => Math.abs(x - (legs[i]?.odds ?? x)) > 0.0005);
   const total = saved ? Number(saved.total_odds) : totalOdds(taken);
   const ev = express.p_express * total - 1;
-  const decision = analysis.bet_id !== null ? 'bet' : analysis.decision;
+  // Решение «ставка» относится к экспрессу, только если сохранен он сам (у анализа может быть
+  // и ординар, и своя ставка — Р29)
+  const decision = saved ? 'bet' : !props.hasBets && analysis.decision === 'skip' ? 'skip' : null;
   const failedRules = express.rules.filter((r) => !r.ok);
   const bank = Number(express.stake.bank);
   const lose = loseRate(express.p_express);
@@ -163,14 +195,10 @@ export function ExpressCard(props: ExpressCardProps) {
                 amount: formatMoney(saved.stake, saved.currency as Currency),
                 total: formatOdds(saved.total_odds),
               })
-            : t('analysis.express.savedShort', { id: analysis.bet_id ?? '' })}
+            : null}
         </Callout>
         <div className="analysis-actions">
-          <Button
-            kind="primary"
-            icon="ticket"
-            to={analysis.bet_id !== null ? `${paths.bets}?new=${analysis.bet_id}` : paths.bets}
-          >
+          <Button kind="primary" icon="ticket" to={saved ? `${paths.bets}?new=${saved.id}` : paths.bets}>
             {t('analysis.express.openBets')}
           </Button>
         </div>
@@ -196,9 +224,14 @@ export function ExpressCard(props: ExpressCardProps) {
         <Button icon="edit" onClick={props.onEditStake} ro>
           {t('analysis.express.editStake')}
         </Button>
-        <Button kind="ghost" icon="x" loading={props.deciding} onClick={props.onSkip} ro>
-          {t('analysis.express.skip')}
+        <Button icon="layers" onClick={props.onCollect} ro>
+          {t('analysis.variants.collect')}
         </Button>
+        {!props.hasBets && (
+          <Button kind="ghost" icon="x" loading={props.deciding} onClick={props.onSkip} ro>
+            {t('analysis.express.skip')}
+          </Button>
+        )}
       </div>
     );
     // Р27: администратор смотрит анализ участника — решение принимает сам участник
@@ -228,11 +261,11 @@ export function ExpressCard(props: ExpressCardProps) {
     );
 
   return (
-    <section className="card analysis-exp" aria-labelledby="analysis-exp-title">
+    <section className="card analysis-exp is-main" aria-labelledby="analysis-exp-title">
       <div className="card-head">
         <div className="card-head-text">
-          <div className="eyebrow">{t('analysis.express.eyebrow')}</div>
-          <h3 id="analysis-exp-title">{t('analysis.express.title')}</h3>
+          <div className="eyebrow">{t('analysis.variants.mainEyebrow')}</div>
+          <h3 id="analysis-exp-title">{t('analysis.variants.title.strategy')}</h3>
           <div className="card-sub">{t('analysis.express.sub', { count: legs.length, code: props.strategyCode })}</div>
         </div>
         {status}
@@ -308,7 +341,7 @@ export function ExpressCard(props: ExpressCardProps) {
         </div>
         <Disclosure icon="info" summary={t('analysis.express.calc')} open={props.calcOpen} onToggle={props.onCalcToggle} bodyClassName="stack analysis-calc-box">
           <dl className="analysis-calc">
-            {calcRows(express, currency, t).map(([label, value], i, all) => (
+            {calcRows(express.stake, express.total_odds, currency, t).map(([label, value], i, all) => (
               <div key={`${i}-${label}`} className={i === all.length - 1 ? 'is-sum' : undefined}>
                 <dt>{label}</dt>
                 <dd>{value}</dd>
@@ -323,28 +356,6 @@ export function ExpressCard(props: ExpressCardProps) {
         </p>
       </div>
       <div className="card-foot">{foot}</div>
-    </section>
-  );
-}
-
-/** Экспресса нет: почему и что дальше. */
-export function NoExpressCard({ reasonKey }: { reasonKey: string | null }) {
-  const { t } = useTranslation();
-  return (
-    <section className="card analysis-exp" aria-labelledby="analysis-exp-title">
-      <div className="card-head">
-        <div className="card-head-text">
-          <div className="eyebrow">{t('analysis.express.eyebrow')}</div>
-          <h3 id="analysis-exp-title">{t('analysis.express.noneTitle')}</h3>
-        </div>
-        <Chip kind="outline" icon="x">
-          {t('analysis.express.chipNone')}
-        </Chip>
-      </div>
-      <div className="card-body">
-        <Callout kind="info">{keyText(reasonKey, {}, t('analysis.express.noneDefault'))}</Callout>
-        <p className="small soft">{t('analysis.express.noneText')}</p>
-      </div>
     </section>
   );
 }

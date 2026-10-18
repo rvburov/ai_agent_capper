@@ -84,6 +84,7 @@ export function betLeg2(over: Partial<BetLeg> = {}): BetLeg {
 export function betOpen(over: Partial<BetItem> = {}): BetItem {
   return {
     id: 7,
+    kind: 'strategy',
     analysis_id: 1,
     placed_at: '2026-10-13T08:30:00Z',
     bookmaker: 'Fonbet',

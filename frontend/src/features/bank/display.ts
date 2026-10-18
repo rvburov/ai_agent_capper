@@ -53,6 +53,15 @@ export function stakeRows(params: StrategyParams, equity: number | null, currenc
   });
 }
 
+/** Таблица суммы ординара (Р29): доля банка по кэфу и сколько это сейчас. */
+export function singleRows(params: StrategyParams, equity: number | null, currency: string): Omit<StakeRow, 'triple'>[] {
+  const rules = moneyRules(currency, params);
+  return params.single_bands.map((band) => {
+    const pct = Number(band.pct);
+    return { low: band.low, high: band.high, pct, stake: equity !== null && equity > 0 ? stakeForShare(equity, pct, rules) : null };
+  });
+}
+
 export type ValueTier = 'strong' | 'good' | 'small' | 'none';
 
 export interface ValueRow {

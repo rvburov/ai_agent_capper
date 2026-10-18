@@ -20,6 +20,8 @@ const GROUPS = [
   'analysis.express',
   'analysis.stake',
   'analysis.compare',
+  // Р29: причины вариантов ставки и их предупреждения
+  'analysis.variants',
   // кабинет (этап 4): ответственная игра, букмекеры, удаление аккаунта, уведомления, валюта
   'errors.play',
   'errors.bookmaker',

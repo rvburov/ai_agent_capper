@@ -54,7 +54,7 @@ test.describe('смена валюты программы', () => {
     await parseEvents(m.page, eventsText(SINNER_RUNE), 1);
     await withFakeClaude(async () => {
       await m.page.getByRole('button', { name: /^Запустить/ }).last().click();
-      await expect(m.page.getByRole('heading', { level: 2, name: /^Анализ 1 матча готов/ })).toBeVisible({ timeout: 30_000 });
+      await expect(m.page.getByRole('heading', { level: 2, name: /^Экспресса стратегии нет · \d варианта? ставки$|^Анализ 1 матча готов/ })).toBeVisible({ timeout: 30_000 });
     });
 
     // Участник с открытым приложением: кэш запросов с суммами в рублях (главная, «Ставки»,

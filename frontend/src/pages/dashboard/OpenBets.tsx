@@ -6,7 +6,7 @@ import { Button, Card, EmptyState } from '../../components';
 import { betTournament, currencyOf, legProb } from '../../features/bets/display';
 import type { Dashboard, OpenBet } from '../../features/dashboard/types';
 import { formatDate, formatMoney, formatOdds, formatProb, formatTime } from '../../lib/format';
-import { betKindLong, legMarket, StatusChip } from '../bets/parts';
+import { betKindLong, KindChip, legMarket, StatusChip } from '../bets/parts';
 import { MatchLinks } from './parts';
 
 // «Открытые ставки» (openBetsCard макета): события с вероятностью модели и 1/кэф, кэф, сумма,
@@ -32,7 +32,7 @@ function OpenBetCard({ bet, today, starts }: { bet: OpenBet; today: string; star
     <article className="dashboard-bet" aria-label={t('dashboard.open.betLabel', { id: bet.id })}>
       <div className="dashboard-bet-head">
         <div>
-          <strong>{betKindLong(bet, t)}</strong>
+          <strong>{betKindLong(bet, t)}</strong> <KindChip kind={bet.kind} />
           <div className="xsmall muted">{meta}</div>
         </div>
         <StatusChip status="open" />

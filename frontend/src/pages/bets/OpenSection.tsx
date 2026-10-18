@@ -11,7 +11,7 @@ import type { BetItem } from '../../features/bets/types';
 import { cx } from '../../lib/cx';
 import { formatDate, formatOdds, formatProb } from '../../lib/format';
 import { OpenStatusChip } from './marks';
-import { betKindLong, legMarket, MatchName, money } from './parts';
+import { betKindLong, KindChip, legMarket, MatchName, money } from './parts';
 
 // «В игре» (openSection и openCard макета): открытые ставки карточками с «Внести результат».
 
@@ -105,7 +105,9 @@ function OpenCard({ bet, fresh, onSettle }: { bet: BetItem; fresh: boolean; onSe
     <article className={cx('card bets-open', fresh && 'is-new')} aria-label={t('bets.open.cardLabel', { id: bet.id })} data-open-bet={bet.id}>
       <div className="bets-open-head">
         <div className="bets-min">
-          <div className="bets-open-title">{betKindLong(bet, t)}</div>
+          <div className="bets-open-title">
+            {betKindLong(bet, t)} <KindChip kind={bet.kind} />
+          </div>
           <div className="xsmall muted">{meta.join(' · ')}</div>
         </div>
         <OpenStatusChip bet={bet} />

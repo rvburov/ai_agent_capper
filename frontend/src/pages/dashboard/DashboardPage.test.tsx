@@ -190,6 +190,12 @@ describe('Главная', () => {
     expect(router.state.location.search).toBe('?bet=7');
   });
 
+  it('открытая своя ставка (Р29) — метка «Своя»', async () => {
+    renderDashboard({ data: dashboardOut({ open_bets: [openBetOut({ kind: 'own' })] }) });
+    const card = await screen.findByRole('article', { name: 'Ставка №7' });
+    expect(within(card).getByText('Своя')).toBeInTheDocument();
+  });
+
   it('мои матчи сегодня: время по поясу, место по Эло, ставка и анализ', async () => {
     const data = dashboardOut({
       my_matches: [myMatch(), myMatch({ match_id: 102, scheduled_at: null, bets: [], analyses: [140, 143], rank1: null, round: 'QF', tournament: null })],

@@ -11,7 +11,7 @@ import { formatDate, formatMoney, formatOdds, formatPercent } from '../../lib/fo
 import { cx } from '../../lib/cx';
 import { DetailBlock } from './BetDetail';
 import { SettledByTag } from './marks';
-import { betKind, ClvValue, legMarket, MatchName, matchText, money, ResultIcon, Signed, StatusChip } from './parts';
+import { betKind, ClvValue, KindChip, legMarket, MatchName, matchText, money, ResultIcon, Signed, StatusChip } from './parts';
 
 // История (historySection макета): рассчитанные ставки по месяцам. На компьютере — таблица,
 // строка раскрывается деталями; на телефоне — карточки, детали в нижнем листе.
@@ -277,6 +277,7 @@ function Row({ bet, open, fresh, onToggle }: { bet: BetItem; open: boolean; fres
             </Chip>
           </span>
         )}
+        <KindChip kind={bet.kind} />
         <SettledByTag bet={bet} />
       </td>
       <td>
@@ -336,7 +337,9 @@ function BetCard({ bet, fresh, onOpen }: { bet: BetItem; fresh: boolean; onOpen:
     <div className={cx('bets-mcard', fresh && 'is-new')} role="button" tabIndex={0} aria-label={label} onClick={() => onOpen(bet)} onKeyDown={onKey}>
       <div className="bets-mcard-top">
         <div className="bets-min">
-          <div className="bets-mcard-date">{`${formatDate(bet.placed_at)} · ${betKind(bet, t)}`}</div>
+          <div className="bets-mcard-date">
+            {`${formatDate(bet.placed_at)} · ${betKind(bet, t)}`} <KindChip kind={bet.kind} />
+          </div>
           <div className="bets-sub">
             <Dot surface={surface} />
             {sub.filter(Boolean).join(' · ')}

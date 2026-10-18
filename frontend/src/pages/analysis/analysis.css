@@ -206,3 +206,30 @@
 .analysis-legodd-name small { display: block; font-size: var(--fs-xs); color: var(--fg-3); }
 .analysis-legodd .field-error { grid-column: 1 / -1; }
 @media (max-width: 720px) { .analysis-legodd { grid-template-columns: minmax(0, 1fr) 96px; } .analysis-legodd .input { font-size: 16px; height: 44px; } }
+
+/* Р29: варианты ставки, своя ставка */
+.analysis-slip-btn { align-self: flex-start; margin-top: 4px; min-height: var(--tap); padding-inline: 8px; margin-left: -8px; }
+.analysis-slip-btn.is-in { color: var(--accent-ink); }
+.analysis-vars { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.analysis-vars-head h3 { font-size: var(--fs-xl); }
+.analysis-vars-head p { margin: 4px 0 0; }
+.analysis-exp.is-main { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.analysis-var .card-head { flex-wrap: nowrap; }
+.analysis-var .card-head > .card-head-text { flex: 1 1 auto; }
+.analysis-var.is-novalue { border-style: dashed; }
+.analysis-why-line { display: flex; gap: 8px; align-items: flex-start; margin: 0; font-size: var(--fs-sm); color: var(--fg-2); }
+.analysis-why-line svg { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--fg-3); }
+.analysis-why-line b { color: var(--fg); font-weight: 600; }
+.analysis-calc-note { margin: 0; }
+.analysis-slip { border-color: var(--warn); }
+.analysis-slip-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.analysis-slip-list li { display: flex; justify-content: space-between; gap: 10px; font-size: var(--fs-sm); }
+.analysis-slip-list li > span:first-child { min-width: 0; display: flex; flex-direction: column; }
+.analysis-slip-list small { color: var(--fg-3); font-size: var(--fs-xs); }
+.analysis-own-kind { gap: 6px; }
+.analysis-bm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 720px) { .analysis-bm-grid { grid-template-columns: minmax(0, 1fr); } }
+.analysis-legodd.has-rm { grid-template-columns: minmax(0, 1fr) 112px 40px; }
+.analysis-legodd.has-rm .btn { width: 40px; height: 40px; padding: 0; }
+@media (max-width: 720px) { .analysis-legodd.has-rm { grid-template-columns: minmax(0, 1fr) 88px 44px; } .analysis-legodd.has-rm .btn { width: 44px; height: 44px; } }
+.analysis-legodd-name .warn-text { display: block; font-size: var(--fs-xs); color: var(--warn-ink); }

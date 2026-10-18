@@ -7,7 +7,7 @@ import { archiveConflicts, impliedProb, isImported, isLegacy, legProb, legShown,
 import type { BetItem, BetLeg } from '../../features/bets/types';
 import { formatDate, formatDateLong, formatDateTime, formatOdds, formatOddsExact, formatPp, formatProb } from '../../lib/format';
 import { ClosingCell, OpenStatusChip } from './marks';
-import { betKind, ClvValue, legMarket, LegChip, MatchName, matchText, money, ResultIcon, Signed } from './parts';
+import { betKind, ClvValue, KindChip, legMarket, LegChip, MatchName, matchText, money, ResultIcon, Signed } from './parts';
 import { ReviewBlock } from './ReviewBlock';
 
 // Детали ставки (detailBlock и detailModal макета): события с исходом, закрытием и CLV, расчет
@@ -285,7 +285,9 @@ export function BetSheet({
     <Modal open wide onClose={onClose} title={t('bets.detail.sheetTitle', { id: bet.id })} footer={footer} className="bets-sheet">
       <div className="bets-dm-top">
         <div className="bets-min">
-          <div className="xsmall muted">{[formatDateLong(bet.placed_at), betKind(bet, t), bet.bookmaker].join(' · ')}</div>
+          <div className="xsmall muted">
+            {[formatDateLong(bet.placed_at), betKind(bet, t), bet.bookmaker].join(' · ')} <KindChip kind={bet.kind} />
+          </div>
           <div className="bets-dm-profit">
             {open ? money(bet, bet.stake) : <Signed value={bet.profit} text={money(bet, bet.profit, true)} />}
           </div>

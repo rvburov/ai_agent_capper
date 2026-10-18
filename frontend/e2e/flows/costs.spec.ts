@@ -37,7 +37,7 @@ test('анализ → «ИИ и расходы»: вызовы и цена, к�
   await withFakeClaude(async () => {
     await page.getByRole('button', { name: /^Запустить/ }).last().click();
     await expect(page).toHaveURL(/\/analysis\/\d+$/);
-    await expect(page.getByRole('heading', { level: 2, name: /^Анализ 1 матча готов/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('heading', { level: 2, name: /^Экспресса стратегии нет · \d варианта? ставки$|^Анализ 1 матча готов/ })).toBeVisible({ timeout: 30_000 });
   });
   const analysisId = Number(/\/analysis\/(\d+)/.exec(page.url())?.[1]);
   // имена игроков в сравнении — ссылки на их карточки (plink макета); на телефоне сравнение —

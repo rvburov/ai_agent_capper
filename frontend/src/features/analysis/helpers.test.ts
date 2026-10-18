@@ -237,7 +237,7 @@ describe('тексты по ключам и кодам сервера', () => {
     expect(keyText('errors.analysis.too_many_events', { max: 5 })).toBe('Не больше 5 событий в одном анализе');
     expect(keyText('analysis.steps.unknown_key', {}, 'запасной')).toBe('запасной');
     expect(codeText('ai.overloaded')).toBe('Claude сейчас перегружен. Перезапустите анализ через несколько минут');
-    expect(codeText('errors.bet.duplicate')).toBe('Ставка по этому анализу уже сохранена');
+    expect(codeText('errors.bet.duplicate')).toBe('Такая ставка по этому анализу уже сохранена');
     expect(codeText(null, {}, 'нет')).toBe('нет');
   });
 

@@ -23,7 +23,7 @@ export async function placeBet(page: Page): Promise<{ id: number; stake: number 
     await expect(page).toHaveURL(/\/analysis\/\d+$/);
     await expect(page.getByRole('heading', { level: 2, name: /^Экспресс из 2 событий/ })).toBeVisible({ timeout: 30_000 });
   });
-  const express = page.getByRole('region', { name: 'Экспресс' });
+  const express = page.getByRole('region', { name: 'Экспресс стратегии' });
   await express.getByRole('button', { name: 'Сохранить ставку' }).click();
   const dialog = page.getByRole('dialog', { name: 'Сохранить ставку' });
   await dialog.getByRole('button', { name: 'Сохранить ставку' }).click();

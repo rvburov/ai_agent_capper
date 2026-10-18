@@ -1,4 +1,4 @@
-import type { AnalyticsQuery, ExportPart, Market, Period, SourceFilter, SurfaceFilter } from './types';
+import type { AnalyticsQuery, ExportPart, KindFilter, Market, Period, SourceFilter, SurfaceFilter } from './types';
 
 /*
  * Фильтры «Аналитики» живут в адресе (/analytics?period=30d&market=ML&selection=1&surface=clay):
@@ -18,6 +18,8 @@ export interface AnalyticsFilters {
   selection: 1 | 2 | null;
   surface: SurfaceFilter | null;
   source: SourceFilter | null;
+  /** Вид ставки (Р29): null — все ставки. */
+  kind: KindFilter | null;
 }
 
 /** Периоды переключателя (как в макете): 7 дней есть только у главной. */
@@ -25,6 +27,7 @@ export const PERIODS: readonly Period[] = ['30d', '90d', 'all'];
 export const MARKETS: readonly Market[] = ['ML', 'HCP_-1.5', 'HCP_+1.5'];
 export const SURFACES: readonly SurfaceFilter[] = ['hard', 'clay', 'grass', 'carpet', 'unknown'];
 export const SOURCES: readonly SourceFilter[] = ['app', 'legacy'];
+export const KINDS: readonly KindFilter[] = ['strategy', 'single', 'own'];
 
 /** Шесть исходов в порядке макета и сервера: П1, П2, Ф1(−1.5), Ф2(−1.5), Ф1(+1.5), Ф2(+1.5). */
 export const OUTCOMES: readonly (readonly [Market, 1 | 2])[] = [
@@ -44,6 +47,7 @@ export const EMPTY_FILTERS: AnalyticsFilters = {
   selection: null,
   surface: null,
   source: null,
+  kind: null,
 };
 
 // Даты фильтра сервер принимает только в этих пределах
@@ -76,10 +80,11 @@ export function filtersFromSearch(params: URLSearchParams): AnalyticsFilters {
     selection,
     surface: pick(params.get('surface'), SURFACES),
     source: pick(params.get('source'), SOURCES),
+    kind: pick(params.get('kind'), KINDS),
   };
 }
 
-const FILTER_PARAMS = ['period', 'from', 'to', 'market', 'selection', 'surface', 'source'];
+const FILTER_PARAMS = ['period', 'from', 'to', 'market', 'selection', 'surface', 'source', 'kind'];
 
 /** Адрес с фильтрами: прочие параметры остаются; значения по умолчанию не пишутся. */
 export function searchWithFilters(
@@ -97,6 +102,7 @@ export function searchWithFilters(
   }
   if (filters.surface) params.set('surface', filters.surface);
   if (filters.source) params.set('source', filters.source);
+  if (filters.kind) params.set('kind', filters.kind);
   return params;
 }
 
@@ -115,12 +121,13 @@ export function filtersQuery(filters: AnalyticsFilters): AnalyticsQuery {
   }
   if (filters.surface) query.surface = [filters.surface];
   if (filters.source) query.source = filters.source;
+  if (filters.kind) query.kind = filters.kind;
   return query;
 }
 
-/** Выбран рынок, покрытие или источник (период и даты фильтром выборки не считаются). */
+/** Выбран рынок, покрытие, источник или вид ставки (период и даты фильтром выборки не считаются). */
 export function hasSliceFilter(filters: AnalyticsFilters): boolean {
-  return filters.market !== null || filters.surface !== null || filters.source !== null;
+  return filters.market !== null || filters.surface !== null || filters.source !== null || filters.kind !== null;
 }
 
 /** Хоть что-то отличается от «все время без фильтров» — видна кнопка «Сбросить фильтры». */
@@ -128,9 +135,9 @@ export function isDefault(filters: AnalyticsFilters): boolean {
   return filters.period === 'all' && filters.from === null && filters.to === null && !hasSliceFilter(filters);
 }
 
-/** Без рынка, покрытия и источника (действие вывода «Снять фильтры»): период остается. */
+/** Без рынка, покрытия, источника и вида (действие вывода «Снять фильтры»): период остается. */
 export function withoutSlices(filters: AnalyticsFilters): AnalyticsFilters {
-  return { ...filters, market: null, selection: null, surface: null, source: null };
+  return { ...filters, market: null, selection: null, surface: null, source: null, kind: null };
 }
 
 /** Значение исхода в выпадающем списке: «ML:1»; рынок без стороны (пришел ссылкой) — «ML». */

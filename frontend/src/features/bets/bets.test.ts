@@ -19,7 +19,7 @@ import { betLeg, betOpen, betWon } from './testData';
 describe('Ставки: фильтры в адресе', () => {
   it('берет из адреса только то, что примет сервер', () => {
     const f = filtersFromSearch(
-      new URLSearchParams('period=30d&status=won&market=HCP_-1.5&surface=clay&surface=bogus&surface=hard&source=legacy&q=синнер&bet=7'),
+      new URLSearchParams('period=30d&status=won&market=HCP_-1.5&surface=clay&surface=bogus&surface=hard&source=legacy&kind=single&q=синнер&bet=7'),
     );
     expect(f).toEqual({
       period: '30d',
@@ -29,9 +29,18 @@ describe('Ставки: фильтры в адресе', () => {
       market: 'HCP_-1.5',
       surfaces: ['hard', 'clay'],
       source: 'legacy',
+      kind: 'single',
       q: 'синнер',
     });
-    expect(filtersFromSearch(new URLSearchParams('period=1y&status=all&market=X&source=bot'))).toEqual(EMPTY_FILTERS);
+    expect(filtersFromSearch(new URLSearchParams('period=1y&status=all&market=X&source=bot&kind=all'))).toEqual(EMPTY_FILTERS);
+  });
+
+  it('вид ставки (Р29): в адрес и в запрос, «все» не пишется', () => {
+    const filters = { ...EMPTY_FILTERS, kind: 'own' as const };
+    expect(searchWithFilters(filters).toString()).toBe('kind=own');
+    expect(filtersQuery(filters)).toEqual({ kind: 'own' });
+    expect(sheetActiveCount(filters)).toBe(1);
+    expect(filtersQuery(EMPTY_FILTERS)).toEqual({});
   });
 
   it('даты: только 2000–2100 и настоящие дни, конец раньше начала — меняются местами', () => {

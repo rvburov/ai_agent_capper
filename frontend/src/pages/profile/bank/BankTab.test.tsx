@@ -108,6 +108,21 @@ describe('Кабинет: банк и стратегия', () => {
     expect(within(card).getByText(/потолок — 3% банка\. Сумма округляется вниз до 10 ₽; меньше 50 ₽ — ставки нет\./)).toBeInTheDocument();
   });
 
+  it('ординары и свои ставки (Р29): таблица суммы ординара и где они учитываются', async () => {
+    renderBank();
+    const card = (await screen.findByRole('heading', { name: 'Правила стратегии' })).closest('section') as HTMLElement;
+    const block = (await within(card).findByRole('heading', { name: 'Ординары и свои ставки' })).closest('.stack') as HTMLElement;
+    expect(within(block).getByText('Ординар · кэф до 1.60')).toBeInTheDocument();
+    expect(within(block).getByText('Ординар · кэф 1.61–2.20')).toBeInTheDocument();
+    expect(within(block).getByText('Ординар · кэф от 2.21')).toBeInTheDocument();
+    expect(within(block).getByText('1,25%')).toBeInTheDocument();
+    // 43 320 × 1,5% = 649,8 → вниз до 10 ₽
+    expect(within(block).getByText('сейчас это 640 ₽')).toBeInTheDocument();
+    expect(within(block).getByText('сумму выбираете вы')).toBeInTheDocument();
+    expect(within(block).getByText(/в защитном режиме — не больше 1% банка/)).toBeInTheDocument();
+    expect(within(block).getByText(/входят в просадку от пика и итог недели для адаптаций, в лимиты ответственной игры/)).toBeInTheDocument();
+  });
+
   it('адаптации: статус по банку, рост ставки выключен, переключатели неактивны', async () => {
     renderBank();
     const card = (await screen.findByRole('heading', { name: 'Адаптации ставки' })).closest('section') as HTMLElement;

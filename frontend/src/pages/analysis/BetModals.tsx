@@ -9,6 +9,7 @@ import { apiErrorText } from '../../features/analysis/codes';
 import { oddInputText, oddNumber, validOdd } from '../../features/analysis/draft';
 import { formatShare } from '../../features/analysis/markets';
 import { payout, roundMoney, shareOf, stakeForShare, stakeProblem, totalOdds, type MoneyRules } from '../../features/analysis/stake';
+import type { BetKindIn } from '../../features/analysis/types';
 import { BET_CONFLICTS, newClientRef, usePlaceBet, type Bet } from '../../features/bets/api';
 import { useBookmakerList } from '../../features/bookmakers/api';
 import { currencySign, formatAmountInput, formatMoney, formatOdds, type Currency } from '../../lib/format';
@@ -41,6 +42,14 @@ export interface BetContext {
   /** Рост банка разрешает до 4% (правило «Рост банка» действует). */
   growthOn: boolean;
   strategyCode: string;
+  /** Вид ставки при сохранении (Р29): экспресс стратегии, ординар варианта или своя. */
+  kind: BetKindIn;
+  /** Подсказка к сумме вместо «Рекомендовано … по стратегии» (ординар, экспресс из лучших). */
+  stakeHint?: string;
+  /** Доли банка в «Изменить сумму» (у ординара — меньше, чем у экспресса). */
+  presets?: readonly number[];
+  /** Пояснение внизу окна: что это за ставка и где она учитывается. */
+  kindNote?: string;
 }
 
 function LegOddsFields({ prefix, legs, values, onChange }: { prefix: string; legs: readonly LegView[]; values: string[]; onChange: (next: string[]) => void }) {
@@ -89,19 +98,21 @@ function LegOddsFields({ prefix, legs, values, onChange }: { prefix: string; leg
 }
 
 /** Кэфы из полей; хоть один неверный — null. */
-function takenNumbers(values: readonly string[]): number[] | null {
+export function takenNumbers(values: readonly string[]): number[] | null {
   if (!values.every((v) => validOdd(v))) return null;
   return values.map((v) => Math.round(oddNumber(v) * 1000) / 1000);
 }
 
-function shareWarning(share: number, ctx: BetContext, t: TFunction) {
+export function shareWarning(share: number, growthOn: boolean, t: TFunction) {
   if (share > 0.04) return <Callout kind="bad">{t('analysis.stakeModal.over4')}</Callout>;
-  if (share > 0.03 && !ctx.growthOn) return <Callout kind="warn">{t('analysis.stakeModal.over3')}</Callout>;
+  if (share > 0.03 && !growthOn) return <Callout kind="warn">{t('analysis.stakeModal.over3')}</Callout>;
   if (share > 0.03) return <Callout kind="info">{t('analysis.stakeModal.over3Growth')}</Callout>;
   return null;
 }
 
 const PRESETS = [0.015, 0.02, 0.025, 0.03];
+/** Доли банка ординара (таблица Р29: 1%, 1,25%, 1,5%). */
+export const SINGLE_PRESETS = [0.01, 0.0125, 0.015];
 
 /** «Изменить сумму»: сумма или доля банка, кэфы при ставке, что будет при выигрыше и проигрыше. */
 export function StakeModal({
@@ -128,10 +139,10 @@ export function StakeModal({
   const numbers = takenNumbers(odds);
   const problem = stakeProblem(amount, ctx.bank, ctx.rules);
   const presets = useMemo(() => {
-    const list = new Set(PRESETS);
+    const list = new Set(ctx.presets ?? PRESETS);
     if (ctx.recommendedShare) list.add(ctx.recommendedShare);
     return [...list].sort((a, b) => a - b);
-  }, [ctx.recommendedShare]);
+  }, [ctx.recommendedShare, ctx.presets]);
   const active = presets.find((p) => amount !== null && stakeForShare(ctx.bank, p, ctx.rules) === amount);
   const sign = currencySign(ctx.currency);
 
@@ -163,7 +174,7 @@ export function StakeModal({
             },
           ]}
         />
-        {shareWarning(share, ctx, t)}
+        {shareWarning(share, ctx.growthOn, t)}
       </>
     );
   }
@@ -200,13 +211,14 @@ export function StakeModal({
           autoComplete="off"
           maxLength={12}
           hint={
-            ctx.recommended !== null && ctx.recommendedShare !== null
+            ctx.stakeHint ??
+            (ctx.recommended !== null && ctx.recommendedShare !== null
               ? t('analysis.stakeModal.hint', {
                   amount: formatMoney(ctx.recommended, ctx.currency),
                   share: formatShare(ctx.recommendedShare),
                   code: ctx.strategyCode,
                 })
-              : t('analysis.stakeModal.hintNone', { code: ctx.strategyCode })
+              : t('analysis.stakeModal.hintNone', { code: ctx.strategyCode }))
           }
           onChange={(event) => setText(event.target.value)}
           onBlur={() => {
@@ -240,6 +252,91 @@ function sameBookName(a: string, b: string): boolean {
   return a.trim().toLocaleLowerCase('ru') === b.trim().toLocaleLowerCase('ru');
 }
 
+export interface BookChoice {
+  book: string;
+  setBook: (value: string) => void;
+  /** Букмекер анализа скрыт в «Моих букмекерах». */
+  hiddenBook: boolean;
+  bookOk: boolean;
+  /** Показать ошибку «Укажите букмекера». */
+  bookError: boolean;
+  touch: () => void;
+}
+
+/**
+ * Букмекер ставки. Букмекер анализа скрыт в «Моих букмекерах» после запуска: молча ставить на
+ * скрытого нельзя (у скрытого не бывает ставок в игре) — показываем выбор из действующих, пустой.
+ */
+export function useBookChoice(bookmaker: string | null, bookmakers: readonly string[]): BookChoice {
+  const list = useBookmakerList();
+  const hiddenBook =
+    bookmaker !== null &&
+    (list.data?.items ?? []).some((item) => item.archived_at !== null && sameBookName(item.name, bookmaker));
+  const [book, setBook] = useState(bookmaker ?? bookmakers[0] ?? '');
+  useEffect(() => {
+    if (hiddenBook) setBook((value) => (bookmaker !== null && sameBookName(value, bookmaker) ? '' : value));
+  }, [hiddenBook, bookmaker]);
+  // Ошибка «Укажите букмекера» — после правки поля или попытки сохранить, а не сразу
+  const [touched, setTouched] = useState(false);
+  const bookOk = book.trim().length > 0;
+  return {
+    book,
+    setBook: (value) => {
+      setBook(value);
+      setTouched(true);
+    },
+    hiddenBook,
+    bookOk,
+    bookError: !bookOk && touched,
+    touch: () => setTouched(true),
+  };
+}
+
+export function HiddenBookNote({ name }: { name: string }) {
+  const { t } = useTranslation();
+  return (
+    <Callout kind="warn" icon="eyeOff">
+      {t('analysis.bet.bookmakerHidden', { name })}
+    </Callout>
+  );
+}
+
+/** Поле «Букмекер»: общий выпадающий список с вводом (Combobox). */
+export function BookmakerField({ id, choice, bookmakers, hint }: { id: string; choice: BookChoice; bookmakers: readonly string[]; hint?: string }) {
+  const { t } = useTranslation();
+  const query = choice.book.trim().toLowerCase();
+  const describedBy = choice.bookError ? `${id}-error` : hint ? `${id}-hint` : undefined;
+  return (
+    <div className="field">
+      <label className="field-label" htmlFor={id}>
+        {t('analysis.bet.bookmaker')}
+      </label>
+      <Combobox
+        id={id}
+        label={t('analysis.bet.bookmaker')}
+        value={choice.book}
+        minChars={0}
+        invalid={choice.bookError}
+        describedBy={describedBy}
+        options={bookmakers.filter((b) => !query || b.toLowerCase().includes(query)).map((b) => ({ value: b, label: b }))}
+        onChange={choice.setBook}
+        onPick={(option) => choice.setBook(option.value)}
+      />
+      {choice.bookError ? (
+        <div className="field-error" id={`${id}-error`} role="alert">
+          {t('analysis.bet.bookmakerRequired')}
+        </div>
+      ) : (
+        hint && (
+          <div className="field-hint" id={`${id}-hint`}>
+            {hint}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 /** «Сохранить ставку»: кэф при ставке у каждой ноги, итоговый кэф и выплата; POST /api/bets. */
 export function SaveBetModal({
   open,
@@ -264,20 +361,10 @@ export function SaveBetModal({
   onConflict: (message: string) => void;
 }) {
   const { t } = useTranslation();
-  // Букмекер анализа скрыт в «Моих букмекерах» после запуска: молча ставить на скрытого нельзя
-  // (у скрытого не бывает ставок в игре) — показываем выбор из действующих, пустой
-  const list = useBookmakerList();
-  const hiddenBook =
-    bookmaker !== null &&
-    (list.data?.items ?? []).some((item) => item.archived_at !== null && sameBookName(item.name, bookmaker));
+  const choice = useBookChoice(bookmaker, bookmakers);
+  const { book, hiddenBook, bookOk } = choice;
   const fixedBook = hiddenBook ? null : bookmaker;
   const [odds, setOdds] = useState<string[]>(() => [...taken]);
-  const [book, setBook] = useState(bookmaker ?? bookmakers[0] ?? '');
-  useEffect(() => {
-    if (hiddenBook) setBook((value) => (bookmaker !== null && sameBookName(value, bookmaker) ? '' : value));
-  }, [hiddenBook, bookmaker]);
-  // Ошибка «Укажите букмекера» — после правки поля или попытки сохранить, а не сразу
-  const [bookTouched, setBookTouched] = useState(false);
   const [clientRef] = useState(newClientRef);
   const [error, setError] = useState<string | null>(null);
   const saving = useRef(false);
@@ -285,12 +372,10 @@ export function SaveBetModal({
   const numbers = takenNumbers(odds);
   const analysisTotal = totalOdds(ctx.legs.map((l) => l.odds));
   const total = numbers ? totalOdds(numbers) : null;
-  const bookOk = book.trim().length > 0;
-  const bookError = !bookOk && bookTouched;
 
   async function save() {
     if (!bookOk) {
-      setBookTouched(true);
+      choice.touch();
       document.getElementById('analysis-bet-bk')?.focus();
       return;
     }
@@ -300,6 +385,7 @@ export function SaveBetModal({
     try {
       const bet = await place.mutateAsync({
         analysis_id: ctx.analysisId,
+        kind: ctx.kind,
         stake: stake.toFixed(2),
         bookmaker: book.trim().slice(0, 64),
         legs: ctx.legs.map((leg, i) => ({ prediction_id: leg.predictionId, odds_taken: String(numbers[i]) })),
@@ -318,7 +404,6 @@ export function SaveBetModal({
     }
   }
 
-  const query = book.trim().toLowerCase();
   return (
     <Modal
       open={open}
@@ -334,37 +419,8 @@ export function SaveBetModal({
       }
     >
       <LegOddsFields prefix="analysis-bet" legs={ctx.legs} values={odds} onChange={setOdds} />
-      {hiddenBook && (
-        <Callout kind="warn" icon="eyeOff">
-          {t('analysis.bet.bookmakerHidden', { name: bookmaker })}
-        </Callout>
-      )}
-      {!fixedBook && (
-        <div className="field">
-          <label className="field-label" htmlFor="analysis-bet-bk">
-            {t('analysis.bet.bookmaker')}
-          </label>
-          <Combobox
-            id="analysis-bet-bk"
-            label={t('analysis.bet.bookmaker')}
-            value={book}
-            minChars={0}
-            invalid={bookError}
-            describedBy={bookError ? 'analysis-bet-bk-error' : undefined}
-            options={bookmakers.filter((b) => !query || b.toLowerCase().includes(query)).map((b) => ({ value: b, label: b }))}
-            onChange={(text) => {
-              setBook(text);
-              setBookTouched(true);
-            }}
-            onPick={(option) => setBook(option.value)}
-          />
-          {bookError && (
-            <div className="field-error" id="analysis-bet-bk-error" role="alert">
-              {t('analysis.bet.bookmakerRequired')}
-            </div>
-          )}
-        </div>
-      )}
+      {hiddenBook && <HiddenBookNote name={bookmaker ?? ''} />}
+      {!fixedBook && <BookmakerField id="analysis-bet-bk" choice={choice} bookmakers={bookmakers} />}
       <div aria-live="polite" className="stack">
         {total !== null && (
           <>
@@ -405,6 +461,9 @@ export function SaveBetModal({
         <Callout kind="bad" role="alert">
           {error}
         </Callout>
+      )}
+      {ctx.kindNote && (
+        <Callout icon={ctx.kind === 'single' ? 'target' : 'user'}>{ctx.kindNote}</Callout>
       )}
       <p className="xsmall muted">{t('analysis.bet.note')}</p>
     </Modal>

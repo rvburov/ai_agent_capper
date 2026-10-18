@@ -138,6 +138,19 @@ describe('Аналитика', () => {
     await waitFor(() => expect(router.state.location.search).toBe(''));
   });
 
+  it('вид ставки (Р29): «Все ставки» по умолчанию, выбор — в адресе, в запросе и меткой', async () => {
+    const { user, router, calls } = renderAnalytics();
+    await screen.findByRole('list', { name: 'Выводы' });
+    expect(screen.getByText(/версии стратегии сравниваются только по ее экспрессам/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Вид ставки: Все ставки' }));
+    await user.click(within(screen.getByRole('listbox', { name: 'Вид ставки' })).getByRole('option', { name: 'Ординары' }));
+    await waitFor(() => expect(router.state.location.search).toBe('?kind=single'));
+    await waitFor(() => expect(calls.some((r) => query(r).get('kind') === 'single')).toBe(true));
+    expect(screen.queryByText(/версии стратегии сравниваются только по ее экспрессам/)).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Убрать фильтр: Вид: Ординары' }));
+    await waitFor(() => expect(router.state.location.search).toBe(''));
+  });
+
   it('сводка по рынкам: строка ставит фильтр исхода, повторно — снимает; «Все рынки» — тоже', async () => {
     const { user, router } = renderAnalytics();
     const table = await screen.findByRole('table', { name: 'Сводка по рынкам' });

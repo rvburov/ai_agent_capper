@@ -137,12 +137,38 @@ export function closingWhoText(closing: Pick<Closing, 'by' | 'bookmaker' | 'sour
   return closing.source === 'archive' ? t(`bets.closing.whoArchive.${by}`) : t(`bets.closing.whoRef.${by}`);
 }
 
-/** «Ординар», «Экспресс × 2». */
-export function betKind(bet: Pick<BetItem, 'legs'>, t: TFunction): string {
+/** «Ординар», «Экспресс × 2»; ординар из вариантов анализа (Р29) — «Вариант анализа». */
+export function betKind(bet: Pick<BetItem, 'legs' | 'kind'>, t: TFunction): string {
+  if (bet.kind === 'single') return t('bets.kind.variant');
   return bet.legs.length > 1 ? t('bets.kind.parlay', { n: bet.legs.length }) : t('bets.kind.single');
 }
 
-/** «Ординар», «Экспресс из 2 событий». */
-export function betKindLong(bet: Pick<BetItem, 'legs'>, t: TFunction): string {
+/** «Ординар», «Экспресс из 2 событий»; ординар варианта — «Вариант анализа». */
+export function betKindLong(bet: Pick<BetItem, 'legs' | 'kind'>, t: TFunction): string {
+  if (bet.kind === 'single') return t('bets.kind.variant');
   return bet.legs.length > 1 ? t('bets.kind.parlayLong', { count: bet.legs.length }) : t('bets.kind.single');
+}
+
+/**
+ * Метка вида ставки (Р29): «Ординар» — ординар из вариантов анализа, «Своя» — своя ставка или
+ * экспресс вне правил. У экспресса стратегии и ставок бота метки нет.
+ */
+export function KindChip({ kind, only }: { kind: BetItem['kind']; only?: BetItem['kind'] }) {
+  const { t } = useTranslation();
+  if (only && kind !== only) return null;
+  if (kind === 'own') {
+    return (
+      <Chip kind="warn" icon="user" className="bets-kind">
+        {t('bets.kindChip.own')}
+      </Chip>
+    );
+  }
+  if (kind === 'single') {
+    return (
+      <Chip kind="info" icon="target" className="bets-kind">
+        {t('bets.kindChip.single')}
+      </Chip>
+    );
+  }
+  return null;
 }

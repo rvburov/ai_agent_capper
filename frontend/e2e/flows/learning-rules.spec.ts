@@ -148,7 +148,7 @@ test('проверка кандидата на своих ставках: чис
     await expect(page).toHaveURL(/\/analysis\/\d+$/);
     await expect(page.getByRole('heading', { level: 2, name: /^Экспресс из 2 событий/ })).toBeVisible({ timeout: 30_000 });
   });
-  await page.getByRole('region', { name: 'Экспресс' }).getByRole('button', { name: 'Сохранить ставку' }).click();
+  await page.getByRole('region', { name: 'Экспресс стратегии' }).getByRole('button', { name: 'Сохранить ставку' }).click();
   await page.getByRole('dialog', { name: 'Сохранить ставку' }).getByRole('button', { name: 'Сохранить ставку' }).click();
   const saved = toast(page, /Ставка №\d+ сохранена/);
   await expect(saved).toBeVisible();

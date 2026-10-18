@@ -85,19 +85,20 @@ function renderAnalysis(id: number) {
   return router;
 }
 
-const expressRegion = () => screen.getByRole('region', { name: 'Экспресс' });
+const expressRegion = () => screen.getByRole('region', { name: 'Экспресс стратегии' });
 
 /** Ставка, сохраненная по анализу 1 (сводка в AnalysisOut.bet). */
 function savedBet(over: Partial<NonNullable<Analysis['bet']>> = {}): NonNullable<Analysis['bet']> {
   return {
     id: 11,
+    kind: 'strategy',
     stake: '1320.00',
     currency: 'RUB',
     total_odds: '1.914',
     bookmaker: 'Fonbet',
     legs: [
-      { prediction_id: 7, odds_taken: '1.45' },
-      { prediction_id: 1, odds_taken: '1.32' },
+      { prediction_id: 7, match_id: 92, market: 'ML', selection: 1, odds_taken: '1.45' },
+      { prediction_id: 1, match_id: 91, market: 'ML', selection: 1, odds_taken: '1.32' },
     ],
     ...over,
   };
@@ -265,7 +266,7 @@ describe('Анализ готов: итог и экспресс', () => {
     await user.click(within(expressRegion()).getByRole('button', { name: 'Сохранить ставку' }));
     await user.click(within(screen.getByRole('dialog', { name: 'Сохранить ставку' })).getByRole('button', { name: 'Сохранить ставку' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(await screen.findByText(/Ставка по этому анализу уже сохранена/)).toBeInTheDocument();
+    expect(await screen.findByText(/Такая ставка по этому анализу уже сохранена/)).toBeInTheDocument();
     expect(await within(expressRegion()).findByText(/^Ставка №11 в игре/)).toBeInTheDocument();
     expect(gets()).toBeGreaterThan(before.gets);
     expect(banks()).toBeGreaterThan(before.banks);

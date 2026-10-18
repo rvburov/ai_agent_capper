@@ -39,6 +39,6 @@ test('телефон: панель запуска и вкладки карточ
   await sections.getByRole('button', { name: 'Факторы' }).click();
   await expect(page.getByRole('heading', { level: 5, name: /^За ставку/ }).first()).toBeVisible();
   // Экспресс на телефоне — первым после хода анализа
-  await expect(page.getByRole('region', { name: 'Экспресс' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Экспресс стратегии' })).toBeVisible();
   await expectNoHorizontalScroll(page);
 });

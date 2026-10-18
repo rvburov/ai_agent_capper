@@ -30,3 +30,5 @@ export type Period = NonNullable<BetListQuery['period']>;
 export type StatusFilter = NonNullable<BetListQuery['status']>;
 export type SurfaceFilter = NonNullable<BetListQuery['surface']>[number];
 export type SourceFilter = NonNullable<BetListQuery['source']>;
+/** Вид ставки (Р29): экспресс стратегии, ординар варианта, своя; all — в адрес не пишется. */
+export type KindFilter = Exclude<NonNullable<BetListQuery['kind']>, 'all'>;

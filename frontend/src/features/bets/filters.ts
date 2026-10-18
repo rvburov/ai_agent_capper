@@ -1,4 +1,4 @@
-import type { BetFiltersQuery, Market, Period, SourceFilter, StatusFilter, SurfaceFilter } from './types';
+import type { BetFiltersQuery, KindFilter, Market, Period, SourceFilter, StatusFilter, SurfaceFilter } from './types';
 
 /*
  * Фильтры «Ставок» живут в адресе (/bets?period=30d&status=won&surface=clay&q=синнер): ссылку
@@ -15,6 +15,8 @@ export interface BetFilters {
   market: Market | null;
   surfaces: SurfaceFilter[];
   source: SourceFilter | null;
+  /** Вид ставки (Р29): стратегия, ординары, свои; null — все. */
+  kind: KindFilter | null;
   q: string;
 }
 
@@ -25,6 +27,7 @@ export const STATUSES: readonly StatusFilter[] = ['open', 'settled', 'won', 'los
 export const MARKETS: readonly Market[] = ['ML', 'HCP_-1.5', 'HCP_+1.5'];
 export const SURFACES: readonly SurfaceFilter[] = ['hard', 'clay', 'grass', 'carpet', 'unknown'];
 export const SOURCES: readonly SourceFilter[] = ['app', 'legacy'];
+export const KINDS: readonly KindFilter[] = ['strategy', 'single', 'own'];
 
 /** Поиск — до 100 знаков (как у сервера). */
 export const SEARCH_MAX = 100;
@@ -40,6 +43,7 @@ export const EMPTY_FILTERS: BetFilters = {
   market: null,
   surfaces: [],
   source: null,
+  kind: null,
   q: '',
 };
 
@@ -67,11 +71,12 @@ export function filtersFromSearch(params: URLSearchParams): BetFilters {
     market: pick(params.get('market'), MARKETS),
     surfaces,
     source: pick(params.get('source'), SOURCES),
+    kind: pick(params.get('kind'), KINDS),
     q: (params.get('q') ?? '').slice(0, SEARCH_MAX),
   };
 }
 
-const FILTER_PARAMS = ['period', 'from', 'to', 'status', 'market', 'surface', 'source', 'q'];
+const FILTER_PARAMS = ['period', 'from', 'to', 'status', 'market', 'surface', 'source', 'kind', 'q'];
 
 /** Адрес с фильтрами: прочие параметры (bet) остаются; значения по умолчанию не пишутся. */
 export function searchWithFilters(filters: BetFilters, base: URLSearchParams = new URLSearchParams()): URLSearchParams {
@@ -84,6 +89,7 @@ export function searchWithFilters(filters: BetFilters, base: URLSearchParams = n
   if (filters.market) params.set('market', filters.market);
   for (const surface of SURFACES) if (filters.surfaces.includes(surface)) params.append('surface', surface);
   if (filters.source) params.set('source', filters.source);
+  if (filters.kind) params.set('kind', filters.kind);
   const q = filters.q.trim();
   if (q) params.set('q', q);
   return params;
@@ -103,14 +109,15 @@ export function filtersQuery(filters: BetFilters): BetFiltersQuery {
   const surfaces = SURFACES.filter((s) => filters.surfaces.includes(s));
   if (surfaces.length) query.surface = surfaces;
   if (filters.source) query.source = filters.source;
+  if (filters.kind) query.kind = filters.kind;
   const q = filters.q.trim().slice(0, SEARCH_MAX);
   if (q) query.q = q;
   return query;
 }
 
-/** Сколько фильтров выбрано в шторке (статус, рынок, источник, покрытия) — число на кнопке «Фильтры». */
+/** Сколько фильтров выбрано в шторке (статус, рынок, источник, вид, покрытия) — число на кнопке «Фильтры». */
 export function sheetActiveCount(filters: BetFilters): number {
-  return (filters.status ? 1 : 0) + (filters.market ? 1 : 0) + (filters.source ? 1 : 0) + filters.surfaces.length;
+  return (filters.status ? 1 : 0) + (filters.market ? 1 : 0) + (filters.source ? 1 : 0) + (filters.kind ? 1 : 0) + filters.surfaces.length;
 }
 
 /** Выбран хоть один фильтр (вместе с периодом, датами и поиском). */

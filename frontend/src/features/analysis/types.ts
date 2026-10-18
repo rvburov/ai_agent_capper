@@ -93,3 +93,11 @@ export function stepFinishingUntil(analysis: Analysis | undefined): number | nul
 export function isParseFailed(analysis: Pick<Analysis, 'status' | 'error'>): boolean {
   return analysis.status === 'failed' && analysis.error?.step === 'parse';
 }
+
+// ---------- Р29: варианты ставки и вид ставки ----------
+export type Variant = S['VariantOut'];
+export type VariantCode = Variant['code'];
+/** Ставка по анализу (их может быть несколько: экспресс, ординар, своя). */
+export type AnalysisBet = S['BetBrief'];
+export type BetKind = AnalysisBet['kind'];
+export type BetKindIn = Variant['kind'];
